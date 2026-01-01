@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Resolve the repository root even when invoked via a symlink.
+repo_root="$(git rev-parse --show-toplevel)"
+commit_msg_file="$1"
+
+cd "$repo_root"
+
+if [[ -z "${IN_NIX_SHELL-}" ]]; then
+    escaped_file=$(printf '%q' "$commit_msg_file")
+    exec nix-shell --run "python tools/lint_commit.py --file ${escaped_file}"
+else
+    exec python tools/lint_commit.py --file "$commit_msg_file"
+fi

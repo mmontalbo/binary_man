@@ -1,0 +1,20 @@
+<subject>
+
+Context:
+<1-8 lines on why this commit exists; optional paragraph break>
+
+What this enables:
+- capability or boundary introduced
+
+Changes (by file):
+- path/to/file: what + why in one line
+  optional continuation line for detail
+
+Deferred:
+- deferred follow-up work
+
+# tools/format_commit.py can be used to generate a compliant message and
+# tools/lint_commit.py validates an existing message.
+#
+# Replace the placeholder bullets with concrete notes before saving.
+# Keep a single blank line between sections.

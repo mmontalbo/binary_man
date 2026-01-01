@@ -1,0 +1,17 @@
+Usage: ls [OPTION]... [FILE]...
+List information about the FILEs (the current directory by default).
+
+  -a, --all                  do not ignore entries starting with .
+  -A, --almost-all           do not list implied . and ..
+      --author               with -l, print the author of each file
+  -B, --ignore-backups       do not list implied entries ending with ~
+      --block-size=SIZE      with -l, scale sizes by SIZE
+      --color[=WHEN]         colorize the output
+  -i                         print the index number of each file
+  -I, --ignore=PATTERN       do not list implied entries matching shell PATTERN
+  -L, --dereference          when showing file information for a symbolic
+                             link, show information for the file the link references
+  -T, --tabsize=COLS         assume tab stops at each COLS instead of 8
+
+Examples:
+  ls --color=auto

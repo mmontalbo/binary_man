@@ -1,0 +1,203 @@
+{
+  "binary_identity": null,
+  "invocation": null,
+  "capture_error": null,
+  "claims": [
+    {
+      "id": "claim:option:opt=--all:exists",
+      "text": "Option --all is listed in help output.",
+      "kind": "option",
+      "source": {
+        "type": "help",
+        "path": "tests/data/ls_help.txt",
+        "line": 4
+      },
+      "status": "unvalidated",
+      "extractor": "parse:help:v0",
+      "raw_excerpt": "  -a, --all                  do not ignore entries starting with .",
+      "confidence": 0.9
+    },
+    {
+      "id": "claim:option:opt=--almost-all:exists",
+      "text": "Option --almost-all is listed in help output.",
+      "kind": "option",
+      "source": {
+        "type": "help",
+        "path": "tests/data/ls_help.txt",
+        "line": 5
+      },
+      "status": "unvalidated",
+      "extractor": "parse:help:v0",
+      "raw_excerpt": "  -A, --almost-all           do not list implied . and ..",
+      "confidence": 0.9
+    },
+    {
+      "id": "claim:option:opt=--author:exists",
+      "text": "Option --author is listed in help output.",
+      "kind": "option",
+      "source": {
+        "type": "help",
+        "path": "tests/data/ls_help.txt",
+        "line": 6
+      },
+      "status": "unvalidated",
+      "extractor": "parse:help:v0",
+      "raw_excerpt": "      --author               with -l, print the author of each file",
+      "confidence": 0.9
+    },
+    {
+      "id": "claim:option:opt=--block-size:arity",
+      "text": "Option --block-size accepts a required argument in `--block-size=SIZE` form.",
+      "kind": "option",
+      "source": {
+        "type": "help",
+        "path": "tests/data/ls_help.txt",
+        "line": 8
+      },
+      "status": "unvalidated",
+      "extractor": "parse:help:v0",
+      "raw_excerpt": "      --block-size=SIZE      with -l, scale sizes by SIZE",
+      "confidence": 0.7
+    },
+    {
+      "id": "claim:option:opt=--block-size:exists",
+      "text": "Option --block-size is listed in help output.",
+      "kind": "option",
+      "source": {
+        "type": "help",
+        "path": "tests/data/ls_help.txt",
+        "line": 8
+      },
+      "status": "unvalidated",
+      "extractor": "parse:help:v0",
+      "raw_excerpt": "      --block-size=SIZE      with -l, scale sizes by SIZE",
+      "confidence": 0.9
+    },
+    {
+      "id": "claim:option:opt=--color:arity",
+      "text": "Option --color accepts an optional argument in `--color[=WHEN]` form.",
+      "kind": "option",
+      "source": {
+        "type": "help",
+        "path": "tests/data/ls_help.txt",
+        "line": 9
+      },
+      "status": "unvalidated",
+      "extractor": "parse:help:v0",
+      "raw_excerpt": "      --color[=WHEN]         colorize the output",
+      "confidence": 0.6
+    },
+    {
+      "id": "claim:option:opt=--color:exists",
+      "text": "Option --color is listed in help output.",
+      "kind": "option",
+      "source": {
+        "type": "help",
+        "path": "tests/data/ls_help.txt",
+        "line": 9
+      },
+      "status": "unvalidated",
+      "extractor": "parse:help:v0",
+      "raw_excerpt": "      --color[=WHEN]         colorize the output",
+      "confidence": 0.9
+    },
+    {
+      "id": "claim:option:opt=--dereference:exists",
+      "text": "Option --dereference is listed in help output.",
+      "kind": "option",
+      "source": {
+        "type": "help",
+        "path": "tests/data/ls_help.txt",
+        "line": 12
+      },
+      "status": "unvalidated",
+      "extractor": "parse:help:v0",
+      "raw_excerpt": "  -L, --dereference          when showing file information for a symbolic",
+      "confidence": 0.9
+    },
+    {
+      "id": "claim:option:opt=--ignore-backups:exists",
+      "text": "Option --ignore-backups is listed in help output.",
+      "kind": "option",
+      "source": {
+        "type": "help",
+        "path": "tests/data/ls_help.txt",
+        "line": 7
+      },
+      "status": "unvalidated",
+      "extractor": "parse:help:v0",
+      "raw_excerpt": "  -B, --ignore-backups       do not list implied entries ending with ~",
+      "confidence": 0.9
+    },
+    {
+      "id": "claim:option:opt=--ignore:arity",
+      "text": "Option --ignore accepts a required argument in `--ignore=PATTERN` form.",
+      "kind": "option",
+      "source": {
+        "type": "help",
+        "path": "tests/data/ls_help.txt",
+        "line": 11
+      },
+      "status": "unvalidated",
+      "extractor": "parse:help:v0",
+      "raw_excerpt": "  -I, --ignore=PATTERN       do not list implied entries matching shell PATTERN",
+      "confidence": 0.7
+    },
+    {
+      "id": "claim:option:opt=--ignore:exists",
+      "text": "Option --ignore is listed in help output.",
+      "kind": "option",
+      "source": {
+        "type": "help",
+        "path": "tests/data/ls_help.txt",
+        "line": 11
+      },
+      "status": "unvalidated",
+      "extractor": "parse:help:v0",
+      "raw_excerpt": "  -I, --ignore=PATTERN       do not list implied entries matching shell PATTERN",
+      "confidence": 0.9
+    },
+    {
+      "id": "claim:option:opt=--tabsize:arity",
+      "text": "Option --tabsize accepts a required argument in `--tabsize=COLS` form.",
+      "kind": "option",
+      "source": {
+        "type": "help",
+        "path": "tests/data/ls_help.txt",
+        "line": 14
+      },
+      "status": "unvalidated",
+      "extractor": "parse:help:v0",
+      "raw_excerpt": "  -T, --tabsize=COLS         assume tab stops at each COLS instead of 8",
+      "confidence": 0.7
+    },
+    {
+      "id": "claim:option:opt=--tabsize:exists",
+      "text": "Option --tabsize is listed in help output.",
+      "kind": "option",
+      "source": {
+        "type": "help",
+        "path": "tests/data/ls_help.txt",
+        "line": 14
+      },
+      "status": "unvalidated",
+      "extractor": "parse:help:v0",
+      "raw_excerpt": "  -T, --tabsize=COLS         assume tab stops at each COLS instead of 8",
+      "confidence": 0.9
+    },
+    {
+      "id": "claim:option:opt=-i:exists",
+      "text": "Option -i is listed in help output.",
+      "kind": "option",
+      "source": {
+        "type": "help",
+        "path": "tests/data/ls_help.txt",
+        "line": 10
+      },
+      "status": "unvalidated",
+      "extractor": "parse:help:v0",
+      "raw_excerpt": "  -i                         print the index number of each file",
+      "confidence": 0.9
+    }
+  ]
+}
