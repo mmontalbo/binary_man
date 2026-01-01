@@ -1,16 +1,19 @@
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
+use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 
 mod claims;
 mod schema;
+mod validate;
 use crate::claims::parse_help_text;
 use schema::{
     compute_binary_identity, compute_binary_identity_with_env, ClaimsFile, EnvSnapshot,
     RegenerationReport, ValidationReport,
 };
+use validate::{option_from_claim_id, validate_option_existence, validation_env};
 
 #[derive(Parser, Debug)]
 #[command(name = "bvm", version, about = "Binary-validated man page generator")]
@@ -198,21 +201,26 @@ fn cmd_claims(args: ClaimsArgs) -> Result<()> {
 }
 
 fn cmd_validate(args: ValidateArgs) -> Result<()> {
-    println!("TODO: validate claims by executing the binary under fixtures/env constraints.");
-    println!("binary: {}", args.binary.display());
-    println!("claims: {}", args.claims.display());
-    print_opt_path("fixtures", &args.fixtures);
-    print_opt_path("out", &args.out);
+    let claims: ClaimsFile = read_json(&args.claims)?;
+    let env = validation_env();
+    let binary_identity = compute_binary_identity_with_env(&args.binary, env.clone())?;
+    let mut results = Vec::new();
+
+    for claim in claims.claims {
+        if let Some(option) = option_from_claim_id(&claim.id) {
+            let result = validate_option_existence(&args.binary, &claim.id, &option, &env);
+            results.push(result);
+        }
+    }
+
     if let Some(out) = &args.out {
-        let binary_identity = compute_binary_identity(&args.binary)?;
         let report = ValidationReport {
             binary_identity,
-            results: Vec::new(),
+            results,
         };
         write_json(out, &report)?;
-        println!("Wrote validation skeleton to {}", out.display());
+        println!("Wrote validation report to {}", out.display());
     }
-    println!("Next: implement execution harness, evidence capture, and result schema.");
     Ok(())
 }
 
@@ -250,6 +258,12 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     let json = serde_json::to_string_pretty(value)?;
     std::fs::write(path, json)?;
     Ok(())
+}
+
+fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
+    let content = std::fs::read_to_string(path)?;
+    let value = serde_json::from_str(&content)?;
+    Ok(value)
 }
 
 fn resolve_invocation(args: &ClaimsArgs) -> Option<String> {

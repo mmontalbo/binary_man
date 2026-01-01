@@ -45,16 +45,18 @@ pub fn parse_help_text(source_path: &str, content: &str) -> Vec<Claim> {
         let raw_excerpt = line.to_string();
 
         let exists_id = format!("claim:option:opt={}:exists", canonical.opt);
-        claims_by_id.entry(exists_id.clone()).or_insert_with(|| Claim {
-            id: exists_id,
-            text: format!("Option {} is listed in help output.", canonical.opt),
-            kind: ClaimKind::Option,
-            source: source.clone(),
-            status: ClaimStatus::Unvalidated,
-            extractor: EXTRACTOR_HELP_V0.to_string(),
-            raw_excerpt: raw_excerpt.clone(),
-            confidence: Some(CONFIDENCE_EXISTS),
-        });
+        claims_by_id
+            .entry(exists_id.clone())
+            .or_insert_with(|| Claim {
+                id: exists_id,
+                text: format!("Option {} is listed in help output.", canonical.opt),
+                kind: ClaimKind::Option,
+                source: source.clone(),
+                status: ClaimStatus::Unvalidated,
+                extractor: EXTRACTOR_HELP_V0.to_string(),
+                raw_excerpt: raw_excerpt.clone(),
+                confidence: Some(CONFIDENCE_EXISTS),
+            });
 
         if let Some(arg_form) = arg_form {
             let (form_text, confidence, qualifier, article) = match &arg_form {
@@ -73,19 +75,21 @@ pub fn parse_help_text(source_path: &str, content: &str) -> Vec<Claim> {
             };
 
             let arity_id = format!("claim:option:opt={}:arity", canonical.opt);
-            claims_by_id.entry(arity_id.clone()).or_insert_with(|| Claim {
-                id: arity_id,
-                text: format!(
-                    "Option {} accepts {} {} argument in `{}` form.",
-                    canonical.opt, article, qualifier, form_text
-                ),
-                kind: ClaimKind::Option,
-                source: source.clone(),
-                status: ClaimStatus::Unvalidated,
-                extractor: EXTRACTOR_HELP_V0.to_string(),
-                raw_excerpt: raw_excerpt.clone(),
-                confidence: Some(confidence),
-            });
+            claims_by_id
+                .entry(arity_id.clone())
+                .or_insert_with(|| Claim {
+                    id: arity_id,
+                    text: format!(
+                        "Option {} accepts {} {} argument in `{}` form.",
+                        canonical.opt, article, qualifier, form_text
+                    ),
+                    kind: ClaimKind::Option,
+                    source: source.clone(),
+                    status: ClaimStatus::Unvalidated,
+                    extractor: EXTRACTOR_HELP_V0.to_string(),
+                    raw_excerpt: raw_excerpt.clone(),
+                    confidence: Some(confidence),
+                });
         }
     }
 
