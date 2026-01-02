@@ -150,16 +150,6 @@ pub struct RegenerationReport {
     pub out_man: PathBuf,
 }
 
-/// Compute binary identity using environment variables from the current process.
-pub fn compute_binary_identity(path: &Path) -> Result<BinaryIdentity> {
-    let env = EnvSnapshot {
-        locale: env_or_unset(&["LC_ALL", "LC_CTYPE", "LANG"]),
-        tz: env_or_unset(&["TZ"]),
-        term: env_or_unset(&["TERM"]),
-    };
-    compute_binary_identity_with_env(path, env)
-}
-
 /// Compute binary identity using a provided environment snapshot.
 pub fn compute_binary_identity_with_env(path: &Path, env: EnvSnapshot) -> Result<BinaryIdentity> {
     let abs_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
@@ -178,13 +168,4 @@ pub fn compute_binary_identity_with_env(path: &Path, env: EnvSnapshot) -> Result
         },
         env,
     })
-}
-
-fn env_or_unset(keys: &[&str]) -> String {
-    for key in keys {
-        if let Ok(value) = std::env::var(key) {
-            return value;
-        }
-    }
-    "<unset>".to_string()
 }
