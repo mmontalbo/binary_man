@@ -3,7 +3,7 @@
 This document records the current milestone plan and status. It is the canonical
 sequence for the project.
 
-Current focus: M3 — Minimal Regeneration.
+Current focus: M3 — Minimal Regeneration (stop point reached; Tier-1 surface validation complete).
 
 ## M0 — Scaffold & Invariants (done)
 
@@ -20,6 +20,7 @@ What landed:
 Invariants established:
 - The binary is the source of truth.
 - Docs/help are claims, not truth.
+- Man pages are rendered views; the claim set and validation results are the core artifact.
 - Unknowns are first-class; no guessing.
 
 ## M1 — Surface Claim Ingestion (done)
@@ -54,7 +55,7 @@ Deliverable:
 Deferred:
 - Tier-1 parameter binding validation.
 - Behavior validation.
-- Man page generation.
+- Rendered views (man page).
 
 ## M2.5 — Tier-1 Parameter Binding Validation (done)
 
@@ -70,10 +71,10 @@ Deliverable:
 
 ## M3 — Minimal Regeneration (current)
 
-Goal: Prove the pipeline can emit a truthful doc artifact.
+Goal: Prove the pipeline can render a truthful view from validated claims.
 
 Scope:
-- Generate a minimal man page that includes:
+- Generate a minimal man page view that includes:
   - Confirmed T0/T1 claims (option existence + parameter binding)
   - Refuted T0/T1 claims (flagged)
   - Undetermined T0/T1 claims (explicitly listed)

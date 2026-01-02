@@ -7,6 +7,23 @@ These schemas define the minimal, audit-friendly data exchanged between pipeline
 - Claim extraction is heuristic. Every claim must record its `extractor` and a `raw_excerpt` for auditability.
 - Claims are not truth. They are unvalidated assertions until tested against the binary.
 - Unknowns are first-class: use `undetermined` when evidence is insufficient.
+- The goal is accounting and honesty, not completeness.
+
+## Conceptual Model
+
+The core artifact is the unified claim set plus validation results; man pages are rendered views
+derived from that set. We synthesize claims from inputs and validate them against the binary; we do
+not validate man pages.
+
+Phase A: Claim synthesis. Inputs include binary observations, binary self-reports (--help), existing
+docs, and optional annotations. Output is a single unified claim set.
+
+Phase B: Validation + rendering. Claims are confirmed/refuted/undetermined via controlled binary
+execution. Outputs include a validation report and rendered views (man page today; other views
+later).
+
+Minimum (binary-only) and augmented (binary + docs + annotations) modes are configuration choices
+that feed the same pipeline.
 
 ## Parameter Surface Tiers
 

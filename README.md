@@ -1,10 +1,13 @@
 # Binary-Validated Man Pages
 
-Generate accurate man pages by validating documentation claims against a specific binary.
+Generate trustworthy documentation by synthesizing claims, validating them against a specific
+binary, and rendering human-oriented views such as man pages.
 
 The binary on disk is the source of truth. Man pages, --help output, and source excerpts are
-treated as claims and validated through controlled execution. The output is a regenerated man page
-that records confirmed facts and explicit unknowns.
+treated as claims with provenance. We validate those claims through controlled execution; we do
+not validate man pages. Man pages are one rendered view over the validated claim set.
+
+The core artifact is the synthesized, provenance-tracked claim set plus its validation results.
 
 ## Motivation
 
@@ -14,10 +17,30 @@ validation.
 
 ## Goal
 
-- Parse documentation inputs into claims with provenance.
+- Synthesize a unified, provenance-tracked claim set from all inputs.
 - Execute the binary under controlled environments to validate claims.
 - Classify each claim as confirmed, refuted, or undetermined.
-- Regenerate a man page tied to a specific binary identity.
+- Render man pages and other views from validated claims, tied to a specific binary identity.
+
+## Two-Phase Process
+
+Phase A: Claim synthesis.
+Inputs include binary observations, binary self-reports (--help), existing docs, and optional
+annotations. All non-binary inputs are treated as claims with provenance. Output is a single
+unified claim set.
+
+Phase B: Validation + rendering.
+Claims are confirmed/refuted/undetermined via controlled binary execution. Outputs include a
+validation report, a rendered man page, and (future) other views.
+
+Both binary-only and binary + docs modes use this same pipeline; they differ only in which inputs
+are enabled.
+
+## Input Modes
+
+Minimum input (binary only) yields sparse, maximally trustworthy documentation. Augmented input
+(binary + existing docs + annotations) yields richer documentation, still constrained by validation.
+These are configuration choices, not different systems.
 
 ## Parameter Surface Tiers
 
@@ -29,12 +52,16 @@ Option parameters are evaluated as a tiered surface:
 - T3: Parameter domain/type (enum, numeric, path-like).
 - T4: Behavioral semantics.
 
+The tiered surface is a coverage accounting model for large parameter spaces, not an attempt at
+exhaustive semantics.
+
 Only T0 and T1 are in scope today. Higher tiers may remain not evaluated indefinitely.
 
 ## What "Comprehensive" Means
 
-A man page is comprehensive when every user-visible surface is either validated at its tier or
-explicitly marked as undetermined/not evaluated.
+A rendered man page view is comprehensive when every user-visible surface is either validated at
+its tier or explicitly marked as undetermined/not evaluated. The goal is accounting and honesty,
+not completeness.
 
 Requirements:
 
@@ -48,11 +75,13 @@ Requirements:
 
 - Binary identity is recorded (path, hash, platform, env).
 - Documentation inputs are non-authoritative claims until validated.
+- Man pages are rendered views, not authoritative inputs.
 
 ## Validation and Outputs
 
 - Validation runs under controlled env and fixtures when needed.
-- Outputs include a regenerated man page and a machine-readable validation report.
+- Outputs include a machine-readable validation report and rendered views (man page today; other
+  views later).
 
 ## Environment Contract
 
@@ -81,4 +110,4 @@ definitions and the tiered surface model.
 - Defaults are explicit.
 - Discrepancies are justified with evidence.
 - Unknowns are clearly marked.
-- Output is tied to a specific binary hash.
+- Outputs are tied to a specific binary hash.
