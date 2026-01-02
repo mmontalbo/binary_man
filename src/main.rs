@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 
 mod claims;
+mod inspect_tui;
 mod schema;
 mod validate;
 use crate::claims::parse_help_text;
@@ -30,6 +31,8 @@ enum Commands {
     Validate(ValidateArgs),
     /// Regenerate a man page and report from validated claims
     Regenerate(RegenerateArgs),
+    /// Inspect claims and validation results in a TUI
+    Inspect(InspectArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -109,6 +112,17 @@ struct RegenerateArgs {
     out_report: Option<PathBuf>,
 }
 
+#[derive(Parser, Debug)]
+struct InspectArgs {
+    /// Path to claims JSON
+    #[arg(long)]
+    claims: PathBuf,
+
+    /// Optional path to validation results JSON
+    #[arg(long)]
+    results: Option<PathBuf>,
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -116,6 +130,7 @@ fn main() -> Result<()> {
         Commands::Claims(args) => cmd_claims(args),
         Commands::Validate(args) => cmd_validate(args),
         Commands::Regenerate(args) => cmd_regenerate(args),
+        Commands::Inspect(args) => cmd_inspect(args),
     }
 }
 
@@ -244,6 +259,10 @@ fn cmd_regenerate(args: RegenerateArgs) -> Result<()> {
     }
     println!("Next: implement formatter, unknowns handling, and output binding to binary hash.");
     Ok(())
+}
+
+fn cmd_inspect(args: InspectArgs) -> Result<()> {
+    inspect_tui::run(&args.claims, args.results.as_deref())
 }
 
 fn print_opt_path(label: &str, path: &Option<PathBuf>) {

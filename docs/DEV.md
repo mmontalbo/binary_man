@@ -41,6 +41,13 @@ cargo run -- validate --binary /usr/bin/ls --claims ./claims.json --fixtures ./f
 
 # Regenerate a man page and a machine-readable report
 cargo run -- regenerate --binary /usr/bin/ls --claims ./claims.json --results ./validation.json --out-man ./ls.1 --out-report ./report.json
+
+# Inspect claims and validation results in a TUI
+cargo run -- inspect --claims ./claims.json --results ./validation.json
+
+# TUI keys
+# - t: toggle claims list vs source view
+# - tab: cycle claims on the selected source line
 ```
 
 ## Notes
