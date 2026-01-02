@@ -3,7 +3,7 @@
 This document records the current milestone plan and status. It is the canonical
 sequence for the project.
 
-Current focus: M3 — Minimal Regeneration (stop point reached; Tier-1 surface validation complete).
+Current focus: M4 — Conceptual Alignment (in progress).
 
 ## M0 — Scaffold & Invariants (done)
 
@@ -69,7 +69,7 @@ Scope:
 Deliverable:
 - Extended ValidationReport with Tier-1 parameter binding results.
 
-## M3 — Minimal Regeneration (current)
+## M3 — Minimal Regeneration (done)
 
 Goal: Prove the pipeline can render a truthful view from validated claims.
 
@@ -81,24 +81,19 @@ Scope:
 - Include binary hash/version header.
 - Intentionally barebones.
 
-## M4 — Coverage Accounting / “Comprehensiveness”
+## M4 — Conceptual Alignment (in progress)
 
-Goal: Make “comprehensive” measurable, not aspirational.
+Goal: Align implementation with the claim-centric model and input modes.
 
-Deliverable:
-- Coverage report:
-  - Coverage per tier (T0/T1): % confirmed and % undetermined
-  - % option existence confirmed
-  - % Tier-1 parameter binding confirmed
-- Stop when:
-  - T0/T1 surface completeness achieved
-  - remaining gaps explicitly documented
+Scope:
+- Synthesize a unified claim set from enabled inputs (help, man pages, source excerpts, annotations),
+  with provenance preserved for each claim.
+- Make minimum vs augmented input modes explicit configuration choices, not separate systems.
+- Ensure rendering treats validation results as authoritative; missing results default to undetermined.
+- Keep outputs tied to a specific binary identity and validation report.
 
-## M5 — Selective Behavior Validation
-
-Goal: Validate a small set of stable, high-signal behaviors.
-
-Example (for ls):
-- dotfiles hidden by default
-- -a shows dotfiles
-- -d lists directory itself
+First steps:
+- Wire claims synthesis to consume all enabled inputs, even if some parsers are still minimal.
+- Define a merge/dedup strategy for claims across sources while preserving provenance.
+- Make input mode selection explicit in the CLI workflow and docs.
+- Add a guard so rendering never treats unvalidated claims as authoritative.
