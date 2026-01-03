@@ -3,7 +3,7 @@
 This document records the current milestone plan and status. It is the canonical
 sequence for the project.
 
-Current focus: M4 — Conceptual Alignment (in progress).
+Current focus: M4 — Conceptual Alignment + `ls` validation surface area (in progress).
 
 ## M0 — Scaffold & Invariants (done)
 
@@ -83,7 +83,8 @@ Scope:
 
 ## M4 — Conceptual Alignment (in progress)
 
-Goal: Align implementation with the claim-centric model and input modes.
+Goal: Align implementation with the claim-centric model and input modes while
+expanding validation coverage using GNU coreutils `ls` as the benchmark.
 
 Scope:
 - Synthesize a unified claim set from enabled inputs (help, man pages, source excerpts, annotations),
@@ -91,9 +92,13 @@ Scope:
 - Make minimum vs augmented input modes explicit configuration choices, not separate systems.
 - Ensure rendering treats validation results as authoritative; missing results default to undetermined.
 - Keep outputs tied to a specific binary identity and validation report.
+- Exercise more of the `ls --help` surface area with deterministic, low-impact probes.
 
 First steps:
 - Wire claims synthesis to consume all enabled inputs, even if some parsers are still minimal.
 - Define a merge/dedup strategy for claims across sources while preserving provenance.
 - Make input mode selection explicit in the CLI workflow and docs.
 - Add a guard so rendering never treats unvalidated claims as authoritative.
+- Extend binding probes to honor the help-text form and reduce `ls` undetermined bindings.
+- Validate aliases listed on the same help row to cover more `ls` option surface area.
+- Parse inline value enumerations in `ls` help descriptions and test valid/invalid values.
