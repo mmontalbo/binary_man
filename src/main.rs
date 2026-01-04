@@ -155,7 +155,7 @@ fn cmd_validate(args: ValidateArgs) -> Result<()> {
 
     for claim in claims.claims {
         if let Some(option) = option_from_claim_id(&claim.id) {
-            let result = validate_option_existence(&args.binary, &claim.id, &option, &env);
+            let result = validate_option_existence(&args.binary, &claim, &option, &env);
             results.push(result);
         } else if option_from_binding_claim_id(&claim.id).is_some() {
             let result = validate_option_binding(&args.binary, &claim, &env);

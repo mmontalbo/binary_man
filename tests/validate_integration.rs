@@ -93,3 +93,29 @@ fn validates_ls_all_option_when_help_is_available() {
     });
     assert!(has_binding, "expected --block-size binding result");
 }
+
+#[test]
+fn ls_hide_requires_argument_when_help_is_available() {
+    let Some(ls_path) = find_in_path("ls") else {
+        return;
+    };
+    if !ls_help_available(&ls_path) {
+        return;
+    }
+
+    let output = match Command::new(&ls_path)
+        .arg("--hide")
+        .env_clear()
+        .env("LC_ALL", "C")
+        .env("TZ", "UTC")
+        .env("TERM", "dumb")
+        .output()
+    {
+        Ok(output) => output,
+        Err(_) => return,
+    };
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("requires an argument"));
+}

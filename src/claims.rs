@@ -52,7 +52,7 @@
 //! ```
 
 use crate::schema::{Claim, ClaimKind, ClaimSource, ClaimSourceType, ClaimStatus};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 const EXTRACTOR_HELP_V1: &str = "parse:help:v1";
 const CONFIDENCE_EXISTS: f32 = 0.9;
@@ -67,6 +67,11 @@ struct OptionRow {
     line_no: usize,
     raw_line: String,
     spec_segment: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ParsedHelpRow {
+    pub(crate) options: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,6 +145,34 @@ pub fn parse_help_text(source_path: &str, content: &str) -> Vec<Claim> {
         content,
         looks_like_option_table,
     )
+}
+
+fn parse_help_row(line: &str) -> Option<ParsedHelpRow> {
+    let spec = option_spec_segment(line);
+    if spec.is_empty() {
+        return None;
+    }
+    let tokens = tokenize_spec(spec);
+    let Some(spec) = parse_option_spec(&tokens) else {
+        return None;
+    };
+    if spec.options.is_empty() {
+        return None;
+    }
+    let mut options = Vec::new();
+    let mut seen = HashSet::new();
+    for option in spec.options.into_iter().map(|opt| opt.raw) {
+        if seen.insert(option.clone()) {
+            options.push(option);
+        }
+    }
+    Some(ParsedHelpRow { options })
+}
+
+pub(crate) fn parse_help_row_options(line: &str) -> Vec<String> {
+    parse_help_row(line)
+        .map(|parsed| parsed.options)
+        .unwrap_or_default()
 }
 
 // Parse rows into claims using a staged pipeline and preserve provenance.
@@ -254,66 +287,44 @@ fn source_label(source_type: &ClaimSourceType) -> &'static str {
 }
 
 // Return true when a line looks like the start of an option spec row.
+// Example: "  -a, --all  include" -> true; "Examples:" -> false.
 fn looks_like_option_table(line: &str) -> bool {
     let trimmed = line.trim_start();
-    if trimmed.is_empty() {
-        return false;
-    }
-    if !trimmed.starts_with('-') {
-        return false;
-    }
-    !trimmed.starts_with("---")
+    trimmed.starts_with('-') && !trimmed.starts_with("---")
 }
 
 // Split a line into the "spec" segment (options + args) and description.
 // Prefer the typical double-space column split, with a guarded single-space
 // fallback for short, spec-heavy lines.
+// Example (double-space): "  -o, --output FILE  write results" -> "-o, --output FILE"
+// Example (single-space): "-o, --output FILE write results" -> "-o, --output FILE"
 fn option_spec_segment(line: &str) -> &str {
-    let trimmed = line.trim_end();
-    let trimmed = trimmed.trim_start();
-    if let Some(spec) = split_on_double_space(trimmed) {
-        return spec;
-    }
-    if let Some(idx) = split_on_single_space_fallback(trimmed) {
-        return trimmed[..idx].trim_end();
-    }
-    trimmed
+    let trimmed = line.trim();
+    split_on_double_space_index(trimmed)
+        .or_else(|| split_on_single_space_fallback(trimmed))
+        .map(|idx| trimmed[..idx].trim_end())
+        .unwrap_or(trimmed)
 }
 
-fn split_on_double_space(line: &str) -> Option<&str> {
-    let bytes = line.as_bytes();
-    for i in 0..bytes.len().saturating_sub(1) {
-        if is_whitespace(bytes[i]) && is_whitespace(bytes[i + 1]) {
-            return Some(&line[..i]);
-        }
-    }
-    None
+fn split_on_double_space_index(line: &str) -> Option<usize> {
+    line.as_bytes()
+        .windows(2)
+        .position(|pair| is_whitespace(pair[0]) && is_whitespace(pair[1]))
 }
 
 // Heuristic split for short lines that use single-space separation.
+// Example: "-o, --output FILE write results" -> split before "write".
 fn split_on_single_space_fallback(line: &str) -> Option<usize> {
     if line.len() > SINGLE_SPACE_SPLIT_MAX_LEN {
         return None;
     }
-    let bytes = line.as_bytes();
-    let mut idx = 0;
     let mut saw_option = false;
     let mut spec_tokens = 0;
     let mut non_spec_tokens = 0;
     let mut split_at = None;
 
-    while idx < bytes.len() {
-        while idx < bytes.len() && is_whitespace(bytes[idx]) {
-            idx += 1;
-        }
-        if idx >= bytes.len() {
-            break;
-        }
-        let start = idx;
-        while idx < bytes.len() && !is_whitespace(bytes[idx]) {
-            idx += 1;
-        }
-        let token = &line[start..idx];
+    for (start, end) in token_spans(line) {
+        let token = &line[start..end];
         let is_option = looks_like_option_token(token);
         if is_option {
             saw_option = true;
@@ -340,33 +351,38 @@ fn split_on_single_space_fallback(line: &str) -> Option<usize> {
     }
 }
 
+fn token_spans(line: &str) -> impl Iterator<Item = (usize, usize)> + '_ {
+    let mut iter = line.char_indices().peekable();
+    std::iter::from_fn(move || {
+        while let Some((start, ch)) = iter.next() {
+            if ch == ' ' || ch == '\t' {
+                continue;
+            }
+            while let Some(&(_, next)) = iter.peek() {
+                if next == ' ' || next == '\t' {
+                    break;
+                }
+                iter.next();
+            }
+            let end = iter.peek().map(|(idx, _)| *idx).unwrap_or(line.len());
+            return Some((start, end));
+        }
+        None
+    })
+}
+
 fn is_whitespace(byte: u8) -> bool {
     byte == b' ' || byte == b'\t'
 }
 
 // Convert a spec segment into typed tokens without regex.
+// Example: "-o, --output FILE" -> Option(-o), Option(--output), Arg(FILE).
 fn tokenize_spec(spec: &str) -> Vec<SpecToken> {
     let mut tokens = Vec::new();
-    let mut buffer = String::new();
-
-    for ch in spec.chars() {
-        if ch.is_whitespace() {
-            flush_spec_word(&mut buffer, &mut tokens);
-        } else {
-            buffer.push(ch);
-        }
+    for word in spec.split_whitespace() {
+        tokenize_word(word, &mut tokens);
     }
-    flush_spec_word(&mut buffer, &mut tokens);
-
     tokens
-}
-
-fn flush_spec_word(buffer: &mut String, tokens: &mut Vec<SpecToken>) {
-    if buffer.is_empty() {
-        return;
-    }
-    tokenize_word(buffer, tokens);
-    buffer.clear();
 }
 
 fn tokenize_word(word: &str, tokens: &mut Vec<SpecToken>) {
@@ -429,6 +445,7 @@ fn parse_option_spec(tokens: &[SpecToken]) -> Option<OptionSpec> {
 }
 
 // Prefer attached args over trailing heuristics when both are present.
+// Example: "--color[=WHEN] --color WHEN" -> attached wins.
 fn prefer_arg_spec(existing: ArgSpec, candidate: ArgSpec) -> ArgSpec {
     if existing.source() == ArgSource::Trailing && candidate.source() == ArgSource::Attached {
         candidate
@@ -446,6 +463,7 @@ fn choose_canonical(tokens: &[OptionToken]) -> &OptionToken {
 }
 
 // Format the binding form shown in claim text.
+// Example: attached optional -> "--color[=WHEN]"; trailing required -> "--output FILE".
 fn format_binding_form(option: &str, arg: &str, optional: bool, source: ArgSource) -> String {
     match source {
         ArgSource::Attached => {
@@ -564,6 +582,7 @@ fn parse_short_option_segment(segment: &str) -> Option<(OptionToken, Option<ArgT
 }
 
 // Detect attached arg forms (`--opt=ARG`, `--opt[=ARG]`).
+// Example: "--color[=WHEN]" -> ("--color", Arg(WHEN, optional)).
 fn split_attached_arg_form(token: &str) -> Option<(&str, Option<ArgToken>)> {
     if let Some(idx) = token.find("[=") {
         if token.ends_with(']') {
@@ -603,6 +622,7 @@ fn split_attached_arg_form(token: &str) -> Option<(&str, Option<ArgToken>)> {
 }
 
 // Detect trailing arg placeholders (`FILE`, `<fmt>`, `[ARG]`) as heuristics.
+// Example: "FILE" or "[ARG]" or "<fmt>" -> trailing arg token.
 fn parse_trailing_arg_segment(segment: &str) -> Option<ArgToken> {
     let (raw, optional) = classify_arg_token(segment)?;
     Some(ArgToken {
@@ -613,19 +633,28 @@ fn parse_trailing_arg_segment(segment: &str) -> Option<ArgToken> {
 }
 
 // Classify a token as a required/optional arg placeholder.
+// Example: "[ARG]" -> optional, "<fmt>" -> required.
 fn classify_arg_token(token: &str) -> Option<(String, bool)> {
     if token.is_empty() {
         return None;
     }
-    if token.starts_with('[') && token.ends_with(']') && token.len() > 2 {
-        let inner = &token[1..token.len() - 1];
+    if let Some(inner) = token
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+    {
         if inner.is_empty() {
             return None;
         }
         return Some((inner.to_string(), true));
     }
-    if token.starts_with('<') && token.ends_with('>') && token.len() > 2 {
-        return Some((token.to_string(), false));
+    if let Some(inner) = token
+        .strip_prefix('<')
+        .and_then(|rest| rest.strip_suffix('>'))
+    {
+        if inner.is_empty() {
+            return None;
+        }
+        return Some((format!("<{inner}>"), false));
     }
     if is_upper_placeholder(token) {
         return Some((token.to_string(), false));
@@ -714,6 +743,13 @@ mod tests {
             "--output FILE",
             false,
         );
+    }
+
+    #[test]
+    fn parse_help_row_extracts_options() {
+        let row = "  -a, --all  include dotfiles";
+        let parsed = parse_help_row(row).expect("parse help row");
+        assert_eq!(parsed.options, vec!["-a", "--all"]);
     }
 
     #[test]
