@@ -1,13 +1,10 @@
 # Binary-Validated Man Pages
 
-Generate trustworthy documentation by synthesizing claims, validating them against a specific
-binary, and rendering human-oriented views such as man pages.
+Generate trustworthy surface contracts by probing binaries and rendering minimal views.
 
-The binary on disk is the source of truth. Man pages, --help output, and source excerpts are
-treated as claims with provenance. We validate those claims through controlled execution; we do
-not validate man pages. Man pages are one rendered view over the validated claim set.
-
-The core artifact is the synthesized, provenance-tracked claim set plus its validation results.
+The binary on disk is the source of truth. Self-report output (--help/--version/usage errors) is
+used only to plan probes; validation relies on controlled execution. The core artifact is a
+validated T0/T1 surface report plus probe evidence.
 
 ## Motivation
 
@@ -17,10 +14,10 @@ validation.
 
 ## Goal
 
-- Synthesize a unified, provenance-tracked claim set from enabled inputs.
-- Execute the binary under controlled environments to validate claims.
-- Classify each claim as confirmed, refuted, or undetermined.
-- Render man pages and other views from validated claims, tied to a specific binary identity.
+- Capture binary self-report under a controlled env contract.
+- Use an LM planner to select and order T0/T1 probes.
+- Execute probes deterministically and record evidence.
+- Render a minimal view tied to a specific binary identity.
 
 ## Current Focus (M5)
 
@@ -29,25 +26,19 @@ validation.
 - Outputs: validated surface contract, minimal rendered view, and audit-ready evidence.
 - Scenario frameworks, higher-tier semantics, and doc/source parsing are deferred.
 
-## Two-Phase Process
+## Fast-Pass Flow (M5)
 
-Phase A: Claim synthesis.
-Inputs include binary observations and binary self-reports (--help). Other sources (docs,
-annotations, source excerpts) are treated as optional claims and are deferred in M5. Output is a
-single unified claim set.
+1) Capture self-report (--help, --version, usage error).
+2) LM planner emits a probe plan (JSON, schema-validated).
+3) Execute probes and synthesize the T0/T1 surface report.
+4) Render a minimal view; higher tiers are marked not evaluated.
 
-Phase B: Validation + rendering.
-Claims are confirmed/refuted/undetermined via controlled binary execution. Outputs include a
-validation report, a rendered man page, and (future) other views.
+## Usage (M5)
 
-Both binary-only and binary + docs modes use this same pipeline; they differ only in which inputs
-are enabled.
-
-## Input Modes
-
-Minimum input (binary only) yields sparse, maximally trustworthy documentation and is the current
-focus. Augmented input (binary + existing docs + annotations) yields richer documentation, still
-constrained by validation, but is deferred beyond M5.
+```
+BVM_PLANNER_CMD=/path/to/planner bvm surface /path/to/bin --out-dir ./out
+BVM_PLANNER_PLAN=/path/to/plan.json bvm surface /path/to/bin --out-dir ./out
+```
 
 ## Parameter Surface Tiers
 
@@ -78,23 +69,24 @@ Requirements:
 - Observational grounding: every statement traceable to evidence or marked unknown.
 - Negative space: document limits, variability, and untested cases.
 
-## Source of Truth and Claims
+## Source of Truth
 
 - Binary identity is recorded (path, hash, platform, env).
-- Documentation inputs are non-authoritative claims until validated.
-- Man pages are rendered views, not authoritative inputs.
+- Self-report output is non-authoritative and only used to plan probes.
+- Rendered views are derived from validated probe evidence.
 
 ## Validation and Outputs
 
 - Validation runs under the controlled environment contract; fixtures are deferred in M5.
-- Outputs include a machine-readable validation report and rendered views (man page today; other
-  views later).
+- Outputs include a machine-readable surface report and a minimal rendered view.
 
-## Small LM Backend (M5)
+## Required LM Planner (M5)
 
-An optional small LM may be used only to plan and prioritize Tier-0/Tier-1 probes based on binary
-self-report and known probe types. It must be swappable, failure-closed, and never treated as a
-source of truth or documentation text.
+The LM planner is required and narrowly scoped:
+
+- Inputs: binary self-report, fixed probe library, budget, stop rules.
+- Output: JSON-only probe plan (schema-validated, persisted, failure-closed).
+- It must not propose new options, semantics, or documentation text.
 
 ## Environment Contract
 

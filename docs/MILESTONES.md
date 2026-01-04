@@ -120,7 +120,7 @@ Scope:
   3) Evidence sufficient for auditability
 - Performance target:
   - coreutils-scale tools complete in ≤5 seconds
-  - cacheable by (binary hash, env contract)
+  - cacheable by (binary hash, env contract, planner version, probe library version)
 
 Explicit non-goals:
 - No scenario framework or fixtures
@@ -129,31 +129,25 @@ Explicit non-goals:
 - No progressive exploration
 - No per-binary validation profiles
 
-Role of the Small LM Backend in M5:
+Role of the LM Planner in M5:
 
-The LM is not a source of truth and not a claim generator.
+The LM is required, not a source of truth, and not a claim generator.
 
 Its role in M5 is narrowly defined as:
 - Probe planner and prioritizer for Tier-0 and Tier-1 validation only.
 
-The LM MAY:
-- Given binary self-report (e.g. --help text) and a list of known probe types,
-  propose:
-  - which probes to run for which options,
-  - ordering/prioritization to minimize total probes,
-  - early-exit conditions per option.
+The LM MUST:
+- Consume binary self-report and a fixed probe library.
+- Honor a probe budget and stop rules.
+- Output JSON only (schema-validated, persisted, failure-closed).
 
-The LM MAY NOT:
+The LM MUST NOT:
 - Propose new options not present in binary self-report
 - Propose semantics, domains, or scenarios
 - Assert claims as true or false
 - Generate documentation text
 
 The LM backend must be:
-- Optional and swappable
-- Failure-closed (invalid output → fewer probes, never wrong claims)
-- Small and fast (≈3B class model, seconds-level inference)
-- Used only to reduce bespoke parsing and speed up probe selection
-
-If the LM is unavailable, the system must fall back to a deterministic default
-probe plan and still produce correct results.
+- Required and swappable
+- Failure-closed (invalid output → abort fast-pass)
+- Small and fast (seconds-level inference)

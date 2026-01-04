@@ -1,45 +1,13 @@
 # Schemas
 
-These schemas define the minimal, audit-friendly data exchanged between pipeline stages.
+These schemas define the minimal, audit-friendly data exchanged during the fast-pass pipeline.
 
 ## Notes
 
-- Claim extraction is heuristic. Every claim must record its `extractor` and a `raw_excerpt` for auditability.
-- Claims are not truth. They are unvalidated assertions until tested against the binary.
+- Self-report is non-authoritative and used only to plan probes.
 - Unknowns are first-class: use `undetermined` when evidence is insufficient.
-- Rendered views treat validation results as authoritative; unvalidated claims default to `undetermined`.
+- Higher tiers are explicitly marked as not evaluated.
 - The goal is accounting and honesty, not completeness.
-
-## Conceptual Model
-
-The core artifact is the unified claim set plus validation results; man pages are rendered views
-derived from that set. We synthesize claims from inputs and validate them against the binary; we do
-not validate man pages.
-
-Phase A: Claim synthesis. Inputs include binary observations, binary self-reports (--help), existing
-docs, and optional annotations. Output is a single unified claim set.
-
-Phase B: Validation + rendering. Claims are confirmed/refuted/undetermined via controlled binary
-execution. Outputs include a validation report and rendered views (man page today; other views
-later).
-
-Minimum (binary-only) and augmented (binary + docs + annotations) modes are configuration choices
-that feed the same pipeline.
-
-## Parameter Surface Tiers
-
-Option parameters are evaluated as a tiered surface:
-
-- T0: Option existence.
-- T1: Parameter binding (required vs optional value).
-- T2: Parameter form (attachment style, repeatability).
-- T3: Parameter domain/type (enum, numeric, path-like).
-- T4: Behavioral semantics.
-
-Only T0 and T1 are in scope today. Higher tiers may remain not evaluated indefinitely.
-
-Large parameter spaces are accounted for via coverage reporting and explicit unknowns, not by
-exhaustive enumeration.
 
 ## Environment Contract
 
@@ -64,82 +32,86 @@ be classified as `undetermined`.
 }
 ```
 
-## Claim
+## SelfReport
 
 ```json
 {
-  "id": "string",
-  "text": "string",
-  "kind": "option|behavior|env|io|error|exit_status",
-  "source": { "type": "help", "path": "string", "line": 0 },
-  "status": "unvalidated",
-  "extractor": "parse:help:v1",
-  "raw_excerpt": "string",
-  "confidence": 0.42
+  "help": {
+    "args": ["--help"],
+    "exit_code": 0,
+    "stdout": "...",
+    "stderr": "..."
+  },
+  "version": {
+    "args": ["--version"],
+    "exit_code": 0,
+    "stdout": "...",
+    "stderr": "..."
+  },
+  "usage_error": {
+    "args": ["--__bvm_unknown__"],
+    "exit_code": 2,
+    "stdout": "...",
+    "stderr": "..."
+  }
 }
 ```
 
-M1 focuses on surface claims (`option`, `io`, `exit_status`). Behavior claims are tagged but validated later.
+## ProbePlan (LM Output)
 
-## ClaimsFile
+```json
+{
+  "planner_version": "v1",
+  "options": [
+    { "option": "--all", "probes": ["existence", "invalid_value"] },
+    { "option": "--block-size", "probes": ["existence", "invalid_value", "option_at_end"] }
+  ],
+  "budget": { "max_total": 300, "max_per_option": 3 },
+  "stop_rules": { "stop_on_unrecognized": true, "stop_on_binding_confirmed": true }
+}
+```
+
+Probe types:
+
+- `existence`: run `<opt> --help` and detect unrecognized/ambiguous responses.
+- `invalid_value`: run `<opt>` with a dummy value and `--help` to detect binding.
+- `option_at_end`: run `<opt>` at end (no `--help`) to detect missing-arg responses.
+
+## SurfaceReport
 
 ```json
 {
   "invoked_path": "/usr/bin/ls",
-  "binary_identity": "...BinaryIdentity...",
-  "claims": ["...Claim..."]
+  "binary_identity": { "path": "/abs/path/to/binary", "hash": { "algo": "blake3", "value": "..." } },
+  "planner": { "version": "v1", "plan_hash": "..." },
+  "probe_library_version": "v1",
+  "timings_ms": { "planner_ms": 12, "probes_ms": 148, "total_ms": 185 },
+  "self_report": { "help": { "args": ["--help"], "exit_code": 0, "stdout": "...", "stderr": "..." } },
+  "options": [
+    {
+      "option": "--all",
+      "existence": { "status": "confirmed", "reason": null, "evidence": ["...Evidence..."] },
+      "binding": {
+        "status": "confirmed",
+        "kind": "no_value",
+        "reason": "argument not allowed response observed",
+        "evidence": ["...Evidence..."]
+      }
+    }
+  ],
+  "higher_tiers": { "t2": "not_evaluated", "t3": "not_evaluated", "t4": "not_evaluated" }
 }
 ```
-
-`invoked_path` records the path used to capture help output. `binary_identity` is present when help
-text was captured directly from the binary by this tool (the current CLI flow).
 
 ## Evidence
 
 ```json
 {
   "args": ["--long"],
-  "env": { "LC_ALL": "C", "TZ": "UTC" },
+  "env": { "LC_ALL": "C", "TZ": "UTC", "TERM": "dumb" },
   "exit_code": 0,
   "stdout": "blake3:...",
   "stderr": "blake3:...",
-  "notes": "string"
-}
-```
-
-## ValidationResult
-
-```json
-{
-  "claim_id": "string",
-  "status": "confirmed|refuted|undetermined",
-  "method": "acceptance_test|behavior_fixture|stderr_match|exit_code|output_diff|other",
-  "determinism": "deterministic|env_sensitive|flaky",
-  "attempts": ["...Evidence..."],
-  "observed": "string",
-  "reason": "string"
-}
-```
-
-Confirmed means evidence directly implies the claim. Refuted means evidence directly contradicts it.
-Undetermined means tests ran but were inconclusive.
-
-## ValidationReport
-
-```json
-{
-  "binary_identity": { "...BinaryIdentity..." },
-  "results": ["...ValidationResult..."]
-}
-```
-
-## RegenerationReport
-
-```json
-{
-  "binary_identity": { "...BinaryIdentity..." },
-  "claims_path": "./claims.json",
-  "results_path": "./validation.json",
-  "out_man": "./tool.1"
+  "notes": "probe=existence"
 }
 ```

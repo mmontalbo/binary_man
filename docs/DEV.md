@@ -30,18 +30,14 @@ cargo build
 cargo run -- --help
 ```
 
-## Basic workflow (stubs for now)
+## Basic workflow (M5 fast-pass)
 
 ```
-# Synthesize claims from the binary help output (--help with -h fallback)
-cargo run -- claims --binary /usr/bin/ls --out ./claims.json
+# Provide an LM planner command (JSON in/out) and extract the surface.
+BVM_PLANNER_CMD=/path/to/planner cargo run -- surface /usr/bin/ls --out-dir ./out
 
-# Validate claims by executing the binary under controlled env constraints
-cargo run -- validate --binary /usr/bin/ls --claims ./claims.json --out ./validation.json
-
-# Render a man page view and a machine-readable report
-cargo run -- regenerate --binary /usr/bin/ls --claims ./claims.json --results ./validation.json --out-man ./ls.1 --out-report ./report.json
-
+# Or replay a precomputed plan JSON (still required for the run).
+BVM_PLANNER_PLAN=/path/to/plan.json cargo run -- surface /usr/bin/ls --out-dir ./out
 ```
 
 ## Notes
