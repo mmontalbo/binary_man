@@ -17,17 +17,24 @@ validation.
 
 ## Goal
 
-- Synthesize a unified, provenance-tracked claim set from all inputs.
+- Synthesize a unified, provenance-tracked claim set from enabled inputs.
 - Execute the binary under controlled environments to validate claims.
 - Classify each claim as confirmed, refuted, or undetermined.
 - Render man pages and other views from validated claims, tied to a specific binary identity.
 
+## Current Focus (M5)
+
+- Fast, binary-only surface extraction for T0/T1.
+- Inputs: binary path + controlled env contract.
+- Outputs: validated surface contract, minimal rendered view, and audit-ready evidence.
+- Scenario frameworks, higher-tier semantics, and doc/source parsing are deferred.
+
 ## Two-Phase Process
 
 Phase A: Claim synthesis.
-Inputs include binary observations, binary self-reports (--help), existing docs, and optional
-annotations. All non-binary inputs are treated as claims with provenance. Output is a single
-unified claim set.
+Inputs include binary observations and binary self-reports (--help). Other sources (docs,
+annotations, source excerpts) are treated as optional claims and are deferred in M5. Output is a
+single unified claim set.
 
 Phase B: Validation + rendering.
 Claims are confirmed/refuted/undetermined via controlled binary execution. Outputs include a
@@ -38,9 +45,9 @@ are enabled.
 
 ## Input Modes
 
-Minimum input (binary only) yields sparse, maximally trustworthy documentation. Augmented input
-(binary + existing docs + annotations) yields richer documentation, still constrained by validation.
-These are configuration choices, not different systems.
+Minimum input (binary only) yields sparse, maximally trustworthy documentation and is the current
+focus. Augmented input (binary + existing docs + annotations) yields richer documentation, still
+constrained by validation, but is deferred beyond M5.
 
 ## Parameter Surface Tiers
 
@@ -79,9 +86,15 @@ Requirements:
 
 ## Validation and Outputs
 
-- Validation runs under controlled env and fixtures when needed.
+- Validation runs under the controlled environment contract; fixtures are deferred in M5.
 - Outputs include a machine-readable validation report and rendered views (man page today; other
   views later).
+
+## Small LM Backend (M5)
+
+An optional small LM may be used only to plan and prioritize Tier-0/Tier-1 probes based on binary
+self-report and known probe types. It must be swappable, failure-closed, and never treated as a
+source of truth or documentation text.
 
 ## Environment Contract
 

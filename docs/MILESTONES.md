@@ -3,7 +3,7 @@
 This document records the current milestone plan and status. It is the canonical
 sequence for the project.
 
-Current focus: M4 — Conceptual Alignment + `ls` validation surface area (in progress).
+Current focus: M5 — Fast Binary-Only Surface Extraction (T0 + T1) (in progress).
 
 ## M0 — Scaffold & Invariants (done)
 
@@ -81,24 +81,79 @@ Scope:
 - Include binary hash/version header.
 - Intentionally barebones.
 
-## M4 — Conceptual Alignment (in progress)
+## M4 — Conceptual Alignment (done)
 
 Goal: Align implementation with the claim-centric model and input modes while
 expanding validation coverage using GNU coreutils `ls` as the benchmark.
 
-Scope:
-- Synthesize a unified claim set from enabled inputs (help, man pages, source excerpts, annotations),
-  with provenance preserved for each claim.
-- Make minimum vs augmented input modes explicit configuration choices, not separate systems.
-- Ensure rendering treats validation results as authoritative; missing results default to undetermined.
-- Keep outputs tied to a specific binary identity and validation report.
-- Exercise more of the `ls --help` surface area with deterministic, low-impact probes.
+What landed:
+- Binary-as-source-of-truth is validated in practice.
+- Tier-0 (option existence) and Tier-1 (parameter binding) are finite and closeable.
+- Probe design is the primary determinant of success; parsing docs is not.
+- Under the env contract (LC_ALL=C, TZ=UTC, TERM=dumb), Tier-1 uncertainty can be driven to zero for `ls`.
+- Unknowns are meaningful only when pushed explicitly into higher tiers by design.
+- Tier-1 probes were tightened to close remaining `ls` undetermined bindings.
 
-First steps:
-- Wire claims synthesis to consume all enabled inputs, even if some parsers are still minimal.
-- Define a merge/dedup strategy for claims across sources while preserving provenance.
-- Make input mode selection explicit in the CLI workflow and docs.
-- Add a guard so rendering never treats unvalidated claims as authoritative.
-- Extend binding probes to honor the help-text form and reduce `ls` undetermined bindings.
-- Validate aliases listed on the same help row to cover more `ls` option surface area.
-- Parse inline value enumerations in `ls` help descriptions and test valid/invalid values.
+Why M4 is closed:
+- Scenario frameworks and progressive affordance exploration explode scope.
+- Parameter domain/type and behavior semantics require fixtures and per-binary logic.
+- Bespoke parsing for help/man text does not scale and undermines binary-agnostic speed.
+
+Explicitly deferred:
+- Scenario-based progressive exploration (old M5).
+- Tier-2+ parameter form/domain/behavior semantics.
+
+## M5 — Fast Binary-Only Surface Extraction (T0 + T1)
+
+Purpose:
+- Deliver a fast, binary-agnostic pipeline that, given only a binary,
+  produces a closed, validated Tier-0 and Tier-1 interface surface
+  and a minimal documentation view in seconds.
+
+Scope:
+- Inputs:
+  - binary path only
+  - controlled environment contract (LC_ALL=C, TZ=UTC, TERM=dumb)
+- Outputs:
+  1) Validated surface contract (T0 existence, T1 parameter binding)
+  2) Minimal rendered view (man-like or markdown)
+  3) Evidence sufficient for auditability
+- Performance target:
+  - coreutils-scale tools complete in ≤5 seconds
+  - cacheable by (binary hash, env contract)
+
+Explicit non-goals:
+- No scenario framework or fixtures
+- No parameter form/domain/behavior semantics (T2–T4)
+- No man-page parsing or source parsing
+- No progressive exploration
+- No per-binary validation profiles
+
+Role of the Small LM Backend in M5:
+
+The LM is not a source of truth and not a claim generator.
+
+Its role in M5 is narrowly defined as:
+- Probe planner and prioritizer for Tier-0 and Tier-1 validation only.
+
+The LM MAY:
+- Given binary self-report (e.g. --help text) and a list of known probe types,
+  propose:
+  - which probes to run for which options,
+  - ordering/prioritization to minimize total probes,
+  - early-exit conditions per option.
+
+The LM MAY NOT:
+- Propose new options not present in binary self-report
+- Propose semantics, domains, or scenarios
+- Assert claims as true or false
+- Generate documentation text
+
+The LM backend must be:
+- Optional and swappable
+- Failure-closed (invalid output → fewer probes, never wrong claims)
+- Small and fast (≈3B class model, seconds-level inference)
+- Used only to reduce bespoke parsing and speed up probe selection
+
+If the LM is unavailable, the system must fall back to a deterministic default
+probe plan and still produce correct results.
