@@ -3,7 +3,7 @@
 This document records the current milestone plan and status. It is the canonical
 sequence for the project.
 
-Current focus: M5 — Help Text Context Extraction (in progress).
+Current focus: M6 — Scenario Runner (done, v0).
 
 ## M0 — Scaffold & Invariants (done)
 
@@ -103,7 +103,7 @@ Explicitly deferred:
 - Scenario-based progressive exploration (old M5).
 - Tier-2+ parameter form/domain/behavior semantics.
 
-## M5 — Help Text Context Extraction
+## M5 — Help Text Context Extraction (done)
 
 Purpose:
 - Deliver a minimal, binary-agnostic step that captures raw help output as LM context.
@@ -123,3 +123,20 @@ Explicit non-goals:
 - No surface validation
 - No rendering beyond raw help text
 - No documentation synthesis
+
+## M6 — Scenario Runner (done, v0)
+
+Purpose:
+- Deliver a constrained, recordable runner that executes LM-suggested scenarios safely.
+
+What landed:
+- Scenario JSON parsing with strict schema validation and bounded limits.
+- Fixture layout with manifest verification and deterministic materialization.
+- Evidence bundles with stdout/stderr/exit, timing, and SHA-256 hashes.
+- Rootless bwrap sandbox with no network and read-only Nix store mounts.
+- Env contract enforcement (LC_ALL=C, TZ=UTC, TERM=dumb) and stdin=/dev/null.
+- Direct (non-bwrap) mode for debugging only.
+
+Explicitly not done:
+- Syscall tracing (deferred in v0).
+- Multi-command scenarios, retries, or semantic inference.

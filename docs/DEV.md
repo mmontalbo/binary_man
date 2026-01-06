@@ -21,23 +21,13 @@ direnv allow
 nix develop
 ```
 
-The shell provides the Rust toolchain.
+The shell provides the Rust toolchain and bwrap.
 
 ## Build and run
 
 ```
 cargo build
-cargo run -- /path/to/bin --out-dir ./out
+cargo run -- scenario.json
 ```
 
-The help artifact is written under `out/context/<binary-name>/help.txt`.
-
-Additional artifacts:
-
-```
-out/context/<binary-name>/help.stdout.txt
-out/context/<binary-name>/help.stderr.txt
-out/context/<binary-name>/context.json
-```
-
-`context.json` includes a binary hash along with the capture metadata.
+Evidence is written under `out/evidence/<run_id>/`.
