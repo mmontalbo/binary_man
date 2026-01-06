@@ -3,6 +3,7 @@
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use serde::Serialize;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -81,10 +82,17 @@ fn main() -> Result<()> {
     std::fs::write(&help_path, help_text)
         .with_context(|| format!("write help text {}", help_path.display()))?;
 
+    let binary_hash = match compute_binary_hash(&args.binary) {
+        Ok(hash) => Some(hash),
+        Err(err) => {
+            eprintln!("warning: failed to hash binary: {err}");
+            None
+        }
+    };
     let metadata = ContextMetadata {
         binary_path: args.binary.display().to_string(),
         binary_name: name.to_string(),
-        binary_hash: None,
+        binary_hash,
         help_arg_used: capture.arg,
         exit_code: capture.output.exit_code,
         env: EnvContract {
@@ -152,4 +160,19 @@ fn capture_output(binary: &Path, args: &[&str]) -> Result<CaptureOutput> {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
     })
+}
+
+fn compute_binary_hash(binary: &Path) -> Result<String> {
+    let mut file = std::fs::File::open(binary)
+        .with_context(|| format!("open binary for hashing {}", binary.display()))?;
+    let mut hasher = blake3::Hasher::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(hasher.finalize().to_hex().to_string())
 }

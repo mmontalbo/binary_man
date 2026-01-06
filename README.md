@@ -28,8 +28,8 @@ out/context/<binary-name>/help.stderr.txt
 out/context/<binary-name>/context.json
 ```
 
-`context.json` includes the binary path/name, the help arg used, exit code, environment contract,
-and a unix timestamp.
+`context.json` includes the binary path/name, the binary hash, the help arg used, exit code,
+environment contract, and a unix timestamp.
 
 ## Environment Contract
 

@@ -39,3 +39,5 @@ out/context/<binary-name>/help.stdout.txt
 out/context/<binary-name>/help.stderr.txt
 out/context/<binary-name>/context.json
 ```
+
+`context.json` includes a binary hash along with the capture metadata.
