@@ -19,15 +19,16 @@
           config = { allowUnfree = true; };
         };
         claudePkg = if pkgs ? claude-code then pkgs.claude-code else pkgsUnstable.claude-code;
+        rustPkgs = pkgsUnstable;
       in
       {
         devShells.default = pkgs.mkShell {
           packages = [ claudePkg ] ++ (with pkgs; [
-            rustc
-            cargo
-            rustfmt
-            clippy
-            rust-analyzer
+            rustPkgs.rustc
+            rustPkgs.cargo
+            rustPkgs.rustfmt
+            rustPkgs.clippy
+            rustPkgs.rust-analyzer
             ripgrep
             jq
             file
@@ -35,6 +36,7 @@
             man-db
             groff
             coreutils
+            bubblewrap
           ]) ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
             pkgs.strace
           ];
