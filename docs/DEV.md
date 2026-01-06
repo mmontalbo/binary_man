@@ -21,26 +21,13 @@ direnv allow
 nix develop
 ```
 
-The shell provides the Rust toolchain plus helpers for binary inspection and tracing.
+The shell provides the Rust toolchain.
 
 ## Build and run
 
 ```
 cargo build
-cargo run -- --help
+cargo run -- /path/to/bin --out-dir ./out
 ```
 
-## Basic workflow (M5 fast-pass)
-
-```
-# Provide an LM planner command (JSON in/out) and extract the surface.
-BVM_PLANNER_CMD=/path/to/planner cargo run -- surface /usr/bin/ls --out-dir ./out
-
-# Or replay a precomputed plan JSON (still required for the run).
-BVM_PLANNER_PLAN=/path/to/plan.json cargo run -- surface /usr/bin/ls --out-dir ./out
-```
-
-## Notes
-
-- The dev shell exports `RUST_BACKTRACE=1` for better diagnostics.
-- `reports/` and `out/` are gitignored; `.gitkeep` keeps the directories in the repo.
+The help artifact is written under `out/context/<binary-name>/help.txt`.

@@ -3,7 +3,7 @@
 This document records the current milestone plan and status. It is the canonical
 sequence for the project.
 
-Current focus: M5 — Fast Binary-Only Surface Extraction (T0 + T1) (in progress).
+Current focus: M5 — Help Text Context Extraction (in progress).
 
 ## M0 — Scaffold & Invariants (done)
 
@@ -103,51 +103,23 @@ Explicitly deferred:
 - Scenario-based progressive exploration (old M5).
 - Tier-2+ parameter form/domain/behavior semantics.
 
-## M5 — Fast Binary-Only Surface Extraction (T0 + T1)
+## M5 — Help Text Context Extraction
 
 Purpose:
-- Deliver a fast, binary-agnostic pipeline that, given only a binary,
-  produces a closed, validated Tier-0 and Tier-1 interface surface
-  and a minimal documentation view in seconds.
+- Deliver a minimal, binary-agnostic step that captures raw help output as LM context.
 
 Scope:
 - Inputs:
   - binary path only
   - controlled environment contract (LC_ALL=C, TZ=UTC, TERM=dumb)
 - Outputs:
-  1) Validated surface contract (T0 existence, T1 parameter binding)
-  2) Minimal rendered view (man-like or markdown)
-  3) Evidence sufficient for auditability
-- Performance target:
-  - coreutils-scale tools complete in ≤5 seconds
-  - cacheable by (binary hash, env contract, planner version, probe library version)
+  1) Raw help text artifact (`out/context/<binary-name>/help.txt`)
+  2) No parsing, no inference, no validation
+- Fallback behavior:
+  - Use `--help`; if empty, fall back to `-h`.
 
 Explicit non-goals:
-- No scenario framework or fixtures
-- No parameter form/domain/behavior semantics (T2–T4)
-- No man-page parsing or source parsing
-- No progressive exploration
-- No per-binary validation profiles
-
-Role of the LM Planner in M5:
-
-The LM is required, not a source of truth, and not a claim generator.
-
-Its role in M5 is narrowly defined as:
-- Probe planner and prioritizer for Tier-0 and Tier-1 validation only.
-
-The LM MUST:
-- Consume binary self-report and a fixed probe library.
-- Honor a probe budget and stop rules.
-- Output JSON only (schema-validated, persisted, failure-closed).
-
-The LM MUST NOT:
-- Propose new options not present in binary self-report
-- Propose semantics, domains, or scenarios
-- Assert claims as true or false
-- Generate documentation text
-
-The LM backend must be:
-- Required and swappable
-- Failure-closed (invalid output → abort fast-pass)
-- Small and fast (seconds-level inference)
+- No probe planning
+- No surface validation
+- No rendering beyond raw help text
+- No documentation synthesis

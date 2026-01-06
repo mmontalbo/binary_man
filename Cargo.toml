@@ -3,13 +3,8 @@ name = "binary-man"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Binary-validated surface extraction"
+description = "Binary help text extractor"
 
 [dependencies]
 anyhow = "1.0"
-blake3 = "1.5"
 clap = { version = "4.5", features = ["derive"] }
-regex = "1.10"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-tempfile = "3.10"

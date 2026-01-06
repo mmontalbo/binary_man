@@ -1,6 +1,4 @@
 /target/
 /.direnv/
-/reports/*
-!/reports/.gitkeep
 /out/*
 !/out/.gitkeep
