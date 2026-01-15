@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema/invocation.v0.json",
+  "title": "Invocation v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["args"],
+  "properties": {
+    "args": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 4096
+      },
+      "maxItems": 32
+    },
+    "rationale": {
+      "type": "string",
+      "maxLength": 1024
+    }
+  }
+}

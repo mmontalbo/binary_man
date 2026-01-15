@@ -1,10 +1,11 @@
-//! Scenario runner entrypoint.
+//! Iterative invocation runner entrypoint.
 
 mod binary;
 mod contract;
 mod evidence;
 mod fixture;
 mod hashing;
+mod invocation;
 mod lm;
 mod limits;
 mod paths;
@@ -14,6 +15,7 @@ mod transcript;
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -25,9 +27,11 @@ use crate::evidence::{
 };
 use crate::fixture::{fixture_root, load_fixture_catalog, prepare_fixture, validate_fixture};
 use crate::hashing::sha256_hex;
-use crate::lm::{
-    build_prompt, capture_help, example_scenario_path, fixture_catalog_path, load_lm_command,
-    load_text, lm_schema_path, run_lm, scenario_schema_path,
+use crate::lm::{capture_help, load_lm_command, load_text, run_lm};
+use crate::invocation::{
+    build_invocation_prompt, invocation_schema_path, parse_invocation_response,
+    scenario_for_invocation, summarize_output, validate_invocation, InvocationEnvelope,
+    InvocationFeedback, InvocationStatus, MAX_ITERATION_ROUNDS, INVOCATION_FIXTURE_ID,
 };
 use crate::runner::{run_direct, run_sandboxed};
 use crate::scenario::{validate_scenario, Scenario};
@@ -36,12 +40,12 @@ use crate::transcript::Transcript;
 const DEFAULT_OUT_DIR: &str = "out";
 const FIXTURES_DIR: &str = "fixtures";
 
-/// CLI arguments for the scenario runner.
+/// CLI arguments for the iterative runner.
 #[derive(Parser, Debug)]
 #[command(
     name = "bman",
     version,
-    about = "Run or validate a single binary scenario in a sandbox"
+    about = "Iteratively invoke a binary in a sandbox"
 )]
 struct Args {
     /// Binary name or path to inspect
@@ -69,15 +73,20 @@ fn main() -> Result<()> {
     run(args)
 }
 
-/// Execute a single scenario and emit an evidence bundle.
 fn run(args: Args) -> Result<()> {
+    run_iterate(args)
+}
+
+/// Execute iterative single-invocation rounds and emit evidence per run.
+fn run_iterate(args: Args) -> Result<()> {
     let env = env_contract();
     let repo_root = std::env::current_dir().context("resolve repo root")?;
     let mut transcript = Transcript::new(args.verbose);
     transcript.note(format!(
-        "start binary_input={} dry_run={} direct={}",
+        "start binary_input={} dry_run={} direct={} iterate=true",
         args.binary, args.dry_run, args.direct
     ));
+
     let target_binary = match resolve_binary_input(&args.binary) {
         Ok(target) => target,
         Err(err) => {
@@ -123,15 +132,15 @@ fn run(args: Args) -> Result<()> {
         help_capture.bytes.len()
     ));
 
-    let schema_text = match load_text(&scenario_schema_path(&repo_root)) {
+    let schema_text = match load_text(&invocation_schema_path(&repo_root)) {
         Ok(text) => text,
         Err(err) => {
-            transcript.note(format!("load scenario schema failed: {err}"));
+            transcript.note(format!("load invocation schema failed: {err}"));
             let evidence_dir = record_early_failure(
                 &args.out_dir,
                 &env,
                 "schema_asset_missing",
-                "failed to load scenario schema".to_string(),
+                "failed to load invocation schema".to_string(),
                 vec![err.to_string()],
                 None,
             )?;
@@ -139,58 +148,84 @@ fn run(args: Args) -> Result<()> {
             return Ok(());
         }
     };
-    let lm_schema_text = match load_text(&lm_schema_path(&repo_root)) {
-        Ok(text) => text,
-        Err(err) => {
-            transcript.note(format!("load LM schema failed: {err}"));
-            let evidence_dir = record_early_failure(
-                &args.out_dir,
-                &env,
-                "schema_asset_missing",
-                "failed to load LM schema".to_string(),
-                vec![err.to_string()],
-                None,
-            )?;
-            transcript.note(format!("evidence_dir {}", evidence_dir.display()));
-            return Ok(());
-        }
-    };
-    let catalog_text = match load_text(&fixture_catalog_path(&repo_root)) {
-        Ok(text) => text,
-        Err(err) => {
-            transcript.note(format!("load fixture catalog failed: {err}"));
-            let evidence_dir = record_early_failure(
-                &args.out_dir,
-                &env,
-                "catalog_asset_missing",
-                "failed to load fixture catalog".to_string(),
-                vec![err.to_string()],
-                None,
-            )?;
-            transcript.note(format!("evidence_dir {}", evidence_dir.display()));
-            return Ok(());
-        }
-    };
-    let example_text = load_text(&example_scenario_path(&repo_root)).ok();
-
     transcript.note(format!(
-        "load_assets scenario_schema_bytes={} lm_schema_bytes={} catalog_bytes={} example_present={}",
-        schema_text.len(),
-        lm_schema_text.len(),
-        catalog_text.len(),
-        example_text.is_some()
+        "load_assets invocation_schema_bytes={}",
+        schema_text.len()
     ));
 
-    let help_text = String::from_utf8_lossy(&help_capture.bytes);
-    let prompt = build_prompt(
-        &target_binary.exec_path,
-        &help_text,
-        &schema_text,
-        &catalog_text,
-        example_text.as_deref(),
-    );
-    transcript.note(format!("build_prompt bytes={}", prompt.len()));
-    transcript.block("lm.prompt", &prompt);
+    let fixtures_root = repo_root.join(FIXTURES_DIR);
+    let fixture_catalog = match load_fixture_catalog(&fixtures_root) {
+        Ok(catalog) => catalog,
+        Err(err) => {
+            transcript.note(format!("load_fixture_catalog failed: {err}"));
+            let evidence_dir = record_early_failure(
+                &args.out_dir,
+                &env,
+                "fixture_catalog_invalid",
+                "fixture catalog invalid".to_string(),
+                vec![err.to_string()],
+                None,
+            )?;
+            transcript.note(format!("evidence_dir {}", evidence_dir.display()));
+            return Ok(());
+        }
+    };
+    if !fixture_catalog.contains(INVOCATION_FIXTURE_ID) {
+        transcript.note(format!("fixture_not_allowed id={}", INVOCATION_FIXTURE_ID));
+        let evidence_dir = record_early_failure(
+            &args.out_dir,
+            &env,
+            "fixture_not_allowed",
+            "fixture id not in catalog".to_string(),
+            vec![INVOCATION_FIXTURE_ID.to_string()],
+            None,
+        )?;
+        transcript.note(format!("evidence_dir {}", evidence_dir.display()));
+        return Ok(());
+    }
+    let fixture_dir = match fixture_root(&fixtures_root, INVOCATION_FIXTURE_ID) {
+        Ok(path) => path,
+        Err(err) => {
+            transcript.note(format!("fixture_root failed: {err}"));
+            let evidence_dir = record_early_failure(
+                &args.out_dir,
+                &env,
+                "fixture_invalid",
+                format!("fixture id invalid: {err}"),
+                Vec::new(),
+                None,
+            )?;
+            transcript.note(format!("evidence_dir {}", evidence_dir.display()));
+            return Ok(());
+        }
+    };
+    transcript.note(format!("fixture_root {}", fixture_dir.display()));
+
+    let dry_run_fixture_hash = if args.dry_run {
+        match validate_fixture(&fixture_dir) {
+            Ok(hash) => {
+                transcript.note(format!("fixture_hash {}", hash));
+                Some(hash)
+            }
+            Err(err) => {
+                transcript.note(format!("validate_fixture failed: {err}"));
+                let evidence_dir = record_early_failure(
+                    &args.out_dir,
+                    &env,
+                    "fixture_invalid",
+                    "fixture validation failed".to_string(),
+                    vec![err.to_string()],
+                    None,
+                )?;
+                transcript.note(format!("evidence_dir {}", evidence_dir.display()));
+                return Ok(());
+            }
+        }
+    } else {
+        None
+    };
+
+    let help_text = String::from_utf8_lossy(&help_capture.bytes).into_owned();
 
     let lm_command = match load_lm_command() {
         Ok(command) => command,
@@ -202,7 +237,7 @@ fn run(args: Args) -> Result<()> {
                 "lm_command_invalid",
                 "failed to load LM command".to_string(),
                 vec![err.to_string()],
-                Some(&prompt),
+                None,
             )?;
             transcript.note(format!("evidence_dir {}", evidence_dir.display()));
             return Ok(());
@@ -218,50 +253,144 @@ fn run(args: Args) -> Result<()> {
         lm_command.argv.len().saturating_sub(1)
     ));
 
-    let response_bytes = match run_lm(&prompt, &lm_schema_text, &lm_command) {
-        Ok(bytes) => bytes,
-        Err(err) => {
-            transcript.note(format!("run_lm failed: {err}"));
-            let evidence_dir = record_early_failure(
-                &args.out_dir,
-                &env,
-                "lm_failed",
-                "failed to obtain LM response".to_string(),
-                vec![err.to_string()],
-                Some(&prompt),
-            )?;
-            transcript.note(format!("evidence_dir {}", evidence_dir.display()));
-            return Ok(());
-        }
+    let mut history: Vec<InvocationFeedback> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let help_args = vec![help_capture.flag.to_string()];
+    let (stdout_bytes, stderr_bytes) = if help_capture.source == "stdout" {
+        (help_capture.bytes.len() as u64, 0)
+    } else {
+        (0, help_capture.bytes.len() as u64)
     };
-    transcript.note(format!("lm_response bytes={}", response_bytes.len()));
-    let response_text = String::from_utf8_lossy(&response_bytes);
-    transcript.block("lm.response", &response_text);
+    history.push(InvocationFeedback {
+        args: help_args.clone(),
+        status: InvocationStatus::Executed,
+        exit_code: None,
+        timed_out: false,
+        stdout_bytes,
+        stderr_bytes,
+        stdout_snippet: None,
+        stderr_snippet: None,
+        note: Some(format!(
+            "help captured via {} ({})",
+            help_capture.flag, help_capture.source
+        )),
+    });
+    seen.insert(invocation_key(&help_args));
 
-    let ScenarioEnvelope {
-        scenario,
-        scenario_bytes,
-    } = match parse_scenario_response(&response_bytes) {
-        Ok(envelope) => envelope,
-        Err(details) => {
+    let mut sequence: u64 = 0;
+    for round_index in 0..MAX_ITERATION_ROUNDS {
+        let prompt = build_invocation_prompt(
+            &target_binary.exec_path,
+            &help_text,
+            &schema_text,
+            &history,
+        );
+
+        transcript.note(format!("iterate_round {}", round_index + 1));
+        transcript.note(format!("build_invocation_prompt bytes={}", prompt.len()));
+        transcript.block("lm.prompt", &prompt);
+
+        let response_bytes = match run_lm(&prompt, &schema_text, &lm_command) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                transcript.note(format!("run_lm failed: {err}"));
+                let evidence_dir = record_early_failure(
+                    &args.out_dir,
+                    &env,
+                    "lm_failed",
+                    "failed to obtain LM response".to_string(),
+                    vec![err.to_string()],
+                    Some(&prompt),
+                )?;
+                transcript.note(format!("evidence_dir {}", evidence_dir.display()));
+                return Ok(());
+            }
+        };
+        transcript.note(format!("lm_response bytes={}", response_bytes.len()));
+        let response_text = String::from_utf8_lossy(&response_bytes);
+        transcript.block("lm.response", &response_text);
+
+        let InvocationEnvelope {
+            invocation,
+            invocation_bytes,
+        } = match parse_invocation_response(&response_bytes) {
+            Ok(envelope) => envelope,
+            Err(details) => {
+                transcript.note(format!(
+                    "parse_invocation failed: {}",
+                    details.join("; ")
+                ));
+                let invocation_hash = sha256_hex(&response_bytes);
+                let evidence_dir =
+                    create_evidence_dir(&args.out_dir, Some(&invocation_hash), Some("lm_invalid"))?;
+                transcript.note(format!("evidence_dir {}", evidence_dir.display()));
+                if let Err(err) = write_invocation_provenance(
+                    &evidence_dir,
+                    &prompt,
+                    &response_bytes,
+                    None,
+                    None,
+                ) {
+                    fail_schema(
+                        &evidence_dir,
+                        &env,
+                        Some(&invocation_hash),
+                        None,
+                        "lm_io_failed",
+                        "failed to write LM provenance".to_string(),
+                        vec![err.to_string()],
+                    )?;
+                    return Ok(());
+                }
+                fail_schema(
+                    &evidence_dir,
+                    &env,
+                    Some(&invocation_hash),
+                    None,
+                    "schema_invalid",
+                    "invocation JSON failed to parse".to_string(),
+                    details,
+                )?;
+                return Ok(());
+            }
+        };
+
+        let invocation_text = String::from_utf8_lossy(&invocation_bytes);
+        transcript.block("invocation.json", &invocation_text);
+
+        if invocation.args.is_empty() {
+            transcript.note("empty args; stop");
+            break;
+        }
+
+        let mut errors = validate_invocation(&invocation).unwrap_or_default();
+        let key = invocation_key(&invocation.args);
+        if seen.contains(&key) {
+            errors.push("invocation already tested".to_string());
+        }
+
+        if !errors.is_empty() {
             transcript.note(format!(
-                "parse_scenario failed: {}",
-                details.join("; ")
+                "validate_invocation failed: {}",
+                errors.join("; ")
             ));
-            let scenario_hash = sha256_hex(&response_bytes);
-            let evidence_dir =
-                create_evidence_dir(&args.out_dir, Some(&scenario_hash), Some("lm_invalid"))?;
-            transcript.note(format!("evidence_dir {}", evidence_dir.display()));
-            if let Err(err) = write_lm_provenance(
+            let invocation_hash = sha256_hex(&invocation_bytes);
+            let evidence_dir = create_evidence_dir(
+                &args.out_dir,
+                Some(&invocation_hash),
+                Some("invoke_invalid"),
+            )?;
+            if let Err(err) = write_invocation_provenance(
                 &evidence_dir,
                 &prompt,
                 &response_bytes,
-                &response_bytes,
+                Some(&invocation_bytes),
+                None,
             ) {
                 fail_schema(
                     &evidence_dir,
                     &env,
-                    Some(&scenario_hash),
+                    Some(&invocation_hash),
                     None,
                     "lm_io_failed",
                     "failed to write LM provenance".to_string(),
@@ -269,139 +398,167 @@ fn run(args: Args) -> Result<()> {
                 )?;
                 return Ok(());
             }
+
+            let feedback = InvocationFeedback {
+                args: invocation.args.clone(),
+                status: InvocationStatus::Rejected,
+                exit_code: None,
+                timed_out: false,
+                stdout_bytes: 0,
+                stderr_bytes: 0,
+                stdout_snippet: None,
+                stderr_snippet: None,
+                note: Some(errors.join("; ")),
+            };
+            write_invocation_result(&evidence_dir, &feedback)?;
             fail_schema(
                 &evidence_dir,
                 &env,
-                Some(&scenario_hash),
+                Some(&invocation_hash),
                 None,
-                "schema_invalid",
-                "scenario JSON failed to parse".to_string(),
-                details,
+                "invocation_invalid",
+                "invocation validation failed".to_string(),
+                errors,
             )?;
-            return Ok(());
+
+            history.push(feedback);
+            seen.insert(key);
+            continue;
         }
-    };
-    transcript.note(format!(
-        "scenario parsed id={} binary={} args_len={}",
-        scenario.scenario_id,
-        scenario.binary.path,
-        scenario.args.len()
-    ));
-    let scenario_text = String::from_utf8_lossy(&scenario_bytes);
-    transcript.block("scenario.json", &scenario_text);
 
-    let scenario_hash = sha256_hex(&scenario_bytes);
-    let evidence_dir =
-        create_evidence_dir(&args.out_dir, Some(&scenario_hash), Some(&scenario.scenario_id))?;
-    if let Err(err) = write_lm_provenance(
-        &evidence_dir,
-        &prompt,
-        &response_bytes,
-        &scenario_bytes,
-    ) {
-        fail_schema(
-            &evidence_dir,
-            &env,
-            Some(&scenario_hash),
-            None,
-            "lm_io_failed",
-            "failed to write LM provenance".to_string(),
-            vec![err.to_string()],
-        )?;
-        return Ok(());
-    }
+        seen.insert(key);
+        sequence += 1;
+        let scenario = scenario_for_invocation(&invocation, &target_binary.exec_path, sequence);
+        let scenario_bytes =
+            serde_json::to_vec_pretty(&scenario).context("serialize scenario")?;
+        let scenario_text = String::from_utf8_lossy(&scenario_bytes);
+        transcript.block("scenario.json", &scenario_text);
 
-    if let Some(errors) = validate_scenario(&scenario) {
-        transcript.note(format!(
-            "validate_scenario failed: {}",
-            errors.join("; ")
-        ));
-        fail_schema(
-            &evidence_dir,
-            &env,
+        let scenario_hash = sha256_hex(&scenario_bytes);
+        let evidence_dir = create_evidence_dir(
+            &args.out_dir,
             Some(&scenario_hash),
             Some(&scenario.scenario_id),
-            "schema_invalid",
-            "scenario validation failed".to_string(),
-            errors,
         )?;
-        return Ok(());
-    }
-    transcript.note("validate_scenario ok");
-
-    let fixtures_root = repo_root.join(FIXTURES_DIR);
-    let fixture_catalog = match load_fixture_catalog(&fixtures_root) {
-        Ok(catalog) => catalog,
-        Err(err) => {
-            transcript.note(format!("load_fixture_catalog failed: {err}"));
+        if let Err(err) = write_invocation_provenance(
+            &evidence_dir,
+            &prompt,
+            &response_bytes,
+            Some(&invocation_bytes),
+            Some(&scenario_bytes),
+        ) {
             fail_schema(
                 &evidence_dir,
                 &env,
                 Some(&scenario_hash),
                 Some(&scenario.scenario_id),
-                "fixture_catalog_invalid",
-                "fixture catalog invalid".to_string(),
+                "lm_io_failed",
+                "failed to write LM provenance".to_string(),
                 vec![err.to_string()],
             )?;
             return Ok(());
         }
-    };
-    transcript.note(format!("fixture_catalog entries={}", fixture_catalog.len()));
-    if !fixture_catalog.contains(&scenario.fixture.id) {
-        transcript.note(format!(
-            "fixture_not_allowed id={}",
-            scenario.fixture.id
-        ));
-        fail_schema(
-            &evidence_dir,
+
+        if let Some(errors) = validate_scenario(&scenario) {
+            transcript.note(format!(
+                "validate_scenario failed: {}",
+                errors.join("; ")
+            ));
+            fail_schema(
+                &evidence_dir,
+                &env,
+                Some(&scenario_hash),
+                Some(&scenario.scenario_id),
+                "schema_invalid",
+                "scenario validation failed".to_string(),
+                errors,
+            )?;
+            return Ok(());
+        }
+
+        let binary_validation = match validate_binary(
+            &args,
             &env,
-            Some(&scenario_hash),
-            Some(&scenario.scenario_id),
-            "fixture_not_allowed",
-            "fixture id not in catalog".to_string(),
-            vec![scenario.fixture.id.clone()],
-        )?;
-        return Ok(());
-    }
+            &evidence_dir,
+            &scenario_hash,
+            &scenario,
+            &target_binary,
+            &mut transcript,
+        )? {
+            Some(validation) => validation,
+            None => return Ok(()),
+        };
+        let BinaryValidation {
+            exec_binary,
+            resolved_binary,
+            binary_hash,
+        } = binary_validation;
 
-    let binary_validation = match validate_binary(
-        &args,
-        &env,
-        &evidence_dir,
-        &scenario_hash,
-        &scenario,
-        &target_binary,
-        &mut transcript,
-    )? {
-        Some(validation) => validation,
-        None => return Ok(()),
-    };
-    let BinaryValidation {
-        exec_binary,
-        resolved_binary,
-        binary_hash,
-    } = binary_validation;
+        if args.dry_run {
+            let fixture_hash = match dry_run_fixture_hash.as_ref() {
+                Some(hash) => hash.clone(),
+                None => {
+                    return Err(anyhow::anyhow!(
+                        "fixture hash missing for dry-run invocation"
+                    ))
+                }
+            };
+            let feedback = InvocationFeedback {
+                args: invocation.args.clone(),
+                status: InvocationStatus::Skipped,
+                exit_code: None,
+                timed_out: false,
+                stdout_bytes: 0,
+                stderr_bytes: 0,
+                stdout_snippet: None,
+                stderr_snippet: None,
+                note: Some("dry-run".to_string()),
+            };
+            write_invocation_result(&evidence_dir, &feedback)?;
 
-    let fixture_dir = match fixture_root(&fixtures_root, &scenario.fixture.id) {
-        Ok(path) => path,
-        Err(err) => {
-            transcript.note(format!("fixture_root failed: {err}"));
-            if args.dry_run {
-                fail_schema(
-                    &evidence_dir,
-                    &env,
-                    Some(&scenario_hash),
-                    Some(&scenario.scenario_id),
-                    "fixture_invalid",
-                    format!("fixture id invalid: {err}"),
-                    Vec::new(),
-                )?;
-            } else {
+            let meta = Meta {
+                tool_version: TOOL_VERSION.to_string(),
+                scenario_sha256: Some(scenario_hash),
+                scenario_id: Some(scenario.scenario_id.clone()),
+                binary: Some(BinaryMeta {
+                    path: scenario.binary.path.clone(),
+                    sha256: Some(binary_hash),
+                }),
+                fixture: Some(FixtureMeta {
+                    id: scenario.fixture.id.clone(),
+                    sha256: Some(fixture_hash),
+                }),
+                env: env.clone(),
+                limits: Some(scenario.limits),
+                outcome: Outcome::Exited,
+                error: None,
+                result: None,
+                artifacts: None,
+                sandbox: None,
+            };
+
+            write_meta(&evidence_dir, meta)?;
+            transcript.note(format!("evidence_dir {}", evidence_dir.display()));
+            println!("evidence: {}", evidence_dir.display());
+
+            history.push(feedback);
+            continue;
+        }
+
+        let prepared_fixture = match prepare_fixture(&fixture_dir) {
+            Ok(prepared) => prepared,
+            Err(err) => {
+                transcript.note(format!("prepare_fixture failed: {}", err.message));
+                let outcome = if err.is_missing {
+                    Outcome::FixtureMissing
+                } else {
+                    Outcome::FixtureInvalid
+                };
                 write_meta(
                     &evidence_dir,
                     Meta {
                         tool_version: TOOL_VERSION.to_string(),
-                        scenario_sha256: Some(scenario_hash.clone()),
+                        scenario_sha256: Some(scenario_hash),
                         scenario_id: Some(scenario.scenario_id.clone()),
                         binary: Some(BinaryMeta {
                             path: scenario.binary.path.clone(),
@@ -413,44 +570,129 @@ fn run(args: Args) -> Result<()> {
                         }),
                         env: env.clone(),
                         limits: Some(scenario.limits),
-                        outcome: Outcome::FixtureMissing,
+                        outcome,
                         error: Some(ErrorReport {
-                            code: "fixture_missing".to_string(),
-                            message: format!("fixture id invalid: {err}"),
-                            details: Vec::new(),
+                            code: match outcome {
+                                Outcome::FixtureMissing => "fixture_missing".to_string(),
+                                _ => "fixture_invalid".to_string(),
+                            },
+                            message: err.message,
+                            details: err.details,
                         }),
                         result: None,
                         artifacts: None,
                         sandbox: None,
                     },
                 )?;
+                return Ok(());
             }
-            return Ok(());
-        }
-    };
-    transcript.note(format!(
-        "fixture_root {}",
-        fixture_dir.display()
-    ));
+        };
+        transcript.note(format!(
+            "prepare_fixture hash={}",
+            prepared_fixture.fixture_hash
+        ));
 
-    if args.dry_run {
-        let fixture_hash = match validate_fixture(&fixture_dir) {
-            Ok(hash) => hash,
+        let run_result = if args.direct {
+            run_direct(
+                &exec_binary,
+                &scenario.args,
+                &prepared_fixture.fixture_root,
+                scenario.limits,
+            )
+        } else {
+            run_sandboxed(
+                &exec_binary,
+                &resolved_binary,
+                &scenario.args,
+                &prepared_fixture.fixture_root,
+                scenario.limits,
+            )
+        };
+
+        let run_result = match run_result {
+            Ok(result) => result,
             Err(err) => {
-                transcript.note(format!("validate_fixture failed: {err}"));
-                fail_schema(
+                transcript.note(format!("run_failed: {err}"));
+                write_meta(
                     &evidence_dir,
-                    &env,
-                    Some(&scenario_hash),
-                    Some(&scenario.scenario_id),
-                    "fixture_invalid",
-                    "fixture validation failed".to_string(),
-                    vec![err.to_string()],
+                    Meta {
+                        tool_version: TOOL_VERSION.to_string(),
+                        scenario_sha256: Some(scenario_hash),
+                        scenario_id: Some(scenario.scenario_id.clone()),
+                        binary: Some(BinaryMeta {
+                            path: scenario.binary.path.clone(),
+                            sha256: Some(binary_hash.clone()),
+                        }),
+                        fixture: Some(FixtureMeta {
+                            id: scenario.fixture.id.clone(),
+                            sha256: Some(prepared_fixture.fixture_hash.clone()),
+                        }),
+                        env: env.clone(),
+                        limits: Some(scenario.limits),
+                        outcome: Outcome::SandboxFailed,
+                        error: Some(error_report("sandbox_failed", &err)),
+                        result: None,
+                        artifacts: None,
+                        sandbox: Some(SandboxMeta {
+                            mode: if args.direct {
+                                "direct".to_string()
+                            } else {
+                                "bwrap".to_string()
+                            },
+                        }),
+                    },
                 )?;
                 return Ok(());
             }
         };
-        transcript.note(format!("fixture_hash {}", fixture_hash));
+        transcript.note(format!(
+            "run_result exit_code={:?} timed_out={} wall_time_ms={} mode={}",
+            run_result.exit_code,
+            run_result.timed_out,
+            run_result.wall_time_ms,
+            if args.direct { "direct" } else { "bwrap" }
+        ));
+        if scenario.artifacts.capture_stdout {
+            let stdout_text = String::from_utf8_lossy(&run_result.stdout);
+            transcript.block("scenario.stdout", &stdout_text);
+        }
+        if scenario.artifacts.capture_stderr {
+            let stderr_text = String::from_utf8_lossy(&run_result.stderr);
+            transcript.block("scenario.stderr", &stderr_text);
+        }
+
+        let stdout_hash = sha256_hex(&run_result.stdout);
+        let stderr_hash = sha256_hex(&run_result.stderr);
+        if scenario.artifacts.capture_stdout {
+            fs::write(evidence_dir.join("stdout.txt"), &run_result.stdout)
+                .context("write stdout.txt")?;
+        }
+        if scenario.artifacts.capture_stderr {
+            fs::write(evidence_dir.join("stderr.txt"), &run_result.stderr)
+                .context("write stderr.txt")?;
+        }
+
+        let (stdout_bytes, stdout_snippet) = summarize_output(&run_result.stdout);
+        let (stderr_bytes, stderr_snippet) = summarize_output(&run_result.stderr);
+        let feedback = InvocationFeedback {
+            args: invocation.args.clone(),
+            status: InvocationStatus::Executed,
+            exit_code: run_result.exit_code,
+            timed_out: run_result.timed_out,
+            stdout_bytes,
+            stderr_bytes,
+            stdout_snippet,
+            stderr_snippet,
+            note: None,
+        };
+        write_invocation_result(&evidence_dir, &feedback)?;
+        history.push(feedback);
+
+        let meta_outcome = if run_result.timed_out {
+            Outcome::TimedOut
+        } else {
+            Outcome::Exited
+        };
 
         let meta = Meta {
             tool_version: TOOL_VERSION.to_string(),
@@ -462,195 +704,37 @@ fn run(args: Args) -> Result<()> {
             }),
             fixture: Some(FixtureMeta {
                 id: scenario.fixture.id.clone(),
-                sha256: Some(fixture_hash),
+                sha256: Some(prepared_fixture.fixture_hash),
             }),
-            env,
+            env: env.clone(),
             limits: Some(scenario.limits),
-            outcome: Outcome::Exited,
+            outcome: meta_outcome,
             error: None,
-            result: None,
-            artifacts: None,
-            sandbox: None,
+            result: Some(ResultMeta {
+                exit_code: run_result.exit_code,
+                timed_out: run_result.timed_out,
+                wall_time_ms: run_result.wall_time_ms,
+            }),
+            artifacts: Some(ArtifactsMeta {
+                stdout_sha256: stdout_hash,
+                stderr_sha256: stderr_hash,
+                stdout_bytes: run_result.stdout.len() as u64,
+                stderr_bytes: run_result.stderr.len() as u64,
+            }),
+            sandbox: Some(SandboxMeta {
+                mode: if args.direct {
+                    "direct".to_string()
+                } else {
+                    "bwrap".to_string()
+                },
+            }),
         };
 
         write_meta(&evidence_dir, meta)?;
         transcript.note(format!("evidence_dir {}", evidence_dir.display()));
         println!("evidence: {}", evidence_dir.display());
-        return Ok(());
     }
 
-    let prepared_fixture = match prepare_fixture(&fixture_dir) {
-        Ok(prepared) => prepared,
-        Err(err) => {
-            transcript.note(format!("prepare_fixture failed: {}", err.message));
-            let outcome = if err.is_missing {
-                Outcome::FixtureMissing
-            } else {
-                Outcome::FixtureInvalid
-            };
-            write_meta(
-                &evidence_dir,
-                Meta {
-                    tool_version: TOOL_VERSION.to_string(),
-                    scenario_sha256: Some(scenario_hash),
-                    scenario_id: Some(scenario.scenario_id.clone()),
-                    binary: Some(BinaryMeta {
-                        path: scenario.binary.path.clone(),
-                        sha256: Some(binary_hash.clone()),
-                    }),
-                    fixture: Some(FixtureMeta {
-                        id: scenario.fixture.id.clone(),
-                        sha256: None,
-                    }),
-                    env,
-                    limits: Some(scenario.limits),
-                    outcome,
-                    error: Some(ErrorReport {
-                        code: match outcome {
-                            Outcome::FixtureMissing => "fixture_missing".to_string(),
-                            _ => "fixture_invalid".to_string(),
-                        },
-                        message: err.message,
-                        details: err.details,
-                    }),
-                    result: None,
-                    artifacts: None,
-                    sandbox: None,
-                },
-            )?;
-            return Ok(());
-        }
-    };
-    transcript.note(format!(
-        "prepare_fixture hash={}",
-        prepared_fixture.fixture_hash
-    ));
-
-    let run_result = if args.direct {
-        run_direct(
-            &exec_binary,
-            &scenario.args,
-            &prepared_fixture.fixture_root,
-            scenario.limits,
-        )
-    } else {
-        run_sandboxed(
-            &exec_binary,
-            &resolved_binary,
-            &scenario.args,
-            &prepared_fixture.fixture_root,
-            scenario.limits,
-        )
-    };
-
-    let run_result = match run_result {
-        Ok(result) => result,
-        Err(err) => {
-            transcript.note(format!("run_failed: {err}"));
-            write_meta(
-                &evidence_dir,
-                Meta {
-                    tool_version: TOOL_VERSION.to_string(),
-                    scenario_sha256: Some(scenario_hash),
-                    scenario_id: Some(scenario.scenario_id.clone()),
-                    binary: Some(BinaryMeta {
-                        path: scenario.binary.path.clone(),
-                        sha256: Some(binary_hash.clone()),
-                    }),
-                    fixture: Some(FixtureMeta {
-                        id: scenario.fixture.id.clone(),
-                        sha256: Some(prepared_fixture.fixture_hash.clone()),
-                    }),
-                    env,
-                    limits: Some(scenario.limits),
-                    outcome: Outcome::SandboxFailed,
-                    error: Some(error_report("sandbox_failed", &err)),
-                    result: None,
-                    artifacts: None,
-                    sandbox: Some(SandboxMeta {
-                        mode: if args.direct {
-                            "direct".to_string()
-                        } else {
-                            "bwrap".to_string()
-                        },
-                    }),
-                },
-            )?;
-            return Ok(());
-        }
-    };
-    transcript.note(format!(
-        "run_result exit_code={:?} timed_out={} wall_time_ms={} mode={}",
-        run_result.exit_code,
-        run_result.timed_out,
-        run_result.wall_time_ms,
-        if args.direct { "direct" } else { "bwrap" }
-    ));
-    if scenario.artifacts.capture_stdout {
-        let stdout_text = String::from_utf8_lossy(&run_result.stdout);
-        transcript.block("scenario.stdout", &stdout_text);
-    }
-    if scenario.artifacts.capture_stderr {
-        let stderr_text = String::from_utf8_lossy(&run_result.stderr);
-        transcript.block("scenario.stderr", &stderr_text);
-    }
-
-    let stdout_hash = sha256_hex(&run_result.stdout);
-    let stderr_hash = sha256_hex(&run_result.stderr);
-    if scenario.artifacts.capture_stdout {
-        fs::write(evidence_dir.join("stdout.txt"), &run_result.stdout)
-            .context("write stdout.txt")?;
-    }
-    if scenario.artifacts.capture_stderr {
-        fs::write(evidence_dir.join("stderr.txt"), &run_result.stderr)
-            .context("write stderr.txt")?;
-    }
-
-    let outcome = if run_result.timed_out {
-        Outcome::TimedOut
-    } else {
-        Outcome::Exited
-    };
-
-    let meta = Meta {
-        tool_version: TOOL_VERSION.to_string(),
-        scenario_sha256: Some(scenario_hash),
-        scenario_id: Some(scenario.scenario_id.clone()),
-        binary: Some(BinaryMeta {
-            path: scenario.binary.path.clone(),
-            sha256: Some(binary_hash),
-        }),
-        fixture: Some(FixtureMeta {
-            id: scenario.fixture.id.clone(),
-            sha256: Some(prepared_fixture.fixture_hash),
-        }),
-        env,
-        limits: Some(scenario.limits),
-        outcome,
-        error: None,
-        result: Some(ResultMeta {
-            exit_code: run_result.exit_code,
-            timed_out: run_result.timed_out,
-            wall_time_ms: run_result.wall_time_ms,
-        }),
-        artifacts: Some(ArtifactsMeta {
-            stdout_sha256: stdout_hash,
-            stderr_sha256: stderr_hash,
-            stdout_bytes: run_result.stdout.len() as u64,
-            stderr_bytes: run_result.stderr.len() as u64,
-        }),
-        sandbox: Some(SandboxMeta {
-            mode: if args.direct {
-                "direct".to_string()
-            } else {
-                "bwrap".to_string()
-            },
-        }),
-    };
-
-    write_meta(&evidence_dir, meta)?;
-    transcript.note(format!("evidence_dir {}", evidence_dir.display()));
-    println!("evidence: {}", evidence_dir.display());
     Ok(())
 }
 
@@ -672,75 +756,43 @@ fn record_early_failure(
     Ok(evidence_dir)
 }
 
-fn write_lm_provenance(
+fn write_invocation_provenance(
     evidence_dir: &Path,
     prompt: &str,
     response: &[u8],
-    scenario_bytes: &[u8],
+    invocation_bytes: Option<&[u8]>,
+    scenario_bytes: Option<&[u8]>,
 ) -> Result<()> {
     fs::write(evidence_dir.join("lm.prompt.txt"), prompt.as_bytes())
         .context("write lm.prompt.txt")?;
     fs::write(evidence_dir.join("lm.response.json"), response)
         .context("write lm.response.json")?;
-    fs::write(evidence_dir.join("scenario.json"), scenario_bytes)
-        .context("write scenario.json")?;
+    if let Some(invocation_bytes) = invocation_bytes {
+        fs::write(evidence_dir.join("invocation.json"), invocation_bytes)
+            .context("write invocation.json")?;
+    }
+    if let Some(scenario_bytes) = scenario_bytes {
+        fs::write(evidence_dir.join("scenario.json"), scenario_bytes)
+            .context("write scenario.json")?;
+    }
     Ok(())
 }
 
-struct ScenarioEnvelope {
-    scenario: Scenario,
-    scenario_bytes: Vec<u8>,
+fn write_invocation_result(evidence_dir: &Path, record: &InvocationFeedback) -> Result<()> {
+    let json = serde_json::to_vec_pretty(record).context("serialize invocation.result.json")?;
+    fs::write(evidence_dir.join("invocation.result.json"), json)
+        .context("write invocation.result.json")?;
+    Ok(())
+}
+
+fn invocation_key(args: &[String]) -> String {
+    args.join("\u{0}")
 }
 
 struct BinaryValidation {
     exec_binary: PathBuf,
     resolved_binary: PathBuf,
     binary_hash: String,
-}
-
-fn parse_scenario_response(response: &[u8]) -> Result<ScenarioEnvelope, Vec<String>> {
-    let mut details = Vec::new();
-    match serde_json::from_slice::<Scenario>(response) {
-        Ok(scenario) => {
-            return Ok(ScenarioEnvelope {
-                scenario,
-                scenario_bytes: response.to_vec(),
-            })
-        }
-        Err(err) => details.push(format!("response JSON failed to parse as scenario: {err}")),
-    }
-    let value: serde_json::Value = match serde_json::from_slice(response) {
-        Ok(value) => value,
-        Err(err) => {
-            details.push(format!("response JSON failed to parse: {err}"));
-            return Err(details);
-        }
-    };
-    let structured = match value.get("structured_output") {
-        Some(value) => value,
-        None => {
-            details.push("response JSON missing structured_output".to_string());
-            return Err(details);
-        }
-    };
-    let scenario: Scenario = match serde_json::from_value(structured.clone()) {
-        Ok(scenario) => scenario,
-        Err(err) => {
-            details.push(format!("structured_output invalid: {err}"));
-            return Err(details);
-        }
-    };
-    let scenario_bytes = match serde_json::to_vec_pretty(structured) {
-        Ok(bytes) => bytes,
-        Err(err) => {
-            details.push(format!("structured_output serialization failed: {err}"));
-            return Err(details);
-        }
-    };
-    Ok(ScenarioEnvelope {
-        scenario,
-        scenario_bytes,
-    })
 }
 
 fn fail_schema(

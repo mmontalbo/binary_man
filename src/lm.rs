@@ -2,10 +2,11 @@
 
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
+use serde_json::Value;
 use std::env;
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use crate::runner::run_direct;
@@ -32,6 +33,11 @@ pub(crate) struct HelpCapture {
     pub(crate) bytes: Vec<u8>,
     pub(crate) source: &'static str,
     pub(crate) flag: &'static str,
+}
+
+pub(crate) struct ExtractedOutput {
+    pub(crate) value: Value,
+    pub(crate) bytes: Vec<u8>,
 }
 
 /// Capture help text for a binary using `--help`, falling back to `-h`.
@@ -107,45 +113,7 @@ pub(crate) fn load_text(path: &Path) -> Result<String> {
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-/// Build the LM prompt for scenario generation.
-pub(crate) fn build_prompt(
-    binary_path: &Path,
-    help_text: &str,
-    schema_text: &str,
-    catalog_text: &str,
-    example_text: Option<&str>,
-) -> String {
-    let mut prompt = String::new();
-    prompt.push_str("Return a single JSON object that conforms to the schema below.\n");
-    prompt.push_str(
-        "Output JSON only. No prose, no code fences, and no markdown.\n",
-    );
-    prompt.push_str("Begin with '{' and end with '}'.\n\n");
-    prompt.push_str("Target binary path (must match exactly):\n");
-    prompt.push_str(&format!("{}\n\n", binary_path.display()));
-    prompt.push_str("Fixture catalog (allowed fixture.id values):\n");
-    prompt.push_str(catalog_text);
-    prompt.push_str("\n\nSchema:\n");
-    prompt.push_str(schema_text);
-    if let Some(example) = example_text {
-        prompt.push_str("\n\nExample (format only; replace values as needed):\n");
-        prompt.push_str(example);
-    }
-    prompt.push_str("\n\nRaw help text:\n");
-    prompt.push_str(help_text);
-    prompt.push_str(
-        "\n\nConstraints:\n\
- - Use the target binary path verbatim in binary.path.\n\
- - args must be an array of strings (no shell parsing).\n\
- - rationale must be short, plain text.\n\
- - fixture.id must come from the fixture catalog.\n\
- - artifacts.capture_exit_code must be true.\n\
- - limits must be present and within schema bounds.\n",
-    );
-    prompt
-}
-
-/// Invoke Claude CLI to obtain a scenario JSON response.
+/// Invoke the configured LM CLI to obtain a JSON response.
 pub(crate) fn run_lm(prompt: &str, schema: &str, command: &LmCommand) -> Result<Vec<u8>> {
     if command.argv.is_empty() {
         return Err(anyhow!("LM command is empty"));
@@ -190,19 +158,84 @@ pub(crate) fn run_lm(prompt: &str, schema: &str, command: &LmCommand) -> Result<
     Ok(output.stdout)
 }
 
-/// Resolve paths for prompt assets.
-pub(crate) fn scenario_schema_path(root: &Path) -> PathBuf {
-    root.join("schema").join("scenario.v0.json")
+/// Extract structured JSON from an LM response, including Claude envelopes.
+pub(crate) fn extract_structured_output(response: &[u8]) -> Result<ExtractedOutput, Vec<String>> {
+    let mut details = Vec::new();
+    let value: Value = match serde_json::from_slice(response) {
+        Ok(value) => value,
+        Err(err) => {
+            details.push(format!("response JSON failed to parse: {err}"));
+            return Err(details);
+        }
+    };
+
+    if let Some(structured) = value.get("structured_output") {
+        return value_to_extracted(structured.clone(), "structured_output", &mut details);
+    }
+
+    if let Some(result) = value.get("result").and_then(|value| value.as_str()) {
+        let cleaned = strip_code_fences(result);
+        let parsed: Value = match serde_json::from_str(&cleaned) {
+            Ok(parsed) => parsed,
+            Err(err) => {
+                if let Some(parsed) = extract_json_from_text(&cleaned) {
+                    return value_to_extracted(parsed, "result", &mut details);
+                }
+                details.push(format!("result JSON failed to parse: {err}"));
+                return Err(details);
+            }
+        };
+        return value_to_extracted(parsed, "result", &mut details);
+    }
+
+    details.push("response JSON missing structured_output or result".to_string());
+    Err(details)
 }
 
-pub(crate) fn lm_schema_path(root: &Path) -> PathBuf {
-    root.join("schema").join("scenario.lm.json")
+fn value_to_extracted(
+    value: Value,
+    label: &str,
+    details: &mut Vec<String>,
+) -> Result<ExtractedOutput, Vec<String>> {
+    let bytes = match serde_json::to_vec_pretty(&value) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            details.push(format!("{label} serialization failed: {err}"));
+            return Err(details.clone());
+        }
+    };
+    Ok(ExtractedOutput { value, bytes })
 }
 
-pub(crate) fn fixture_catalog_path(root: &Path) -> PathBuf {
-    root.join("fixtures").join("catalog.json")
+fn strip_code_fences(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if !trimmed.starts_with("```") {
+        return trimmed.to_string();
+    }
+    let mut lines: Vec<&str> = trimmed.lines().collect();
+    if let Some(first) = lines.first() {
+        if first.trim_start().starts_with("```") {
+            lines.remove(0);
+        }
+    }
+    if let Some(last) = lines.last() {
+        if last.trim_start().starts_with("```") {
+            lines.pop();
+        }
+    }
+    lines.join("\n").trim().to_string()
 }
 
-pub(crate) fn example_scenario_path(root: &Path) -> PathBuf {
-    root.join("scenarios").join("examples").join("ls_help.json")
+fn extract_json_from_text(raw: &str) -> Option<Value> {
+    for (idx, ch) in raw.char_indices() {
+        if ch != '{' {
+            continue;
+        }
+        let slice = &raw[idx..];
+        let mut deserializer = serde_json::Deserializer::from_str(slice);
+        if let Ok(value) = Value::deserialize(&mut deserializer) {
+            return Some(value);
+        }
+    }
+    None
 }

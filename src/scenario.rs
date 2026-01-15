@@ -20,7 +20,7 @@ pub(crate) const MAX_ARG_LEN: usize = 4096;
 pub(crate) const MAX_RATIONALE_LEN: usize = 1024;
 
 /// Top-level scenario spec parsed from JSON.
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Scenario {
     pub(crate) scenario_id: String,
@@ -33,14 +33,14 @@ pub(crate) struct Scenario {
 }
 
 /// Binary reference for the scenario.
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ScenarioBinary {
     pub(crate) path: String,
 }
 
 /// Fixture ID for the scenario.
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ScenarioFixture {
     pub(crate) id: String,
@@ -57,7 +57,7 @@ pub(crate) struct ScenarioLimits {
 }
 
 /// Artifact capture settings.
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ScenarioArtifacts {
     pub(crate) capture_stdout: bool,
