@@ -3,7 +3,7 @@
 This document tracks the static-first roadmap for generating man pages from
 `binary_lens` packs. Dynamic execution and validation are deferred.
 
-Current focus: M8 — Static `ls(1)` man page generation from a `binary_lens` pack (proposed).
+Current focus: M8 — Static `ls(1)` man page generation from a `binary_lens` pack (done).
 
 ## M0 — Static Reset (done)
 
@@ -52,7 +52,7 @@ Deliverables:
 
 Note: Prompt/response artifacts are deprecated in favor of the lens outputs in M8.
 
-## M8 — Comprehensive `ls(1)` Man Page (proposed)
+## M8 — Comprehensive `ls(1)` Man Page (done)
 
 Goal: Generate a comprehensive, plausible `ls(1)` man page from a fresh
 `binary_lens` pack, using deterministic rendering over lens output. Dynamic
