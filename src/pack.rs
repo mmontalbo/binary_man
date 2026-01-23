@@ -5,9 +5,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const DEFAULT_LENS_FLAKE: &str = "../binary_lens#binary_lens";
-const DEFAULT_USAGE_LENS: &str = "queries/ls_usage_evidence.sql";
-
 #[derive(Deserialize)]
 pub struct BinaryHashes {
     pub sha256: String,
@@ -81,7 +78,7 @@ pub fn resolve_pack_root(path: &Path) -> Result<PathBuf> {
     ))
 }
 
-pub fn generate_pack(binary: &str, out_dir: &Path) -> Result<PathBuf> {
+pub fn generate_pack(binary: &str, out_dir: &Path, lens_flake: &str) -> Result<PathBuf> {
     fs::create_dir_all(out_dir).context("create pack output dir")?;
 
     let out_dir_str = out_dir
@@ -89,14 +86,7 @@ pub fn generate_pack(binary: &str, out_dir: &Path) -> Result<PathBuf> {
         .ok_or_else(|| anyhow!("pack output path is not valid UTF-8"))?;
 
     let output = Command::new("nix")
-        .args([
-            "run",
-            DEFAULT_LENS_FLAKE,
-            "--",
-            binary,
-            "-o",
-            out_dir_str,
-        ])
+        .args(["run", lens_flake, "--", binary, "-o", out_dir_str])
         .output()
         .context("run binary_lens via nix")?;
 
@@ -117,13 +107,8 @@ pub fn generate_pack(binary: &str, out_dir: &Path) -> Result<PathBuf> {
 }
 
 pub fn load_pack_context(pack_root: &Path) -> Result<PackContext> {
-    let manifest_path = pack_root.join("manifest.json");
-    let manifest_bytes = fs::read(&manifest_path)
-        .with_context(|| format!("read {}", manifest_path.display()))?;
-    let manifest: PackManifest = serde_json::from_slice(&manifest_bytes)
-        .context("parse pack manifest")?;
-
-    let usage_lens = run_usage_lens(pack_root)?;
+    let manifest = load_manifest(pack_root)?;
+    let usage_lens = run_usage_lens(pack_root, &manifest.binary_name)?;
     if usage_lens.rows.is_empty() {
         return Err(anyhow!("usage lens returned no rows"));
     }
@@ -141,11 +126,20 @@ pub fn load_pack_context(pack_root: &Path) -> Result<PackContext> {
     })
 }
 
-fn run_usage_lens(pack_root: &Path) -> Result<UsageLensOutput> {
-    let query = render_usage_lens(pack_root)?;
+pub fn load_manifest(pack_root: &Path) -> Result<PackManifest> {
+    let manifest_path = pack_root.join("manifest.json");
+    let manifest_bytes =
+        fs::read(&manifest_path).with_context(|| format!("read {}", manifest_path.display()))?;
+    let manifest: PackManifest =
+        serde_json::from_slice(&manifest_bytes).context("parse pack manifest")?;
+    Ok(manifest)
+}
+
+fn run_usage_lens(pack_root: &Path, binary_name: &str) -> Result<UsageLensOutput> {
+    let query = render_usage_lens(pack_root, binary_name)?;
     let output = run_duckdb_query(&query.rendered_sql, pack_root)?;
-    let rows: Vec<UsageEvidenceRow> = serde_json::from_slice(&output)
-        .context("parse usage evidence JSON output")?;
+    let rows: Vec<UsageEvidenceRow> =
+        serde_json::from_slice(&output).context("parse usage evidence JSON output")?;
 
     Ok(UsageLensOutput {
         rows,
@@ -156,11 +150,22 @@ fn run_usage_lens(pack_root: &Path) -> Result<UsageLensOutput> {
     })
 }
 
-fn render_usage_lens(pack_root: &Path) -> Result<LensQuery> {
-    let lens_path = PathBuf::from(DEFAULT_USAGE_LENS);
-    let lens_path = lens_path
-        .canonicalize()
-        .with_context(|| format!("resolve usage lens path {}", lens_path.display()))?;
+fn render_usage_lens(pack_root: &Path, binary_name: &str) -> Result<LensQuery> {
+    let lens_filename = format!("{binary_name}_usage_evidence.sql");
+    let repo_lens_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("queries")
+        .join(&lens_filename);
+    let lens_path = match pack_root.parent() {
+        Some(doc_pack_root) => {
+            let doc_pack_path = doc_pack_root.join("queries").join(&lens_filename);
+            if doc_pack_path.is_file() {
+                doc_pack_path
+            } else {
+                repo_lens_path
+            }
+        }
+        None => repo_lens_path,
+    };
     let template_sql = fs::read_to_string(&lens_path)
         .with_context(|| format!("read usage lens {}", lens_path.display()))?;
 
@@ -192,10 +197,7 @@ fn render_usage_lens(pack_root: &Path) -> Result<LensQuery> {
 fn facts_relative_path(pack_root: &Path, file_name: &str) -> Result<String> {
     let path = pack_root.join("facts").join(file_name);
     if !path.is_file() {
-        return Err(anyhow!(
-            "facts parquet not found at {}",
-            path.display()
-        ));
+        return Err(anyhow!("facts parquet not found at {}", path.display()));
     }
     Ok(format!("facts/{}", file_name))
 }

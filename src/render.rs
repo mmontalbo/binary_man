@@ -1,9 +1,10 @@
 //! Deterministic man page renderer from usage evidence.
 
 use crate::pack::PackContext;
+use crate::scenarios::ExamplesReport;
 use std::collections::BTreeSet;
 
-pub fn render_man_page(context: &PackContext) -> String {
+pub fn render_man_page(context: &PackContext, examples_report: Option<&ExamplesReport>) -> String {
     let binary_name = context.manifest.binary_name.as_str();
     let upper = binary_name.to_uppercase();
     let help_text = context.help_text.as_str();
@@ -57,6 +58,36 @@ pub fn render_man_page(context: &PackContext) -> String {
         out.push_str(&options_to_roff(&sections.options));
     }
 
+    if let Some(examples_report) = examples_report {
+        let passing: Vec<_> = examples_report
+            .scenarios
+            .iter()
+            .filter(|scenario| scenario.pass && scenario.publish)
+            .collect();
+        if !passing.is_empty() {
+            out.push_str(".SH EXAMPLES\n");
+            for scenario in passing {
+                out.push_str(".PP\n");
+                out.push_str(".nf\n");
+                append_verbatim_line(&mut out, &format!("$ {}", scenario.command_line));
+                append_verbatim_snippet(&mut out, &scenario.stdout_snippet);
+                if !scenario.stderr_snippet.trim().is_empty() {
+                    append_verbatim_line(&mut out, "[stderr]");
+                    append_verbatim_snippet(&mut out, &scenario.stderr_snippet);
+                }
+                out.push_str(".fi\n");
+
+                if let Some(code) = scenario.observed_exit_code {
+                    if code != 0 {
+                        out.push_str(&format!(".PP\nExit status: {}.\n", code));
+                    }
+                } else if let Some(signal) = scenario.observed_exit_signal {
+                    out.push_str(&format!(".PP\nTerminated by signal {}.\n", signal));
+                }
+            }
+        }
+    }
+
     if !sections.exit_status.is_empty() {
         out.push_str(".SH EXIT STATUS\n");
         for line in &sections.exit_status {
@@ -81,6 +112,24 @@ pub fn render_man_page(context: &PackContext) -> String {
     }
 
     out
+}
+
+fn append_verbatim_snippet(out: &mut String, snippet: &str) {
+    if snippet.trim().is_empty() {
+        return;
+    }
+    for chunk in snippet.split_inclusive('\n') {
+        if let Some(line) = chunk.strip_suffix('\n') {
+            append_verbatim_line(out, line);
+        } else {
+            append_verbatim_line(out, chunk);
+        }
+    }
+}
+
+fn append_verbatim_line(out: &mut String, line: &str) {
+    out.push_str(&escape_option(line));
+    out.push('\n');
 }
 
 struct HelpSections {
@@ -168,7 +217,9 @@ fn parse_help_text(help_text: &str) -> HelpSections {
                 options.push(OptionItem::Option(entry));
             }
             if stripped.to_lowercase().contains("option") {
-                options.push(OptionItem::Heading(stripped.trim_end_matches(':').to_string()));
+                options.push(OptionItem::Heading(
+                    stripped.trim_end_matches(':').to_string(),
+                ));
             } else {
                 notes.push(stripped.to_string());
             }
