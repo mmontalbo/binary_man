@@ -81,14 +81,57 @@ struct OptionRow {
     scenario_path: Option<String>,
 }
 
-struct SubcommandHit {
-    row: SubcommandRow,
-    source_root: PathBuf,
+type ScenarioHit<T> = (T, PathBuf);
+
+struct ScenarioQueryRun<T> {
+    hits: Vec<T>,
+    ran: bool,
+    errors: Vec<String>,
 }
 
-struct OptionHit {
-    row: OptionRow,
-    source_root: PathBuf,
+fn run_scenario_query<T, F>(
+    pack_root: &Path,
+    staging_root: &Path,
+    template_sql: &str,
+    pack_has_scenarios: bool,
+    staging_has_scenarios: bool,
+    mut run_query: F,
+) -> ScenarioQueryRun<T>
+where
+    F: FnMut(&Path, &str) -> Result<Vec<T>>,
+{
+    let mut hits = Vec::new();
+    let mut ran = false;
+    let mut errors = Vec::new();
+
+    if pack_has_scenarios {
+        ran = true;
+        match run_query(pack_root, template_sql) {
+            Ok(mut rows) => hits.append(&mut rows),
+            Err(err) => errors.push(err.to_string()),
+        }
+    }
+    if staging_has_scenarios {
+        ran = true;
+        match run_query(staging_root, template_sql) {
+            Ok(mut rows) => hits.append(&mut rows),
+            Err(err) => errors.push(err.to_string()),
+        }
+    }
+
+    ScenarioQueryRun { hits, ran, errors }
+}
+
+fn query_status(ran: bool, found: bool, has_errors: bool) -> &'static str {
+    if has_errors {
+        "error"
+    } else if ran && found {
+        "used"
+    } else if ran {
+        "empty"
+    } else {
+        "skipped"
+    }
 }
 
 pub fn apply_surface_discovery(
@@ -155,49 +198,48 @@ pub fn apply_surface_discovery(
     let plan_evidence = paths.evidence_from_path(&plan_path)?;
     let mut plan = None;
     let mut help_scenarios_present = false;
-    if plan_path.is_file() {
-        match scenarios::load_plan(&plan_path) {
-            Ok(loaded) => {
-                discovery.push(SurfaceDiscovery {
-                    code: "scenarios_plan".to_string(),
-                    status: "used".to_string(),
-                    evidence: vec![plan_evidence.clone()],
-                    message: None,
-                });
-                help_scenarios_present = loaded
-                    .scenarios
-                    .iter()
-                    .any(|scenario| scenario.kind == scenarios::ScenarioKind::Help);
-                plan = Some(loaded);
-            }
-            Err(err) => {
-                discovery.push(SurfaceDiscovery {
-                    code: "scenarios_plan".to_string(),
-                    status: "error".to_string(),
-                    evidence: vec![plan_evidence.clone()],
-                    message: Some(err.to_string()),
-                });
-                blockers.push(enrich::Blocker {
-                    code: "scenario_plan_invalid".to_string(),
-                    message: err.to_string(),
-                    evidence: vec![plan_evidence.clone()],
-                    next_action: Some("fix scenarios/plan.json".to_string()),
-                });
-            }
+    match scenarios::load_plan_if_exists(&plan_path) {
+        Ok(Some(loaded)) => {
+            discovery.push(SurfaceDiscovery {
+                code: "scenarios_plan".to_string(),
+                status: "used".to_string(),
+                evidence: vec![plan_evidence.clone()],
+                message: None,
+            });
+            help_scenarios_present = loaded
+                .scenarios
+                .iter()
+                .any(|scenario| scenario.kind == scenarios::ScenarioKind::Help);
+            plan = Some(loaded);
         }
-    } else {
-        discovery.push(SurfaceDiscovery {
-            code: "scenarios_plan".to_string(),
-            status: "missing".to_string(),
-            evidence: vec![plan_evidence.clone()],
-            message: Some("scenarios plan missing".to_string()),
-        });
-        blockers.push(enrich::Blocker {
-            code: "scenario_plan_missing".to_string(),
-            message: "scenarios plan missing".to_string(),
-            evidence: vec![plan_evidence.clone()],
-            next_action: Some("create scenarios/plan.json".to_string()),
-        });
+        Ok(None) => {
+            discovery.push(SurfaceDiscovery {
+                code: "scenarios_plan".to_string(),
+                status: "missing".to_string(),
+                evidence: vec![plan_evidence.clone()],
+                message: Some("scenarios plan missing".to_string()),
+            });
+            blockers.push(enrich::Blocker {
+                code: "scenario_plan_missing".to_string(),
+                message: "scenarios plan missing".to_string(),
+                evidence: vec![plan_evidence.clone()],
+                next_action: Some("create scenarios/plan.json".to_string()),
+            });
+        }
+        Err(err) => {
+            discovery.push(SurfaceDiscovery {
+                code: "scenarios_plan".to_string(),
+                status: "error".to_string(),
+                evidence: vec![plan_evidence.clone()],
+                message: Some(err.to_string()),
+            });
+            blockers.push(enrich::Blocker {
+                code: "scenario_plan_invalid".to_string(),
+                message: err.to_string(),
+                evidence: vec![plan_evidence.clone()],
+                next_action: Some("fix scenarios/plan.json".to_string()),
+            });
+        }
     }
 
     if plan.is_some() && !help_scenarios_present {
@@ -264,26 +306,21 @@ pub fn apply_surface_discovery(
     if options_template_path.is_file() {
         match fs::read_to_string(&options_template_path) {
             Ok(template_sql) => {
-                let mut hits = Vec::new();
-                let mut ran = false;
-                let mut query_errors = Vec::new();
+                let run = run_scenario_query(
+                    doc_pack_root,
+                    staging_root,
+                    &template_sql,
+                    pack_has_scenarios,
+                    staging_has_scenarios,
+                    run_options_query,
+                );
+                let mut query_errors = run.errors;
                 let mut found_options = false;
-                if pack_has_scenarios {
-                    ran = true;
-                    match run_options_query(doc_pack_root, &template_sql) {
-                        Ok(mut rows) => hits.append(&mut rows),
-                        Err(err) => query_errors.push(err.to_string()),
-                    }
-                }
-                if staging_has_scenarios {
-                    ran = true;
-                    match run_options_query(staging_root, &template_sql) {
-                        Ok(mut rows) => hits.append(&mut rows),
-                        Err(err) => query_errors.push(err.to_string()),
-                    }
-                }
-                for hit in hits {
-                    let evidence = match evidence_from_option_hit(&hit) {
+                for (row, source_root) in run.hits {
+                    let evidence = match evidence_from_scenario_path(
+                        &source_root,
+                        row.scenario_path.as_ref(),
+                    ) {
                         Ok(Some(evidence)) => evidence,
                         Ok(None) => continue,
                         Err(err) => {
@@ -291,12 +328,11 @@ pub fn apply_surface_discovery(
                             continue;
                         }
                     };
-                    if let Some(id) = hit.row.option.as_ref().map(|s| s.trim()) {
+                    if let Some(id) = row.option.as_ref().map(|s| s.trim()) {
                         if id.is_empty() {
                             continue;
                         }
-                        let description = hit
-                            .row
+                        let description = row
                             .description
                             .as_ref()
                             .map(|desc| desc.trim().to_string())
@@ -312,15 +348,8 @@ pub fn apply_surface_discovery(
                         found_options = true;
                     }
                 }
-                let status = if !query_errors.is_empty() {
-                    "error"
-                } else if ran && found_options {
-                    "used"
-                } else if ran {
-                    "empty"
-                } else {
-                    "skipped"
-                };
+                let status =
+                    query_status(run.ran, found_options, !query_errors.is_empty());
                 discovery.push(SurfaceDiscovery {
                     code: "options_from_scenarios".to_string(),
                     status: status.to_string(),
@@ -376,26 +405,21 @@ pub fn apply_surface_discovery(
     if subcommands_template_path.is_file() {
         match fs::read_to_string(&subcommands_template_path) {
             Ok(template_sql) => {
-                let mut hits = Vec::new();
-                let mut ran = false;
-                let mut query_errors = Vec::new();
+                let run = run_scenario_query(
+                    doc_pack_root,
+                    staging_root,
+                    &template_sql,
+                    pack_has_scenarios,
+                    staging_has_scenarios,
+                    run_subcommands_query,
+                );
+                let mut query_errors = run.errors;
                 let mut found_subcommands = false;
-                if pack_has_scenarios {
-                    ran = true;
-                    match run_subcommands_query(doc_pack_root, &template_sql) {
-                        Ok(mut rows) => hits.append(&mut rows),
-                        Err(err) => query_errors.push(err.to_string()),
-                    }
-                }
-                if staging_has_scenarios {
-                    ran = true;
-                    match run_subcommands_query(staging_root, &template_sql) {
-                        Ok(mut rows) => hits.append(&mut rows),
-                        Err(err) => query_errors.push(err.to_string()),
-                    }
-                }
-                for hit in hits {
-                    let evidence = match evidence_from_subcommand_hit(&hit) {
+                for (row, source_root) in run.hits {
+                    let evidence = match evidence_from_scenario_path(
+                        &source_root,
+                        row.scenario_path.as_ref(),
+                    ) {
                         Ok(Some(evidence)) => evidence,
                         Ok(None) => continue,
                         Err(err) => {
@@ -403,15 +427,14 @@ pub fn apply_surface_discovery(
                             continue;
                         }
                     };
-                    if hit.row.multi_command_hint {
+                    if row.multi_command_hint {
                         subcommand_hint_evidence.push(evidence.clone());
                     }
-                    if let Some(id) = hit.row.subcommand.as_ref().map(|s| s.trim()) {
+                    if let Some(id) = row.subcommand.as_ref().map(|s| s.trim()) {
                         if id.is_empty() {
                             continue;
                         }
-                        let description = hit
-                            .row
+                        let description = row
                             .description
                             .as_ref()
                             .map(|desc| desc.trim().to_string())
@@ -427,15 +450,8 @@ pub fn apply_surface_discovery(
                         found_subcommands = true;
                     }
                 }
-                let status = if !query_errors.is_empty() {
-                    "error"
-                } else if ran && found_subcommands {
-                    "used"
-                } else if ran {
-                    "empty"
-                } else {
-                    "skipped"
-                };
+                let status =
+                    query_status(run.ran, found_subcommands, !query_errors.is_empty());
                 discovery.push(SurfaceDiscovery {
                     code: "subcommands_from_scenarios".to_string(),
                     status: status.to_string(),
@@ -578,7 +594,7 @@ fn has_scenario_files(root: &Path) -> Result<bool> {
     Ok(false)
 }
 
-fn run_subcommands_query(root: &Path, template_sql: &str) -> Result<Vec<SubcommandHit>> {
+fn run_subcommands_query(root: &Path, template_sql: &str) -> Result<Vec<ScenarioHit<SubcommandRow>>> {
     let output = pack::run_duckdb_query(template_sql, root)?;
     let rows: Vec<SubcommandRow> =
         if output.is_empty() || output.iter().all(|byte| byte.is_ascii_whitespace()) {
@@ -588,14 +604,11 @@ fn run_subcommands_query(root: &Path, template_sql: &str) -> Result<Vec<Subcomma
         };
     Ok(rows
         .into_iter()
-        .map(|row| SubcommandHit {
-            row,
-            source_root: root.to_path_buf(),
-        })
+        .map(|row| (row, root.to_path_buf()))
         .collect())
 }
 
-fn run_options_query(root: &Path, template_sql: &str) -> Result<Vec<OptionHit>> {
+fn run_options_query(root: &Path, template_sql: &str) -> Result<Vec<ScenarioHit<OptionRow>>> {
     let output = pack::run_duckdb_query(template_sql, root)?;
     let rows: Vec<OptionRow> =
         if output.is_empty() || output.iter().all(|byte| byte.is_ascii_whitespace()) {
@@ -605,19 +618,8 @@ fn run_options_query(root: &Path, template_sql: &str) -> Result<Vec<OptionHit>> 
         };
     Ok(rows
         .into_iter()
-        .map(|row| OptionHit {
-            row,
-            source_root: root.to_path_buf(),
-        })
+        .map(|row| (row, root.to_path_buf()))
         .collect())
-}
-
-fn evidence_from_subcommand_hit(hit: &SubcommandHit) -> Result<Option<enrich::EvidenceRef>> {
-    evidence_from_scenario_path(&hit.source_root, hit.row.scenario_path.as_ref())
-}
-
-fn evidence_from_option_hit(hit: &OptionHit) -> Result<Option<enrich::EvidenceRef>> {
-    evidence_from_scenario_path(&hit.source_root, hit.row.scenario_path.as_ref())
 }
 
 fn evidence_from_scenario_path(
