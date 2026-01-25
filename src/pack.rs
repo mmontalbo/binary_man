@@ -37,10 +37,7 @@ pub struct UsageEvidenceRow {
 
 pub struct UsageLensOutput {
     pub rows: Vec<UsageEvidenceRow>,
-    pub raw_json: Vec<u8>,
     pub template_path: PathBuf,
-    pub template_sql: String,
-    pub rendered_sql: String,
 }
 
 pub struct PackContext {
@@ -53,12 +50,6 @@ pub struct PackContext {
 struct HelpExtraction {
     text: String,
     warnings: Vec<String>,
-}
-
-struct LensQuery {
-    template_path: PathBuf,
-    template_sql: String,
-    rendered_sql: String,
 }
 
 pub fn generate_pack(binary: &str, out_dir: &Path, lens_flake: &str) -> Result<PathBuf> {
@@ -122,21 +113,18 @@ pub fn load_manifest(pack_root: &Path) -> Result<PackManifest> {
 }
 
 fn run_usage_lens(pack_root: &Path, template_path: &Path) -> Result<UsageLensOutput> {
-    let query = render_usage_lens(pack_root, template_path)?;
-    let output = run_duckdb_query(&query.rendered_sql, pack_root)?;
+    let rendered_sql = render_usage_lens(pack_root, template_path)?;
+    let output = run_duckdb_query(&rendered_sql, pack_root)?;
     let rows: Vec<UsageEvidenceRow> =
         serde_json::from_slice(&output).context("parse usage evidence JSON output")?;
 
     Ok(UsageLensOutput {
         rows,
-        raw_json: output,
-        template_path: query.template_path,
-        template_sql: query.template_sql,
-        rendered_sql: query.rendered_sql,
+        template_path: template_path.to_path_buf(),
     })
 }
 
-fn render_usage_lens(pack_root: &Path, template_path: &Path) -> Result<LensQuery> {
+fn render_usage_lens(pack_root: &Path, template_path: &Path) -> Result<String> {
     let template_sql = fs::read_to_string(template_path)
         .with_context(|| format!("read usage lens template {}", template_path.display()))?;
     let mut rendered_sql = template_sql.clone();
@@ -169,11 +157,7 @@ fn render_usage_lens(pack_root: &Path, template_path: &Path) -> Result<LensQuery
         rendered_sql = format!("{loader_sql}\n\n{rendered_sql}");
     }
 
-    Ok(LensQuery {
-        template_path: template_path.to_path_buf(),
-        template_sql,
-        rendered_sql,
-    })
+    Ok(rendered_sql)
 }
 
 fn facts_relative_path(pack_root: &Path, file_name: &str) -> Result<String> {

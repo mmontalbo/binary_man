@@ -410,18 +410,6 @@ impl DocPackPaths {
         self.man_dir().join("examples_report.json")
     }
 
-    pub fn usage_evidence_path(&self) -> PathBuf {
-        self.man_dir().join("usage_evidence.json")
-    }
-
-    pub fn usage_lens_template_path(&self) -> PathBuf {
-        self.man_dir().join("usage_lens.template.sql")
-    }
-
-    pub fn usage_lens_rendered_path(&self) -> PathBuf {
-        self.man_dir().join("usage_lens.sql")
-    }
-
     pub fn rel_path(&self, path: &Path) -> Result<String> {
         rel_path(&self.root, path)
     }

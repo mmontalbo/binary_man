@@ -1,7 +1,7 @@
 use crate::enrich;
 use crate::pack;
 use crate::scenarios;
-use crate::staging::{write_staged_bytes, write_staged_json, write_staged_text};
+use crate::staging::{write_staged_json, write_staged_text};
 use crate::util::display_path;
 use anyhow::{Context, Result};
 use serde::Serialize;
@@ -25,10 +25,6 @@ struct Meta {
     tool_version: String,
     tool_revision: Option<String>,
     usage_lens_source_path: String,
-    usage_lens_template_path: String,
-    usage_lens_rendered_path: String,
-    usage_evidence_path: String,
-    usage_evidence_row_count: usize,
     warnings: Vec<String>,
     examples: Option<ExamplesMeta>,
 }
@@ -58,24 +54,6 @@ pub fn write_outputs_staged(
         write_staged_text(staging_root, &rel, man_page)?;
     }
 
-    let usage_evidence_rel = "man/usage_evidence.json";
-    write_staged_bytes(
-        staging_root,
-        usage_evidence_rel,
-        &context.usage_lens.raw_json,
-    )?;
-
-    write_staged_text(
-        staging_root,
-        "man/usage_lens.template.sql",
-        &context.usage_lens.template_sql,
-    )?;
-    write_staged_text(
-        staging_root,
-        "man/usage_lens.sql",
-        &context.usage_lens.rendered_sql,
-    )?;
-
     if let Some(report) = examples_report {
         write_staged_json(staging_root, "man/examples_report.json", report)?;
     }
@@ -95,7 +73,7 @@ pub fn write_outputs_staged(
         .as_millis();
 
     let meta = Meta {
-        schema_version: 2,
+        schema_version: 4,
         generated_at_epoch_ms,
         binary_name: context.manifest.binary_name.clone(),
         binary_path: context.manifest.binary_path.clone(),
@@ -113,16 +91,6 @@ pub fn write_outputs_staged(
             &context.usage_lens.template_path,
             Some(doc_pack_root),
         ),
-        usage_lens_template_path: display_path(
-            &paths.usage_lens_template_path(),
-            Some(doc_pack_root),
-        ),
-        usage_lens_rendered_path: display_path(
-            &paths.usage_lens_rendered_path(),
-            Some(doc_pack_root),
-        ),
-        usage_evidence_path: display_path(&paths.usage_evidence_path(), Some(doc_pack_root)),
-        usage_evidence_row_count: context.usage_lens.rows.len(),
         warnings: context.warnings.clone(),
         examples: examples_meta,
     };
