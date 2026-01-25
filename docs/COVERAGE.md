@@ -75,8 +75,9 @@ Don’t stop after smoke tests. A “coverage pass” is done only when:
 - you either reach the target, or explain why specific items are out-of-scope
 
 To make coverage a hard gate, add `coverage` to `enrich/config.json`
-`requirements`. The tool will remain incomplete until uncovered IDs are empty
-or blockers are recorded explicitly.
+`requirements`. The tool will remain incomplete until the uncovered ID list is
+empty (either covered via `covers` claims or explicitly listed under
+`coverage.blocked`).
 
 ## Coverage Model (avoid combinatorics)
 
@@ -219,6 +220,9 @@ scenario plan metadata. Coverage gating and ledger output are driven by explicit
 Use the plan-level `coverage.blocked` list to record blocked items with
 `item_ids`, `reason`, optional `details`, and optional `tags` for capability
 blockers.
+
+Blocked items are excluded from the uncovered list and appear in
+`coverage_ledger.json` with `status: "blocked"`.
 
 The scenario plan schema is strict; unknown fields are rejected.
 

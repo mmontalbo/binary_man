@@ -88,7 +88,7 @@ Doc pack layout under `<doc-pack>/`:
 - `<doc-pack>/inventory/scenarios/*.json` (scenario evidence)
 - `<doc-pack>/man/<binary>.1` (man page)
 - `<doc-pack>/man/examples_report.json` (derived scenario validation + run refs; only when scenarios are run)
-- `<doc-pack>/coverage_ledger.json` (derived coverage ledger; never a gate)
+- `<doc-pack>/coverage_ledger.json` (derived coverage ledger; updated on apply; never a gate)
 - `<doc-pack>/man/meta.json` (provenance metadata)
 
 ## binary_lens integration

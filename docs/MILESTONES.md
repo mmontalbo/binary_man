@@ -10,9 +10,8 @@ Current focus: M10 — Scenario-Only Evidence + Coverage v1 (No Scores).
 ## M10 — Scenario-Only Evidence + Coverage v1 (No Scores) (in progress)
 
 Goal: Use a single concept — **scenarios** — for all execution-based evidence
-(help/usage capture, surface discovery, examples, and optional coverage),
-removing the separate “probe” concept. Keep decisions evidence-linked and avoid
-heuristic scoring.
+(help/usage capture, surface discovery, examples, and optional coverage). Keep
+decisions evidence-linked and avoid heuristic scoring.
 
 Motivation:
 - Reduce concepts and file formats a small LM must learn (scenarios only).
@@ -28,13 +27,11 @@ Design constraints (non-negotiable for this milestone):
   evidence inputs or hard requirements.
 
 Deliverables:
-- Unify probes + scenarios:
+- Scenario-only evidence:
   - Agent-edited: `<doc-pack>/scenarios/plan.json` (strict schema; includes help-style
     scenarios and behavior scenarios; includes optional `covers` claims).
   - Tool-written, append-only evidence: `<doc-pack>/inventory/scenarios/*.json`
     (normalized scenario results with bounded stdout/stderr).
-  - Remove `<doc-pack>/inventory/probes/**` entirely (migration supported via a
-    deterministic `status --json next_action` edit).
 - Lens-driven surface discovery from scenario evidence:
   - Install/standardize templates that read scenario evidence (not tool-parsed help):
     - `queries/usage_from_scenarios.sql`
@@ -85,11 +82,11 @@ Design constraints (non-negotiable for this milestone):
 Artifacts (doc pack):
 - Agent-edited inputs (locked by `validate`):
   - `<doc-pack>/enrich/config.json` (desired state; strict schema; invalid rejected)
-  - `<doc-pack>/inventory/probes/plan.json` (probe plan; strict schema; agent-editable)
+  - `<doc-pack>/scenarios/plan.json` (scenario plan; strict schema; agent-editable)
   - optional: `<doc-pack>/inventory/surface.seed.json` (agent-provided surface seed; stable IDs)
   - `<doc-pack>/queries/`, `<doc-pack>/binary.lens/views/queries/`, `<doc-pack>/scenarios/`, `<doc-pack>/fixtures/`
 - Tool-written evidence (append-only / evidence-first):
-  - `<doc-pack>/inventory/probes/*.json` (mechanical probe outputs, captured as structured evidence)
+  - `<doc-pack>/inventory/scenarios/*.json` (mechanical scenario outputs, captured as structured evidence)
   - `<doc-pack>/binary.lens/runs/index.json`, `<doc-pack>/binary.lens/runs/**` (scenario run evidence index + artifacts)
 - Tool-written canonical inventory:
   - `<doc-pack>/inventory/surface.json` (canonical surface inventory; stable IDs + evidence refs)
@@ -118,17 +115,16 @@ Mechanical gating:
 
 Surface discovery (first-class, no “confidence”):
 - Goal: produce a canonical `<doc-pack>/inventory/surface.json` with stable item IDs and evidence refs (even when runtime help is missing/stripped).
-- Tool collects help/usage evidence mechanically (bounded probe set and/or scenarios) into `<doc-pack>/inventory/probes/*.json` and run artifacts under `<doc-pack>/binary.lens/runs/**`.
-- Do not treat derived man artifacts as canonical help evidence; only accept probe/run outputs as help/usage evidence inputs.
+- Tool collects help/usage evidence mechanically into `<doc-pack>/inventory/scenarios/*.json` and run artifacts under `<doc-pack>/binary.lens/runs/**`.
+- Do not treat derived man artifacts as canonical help evidence; only accept scenario/run outputs as help/usage evidence inputs.
 - `surface.json` records the discovery attempts taken (as stable event codes) and the evidence artifacts each attempt produced/consumed.
-- Probe outputs are captured as `<doc-pack>/inventory/probes/*.json` and referenced from `surface.json` as evidence.
 - Every discovered item includes evidence refs (paths + hashes, and run IDs where applicable).
-- Subcommand discovery is driven by a pack-local SQL template (`queries/subcommands_from_probes.sql`) so parsing remains editable.
+- Subcommand discovery is driven by a pack-local SQL template (`queries/subcommands_from_scenarios.sql`) so parsing remains editable.
 - When discovery is underconstrained, emit explicit blocker codes plus an evidence-linked “next unlock” action.
 - V1 simplification: treat options/commands/subcommands as `surface.json` item kinds (no separate `options.json`, `commands.json`, …).
 
 Evidence > scores:
-- Requirements are predicates over canonical inventory IDs (`inventory/surface.json`) and canonical evidence indices (`inventory/probes/*.json`, `binary.lens/runs/index.json`).
+- Requirements are predicates over canonical inventory IDs (`inventory/surface.json`) and canonical evidence indices (`inventory/scenarios/*.json`, `binary.lens/runs/index.json`).
 - `man/examples_report.json` and `coverage_ledger.json` may exist as derived views, but are never authoritative for gating decisions.
 - Reports enumerate unmet requirements, missing evidence, and blockers as structured codes/tags with evidence refs.
 - Metrics may be emitted only as derived summaries, never as authoritative decision inputs.
@@ -141,7 +137,7 @@ Acceptance criteria:
   `validate → plan → apply` until requirements are met or blocked, without modifying anything outside the doc pack.
 - Starting from a doc pack with missing/stripped help output, the tool can still:
   - produce a surface inventory mechanically, or
-  - fail with explicit blocker codes and an evidence-linked smallest “next unlock” action (probe/fixture/manual seed).
+  - fail with explicit blocker codes and an evidence-linked smallest “next unlock” action (scenario/fixture/manual seed).
 - `status --json` always returns exactly one deterministic `next_action` that is either a single command to run or a single tool-owned edit to apply.
 - `apply` is transactional: failures do not partially update state/output artifacts.
 - `report.json` is evidence-linked (scenario IDs, run IDs, artifact paths) and records blockers as stable tags/codes.
@@ -251,7 +247,7 @@ Deliverables:
 
 Out of scope:
 - Dynamic execution or sandbox validation.
-- Scenario runners, probes, or inference loops.
+- Scenario runners or inference loops.
 
 ## M4 — Provenance Bundle (done)
 
