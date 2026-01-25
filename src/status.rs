@@ -63,28 +63,34 @@ pub fn build_status_summary(
 ) -> Result<enrich::StatusSummary> {
     let paths = enrich::DocPackPaths::new(doc_pack_root.to_path_buf());
     let mut eval = evaluate_requirements(&paths, binary_name, config, &lock_status)?;
+    let mut warnings = Vec::new();
     if !config_exists {
         let config_rel = paths.rel_path(&paths.config_path())?;
         eval.missing_artifacts.push(config_rel);
-        eval.warnings.push("enrich/config.json missing".to_string());
+        warnings.push("enrich/config.json missing".to_string());
     }
     if !paths.scenarios_plan_path().is_file() {
         let plan_rel = paths.rel_path(&paths.scenarios_plan_path())?;
         eval.missing_artifacts.push(plan_rel);
-        eval.warnings
-            .push("scenarios/plan.json missing".to_string());
+        warnings.push("scenarios/plan.json missing".to_string());
     }
 
     let missing_inputs = config_exists && enrich::resolve_inputs(config, doc_pack_root).is_err();
     let next_action = if missing_inputs {
         next_action_for_missing_inputs(&paths, binary_name)
     } else {
+        let gating_ok = config_exists
+            && lock_status.present
+            && !lock_status.stale
+            && plan_status.present
+            && !plan_status.stale;
         let first_unmet = eval
             .requirements
             .iter()
             .find(|req| req.status != enrich::RequirementState::Met)
             .map(|req| req.id.clone());
-        if matches!(first_unmet, Some(enrich::RequirementId::Coverage))
+        if gating_ok
+            && matches!(first_unmet, Some(enrich::RequirementId::Coverage))
             && eval.coverage_next_action.is_some()
         {
             eval.coverage_next_action.clone().unwrap()
@@ -870,7 +876,7 @@ fn determine_next_action(
     }
 }
 
-fn next_action_for_missing_inputs(
+pub(crate) fn next_action_for_missing_inputs(
     paths: &enrich::DocPackPaths,
     binary_name: Option<&str>,
 ) -> enrich::NextAction {
