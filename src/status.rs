@@ -20,13 +20,35 @@ struct RunsIndex {
     runs: Vec<serde_json::Value>,
 }
 
+enum SurfaceLoadError {
+    Missing,
+    Parse(String),
+    Invalid(String),
+}
+
+struct SurfaceLoadResult {
+    evidence: enrich::EvidenceRef,
+    surface: Option<surface::SurfaceInventory>,
+    error: Option<SurfaceLoadError>,
+}
+
+enum ScenarioPlanLoadError {
+    Missing,
+    Invalid(String),
+}
+
+struct ScenarioPlanLoadResult {
+    evidence: enrich::EvidenceRef,
+    plan: Option<scenarios::ScenarioPlan>,
+    error: Option<ScenarioPlanLoadError>,
+}
+
 struct EvalResult {
     requirements: Vec<enrich::RequirementStatus>,
     missing_artifacts: Vec<String>,
     blockers: Vec<enrich::Blocker>,
     decision: enrich::Decision,
     decision_reason: Option<String>,
-    warnings: Vec<String>,
     coverage_next_action: Option<enrich::NextAction>,
 }
 
@@ -89,9 +111,75 @@ pub fn build_status_summary(
         decision: eval.decision,
         decision_reason: eval.decision_reason,
         next_action,
-        warnings: eval.warnings,
+        warnings,
         force_used,
     })
+}
+
+fn load_surface_inventory_state(
+    paths: &enrich::DocPackPaths,
+    missing_artifacts: &mut Vec<String>,
+) -> Result<SurfaceLoadResult> {
+    let surface_path = paths.surface_path();
+    let evidence = paths.evidence_from_path(&surface_path)?;
+    if !surface_path.is_file() {
+        missing_artifacts.push(evidence.path.clone());
+        return Ok(SurfaceLoadResult {
+            evidence,
+            surface: None,
+            error: Some(SurfaceLoadError::Missing),
+        });
+    }
+    let surface = match surface::load_surface_inventory(&surface_path) {
+        Ok(surface) => surface,
+        Err(err) => {
+            return Ok(SurfaceLoadResult {
+                evidence,
+                surface: None,
+                error: Some(SurfaceLoadError::Parse(err.to_string())),
+            })
+        }
+    };
+    if let Err(err) = surface::validate_surface_inventory(&surface) {
+        return Ok(SurfaceLoadResult {
+            evidence,
+            surface: None,
+            error: Some(SurfaceLoadError::Invalid(err.to_string())),
+        });
+    }
+    Ok(SurfaceLoadResult {
+        evidence,
+        surface: Some(surface),
+        error: None,
+    })
+}
+
+fn load_scenario_plan_state(
+    paths: &enrich::DocPackPaths,
+    missing_artifacts: &mut Vec<String>,
+) -> Result<ScenarioPlanLoadResult> {
+    let plan_path = paths.scenarios_plan_path();
+    let evidence = paths.evidence_from_path(&plan_path)?;
+    match scenarios::load_plan_if_exists(&plan_path) {
+        Ok(Some(plan)) => Ok(ScenarioPlanLoadResult {
+            evidence,
+            plan: Some(plan),
+            error: None,
+        }),
+        Ok(None) => {
+            missing_artifacts.push(evidence.path.clone());
+            Ok(ScenarioPlanLoadResult {
+                evidence,
+                plan: None,
+                error: Some(ScenarioPlanLoadError::Missing),
+            })
+        }
+        Err(err) => Ok(ScenarioPlanLoadResult {
+            evidence,
+            plan: None,
+            error: Some(ScenarioPlanLoadError::Invalid(err.to_string())),
+        }),
+    }
 }
 
 fn evaluate_requirements(
@@ -103,32 +191,28 @@ fn evaluate_requirements(
     let mut requirements = Vec::new();
     let mut missing_artifacts = Vec::new();
     let mut blockers = Vec::new();
-    let warnings = Vec::new();
     let mut coverage_next_action = None;
 
     for req in enrich::normalized_requirements(config) {
         match req {
             enrich::RequirementId::Surface => {
-                let surface_path = paths.surface_path();
-                let evidence = paths.evidence_from_path(&surface_path)?;
-                if !surface_path.is_file() {
-                    missing_artifacts.push(evidence.path.clone());
-                    requirements.push(enrich::RequirementStatus {
-                        id: req.clone(),
-                        status: enrich::RequirementState::Unmet,
-                        reason: "surface inventory missing".to_string(),
-                        evidence: vec![evidence],
-                        blockers: Vec::new(),
-                    });
-                    continue;
-                }
-
-                let surface = match surface::load_surface_inventory(&surface_path) {
-                    Ok(surface) => surface,
-                    Err(err) => {
+                let surface_state = load_surface_inventory_state(paths, &mut missing_artifacts)?;
+                let evidence = surface_state.evidence.clone();
+                let surface = match surface_state.error {
+                    Some(SurfaceLoadError::Missing) => {
+                        requirements.push(enrich::RequirementStatus {
+                            id: req.clone(),
+                            status: enrich::RequirementState::Unmet,
+                            reason: "surface inventory missing".to_string(),
+                            evidence: vec![evidence],
+                            blockers: Vec::new(),
+                        });
+                        continue;
+                    }
+                    Some(SurfaceLoadError::Parse(message)) => {
                         let blocker = enrich::Blocker {
                             code: "surface_parse_error".to_string(),
-                            message: err.to_string(),
+                            message,
                             evidence: vec![evidence.clone()],
                             next_action: None,
                         };
@@ -142,25 +226,27 @@ fn evaluate_requirements(
                         });
                         continue;
                     }
+                    Some(SurfaceLoadError::Invalid(message)) => {
+                        let blocker = enrich::Blocker {
+                            code: "surface_schema_invalid".to_string(),
+                            message,
+                            evidence: vec![evidence.clone()],
+                            next_action: Some("fix inventory/surface.json".to_string()),
+                        };
+                        blockers.push(blocker.clone());
+                        requirements.push(enrich::RequirementStatus {
+                            id: req.clone(),
+                            status: enrich::RequirementState::Blocked,
+                            reason: "surface inventory schema invalid".to_string(),
+                            evidence: vec![evidence],
+                            blockers: vec![blocker],
+                        });
+                        continue;
+                    }
+                    None => surface_state
+                        .surface
+                        .expect("surface inventory present"),
                 };
-
-                if let Err(err) = surface::validate_surface_inventory(&surface) {
-                    let blocker = enrich::Blocker {
-                        code: "surface_schema_invalid".to_string(),
-                        message: err.to_string(),
-                        evidence: vec![evidence.clone()],
-                        next_action: Some("fix inventory/surface.json".to_string()),
-                    };
-                    blockers.push(blocker.clone());
-                    requirements.push(enrich::RequirementStatus {
-                        id: req.clone(),
-                        status: enrich::RequirementState::Blocked,
-                        reason: "surface inventory schema invalid".to_string(),
-                        evidence: vec![evidence],
-                        blockers: vec![blocker],
-                    });
-                    continue;
-                }
 
                 let local_blockers = surface.blockers.clone();
                 blockers.extend(local_blockers.clone());
@@ -209,67 +295,66 @@ fn evaluate_requirements(
                 });
             }
             enrich::RequirementId::Coverage => {
-                let surface_path = paths.surface_path();
-                let surface_evidence = paths.evidence_from_path(&surface_path)?;
-                let scenarios_path = paths.scenarios_plan_path();
-                let scenarios_evidence = paths.evidence_from_path(&scenarios_path)?;
+                let SurfaceLoadResult {
+                    evidence: surface_evidence,
+                    surface,
+                    error,
+                } = load_surface_inventory_state(paths, &mut missing_artifacts)?;
+                let ScenarioPlanLoadResult {
+                    evidence: scenarios_evidence,
+                    plan,
+                    error: plan_error,
+                } = load_scenario_plan_state(paths, &mut missing_artifacts)?;
                 let mut evidence = vec![surface_evidence.clone(), scenarios_evidence.clone()];
                 let mut local_blockers = Vec::new();
                 let mut missing = Vec::new();
                 let mut uncovered_ids = Vec::new();
                 let mut blocked_ids = BTreeSet::new();
 
-                let surface = if !surface_path.is_file() {
-                    missing_artifacts.push(surface_evidence.path.clone());
-                    missing.push("surface inventory missing".to_string());
-                    None
-                } else {
-                    match surface::load_surface_inventory(&surface_path) {
-                        Ok(surface) => {
-                            if let Err(err) = surface::validate_surface_inventory(&surface) {
-                                let blocker = enrich::Blocker {
-                                    code: "surface_schema_invalid".to_string(),
-                                    message: err.to_string(),
-                                    evidence: vec![surface_evidence.clone()],
-                                    next_action: Some("fix inventory/surface.json".to_string()),
-                                };
-                                local_blockers.push(blocker);
-                                None
-                            } else {
-                                Some(surface)
-                            }
-                        }
-                        Err(err) => {
-                            let blocker = enrich::Blocker {
-                                code: "surface_parse_error".to_string(),
-                                message: err.to_string(),
-                                evidence: vec![surface_evidence.clone()],
-                                next_action: None,
-                            };
-                            local_blockers.push(blocker);
-                            None
-                        }
+                let surface = match error {
+                    Some(SurfaceLoadError::Missing) => {
+                        missing.push("surface inventory missing".to_string());
+                        None
                     }
+                    Some(SurfaceLoadError::Parse(message)) => {
+                        let blocker = enrich::Blocker {
+                            code: "surface_parse_error".to_string(),
+                            message,
+                            evidence: vec![surface_evidence.clone()],
+                            next_action: None,
+                        };
+                        local_blockers.push(blocker);
+                        None
+                    }
+                    Some(SurfaceLoadError::Invalid(message)) => {
+                        let blocker = enrich::Blocker {
+                            code: "surface_schema_invalid".to_string(),
+                            message,
+                            evidence: vec![surface_evidence.clone()],
+                            next_action: Some("fix inventory/surface.json".to_string()),
+                        };
+                        local_blockers.push(blocker);
+                        None
+                    }
+                    None => surface,
                 };
 
-                let plan = if !scenarios_path.is_file() {
-                    missing_artifacts.push(scenarios_evidence.path.clone());
-                    missing.push("scenarios plan missing".to_string());
-                    None
-                } else {
-                    match scenarios::load_plan(&scenarios_path) {
-                        Ok(plan) => Some(plan),
-                        Err(err) => {
-                            let blocker = enrich::Blocker {
-                                code: "scenario_plan_invalid".to_string(),
-                                message: err.to_string(),
-                                evidence: vec![scenarios_evidence.clone()],
-                                next_action: Some("fix scenarios/plan.json".to_string()),
-                            };
-                            local_blockers.push(blocker);
-                            None
-                        }
+                let plan = match plan_error {
+                    Some(ScenarioPlanLoadError::Missing) => {
+                        missing.push("scenarios plan missing".to_string());
+                        None
                     }
+                    Some(ScenarioPlanLoadError::Invalid(message)) => {
+                        let blocker = enrich::Blocker {
+                            code: "scenario_plan_invalid".to_string(),
+                            message,
+                            evidence: vec![scenarios_evidence.clone()],
+                            next_action: Some("fix scenarios/plan.json".to_string()),
+                        };
+                        local_blockers.push(blocker);
+                        None
+                    }
+                    None => plan,
                 };
 
                 if let (Some(surface), Some(plan)) = (surface.as_ref(), plan.as_ref()) {
@@ -369,38 +454,41 @@ fn evaluate_requirements(
                 });
             }
             enrich::RequirementId::CoverageLedger => {
-                let surface_path = paths.surface_path();
-                let surface_evidence = paths.evidence_from_path(&surface_path)?;
+                let SurfaceLoadResult {
+                    evidence: surface_evidence,
+                    surface,
+                    error,
+                } = load_surface_inventory_state(paths, &mut missing_artifacts)?;
                 let mut evidence = vec![surface_evidence.clone()];
                 let mut local_blockers = Vec::new();
                 let mut unmet = Vec::new();
 
-                if !surface_path.is_file() {
-                    missing_artifacts.push(surface_evidence.path.clone());
-                    unmet.push("surface inventory missing".to_string());
-                } else {
-                    match surface::load_surface_inventory(&surface_path) {
-                        Ok(surface) => {
-                            if let Err(err) = surface::validate_surface_inventory(&surface) {
-                                let blocker = enrich::Blocker {
-                                    code: "surface_schema_invalid".to_string(),
-                                    message: err.to_string(),
-                                    evidence: vec![surface_evidence.clone()],
-                                    next_action: Some("fix inventory/surface.json".to_string()),
-                                };
-                                local_blockers.push(blocker);
-                            } else if surface::meaningful_surface_items(&surface) < 1 {
-                                unmet.push("surface inventory missing items".to_string());
-                            }
-                        }
-                        Err(err) => {
-                            let blocker = enrich::Blocker {
-                                code: "surface_parse_error".to_string(),
-                                message: err.to_string(),
-                                evidence: vec![surface_evidence.clone()],
-                                next_action: None,
-                            };
-                            local_blockers.push(blocker);
+                match error {
+                    Some(SurfaceLoadError::Missing) => {
+                        unmet.push("surface inventory missing".to_string());
+                    }
+                    Some(SurfaceLoadError::Parse(message)) => {
+                        let blocker = enrich::Blocker {
+                            code: "surface_parse_error".to_string(),
+                            message,
+                            evidence: vec![surface_evidence.clone()],
+                            next_action: None,
+                        };
+                        local_blockers.push(blocker);
+                    }
+                    Some(SurfaceLoadError::Invalid(message)) => {
+                        let blocker = enrich::Blocker {
+                            code: "surface_schema_invalid".to_string(),
+                            message,
+                            evidence: vec![surface_evidence.clone()],
+                            next_action: Some("fix inventory/surface.json".to_string()),
+                        };
+                        local_blockers.push(blocker);
+                    }
+                    None => {
+                        let surface = surface.expect("surface inventory present");
+                        if surface::meaningful_surface_items(&surface) < 1 {
+                            unmet.push("surface inventory missing items".to_string());
                         }
                     }
                 }
@@ -453,12 +541,8 @@ fn evaluate_requirements(
                     unmet.push("scenarios plan missing".to_string());
                 }
 
-                if !runs_index_path.is_file() {
-                    missing_artifacts.push(runs_evidence.path.clone());
-                    unmet.push("scenario runs index missing".to_string());
-                } else {
-                    let bytes = std::fs::read(&runs_index_path)
-                        .with_context(|| format!("read {}", runs_index_path.display()))?;
+                let runs_index_bytes = scenarios::read_runs_index_bytes(&paths.pack_root())?;
+                if let Some(bytes) = runs_index_bytes {
                     let index: RunsIndex = match serde_json::from_slice(&bytes) {
                         Ok(index) => index,
                         Err(err) => {
@@ -479,6 +563,9 @@ fn evaluate_requirements(
                     if count == 0 {
                         unmet.push("no scenario runs recorded".to_string());
                     }
+                } else {
+                    missing_artifacts.push(runs_evidence.path.clone());
+                    unmet.push("scenario runs index missing".to_string());
                 }
 
                 let (status, reason) = if !local_blockers.is_empty() {
@@ -718,7 +805,6 @@ fn evaluate_requirements(
         blockers,
         decision,
         decision_reason,
-        warnings,
         coverage_next_action,
     })
 }

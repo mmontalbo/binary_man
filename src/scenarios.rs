@@ -876,12 +876,19 @@ fn display_path(path: &Path, base: Option<&Path>) -> String {
     path.display().to_string()
 }
 
-fn read_runs_index(pack_root: &Path) -> Result<Vec<RunIndexEntry>> {
+pub(crate) fn read_runs_index_bytes(pack_root: &Path) -> Result<Option<Vec<u8>>> {
     let index_path = pack_root.join("runs").join("index.json");
     if !index_path.is_file() {
-        return Ok(Vec::new());
+        return Ok(None);
     }
     let bytes = fs::read(&index_path).with_context(|| format!("read {}", index_path.display()))?;
+    Ok(Some(bytes))
+}
+
+fn read_runs_index(pack_root: &Path) -> Result<Vec<RunIndexEntry>> {
+    let Some(bytes) = read_runs_index_bytes(pack_root)? else {
+        return Ok(Vec::new());
+    };
     let index: RunsIndex = serde_json::from_slice(&bytes).context("parse runs index JSON")?;
     Ok(index.runs)
 }
