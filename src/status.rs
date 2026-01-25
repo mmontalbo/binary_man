@@ -1,7 +1,9 @@
 use crate::enrich;
+use crate::scenarios;
 use crate::surface;
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 #[derive(Debug, Clone)]
@@ -25,6 +27,14 @@ struct EvalResult {
     decision: enrich::Decision,
     decision_reason: Option<String>,
     warnings: Vec<String>,
+    coverage_next_action: Option<enrich::NextAction>,
+}
+
+#[derive(Clone)]
+struct CoverageBlockedInfo {
+    reason: String,
+    details: Option<String>,
+    tags: Vec<String>,
 }
 
 pub fn build_status_summary(
@@ -43,19 +53,36 @@ pub fn build_status_summary(
         eval.missing_artifacts.push(config_rel);
         eval.warnings.push("enrich/config.json missing".to_string());
     }
+    if !paths.scenarios_plan_path().is_file() {
+        let plan_rel = paths.rel_path(&paths.scenarios_plan_path())?;
+        eval.missing_artifacts.push(plan_rel);
+        eval.warnings
+            .push("scenarios/plan.json missing".to_string());
+    }
 
     let missing_inputs = config_exists && enrich::resolve_inputs(config, doc_pack_root).is_err();
     let next_action = if missing_inputs {
-        next_action_for_missing_inputs(&paths)
+        next_action_for_missing_inputs(&paths, binary_name)
     } else {
-        determine_next_action(
-            doc_pack_root,
-            config_exists,
-            &lock_status,
-            &plan_status,
-            &eval.decision,
-            &eval.requirements,
-        )
+        let first_unmet = eval
+            .requirements
+            .iter()
+            .find(|req| req.status != enrich::RequirementState::Met)
+            .map(|req| req.id.clone());
+        if matches!(first_unmet, Some(enrich::RequirementId::Coverage))
+            && eval.coverage_next_action.is_some()
+        {
+            eval.coverage_next_action.clone().unwrap()
+        } else {
+            determine_next_action(
+                doc_pack_root,
+                config_exists,
+                &lock_status,
+                &plan_status,
+                &eval.decision,
+                &eval.requirements,
+            )
+        }
     };
 
     Ok(enrich::StatusSummary {
@@ -84,6 +111,7 @@ fn evaluate_requirements(
     let mut missing_artifacts = Vec::new();
     let mut blockers = Vec::new();
     let warnings = Vec::new();
+    let mut coverage_next_action = None;
 
     for req in enrich::normalized_requirements(config) {
         match req {
@@ -187,6 +215,212 @@ fn evaluate_requirements(
                     blockers: req_blockers,
                 });
             }
+            enrich::RequirementId::Coverage => {
+                let surface_path = paths.surface_path();
+                let surface_evidence = paths.evidence_from_path(&surface_path)?;
+                let scenarios_path = paths.scenarios_plan_path();
+                let scenarios_evidence = paths.evidence_from_path(&scenarios_path)?;
+                let mut evidence = vec![surface_evidence.clone(), scenarios_evidence.clone()];
+                let mut local_blockers = Vec::new();
+                let mut missing = Vec::new();
+                let mut uncovered_ids = Vec::new();
+
+                let surface = if !surface_path.is_file() {
+                    missing_artifacts.push(surface_evidence.path.clone());
+                    missing.push("surface inventory missing".to_string());
+                    None
+                } else {
+                    match surface::load_surface_inventory(&surface_path) {
+                        Ok(surface) => {
+                            if let Err(err) = surface::validate_surface_inventory(&surface) {
+                                let blocker = enrich::Blocker {
+                                    code: "surface_schema_invalid".to_string(),
+                                    message: err.to_string(),
+                                    evidence: vec![surface_evidence.clone()],
+                                    next_action: Some("fix inventory/surface.json".to_string()),
+                                };
+                                local_blockers.push(blocker);
+                                None
+                            } else {
+                                Some(surface)
+                            }
+                        }
+                        Err(err) => {
+                            let blocker = enrich::Blocker {
+                                code: "surface_parse_error".to_string(),
+                                message: err.to_string(),
+                                evidence: vec![surface_evidence.clone()],
+                                next_action: None,
+                            };
+                            local_blockers.push(blocker);
+                            None
+                        }
+                    }
+                };
+
+                let plan = if !scenarios_path.is_file() {
+                    missing_artifacts.push(scenarios_evidence.path.clone());
+                    missing.push("scenarios plan missing".to_string());
+                    None
+                } else {
+                    match scenarios::load_plan(&scenarios_path) {
+                        Ok(plan) => Some(plan),
+                        Err(err) => {
+                            let blocker = enrich::Blocker {
+                                code: "scenario_plan_invalid".to_string(),
+                                message: err.to_string(),
+                                evidence: vec![scenarios_evidence.clone()],
+                                next_action: Some("fix scenarios/plan.json".to_string()),
+                            };
+                            local_blockers.push(blocker);
+                            None
+                        }
+                    }
+                };
+
+                if let (Some(surface), Some(plan)) = (surface.as_ref(), plan.as_ref()) {
+                    let mut covered = BTreeSet::new();
+                    for scenario in &plan.scenarios {
+                        if scenario.coverage_ignore || scenario.covers.is_empty() {
+                            continue;
+                        }
+                        for token in &scenario.covers {
+                            let normalized = scenarios::normalize_surface_id(token);
+                            if !normalized.is_empty() {
+                                covered.insert(normalized);
+                            }
+                        }
+                    }
+
+                    let mut blocked_map: BTreeMap<String, CoverageBlockedInfo> = BTreeMap::new();
+                    if let Some(coverage) = plan.coverage.as_ref() {
+                        for blocked in &coverage.blocked {
+                            for item_id in &blocked.item_ids {
+                                let normalized = scenarios::normalize_surface_id(item_id);
+                                if normalized.is_empty() {
+                                    continue;
+                                }
+                                let entry =
+                                    blocked_map
+                                        .entry(normalized)
+                                        .or_insert(CoverageBlockedInfo {
+                                            reason: blocked.reason.clone(),
+                                            details: blocked.details.clone(),
+                                            tags: blocked.tags.clone(),
+                                        });
+                                if entry.reason != blocked.reason {
+                                    entry.reason = format!("{}, {}", entry.reason, blocked.reason);
+                                }
+                                if let Some(details) = blocked.details.as_ref() {
+                                    let updated = match entry.details.take() {
+                                        Some(existing) if existing != *details => {
+                                            format!("{existing}; {details}")
+                                        }
+                                        Some(existing) => existing,
+                                        None => details.clone(),
+                                    };
+                                    entry.details = Some(updated);
+                                }
+                                for tag in &blocked.tags {
+                                    if !entry.tags.contains(tag) {
+                                        entry.tags.push(tag.clone());
+                                    }
+                                }
+                                entry.tags.sort();
+                                entry.tags.dedup();
+                            }
+                        }
+                    }
+
+                    let mut surface_evidence_map: BTreeMap<String, Vec<enrich::EvidenceRef>> =
+                        BTreeMap::new();
+                    for item in surface.items.iter().filter(|item| {
+                        matches!(item.kind.as_str(), "option" | "command" | "subcommand")
+                    }) {
+                        let normalized = scenarios::normalize_surface_id(&item.id);
+                        if normalized.is_empty() {
+                            continue;
+                        }
+                        let entry = surface_evidence_map.entry(normalized).or_default();
+                        merge_evidence_refs(entry, &item.evidence);
+                    }
+
+                    for (id, info) in blocked_map.iter() {
+                        let mut blocker_evidence = vec![scenarios_evidence.clone()];
+                        if let Some(item_evidence) = surface_evidence_map.get(id) {
+                            merge_evidence_refs(&mut blocker_evidence, item_evidence);
+                        }
+                        dedupe_evidence_refs(&mut blocker_evidence);
+                        let mut message = format!("coverage blocked for {id}: {}", info.reason);
+                        if let Some(details) = info.details.as_ref() {
+                            message = format!("{message} ({details})");
+                        }
+                        if !info.tags.is_empty() {
+                            message = format!("{message} [tags: {}]", info.tags.join(", "));
+                        }
+                        local_blockers.push(enrich::Blocker {
+                            code: "coverage_blocked".to_string(),
+                            message,
+                            evidence: blocker_evidence,
+                            next_action: None,
+                        });
+                    }
+
+                    for (id, item_evidence) in surface_evidence_map {
+                        if covered.contains(&id) || blocked_map.contains_key(&id) {
+                            continue;
+                        }
+                        uncovered_ids.push(id);
+                        merge_evidence_refs(&mut evidence, &item_evidence);
+                    }
+
+                    uncovered_ids.sort();
+                    if !uncovered_ids.is_empty() && local_blockers.is_empty() {
+                        if let Some(content) = coverage_stub_from_plan(&plan, &uncovered_ids) {
+                            coverage_next_action = Some(enrich::NextAction::Edit {
+                                path: "scenarios/plan.json".to_string(),
+                                content,
+                                reason: format!(
+                                    "add coverage claims for uncovered ids: {}",
+                                    uncovered_ids.join(", ")
+                                ),
+                            });
+                        }
+                    }
+                }
+
+                dedupe_evidence_refs(&mut evidence);
+                let (status, reason) = if !local_blockers.is_empty() {
+                    (
+                        enrich::RequirementState::Blocked,
+                        "coverage blocked".to_string(),
+                    )
+                } else if !missing.is_empty() {
+                    (
+                        enrich::RequirementState::Unmet,
+                        format!("coverage inputs missing: {}", missing.join("; ")),
+                    )
+                } else if !uncovered_ids.is_empty() {
+                    (
+                        enrich::RequirementState::Unmet,
+                        format!("uncovered ids: {}", uncovered_ids.join(", ")),
+                    )
+                } else {
+                    (
+                        enrich::RequirementState::Met,
+                        "coverage complete".to_string(),
+                    )
+                };
+
+                blockers.extend(local_blockers.clone());
+                requirements.push(enrich::RequirementStatus {
+                    id: req.clone(),
+                    status,
+                    reason,
+                    evidence,
+                    blockers: local_blockers,
+                });
+            }
             enrich::RequirementId::CoverageLedger => {
                 let surface_path = paths.surface_path();
                 let surface_evidence = paths.evidence_from_path(&surface_path)?;
@@ -224,21 +458,12 @@ fn evaluate_requirements(
                     }
                 }
 
-                match config.scenario_catalogs.first() {
-                    Some(rel) => {
-                        let scenario_path = paths.root().join(rel);
-                        let scenario_evidence = paths.evidence_from_path(&scenario_path)?;
-                        evidence.push(scenario_evidence.clone());
-                        if !scenario_path.is_file() {
-                            missing_artifacts.push(scenario_evidence.path.clone());
-                            unmet.push("scenario catalog missing".to_string());
-                        }
-                    }
-                    None => {
-                        let config_evidence = paths.evidence_from_path(&paths.config_path())?;
-                        evidence.push(config_evidence);
-                        unmet.push("scenario catalog missing".to_string());
-                    }
+                let scenarios_path = paths.scenarios_plan_path();
+                let scenarios_evidence = paths.evidence_from_path(&scenarios_path)?;
+                evidence.push(scenarios_evidence.clone());
+                if !scenarios_path.is_file() {
+                    missing_artifacts.push(scenarios_evidence.path.clone());
+                    unmet.push("scenarios plan missing".to_string());
                 }
 
                 let (status, reason) = if !local_blockers.is_empty() {
@@ -273,21 +498,12 @@ fn evaluate_requirements(
                 let mut local_blockers = Vec::new();
                 let mut unmet = Vec::new();
 
-                match config.scenario_catalogs.first() {
-                    Some(rel) => {
-                        let scenario_path = paths.root().join(rel);
-                        let scenario_evidence = paths.evidence_from_path(&scenario_path)?;
-                        evidence.push(scenario_evidence.clone());
-                        if !scenario_path.is_file() {
-                            missing_artifacts.push(scenario_evidence.path.clone());
-                            unmet.push("scenario catalog missing".to_string());
-                        }
-                    }
-                    None => {
-                        let config_evidence = paths.evidence_from_path(&paths.config_path())?;
-                        evidence.push(config_evidence);
-                        unmet.push("scenario catalog missing".to_string());
-                    }
+                let scenarios_path = paths.scenarios_plan_path();
+                let scenarios_evidence = paths.evidence_from_path(&scenarios_path)?;
+                evidence.push(scenarios_evidence.clone());
+                if !scenarios_path.is_file() {
+                    missing_artifacts.push(scenarios_evidence.path.clone());
+                    unmet.push("scenarios plan missing".to_string());
                 }
 
                 if !runs_index_path.is_file() {
@@ -556,6 +772,7 @@ fn evaluate_requirements(
         decision,
         decision_reason,
         warnings,
+        coverage_next_action,
     })
 }
 
@@ -620,7 +837,17 @@ fn determine_next_action(
     }
 }
 
-fn next_action_for_missing_inputs(paths: &enrich::DocPackPaths) -> enrich::NextAction {
+fn next_action_for_missing_inputs(
+    paths: &enrich::DocPackPaths,
+    binary_name: Option<&str>,
+) -> enrich::NextAction {
+    if !paths.scenarios_plan_path().is_file() {
+        return enrich::NextAction::Edit {
+            path: "scenarios/plan.json".to_string(),
+            content: scenarios::plan_stub(binary_name),
+            reason: "scenarios/plan.json missing; create a minimal stub".to_string(),
+        };
+    }
     if !paths.pack_manifest_path().is_file() {
         return enrich::NextAction::Edit {
             path: "enrich/bootstrap.json".to_string(),
@@ -633,6 +860,88 @@ fn next_action_for_missing_inputs(paths: &enrich::DocPackPaths) -> enrich::NextA
         content: enrich::config_stub(),
         reason: "config inputs missing; replace with a minimal stub".to_string(),
     }
+}
+
+fn coverage_stub_from_plan(
+    plan: &scenarios::ScenarioPlan,
+    uncovered_ids: &[String],
+) -> Option<String> {
+    if uncovered_ids.is_empty() {
+        return None;
+    }
+    let mut updated = plan.clone();
+    let stub_id = coverage_stub_id(&updated);
+    updated.scenarios.push(scenarios::ScenarioSpec {
+        id: stub_id,
+        kind: scenarios::ScenarioKind::Behavior,
+        publish: false,
+        argv: Vec::new(),
+        env: BTreeMap::new(),
+        seed_dir: None,
+        cwd: None,
+        timeout_seconds: None,
+        net_mode: None,
+        no_sandbox: None,
+        no_strace: None,
+        snippet_max_lines: None,
+        snippet_max_bytes: None,
+        coverage_tier: Some("acceptance".to_string()),
+        covers: uncovered_ids.to_vec(),
+        coverage_ignore: false,
+        expect: empty_expect(),
+    });
+    serde_json::to_string_pretty(&updated).ok()
+}
+
+fn coverage_stub_id(plan: &scenarios::ScenarioPlan) -> String {
+    let base = "coverage-todo";
+    if plan.scenarios.iter().all(|scenario| scenario.id != base) {
+        return base.to_string();
+    }
+    let mut idx = 1;
+    loop {
+        let candidate = format!("{base}-{idx}");
+        if plan
+            .scenarios
+            .iter()
+            .all(|scenario| scenario.id != candidate)
+        {
+            return candidate;
+        }
+        idx += 1;
+    }
+}
+
+fn empty_expect() -> scenarios::ScenarioExpect {
+    scenarios::ScenarioExpect {
+        exit_code: None,
+        exit_signal: None,
+        stdout_contains_all: Vec::new(),
+        stdout_contains_any: Vec::new(),
+        stdout_regex_all: Vec::new(),
+        stdout_regex_any: Vec::new(),
+        stderr_contains_all: Vec::new(),
+        stderr_contains_any: Vec::new(),
+        stderr_regex_all: Vec::new(),
+        stderr_regex_any: Vec::new(),
+    }
+}
+
+fn merge_evidence_refs(target: &mut Vec<enrich::EvidenceRef>, incoming: &[enrich::EvidenceRef]) {
+    let mut seen = BTreeSet::new();
+    for entry in target.iter() {
+        seen.insert(entry.path.clone());
+    }
+    for entry in incoming {
+        if seen.insert(entry.path.clone()) {
+            target.push(entry.clone());
+        }
+    }
+}
+
+fn dedupe_evidence_refs(entries: &mut Vec<enrich::EvidenceRef>) {
+    let mut seen = BTreeSet::new();
+    entries.retain(|entry| seen.insert(entry.path.clone()));
 }
 
 pub fn planned_actions_from_requirements(

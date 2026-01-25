@@ -1,20 +1,16 @@
 use crate::enrich;
 use crate::pack;
+use crate::scenarios;
 use crate::staging::{collect_files_recursive, write_staged_bytes};
-use crate::util::{sha256_hex, truncate_bytes};
+use crate::util::sha256_hex;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
-const PROBE_TIMEOUT_SECS: u64 = 2;
-const MAX_PROBE_OUTPUT_BYTES: usize = 64 * 1024;
 const SURFACE_SCHEMA_VERSION: u32 = 1;
 const SURFACE_SEED_SCHEMA_VERSION: u32 = 1;
-const PROBE_SCHEMA_VERSION: u32 = 1;
-const PROBE_PLAN_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct SurfaceInventory {
@@ -63,60 +59,6 @@ struct SurfaceSeedItem {
     description: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
-pub struct ProbePlan {
-    pub schema_version: u32,
-    pub generated_at_epoch_ms: u128,
-    #[serde(default)]
-    pub probes: Vec<ProbePlanEntry>,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
-pub struct ProbePlanEntry {
-    pub id: String,
-    #[serde(default)]
-    pub argv: Vec<String>,
-    #[serde(default = "default_probe_enabled")]
-    pub enabled: bool,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-struct ProbeResult {
-    schema_version: u32,
-    generated_at_epoch_ms: u128,
-    #[serde(default)]
-    probe_id: String,
-    argv: Vec<String>,
-    exit_code: Option<i32>,
-    timed_out: bool,
-    duration_ms: u128,
-    stdout: String,
-    stderr: String,
-}
-
-#[derive(Clone)]
-struct ProbeSpec {
-    id: String,
-    argv: Vec<String>,
-}
-
-#[derive(Clone)]
-struct ProbeEvidence {
-    id: String,
-    result: Option<ProbeResult>,
-    evidence: enrich::EvidenceRef,
-}
-
-#[derive(Deserialize)]
-struct RunsIndex {
-    #[serde(default)]
-    run_count: Option<usize>,
-    #[serde(default)]
-    runs: Vec<serde_json::Value>,
-}
-
 #[derive(Deserialize)]
 struct SubcommandRow {
     #[serde(default)]
@@ -124,13 +66,28 @@ struct SubcommandRow {
     #[serde(default)]
     description: Option<String>,
     #[serde(default)]
-    probe_path: Option<String>,
+    scenario_path: Option<String>,
     #[serde(default)]
     multi_command_hint: bool,
 }
 
+#[derive(Deserialize)]
+struct OptionRow {
+    #[serde(default)]
+    option: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    scenario_path: Option<String>,
+}
+
 struct SubcommandHit {
     row: SubcommandRow,
+    source_root: PathBuf,
+}
+
+struct OptionHit {
+    row: OptionRow,
     source_root: PathBuf,
 }
 
@@ -139,6 +96,7 @@ pub fn apply_surface_discovery(
     staging_root: &Path,
     inputs_hash: Option<&str>,
     manifest: Option<&pack::PackManifest>,
+    lens_flake: &str,
     verbose: bool,
 ) -> Result<()> {
     let paths = enrich::DocPackPaths::new(doc_pack_root.to_path_buf());
@@ -193,116 +151,228 @@ pub fn apply_surface_discovery(
         }
     }
 
-    let plan_path = paths.probes_plan_path();
+    let plan_path = paths.scenarios_plan_path();
     let plan_evidence = paths.evidence_from_path(&plan_path)?;
-    let mut probe_plan = None;
+    let mut plan = None;
+    let mut help_scenarios_present = false;
     if plan_path.is_file() {
-        match load_probe_plan(&plan_path) {
-            Ok(plan) => {
+        match scenarios::load_plan(&plan_path) {
+            Ok(loaded) => {
                 discovery.push(SurfaceDiscovery {
-                    code: "probe_plan".to_string(),
+                    code: "scenarios_plan".to_string(),
                     status: "used".to_string(),
                     evidence: vec![plan_evidence.clone()],
                     message: None,
                 });
-                probe_plan = Some(plan);
+                help_scenarios_present = loaded
+                    .scenarios
+                    .iter()
+                    .any(|scenario| scenario.kind == scenarios::ScenarioKind::Help);
+                plan = Some(loaded);
             }
             Err(err) => {
                 discovery.push(SurfaceDiscovery {
-                    code: "probe_plan".to_string(),
+                    code: "scenarios_plan".to_string(),
                     status: "error".to_string(),
                     evidence: vec![plan_evidence.clone()],
                     message: Some(err.to_string()),
                 });
                 blockers.push(enrich::Blocker {
-                    code: "probe_plan_parse_error".to_string(),
+                    code: "scenario_plan_invalid".to_string(),
                     message: err.to_string(),
                     evidence: vec![plan_evidence.clone()],
-                    next_action: Some("fix inventory/probes/plan.json".to_string()),
+                    next_action: Some("fix scenarios/plan.json".to_string()),
                 });
             }
         }
     } else {
         discovery.push(SurfaceDiscovery {
-            code: "probe_plan".to_string(),
+            code: "scenarios_plan".to_string(),
             status: "missing".to_string(),
             evidence: vec![plan_evidence.clone()],
-            message: Some("probe plan missing".to_string()),
+            message: Some("scenarios plan missing".to_string()),
+        });
+        blockers.push(enrich::Blocker {
+            code: "scenario_plan_missing".to_string(),
+            message: "scenarios plan missing".to_string(),
+            evidence: vec![plan_evidence.clone()],
+            next_action: Some("create scenarios/plan.json".to_string()),
         });
     }
 
-    let probe_specs = build_probe_specs(probe_plan.as_ref());
-    let mut probe_run_blocker = None;
-    if let Some(manifest) = manifest {
-        let binary_path = PathBuf::from(&manifest.binary_path);
-        if binary_path.is_file() {
-            for spec in probe_specs {
-                match run_probe(&binary_path, &spec.id, &spec.argv, doc_pack_root) {
-                    Ok(result) => {
-                        let bytes =
-                            serde_json::to_vec_pretty(&result).context("serialize probe")?;
-                        let rel_path =
-                            probe_output_rel_path(&result.probe_id, result.generated_at_epoch_ms);
-                        write_staged_bytes(staging_root, &rel_path, &bytes)?;
-                    }
-                    Err(err) => {
-                        discovery.push(SurfaceDiscovery {
-                            code: format!("probe:{}", spec.id),
-                            status: "error".to_string(),
-                            evidence: Vec::new(),
-                            message: Some(err.to_string()),
-                        });
-                    }
-                }
+    if plan.is_some() && !help_scenarios_present {
+        blockers.push(enrich::Blocker {
+            code: "surface_help_scenarios_missing".to_string(),
+            message: "no help scenarios available for surface discovery".to_string(),
+            evidence: vec![plan_evidence.clone()],
+            next_action: Some("add a help scenario in scenarios/plan.json".to_string()),
+        });
+    }
+
+    let pack_scenarios = paths.inventory_scenarios_dir();
+    let staging_scenarios = staging_root.join("inventory").join("scenarios");
+    let pack_has_scenarios = has_scenario_files(&pack_scenarios)?;
+    let mut staging_has_scenarios = has_scenario_files(&staging_scenarios)?;
+
+    if !pack_has_scenarios && !staging_has_scenarios && help_scenarios_present {
+        if let Some(manifest) = manifest {
+            let binary_path = PathBuf::from(&manifest.binary_path);
+            if !binary_path.is_file() {
+                blockers.push(enrich::Blocker {
+                    code: "scenario_missing_binary".to_string(),
+                    message: format!("binary_path {} not found", binary_path.display()),
+                    evidence: vec![paths.evidence_from_path(&paths.pack_manifest_path())?],
+                    next_action: Some(
+                        "regenerate binary.lens pack to refresh manifest".to_string(),
+                    ),
+                });
+            } else if !paths.pack_root().is_dir() {
+                blockers.push(enrich::Blocker {
+                    code: "scenario_missing_pack".to_string(),
+                    message: "pack root missing; cannot run scenarios".to_string(),
+                    evidence: vec![paths.evidence_from_path(&paths.pack_manifest_path())?],
+                    next_action: Some("generate binary.lens pack under the doc pack".to_string()),
+                });
+            } else {
+                let _report = scenarios::run_scenarios(
+                    &paths.pack_root(),
+                    doc_pack_root,
+                    &manifest.binary_name,
+                    &plan_path,
+                    lens_flake,
+                    Some(doc_pack_root),
+                    Some(staging_root),
+                    Some(scenarios::ScenarioKind::Help),
+                    verbose,
+                )?;
+                staging_has_scenarios = has_scenario_files(&staging_scenarios)?;
             }
         } else {
-            probe_run_blocker = Some(enrich::Blocker {
-                code: "probe_missing_binary".to_string(),
-                message: format!("binary_path {} not found", binary_path.display()),
+            blockers.push(enrich::Blocker {
+                code: "scenario_missing_manifest".to_string(),
+                message: "manifest missing; cannot run scenarios".to_string(),
                 evidence: vec![paths.evidence_from_path(&paths.pack_manifest_path())?],
-                next_action: Some("regenerate binary.lens pack to refresh manifest".to_string()),
+                next_action: Some("generate binary.lens pack under the doc pack".to_string()),
             });
-        }
-    } else {
-        probe_run_blocker = Some(enrich::Blocker {
-            code: "probe_missing_manifest".to_string(),
-            message: "manifest missing; cannot run probes".to_string(),
-            evidence: vec![paths.evidence_from_path(&paths.pack_manifest_path())?],
-            next_action: Some("generate binary.lens pack under the doc pack".to_string()),
-        });
-    }
-
-    let probe_outputs = collect_probe_evidence(staging_root, &paths)?;
-    if probe_outputs.is_empty() {
-        if let Some(blocker) = probe_run_blocker.clone() {
-            blockers.push(blocker);
-        }
-    }
-
-    for probe in &probe_outputs {
-        let status = match probe.result.as_ref() {
-            Some(result) if result.timed_out => "timeout",
-            Some(result) if result.exit_code == Some(0) => "ok",
-            Some(_) => "nonzero",
-            None => "invalid",
-        };
-        discovery.push(SurfaceDiscovery {
-            code: format!("probe:{}", probe.id),
-            status: status.to_string(),
-            evidence: vec![probe.evidence.clone()],
-            message: None,
-        });
-        if let Some(result) = probe.result.as_ref() {
-            if let Some(item) = surface_item_from_probe(result, &probe.evidence) {
-                merge_surface_item(&mut items, &mut seen, item);
-            }
         }
     }
 
     let mut subcommand_hint_evidence = Vec::new();
+
+    let options_template_path = doc_pack_root.join(enrich::OPTIONS_FROM_SCENARIOS_TEMPLATE_REL);
+    let options_template_evidence = paths.evidence_from_path(&options_template_path)?;
+    if options_template_path.is_file() {
+        match fs::read_to_string(&options_template_path) {
+            Ok(template_sql) => {
+                let mut hits = Vec::new();
+                let mut ran = false;
+                let mut query_errors = Vec::new();
+                let mut found_options = false;
+                if pack_has_scenarios {
+                    ran = true;
+                    match run_options_query(doc_pack_root, &template_sql) {
+                        Ok(mut rows) => hits.append(&mut rows),
+                        Err(err) => query_errors.push(err.to_string()),
+                    }
+                }
+                if staging_has_scenarios {
+                    ran = true;
+                    match run_options_query(staging_root, &template_sql) {
+                        Ok(mut rows) => hits.append(&mut rows),
+                        Err(err) => query_errors.push(err.to_string()),
+                    }
+                }
+                for hit in hits {
+                    let evidence = match evidence_from_option_hit(&hit) {
+                        Ok(Some(evidence)) => evidence,
+                        Ok(None) => continue,
+                        Err(err) => {
+                            query_errors.push(err.to_string());
+                            continue;
+                        }
+                    };
+                    if let Some(id) = hit.row.option.as_ref().map(|s| s.trim()) {
+                        if id.is_empty() {
+                            continue;
+                        }
+                        let description = hit
+                            .row
+                            .description
+                            .as_ref()
+                            .map(|desc| desc.trim().to_string())
+                            .filter(|desc| !desc.is_empty());
+                        let item = SurfaceItem {
+                            kind: "option".to_string(),
+                            id: id.to_string(),
+                            display: id.to_string(),
+                            description,
+                            evidence: vec![evidence],
+                        };
+                        merge_surface_item(&mut items, &mut seen, item);
+                        found_options = true;
+                    }
+                }
+                let status = if !query_errors.is_empty() {
+                    "error"
+                } else if ran && found_options {
+                    "used"
+                } else if ran {
+                    "empty"
+                } else {
+                    "skipped"
+                };
+                discovery.push(SurfaceDiscovery {
+                    code: "options_from_scenarios".to_string(),
+                    status: status.to_string(),
+                    evidence: vec![options_template_evidence.clone()],
+                    message: if query_errors.is_empty() {
+                        None
+                    } else {
+                        Some(query_errors.join("; "))
+                    },
+                });
+                if !query_errors.is_empty() {
+                    blockers.push(enrich::Blocker {
+                        code: "options_query_error".to_string(),
+                        message: "options query failed".to_string(),
+                        evidence: vec![options_template_evidence.clone()],
+                        next_action: Some(format!(
+                            "fix {}",
+                            enrich::OPTIONS_FROM_SCENARIOS_TEMPLATE_REL
+                        )),
+                    });
+                }
+            }
+            Err(err) => {
+                discovery.push(SurfaceDiscovery {
+                    code: "options_from_scenarios".to_string(),
+                    status: "error".to_string(),
+                    evidence: vec![options_template_evidence.clone()],
+                    message: Some(err.to_string()),
+                });
+                blockers.push(enrich::Blocker {
+                    code: "options_template_read_error".to_string(),
+                    message: err.to_string(),
+                    evidence: vec![options_template_evidence.clone()],
+                    next_action: Some(format!(
+                        "fix {}",
+                        enrich::OPTIONS_FROM_SCENARIOS_TEMPLATE_REL
+                    )),
+                });
+            }
+        }
+    } else {
+        discovery.push(SurfaceDiscovery {
+            code: "options_from_scenarios".to_string(),
+            status: "missing".to_string(),
+            evidence: vec![options_template_evidence.clone()],
+            message: Some("options template missing".to_string()),
+        });
+    }
+
     let subcommands_template_path =
-        doc_pack_root.join(enrich::SUBCOMMANDS_FROM_PROBES_TEMPLATE_REL);
-    let template_evidence = paths.evidence_from_path(&subcommands_template_path)?;
+        doc_pack_root.join(enrich::SUBCOMMANDS_FROM_SCENARIOS_TEMPLATE_REL);
+    let subcommands_template_evidence = paths.evidence_from_path(&subcommands_template_path)?;
     if subcommands_template_path.is_file() {
         match fs::read_to_string(&subcommands_template_path) {
             Ok(template_sql) => {
@@ -310,15 +380,14 @@ pub fn apply_surface_discovery(
                 let mut ran = false;
                 let mut query_errors = Vec::new();
                 let mut found_subcommands = false;
-                if has_probe_files(&paths.probes_dir())? {
+                if pack_has_scenarios {
                     ran = true;
                     match run_subcommands_query(doc_pack_root, &template_sql) {
                         Ok(mut rows) => hits.append(&mut rows),
                         Err(err) => query_errors.push(err.to_string()),
                     }
                 }
-                let staging_probes = staging_root.join("inventory").join("probes");
-                if has_probe_files(&staging_probes)? {
+                if staging_has_scenarios {
                     ran = true;
                     match run_subcommands_query(staging_root, &template_sql) {
                         Ok(mut rows) => hits.append(&mut rows),
@@ -326,7 +395,7 @@ pub fn apply_surface_discovery(
                     }
                 }
                 for hit in hits {
-                    let evidence = match evidence_from_probe_hit(&hit) {
+                    let evidence = match evidence_from_subcommand_hit(&hit) {
                         Ok(Some(evidence)) => evidence,
                         Ok(None) => continue,
                         Err(err) => {
@@ -368,9 +437,9 @@ pub fn apply_surface_discovery(
                     "skipped"
                 };
                 discovery.push(SurfaceDiscovery {
-                    code: "subcommands_from_probes".to_string(),
+                    code: "subcommands_from_scenarios".to_string(),
                     status: status.to_string(),
-                    evidence: vec![template_evidence.clone()],
+                    evidence: vec![subcommands_template_evidence.clone()],
                     message: if query_errors.is_empty() {
                         None
                     } else {
@@ -381,77 +450,38 @@ pub fn apply_surface_discovery(
                     blockers.push(enrich::Blocker {
                         code: "subcommands_query_error".to_string(),
                         message: "subcommands query failed".to_string(),
-                        evidence: vec![template_evidence.clone()],
+                        evidence: vec![subcommands_template_evidence.clone()],
                         next_action: Some(format!(
                             "fix {}",
-                            enrich::SUBCOMMANDS_FROM_PROBES_TEMPLATE_REL
+                            enrich::SUBCOMMANDS_FROM_SCENARIOS_TEMPLATE_REL
                         )),
                     });
                 }
             }
             Err(err) => {
                 discovery.push(SurfaceDiscovery {
-                    code: "subcommands_from_probes".to_string(),
+                    code: "subcommands_from_scenarios".to_string(),
                     status: "error".to_string(),
-                    evidence: vec![template_evidence.clone()],
+                    evidence: vec![subcommands_template_evidence.clone()],
                     message: Some(err.to_string()),
                 });
                 blockers.push(enrich::Blocker {
                     code: "subcommands_template_read_error".to_string(),
                     message: err.to_string(),
-                    evidence: vec![template_evidence.clone()],
+                    evidence: vec![subcommands_template_evidence.clone()],
                     next_action: Some(format!(
                         "fix {}",
-                        enrich::SUBCOMMANDS_FROM_PROBES_TEMPLATE_REL
+                        enrich::SUBCOMMANDS_FROM_SCENARIOS_TEMPLATE_REL
                     )),
                 });
             }
         }
     } else {
         discovery.push(SurfaceDiscovery {
-            code: "subcommands_from_probes".to_string(),
+            code: "subcommands_from_scenarios".to_string(),
             status: "missing".to_string(),
-            evidence: vec![template_evidence.clone()],
+            evidence: vec![subcommands_template_evidence.clone()],
             message: Some("subcommands template missing".to_string()),
-        });
-    }
-
-    let runs_index_path = paths.pack_root().join("runs").join("index.json");
-    let runs_evidence = paths.evidence_from_path(&runs_index_path)?;
-    let mut runs_present = false;
-    if runs_index_path.is_file() {
-        let bytes = fs::read(&runs_index_path)
-            .with_context(|| format!("read {}", runs_index_path.display()))?;
-        let index: RunsIndex = serde_json::from_slice(&bytes).context("parse runs index JSON")?;
-        let run_count = index.run_count.unwrap_or_else(|| index.runs.len());
-        runs_present = run_count > 0;
-        discovery.push(SurfaceDiscovery {
-            code: "runs_index".to_string(),
-            status: if runs_present {
-                "used".to_string()
-            } else {
-                "empty".to_string()
-            },
-            evidence: vec![runs_evidence.clone()],
-            message: None,
-        });
-    } else {
-        discovery.push(SurfaceDiscovery {
-            code: "runs_index".to_string(),
-            status: "missing".to_string(),
-            evidence: vec![runs_evidence.clone()],
-            message: Some("runs index missing".to_string()),
-        });
-    }
-
-    if probe_outputs.is_empty() && !runs_present {
-        blockers.push(enrich::Blocker {
-            code: "surface_evidence_missing".to_string(),
-            message: "no probe outputs or scenario runs available".to_string(),
-            evidence: vec![runs_evidence],
-            next_action: Some(
-                "capture help/usage evidence via probes or scenario runs".to_string(),
-            ),
         });
     }
 
@@ -464,7 +494,7 @@ pub fn apply_surface_discovery(
                 message: "multi-command usage detected but no subcommands extracted".to_string(),
                 evidence: subcommand_hint_evidence,
                 next_action: Some(
-                    "add probes in inventory/probes/plan.json or adjust queries/subcommands_from_probes.sql"
+                    "add help scenarios in scenarios/plan.json or adjust queries/subcommands_from_scenarios.sql"
                         .to_string(),
                 ),
             });
@@ -536,280 +566,16 @@ pub fn meaningful_surface_items(surface: &SurfaceInventory) -> usize {
         .count()
 }
 
-pub fn default_probe_plan() -> ProbePlan {
-    ProbePlan {
-        schema_version: PROBE_PLAN_SCHEMA_VERSION,
-        generated_at_epoch_ms: enrich::now_epoch_ms().unwrap_or(0),
-        probes: vec![
-            ProbePlanEntry {
-                id: "help".to_string(),
-                argv: vec!["--help".to_string()],
-                enabled: true,
-            },
-            ProbePlanEntry {
-                id: "dash-h".to_string(),
-                argv: vec!["-h".to_string()],
-                enabled: true,
-            },
-            ProbePlanEntry {
-                id: "help-subcommand".to_string(),
-                argv: vec!["help".to_string()],
-                enabled: true,
-            },
-            ProbePlanEntry {
-                id: "no-args".to_string(),
-                argv: Vec::new(),
-                enabled: true,
-            },
-        ],
-    }
-}
-
-fn default_probe_specs() -> Vec<ProbeSpec> {
-    default_probe_plan()
-        .probes
-        .into_iter()
-        .filter(|probe| probe.enabled)
-        .map(|probe| ProbeSpec {
-            id: probe.id,
-            argv: probe.argv,
-        })
-        .collect()
-}
-
-fn build_probe_specs(plan: Option<&ProbePlan>) -> Vec<ProbeSpec> {
-    let mut specs = default_probe_specs();
-    let mut index = std::collections::HashMap::new();
-    for (idx, spec) in specs.iter().enumerate() {
-        index.insert(spec.id.clone(), idx);
-    }
-    if let Some(plan) = plan {
-        for probe in &plan.probes {
-            if !probe.enabled {
-                continue;
-            }
-            let id = probe.id.trim();
-            if id.is_empty() {
-                continue;
-            }
-            let argv = probe
-                .argv
-                .iter()
-                .map(|arg| arg.trim().to_string())
-                .collect::<Vec<_>>();
-            let spec = ProbeSpec {
-                id: id.to_string(),
-                argv,
-            };
-            if let Some(idx) = index.get(&spec.id).copied() {
-                specs[idx] = spec;
-            } else {
-                index.insert(spec.id.clone(), specs.len());
-                specs.push(spec);
-            }
-        }
-    }
-    specs
-}
-
-fn load_probe_plan(path: &Path) -> Result<ProbePlan> {
-    let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
-    let plan: ProbePlan = serde_json::from_slice(&bytes).context("parse probe plan")?;
-    validate_probe_plan(&plan)?;
-    Ok(plan)
-}
-
-fn validate_probe_plan(plan: &ProbePlan) -> Result<()> {
-    if plan.schema_version != PROBE_PLAN_SCHEMA_VERSION {
-        return Err(anyhow!(
-            "unsupported probe plan schema_version {}",
-            plan.schema_version
-        ));
-    }
-    let mut seen = BTreeSet::new();
-    for probe in &plan.probes {
-        let id = probe.id.trim();
-        if id.is_empty() {
-            return Err(anyhow!("probe plan entry id must not be empty"));
-        }
-        if !is_valid_probe_id(id) {
-            return Err(anyhow!(
-                "probe plan entry id {:?} is not a safe identifier",
-                id
-            ));
-        }
-        if !seen.insert(id.to_string()) {
-            return Err(anyhow!("probe plan entry id {:?} is duplicated", id));
-        }
-        for arg in &probe.argv {
-            if arg.trim().is_empty() {
-                return Err(anyhow!("probe plan entry {:?} has empty argv entries", id));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn default_probe_enabled() -> bool {
-    true
-}
-
-fn is_valid_probe_id(id: &str) -> bool {
-    !id.contains('/') && !id.contains('\\')
-}
-
-fn probe_output_rel_path(probe_id: &str, generated_at_epoch_ms: u128) -> String {
-    format!(
-        "inventory/probes/{}-{}.json",
-        probe_id, generated_at_epoch_ms
-    )
-}
-
-fn run_probe(
-    binary_path: &Path,
-    probe_id: &str,
-    argv: &[String],
-    cwd: &Path,
-) -> Result<ProbeResult> {
-    let mut cmd = Command::new(binary_path);
-    cmd.args(argv)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .current_dir(cwd);
-
-    let start = std::time::Instant::now();
-    let mut child = cmd.spawn().context("spawn probe")?;
-    let timeout = std::time::Duration::from_secs(PROBE_TIMEOUT_SECS);
-    let mut timed_out = false;
-
-    loop {
-        if let Some(_status) = child.try_wait().context("check probe status")? {
-            break;
-        }
-        if start.elapsed() > timeout {
-            timed_out = true;
-            let _ = child.kill();
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(25));
-    }
-
-    let output = child.wait_with_output().context("collect probe output")?;
-
-    let duration_ms = start.elapsed().as_millis();
-    let stdout = truncate_bytes(&output.stdout, MAX_PROBE_OUTPUT_BYTES);
-    let stderr = truncate_bytes(&output.stderr, MAX_PROBE_OUTPUT_BYTES);
-
-    let mut argv_full = Vec::new();
-    argv_full.push(binary_path.display().to_string());
-    argv_full.extend(argv.iter().cloned());
-
-    Ok(ProbeResult {
-        schema_version: PROBE_SCHEMA_VERSION,
-        generated_at_epoch_ms: enrich::now_epoch_ms()?,
-        probe_id: probe_id.to_string(),
-        argv: argv_full,
-        exit_code: output.status.code(),
-        timed_out,
-        duration_ms,
-        stdout,
-        stderr,
-    })
-}
-
-fn collect_probe_evidence(
-    staging_root: &Path,
-    paths: &enrich::DocPackPaths,
-) -> Result<Vec<ProbeEvidence>> {
-    let mut candidates: BTreeMap<String, PathBuf> = BTreeMap::new();
-    let pack_probe_root = paths.inventory_dir().join("probes");
-    let staging_probe_root = staging_root.join("inventory").join("probes");
-    for (root, prefer) in [(pack_probe_root, false), (staging_probe_root, true)] {
-        if !root.is_dir() {
-            continue;
-        }
-        for file in collect_files_recursive(&root)? {
-            if file.extension().and_then(|ext| ext.to_str()) != Some("json") {
-                continue;
-            }
-            let rel = file.strip_prefix(&root).context("strip probe root")?;
-            if !is_probe_evidence_rel_path(rel) {
-                continue;
-            }
-            let rel_path = Path::new("inventory").join("probes").join(rel);
-            let rel_string = rel_path.to_string_lossy().to_string();
-            if prefer || !candidates.contains_key(&rel_string) {
-                candidates.insert(rel_string, file);
-            }
-        }
-    }
-
-    let mut outputs = Vec::new();
-    for (rel, path) in candidates {
-        let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
-        let evidence = enrich::EvidenceRef {
-            path: rel.clone(),
-            sha256: Some(sha256_hex(&bytes)),
-        };
-        let result: Option<ProbeResult> = serde_json::from_slice(&bytes).ok();
-        let id = result
-            .as_ref()
-            .and_then(|probe| {
-                let trimmed = probe.probe_id.trim();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(trimmed.to_string())
-                }
-            })
-            .unwrap_or_else(|| {
-                Path::new(&rel)
-                    .file_stem()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("probe")
-                    .to_string()
-            });
-        outputs.push(ProbeEvidence {
-            id,
-            result,
-            evidence,
-        });
-    }
-
-    Ok(outputs)
-}
-
-fn has_probe_files(root: &Path) -> Result<bool> {
+fn has_scenario_files(root: &Path) -> Result<bool> {
     if !root.is_dir() {
         return Ok(false);
     }
     for file in collect_files_recursive(root)? {
         if file.extension().and_then(|ext| ext.to_str()) == Some("json") {
-            if let Ok(rel) = file.strip_prefix(root) {
-                if !is_probe_evidence_rel_path(rel) {
-                    continue;
-                }
-            }
             return Ok(true);
         }
     }
     Ok(false)
-}
-
-fn is_probe_evidence_rel_path(rel: &Path) -> bool {
-    let file_name = rel.file_name().and_then(|name| name.to_str());
-    if matches!(file_name, Some("plan.json") | Some("config.json")) {
-        return false;
-    }
-    if rel
-        .components()
-        .next()
-        .and_then(|component| component.as_os_str().to_str())
-        == Some("config")
-    {
-        return false;
-    }
-    true
 }
 
 fn run_subcommands_query(root: &Path, template_sql: &str) -> Result<Vec<SubcommandHit>> {
@@ -829,21 +595,49 @@ fn run_subcommands_query(root: &Path, template_sql: &str) -> Result<Vec<Subcomma
         .collect())
 }
 
-fn evidence_from_probe_hit(hit: &SubcommandHit) -> Result<Option<enrich::EvidenceRef>> {
-    let raw_path = match hit.row.probe_path.as_ref() {
+fn run_options_query(root: &Path, template_sql: &str) -> Result<Vec<OptionHit>> {
+    let output = pack::run_duckdb_query(template_sql, root)?;
+    let rows: Vec<OptionRow> =
+        if output.is_empty() || output.iter().all(|byte| byte.is_ascii_whitespace()) {
+            Vec::new()
+        } else {
+            serde_json::from_slice(&output).context("parse options query output")?
+        };
+    Ok(rows
+        .into_iter()
+        .map(|row| OptionHit {
+            row,
+            source_root: root.to_path_buf(),
+        })
+        .collect())
+}
+
+fn evidence_from_subcommand_hit(hit: &SubcommandHit) -> Result<Option<enrich::EvidenceRef>> {
+    evidence_from_scenario_path(&hit.source_root, hit.row.scenario_path.as_ref())
+}
+
+fn evidence_from_option_hit(hit: &OptionHit) -> Result<Option<enrich::EvidenceRef>> {
+    evidence_from_scenario_path(&hit.source_root, hit.row.scenario_path.as_ref())
+}
+
+fn evidence_from_scenario_path(
+    source_root: &Path,
+    raw_path: Option<&String>,
+) -> Result<Option<enrich::EvidenceRef>> {
+    let raw_path = match raw_path {
         Some(path) => path,
         None => return Ok(None),
     };
-    let rel = match normalize_probe_rel_path(raw_path) {
+    let rel = match normalize_scenario_rel_path(raw_path) {
         Some(rel) => rel,
         None => return Ok(None),
     };
-    Ok(Some(evidence_from_rel_path(&hit.source_root, &rel)?))
+    Ok(Some(evidence_from_rel_path(source_root, &rel)?))
 }
 
-fn normalize_probe_rel_path(raw: &str) -> Option<String> {
+fn normalize_scenario_rel_path(raw: &str) -> Option<String> {
     let normalized = raw.replace('\\', "/");
-    if let Some(idx) = normalized.rfind("inventory/probes/") {
+    if let Some(idx) = normalized.rfind("inventory/scenarios/") {
         return Some(normalized[idx..].to_string());
     }
     if Path::new(&normalized).is_absolute() {
@@ -918,27 +712,4 @@ fn surface_item_key(item: &SurfaceItem) -> String {
 
 fn is_supported_surface_kind(kind: &str) -> bool {
     matches!(kind, "option" | "command" | "subcommand")
-}
-
-fn surface_item_from_probe(
-    probe: &ProbeResult,
-    evidence: &enrich::EvidenceRef,
-) -> Option<SurfaceItem> {
-    let arg = probe.argv.iter().skip(1).last()?;
-    let trimmed = arg.trim();
-    if trimmed.is_empty() || trimmed == "--" {
-        return None;
-    }
-    let kind = if trimmed.starts_with('-') {
-        "option"
-    } else {
-        "command"
-    };
-    Some(SurfaceItem {
-        kind: kind.to_string(),
-        id: trimmed.to_string(),
-        display: trimmed.to_string(),
-        description: None,
-        evidence: vec![evidence.clone()],
-    })
 }

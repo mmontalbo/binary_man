@@ -1,5 +1,7 @@
 use crate::enrich;
+use crate::staging::write_staged_json;
 use crate::surface;
+use crate::util::truncate_bytes;
 use anyhow::{anyhow, Context, Result};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -11,14 +13,30 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_SNIPPET_MAX_BYTES: usize = 4096;
 const DEFAULT_SNIPPET_MAX_LINES: usize = 60;
+const MAX_SCENARIO_EVIDENCE_BYTES: usize = 64 * 1024;
+const SCENARIO_PLAN_SCHEMA_VERSION: u32 = 1;
+const SCENARIO_EVIDENCE_SCHEMA_VERSION: u32 = 1;
 
 fn default_true() -> bool {
     true
 }
 
-#[derive(Debug, Deserialize)]
-pub struct ScenarioCatalog {
-    pub schema: Option<SchemaRef>,
+fn default_scenario_kind() -> ScenarioKind {
+    ScenarioKind::Behavior
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ScenarioKind {
+    Help,
+    Behavior,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct ScenarioPlan {
+    pub schema_version: u32,
+    #[serde(default)]
     pub binary: Option<String>,
     #[serde(default)]
     pub default_env: BTreeMap<String, String>,
@@ -28,29 +46,31 @@ pub struct ScenarioCatalog {
     pub scenarios: Vec<ScenarioSpec>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct SchemaRef {
-    pub name: String,
-}
-
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct CoverageNotes {
     #[serde(default)]
     pub blocked: Vec<CoverageBlocked>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct CoverageBlocked {
-    #[serde(default)]
-    pub option_ids: Vec<String>,
+    #[serde(default, alias = "option_ids")]
+    pub item_ids: Vec<String>,
     pub reason: String,
     #[serde(default)]
     pub details: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct ScenarioSpec {
     pub id: String,
+    #[serde(default = "default_scenario_kind")]
+    pub kind: ScenarioKind,
     #[serde(default = "default_true")]
     pub publish: bool,
     #[serde(default)]
@@ -69,14 +89,15 @@ pub struct ScenarioSpec {
     pub snippet_max_bytes: Option<usize>,
     #[serde(default)]
     pub coverage_tier: Option<String>,
-    #[serde(default)]
-    pub covers_options: Vec<String>,
+    #[serde(default, alias = "covers_options")]
+    pub covers: Vec<String>,
     #[serde(default)]
     pub coverage_ignore: bool,
     pub expect: ScenarioExpect,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct ScenarioExpect {
     pub exit_code: Option<i32>,
     pub exit_signal: Option<i32>,
@@ -173,6 +194,21 @@ pub struct ScenarioOutcome {
     pub stderr_snippet: String,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct ScenarioEvidence {
+    pub schema_version: u32,
+    pub generated_at_epoch_ms: u128,
+    pub scenario_id: String,
+    #[serde(default)]
+    pub argv: Vec<String>,
+    pub exit_code: Option<i32>,
+    pub timed_out: bool,
+    pub duration_ms: u128,
+    pub stdout: String,
+    pub stderr: String,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CoverageLedger {
     pub schema_version: u32,
@@ -205,33 +241,87 @@ pub struct CoverageOptionEntry {
     pub evidence: Vec<enrich::EvidenceRef>,
 }
 
-pub fn load_catalog(path: &Path) -> Result<ScenarioCatalog> {
+pub fn load_plan(path: &Path) -> Result<ScenarioPlan> {
     let bytes =
-        fs::read(path).with_context(|| format!("read scenarios catalog {}", path.display()))?;
-    let catalog: ScenarioCatalog =
-        serde_json::from_slice(&bytes).context("parse scenarios catalog JSON")?;
-    if let Some(schema) = catalog.schema.as_ref() {
-        if schema.name != "binary_man_scenarios" {
-            return Err(anyhow!(
-                "unexpected scenarios schema name {:?} (expected \"binary_man_scenarios\")",
-                schema.name
-            ));
-        }
+        fs::read(path).with_context(|| format!("read scenarios plan {}", path.display()))?;
+    let plan: ScenarioPlan = serde_json::from_slice(&bytes).context("parse scenarios plan JSON")?;
+    validate_plan(&plan)?;
+    Ok(plan)
+}
+
+pub fn validate_plan(plan: &ScenarioPlan) -> Result<()> {
+    if plan.schema_version != SCENARIO_PLAN_SCHEMA_VERSION {
+        return Err(anyhow!(
+            "unsupported scenarios plan schema_version {}",
+            plan.schema_version
+        ));
     }
-    if catalog.scenarios.is_empty() {
-        return Err(anyhow!("scenarios catalog contains no scenarios"));
+    if plan.scenarios.is_empty() {
+        return Err(anyhow!("scenarios plan contains no scenarios"));
     }
-    if let Some(coverage) = catalog.coverage.as_ref() {
+    if let Some(coverage) = plan.coverage.as_ref() {
         for blocked in &coverage.blocked {
-            if blocked.option_ids.is_empty() {
-                return Err(anyhow!("coverage.blocked entries must include option_ids"));
+            if blocked.item_ids.is_empty() {
+                return Err(anyhow!("coverage.blocked entries must include item_ids"));
             }
             if blocked.reason.trim().is_empty() {
                 return Err(anyhow!("coverage.blocked reason must not be empty"));
             }
         }
     }
-    Ok(catalog)
+    for scenario in &plan.scenarios {
+        validate_scenario_spec(scenario)
+            .with_context(|| format!("validate scenario {}", scenario.id))?;
+    }
+    Ok(())
+}
+
+pub fn plan_stub(binary_name: Option<&str>) -> String {
+    let plan = default_plan(binary_name);
+    serde_json::to_string_pretty(&plan).expect("serialize scenarios plan stub")
+}
+
+fn default_plan(binary_name: Option<&str>) -> ScenarioPlan {
+    ScenarioPlan {
+        schema_version: SCENARIO_PLAN_SCHEMA_VERSION,
+        binary: binary_name.map(|name| name.to_string()),
+        default_env: BTreeMap::new(),
+        coverage: None,
+        scenarios: vec![default_help_scenario()],
+    }
+}
+
+fn default_help_scenario() -> ScenarioSpec {
+    ScenarioSpec {
+        id: "help".to_string(),
+        kind: ScenarioKind::Help,
+        publish: false,
+        argv: vec!["--help".to_string()],
+        env: BTreeMap::new(),
+        seed_dir: None,
+        cwd: None,
+        timeout_seconds: Some(3.0),
+        net_mode: Some("off".to_string()),
+        no_sandbox: Some(false),
+        no_strace: Some(true),
+        snippet_max_lines: Some(12),
+        snippet_max_bytes: Some(1024),
+        coverage_tier: None,
+        covers: Vec::new(),
+        coverage_ignore: true,
+        expect: ScenarioExpect {
+            exit_code: Some(0),
+            exit_signal: None,
+            stdout_contains_all: vec!["Usage:".to_string()],
+            stdout_contains_any: Vec::new(),
+            stdout_regex_all: Vec::new(),
+            stdout_regex_any: Vec::new(),
+            stderr_contains_all: Vec::new(),
+            stderr_contains_any: Vec::new(),
+            stderr_regex_all: Vec::new(),
+            stderr_regex_any: Vec::new(),
+        },
+    }
 }
 
 pub fn run_scenarios(
@@ -241,14 +331,16 @@ pub fn run_scenarios(
     scenarios_path: &Path,
     lens_flake: &str,
     display_root: Option<&Path>,
+    staging_root: Option<&Path>,
+    kind_filter: Option<ScenarioKind>,
     verbose: bool,
 ) -> Result<ExamplesReport> {
-    let catalog = load_catalog(scenarios_path)?;
-    if let Some(catalog_binary) = catalog.binary.as_deref() {
-        if catalog_binary != binary_name {
+    let plan = load_plan(scenarios_path)?;
+    if let Some(plan_binary) = plan.binary.as_deref() {
+        if plan_binary != binary_name {
             return Err(anyhow!(
-                "scenarios catalog binary {:?} does not match pack binary {:?}",
-                catalog_binary,
+                "scenarios plan binary {:?} does not match pack binary {:?}",
+                plan_binary,
                 binary_name
             ));
         }
@@ -261,7 +353,15 @@ pub fn run_scenarios(
     let mut outcomes = Vec::new();
     let mut run_ids = Vec::new();
 
-    for scenario in catalog.scenarios {
+    let scenarios = plan
+        .scenarios
+        .into_iter()
+        .filter(|scenario| match kind_filter {
+            Some(kind) => scenario.kind == kind,
+            None => true,
+        });
+
+    for scenario in scenarios {
         if verbose {
             eprintln!("running scenario {} {}", binary_name, scenario.id);
         }
@@ -269,7 +369,7 @@ pub fn run_scenarios(
         validate_scenario_spec(&scenario)
             .with_context(|| format!("validate scenario {}", scenario.id))?;
 
-        let env = merge_env(&catalog.default_env, &scenario.env);
+        let env = merge_env(&plan.default_env, &scenario.env);
         let seed_dir = scenario.seed_dir.clone();
         let cwd = scenario.cwd.clone();
         let snippet_max_lines = scenario
@@ -282,6 +382,7 @@ pub fn run_scenarios(
         let run_kv_args = build_run_kv_args(&scenario, &run_argv0)?;
         let before = read_runs_index(&pack_root).context("read runs index (before)")?;
 
+        let started = std::time::Instant::now();
         let status = invoke_binary_lens_run(
             &pack_root,
             run_root,
@@ -291,6 +392,7 @@ pub fn run_scenarios(
             &env,
         )
         .with_context(|| format!("invoke binary_lens for scenario {}", scenario.id))?;
+        let duration_ms = started.elapsed().as_millis();
         if !status.success() {
             let argv = scenario.argv.clone();
             let command_line = format_command_line(binary_name, &argv);
@@ -360,6 +462,24 @@ pub fn run_scenarios(
         let observed_exit_code = run_manifest.result.exit_code;
         let observed_exit_signal = run_manifest.result.exit_signal;
         let observed_timed_out = run_manifest.result.timed_out;
+
+        if let Some(staging_root) = staging_root {
+            let mut argv_full = Vec::with_capacity(scenario.argv.len() + 1);
+            argv_full.push(run_argv0.clone());
+            argv_full.extend(scenario.argv.iter().cloned());
+            let evidence = ScenarioEvidence {
+                schema_version: SCENARIO_EVIDENCE_SCHEMA_VERSION,
+                generated_at_epoch_ms: enrich::now_epoch_ms()?,
+                scenario_id: scenario.id.clone(),
+                argv: argv_full,
+                exit_code: observed_exit_code,
+                timed_out: observed_timed_out,
+                duration_ms,
+                stdout: truncate_bytes(&stdout_bytes, MAX_SCENARIO_EVIDENCE_BYTES),
+                stderr: truncate_bytes(&stderr_bytes, MAX_SCENARIO_EVIDENCE_BYTES),
+            };
+            stage_scenario_evidence(staging_root, &evidence)?;
+        }
 
         let failures = validate_scenario(
             &scenario.expect,
@@ -457,6 +577,19 @@ fn invoke_binary_lens_run(
     Ok(status)
 }
 
+fn stage_scenario_evidence(staging_root: &Path, evidence: &ScenarioEvidence) -> Result<()> {
+    let rel = scenario_output_rel_path(&evidence.scenario_id, evidence.generated_at_epoch_ms);
+    write_staged_json(staging_root, &rel, evidence)?;
+    Ok(())
+}
+
+fn scenario_output_rel_path(scenario_id: &str, generated_at_epoch_ms: u128) -> String {
+    format!(
+        "inventory/scenarios/{}-{}.json",
+        scenario_id, generated_at_epoch_ms
+    )
+}
+
 pub fn build_coverage_ledger(
     binary_name: &str,
     surface: &surface::SurfaceInventory,
@@ -464,12 +597,12 @@ pub fn build_coverage_ledger(
     scenarios_path: &Path,
     display_root: Option<&Path>,
 ) -> Result<CoverageLedger> {
-    let catalog = load_catalog(scenarios_path)?;
-    if let Some(catalog_binary) = catalog.binary.as_deref() {
-        if catalog_binary != binary_name {
+    let plan = load_plan(scenarios_path)?;
+    if let Some(plan_binary) = plan.binary.as_deref() {
+        if plan_binary != binary_name {
             return Err(anyhow!(
-                "scenarios catalog binary {:?} does not match pack binary {:?}",
-                catalog_binary,
+                "scenarios plan binary {:?} does not match pack binary {:?}",
+                plan_binary,
                 binary_name
             ));
         }
@@ -477,7 +610,7 @@ pub fn build_coverage_ledger(
 
     let surface_path = doc_pack_root.join("inventory").join("surface.json");
     let surface_evidence = enrich::evidence_from_path(doc_pack_root, &surface_path)?;
-    let catalog_evidence = enrich::evidence_from_path(doc_pack_root, scenarios_path)?;
+    let plan_evidence = enrich::evidence_from_path(doc_pack_root, scenarios_path)?;
     let mut options: BTreeMap<String, CoverageState> = BTreeMap::new();
     for item in surface
         .items
@@ -502,10 +635,10 @@ pub fn build_coverage_ledger(
     let mut warnings = Vec::new();
     let mut unknown_options = BTreeSet::new();
     let mut blocked_map: HashMap<String, BlockedInfo> = HashMap::new();
-    if let Some(coverage) = catalog.coverage.as_ref() {
+    if let Some(coverage) = plan.coverage.as_ref() {
         for blocked in &coverage.blocked {
-            for option_id in &blocked.option_ids {
-                let normalized = normalize_surface_id(option_id);
+            for item_id in &blocked.item_ids {
+                let normalized = normalize_surface_id(item_id);
                 if normalized.is_empty() {
                     continue;
                 }
@@ -530,15 +663,13 @@ pub fn build_coverage_ledger(
         }
     }
 
-    for scenario in &catalog.scenarios {
-        validate_scenario_spec(scenario)
-            .with_context(|| format!("validate scenario {}", scenario.id))?;
+    for scenario in &plan.scenarios {
         if scenario.coverage_ignore {
             continue;
         }
-        if scenario.covers_options.is_empty() {
+        if scenario.covers.is_empty() {
             warnings.push(format!(
-                "scenario {:?} missing covers_options for coverage",
+                "scenario {:?} missing covers for coverage",
                 scenario.id
             ));
             continue;
@@ -620,7 +751,7 @@ pub fn build_coverage_ledger(
 
         let mut evidence = entry.evidence.clone();
         evidence.push(surface_evidence.clone());
-        evidence.push(catalog_evidence.clone());
+        evidence.push(plan_evidence.clone());
         let evidence = dedup_evidence(evidence);
 
         entries.push(CoverageOptionEntry {
@@ -646,7 +777,7 @@ pub fn build_coverage_ledger(
         generated_at_epoch_ms,
         binary_name: binary_name.to_string(),
         scenarios_path: display_path(scenarios_path, display_root),
-        validation_source: "catalog".to_string(),
+        validation_source: "plan".to_string(),
         options_total: entries.len(),
         behavior_count,
         rejected_count,
@@ -692,7 +823,7 @@ fn coverage_tier(scenario: &ScenarioSpec) -> CoverageTier {
 
 fn scenario_surface_ids(scenario: &ScenarioSpec) -> Vec<String> {
     let mut ids = BTreeSet::new();
-    for token in &scenario.covers_options {
+    for token in &scenario.covers {
         let normalized = normalize_surface_id(token);
         if !normalized.is_empty() {
             ids.insert(normalized);
@@ -701,7 +832,7 @@ fn scenario_surface_ids(scenario: &ScenarioSpec) -> Vec<String> {
     ids.into_iter().collect()
 }
 
-fn normalize_surface_id(token: &str) -> String {
+pub fn normalize_surface_id(token: &str) -> String {
     let trimmed = token.trim();
     if let Some((head, _)) = trimmed.split_once('=') {
         head.to_string()
@@ -997,6 +1128,13 @@ fn bounded_snippet(text: &str, max_lines: usize, max_bytes: usize) -> String {
 }
 
 fn validate_scenario_spec(scenario: &ScenarioSpec) -> Result<()> {
+    let id = scenario.id.trim();
+    if id.is_empty() {
+        return Err(anyhow!("scenario id must not be empty"));
+    }
+    if id.contains('/') || id.contains('\\') {
+        return Err(anyhow!("scenario id must not include path separators"));
+    }
     if let Some(timeout_seconds) = scenario.timeout_seconds {
         if !timeout_seconds.is_finite() || timeout_seconds < 0.0 {
             return Err(anyhow!("timeout_seconds must be >= 0"));
@@ -1061,9 +1199,9 @@ fn validate_scenario_spec(scenario: &ScenarioSpec) -> Result<()> {
             ));
         }
     }
-    for option_id in &scenario.covers_options {
+    for option_id in &scenario.covers {
         if option_id.trim().is_empty() {
-            return Err(anyhow!("covers_options entries must not be empty"));
+            return Err(anyhow!("covers entries must not be empty"));
         }
     }
     validate_scenario_expect(&scenario.expect)?;

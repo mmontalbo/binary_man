@@ -1,16 +1,16 @@
--- Prefer probe-generated help output for usage evidence.
+-- Prefer scenario-generated help output for usage evidence.
 with
   manifest as (
     select binary_name
     from read_json_auto('manifest.json')
   ),
-  probes as (
+  scenarios as (
     select
       argv,
       stdout,
       timed_out,
       generated_at_epoch_ms
-    from read_json_auto('../inventory/probes/*.json')
+    from read_json_auto('../inventory/scenarios/*.json')
   ),
   ranked as (
     select
@@ -24,7 +24,7 @@ with
         when lower(list_extract(argv, list_count(argv))) = '--usage' then 4
         else 9
       end as preference
-    from probes
+    from scenarios
     where coalesce(timed_out, false) = false
       and coalesce(stdout, '') <> ''
   ),

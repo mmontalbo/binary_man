@@ -67,7 +67,12 @@ pub fn run_init(args: InitArgs) -> Result<()> {
     }
 
     install_usage_lens_templates(&paths, args.force)?;
-    install_probe_plan(&paths, args.force)?;
+    let manifest = load_manifest_optional(&paths)?;
+    install_scenario_plan(
+        &paths,
+        args.force,
+        manifest.as_ref().map(|m| m.binary_name.as_str()),
+    )?;
 
     let config = enrich::default_config();
     enrich::write_config(paths.root(), &config)?;
@@ -235,11 +240,7 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
 
         let templates = compute_lens_templates(ctx.paths.root(), &ctx.config);
         let mut examples_report = None;
-        let scenarios_path = ctx
-            .config
-            .scenario_catalogs
-            .first()
-            .map(|rel| ctx.paths.root().join(rel));
+        let scenarios_path = ctx.paths.scenarios_plan_path();
 
         if wants_surface {
             apply_surface_discovery(
@@ -247,14 +248,12 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
                 &staging_root,
                 Some(plan.lock.inputs_hash.as_str()),
                 manifest.as_ref(),
+                &lens_flake,
                 args.verbose,
             )?;
         }
 
         if wants_scenarios {
-            let scenarios_path = scenarios_path
-                .clone()
-                .ok_or_else(|| anyhow!("scenario_catalogs missing for planned scenario runs"))?;
             let binary_name = ensure_manifest_binary_name(manifest.as_ref(), binary_name)?;
             examples_report = Some(scenarios::run_scenarios(
                 &pack_root,
@@ -263,6 +262,8 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
                 &scenarios_path,
                 &lens_flake,
                 Some(ctx.paths.root()),
+                Some(&staging_root),
+                None,
                 args.verbose,
             )?);
         } else if wants_render {
@@ -301,9 +302,12 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
         }
 
         if wants_coverage {
-            let scenarios_path = scenarios_path
-                .clone()
-                .ok_or_else(|| anyhow!("scenario_catalogs missing for coverage ledger"))?;
+            if !scenarios_path.is_file() {
+                return Err(anyhow!(
+                    "scenarios plan missing at {}",
+                    scenarios_path.display()
+                ));
+            }
             let staged_surface = staging_root.join("inventory").join("surface.json");
             let surface_path = if staged_surface.is_file() {
                 staged_surface
@@ -452,6 +456,7 @@ pub fn run_status(args: StatusArgs) -> Result<()> {
 
     let config_state = load_config_state(&paths);
     let config_exists = !matches!(config_state, ConfigState::Missing);
+    let scenario_plan_state = load_scenario_plan_state(&paths);
 
     let (lock, lock_parse_error) = if paths.lock_path().is_file() {
         match enrich::load_lock(paths.root()) {
@@ -488,7 +493,25 @@ pub fn run_status(args: StatusArgs) -> Result<()> {
     let force_used = args.force && (!lock_status.present || lock_status.stale);
     let parse_errors_present = lock_parse_error.is_some() || plan_parse_error.is_some();
 
-    let summary = if let ConfigState::Invalid { code, message } = &config_state {
+    let legacy_probe_evidence = legacy_probe_evidence(&paths)?;
+    let summary = if !legacy_probe_evidence.is_empty() {
+        build_probe_migration_summary(
+            &paths,
+            binary_name.as_deref(),
+            lock_status,
+            legacy_probe_evidence,
+            force_used,
+        )?
+    } else if let ScenarioPlanState::Invalid { code, message } = &scenario_plan_state {
+        build_invalid_plan_summary(
+            &paths,
+            binary_name.as_deref(),
+            lock_status,
+            code,
+            message.clone(),
+            force_used,
+        )?
+    } else if let ConfigState::Invalid { code, message } = &config_state {
         build_invalid_config_summary(
             &paths,
             binary_name.as_deref(),
@@ -502,6 +525,7 @@ pub fn run_status(args: StatusArgs) -> Result<()> {
             &paths,
             binary_name.as_deref(),
             &config_state,
+            &scenario_plan_state,
             lock_status,
             lock_parse_error,
             plan_parse_error,
@@ -574,6 +598,12 @@ enum ConfigState {
     Invalid { code: &'static str, message: String },
 }
 
+enum ScenarioPlanState {
+    Missing,
+    Valid,
+    Invalid { code: &'static str, message: String },
+}
+
 fn load_config_state(paths: &enrich::DocPackPaths) -> ConfigState {
     let config_path = paths.config_path();
     if !config_path.is_file() {
@@ -589,6 +619,38 @@ fn load_config_state(paths: &enrich::DocPackPaths) -> ConfigState {
         },
         Err(err) => ConfigState::Invalid {
             code: "config_parse_error",
+            message: error_chain_message(&err),
+        },
+    }
+}
+
+fn load_scenario_plan_state(paths: &enrich::DocPackPaths) -> ScenarioPlanState {
+    let plan_path = paths.scenarios_plan_path();
+    if !plan_path.is_file() {
+        return ScenarioPlanState::Missing;
+    }
+    let bytes = match fs::read(&plan_path) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            return ScenarioPlanState::Invalid {
+                code: "scenario_plan_read_error",
+                message: err.to_string(),
+            }
+        }
+    };
+    let plan: scenarios::ScenarioPlan = match serde_json::from_slice(&bytes) {
+        Ok(plan) => plan,
+        Err(err) => {
+            return ScenarioPlanState::Invalid {
+                code: "scenario_plan_parse_error",
+                message: err.to_string(),
+            }
+        }
+    };
+    match scenarios::validate_plan(&plan) {
+        Ok(()) => ScenarioPlanState::Valid,
+        Err(err) => ScenarioPlanState::Invalid {
+            code: "scenario_plan_invalid",
             message: error_chain_message(&err),
         },
     }
@@ -637,10 +699,130 @@ fn build_invalid_config_summary(
     })
 }
 
+fn build_invalid_plan_summary(
+    paths: &enrich::DocPackPaths,
+    binary_name: Option<&str>,
+    lock_status: enrich::LockStatus,
+    code: &'static str,
+    message: String,
+    force_used: bool,
+) -> Result<enrich::StatusSummary> {
+    let evidence = paths.evidence_from_path(&paths.scenarios_plan_path())?;
+    let blocker = enrich::Blocker {
+        code: code.to_string(),
+        message,
+        evidence: vec![evidence],
+        next_action: None,
+    };
+    let stub = scenarios::plan_stub(binary_name);
+    Ok(enrich::StatusSummary {
+        schema_version: 1,
+        generated_at_epoch_ms: enrich::now_epoch_ms()?,
+        binary_name: binary_name.map(|name| name.to_string()),
+        lock: lock_status,
+        requirements: Vec::new(),
+        missing_artifacts: Vec::new(),
+        blockers: vec![blocker],
+        decision: enrich::Decision::Blocked,
+        decision_reason: Some(format!("blockers present: {}", code)),
+        next_action: enrich::NextAction::Edit {
+            path: "scenarios/plan.json".to_string(),
+            content: stub,
+            reason: "scenarios/plan.json invalid; replace with a minimal stub".to_string(),
+        },
+        warnings: Vec::new(),
+        force_used,
+    })
+}
+
+fn build_probe_migration_summary(
+    _paths: &enrich::DocPackPaths,
+    binary_name: Option<&str>,
+    lock_status: enrich::LockStatus,
+    evidence: Vec<enrich::EvidenceRef>,
+    force_used: bool,
+) -> Result<enrich::StatusSummary> {
+    let blocker = enrich::Blocker {
+        code: "probe_migration_required".to_string(),
+        message: "legacy probe artifacts detected".to_string(),
+        evidence: evidence.clone(),
+        next_action: None,
+    };
+    let stub = scenarios::plan_stub(binary_name);
+    Ok(enrich::StatusSummary {
+        schema_version: 1,
+        generated_at_epoch_ms: enrich::now_epoch_ms()?,
+        binary_name: binary_name.map(|name| name.to_string()),
+        lock: lock_status,
+        requirements: Vec::new(),
+        missing_artifacts: Vec::new(),
+        blockers: vec![blocker],
+        decision: enrich::Decision::Blocked,
+        decision_reason: Some("blockers present: probe_migration_required".to_string()),
+        next_action: enrich::NextAction::Edit {
+            path: "scenarios/plan.json".to_string(),
+            content: stub,
+            reason: "probe artifacts detected; migrate to scenarios/plan.json".to_string(),
+        },
+        warnings: Vec::new(),
+        force_used,
+    })
+}
+
+fn next_action_for_missing_inputs(
+    paths: &enrich::DocPackPaths,
+    binary_name: Option<&str>,
+    scenario_plan_state: &ScenarioPlanState,
+) -> enrich::NextAction {
+    if matches!(scenario_plan_state, ScenarioPlanState::Missing) {
+        return enrich::NextAction::Edit {
+            path: "scenarios/plan.json".to_string(),
+            content: scenarios::plan_stub(binary_name),
+            reason: "scenarios/plan.json missing; create a minimal stub".to_string(),
+        };
+    }
+    if !paths.pack_manifest_path().is_file() {
+        return enrich::NextAction::Edit {
+            path: "enrich/bootstrap.json".to_string(),
+            content: enrich::bootstrap_stub(),
+            reason: "pack missing; init requires binary; set enrich/bootstrap.json".to_string(),
+        };
+    }
+    enrich::NextAction::Edit {
+        path: "enrich/config.json".to_string(),
+        content: enrich::config_stub(),
+        reason: "config inputs missing; replace with a minimal stub".to_string(),
+    }
+}
+
+fn legacy_probe_evidence(paths: &enrich::DocPackPaths) -> Result<Vec<enrich::EvidenceRef>> {
+    let probes_root = paths.inventory_dir().join("probes");
+    if !probes_root.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut evidence = Vec::new();
+    let plan_path = probes_root.join("plan.json");
+    if plan_path.is_file() {
+        evidence.push(paths.evidence_from_path(&plan_path)?);
+    }
+    for file in crate::staging::collect_files_recursive(&probes_root)? {
+        if file.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        if file.file_name().and_then(|name| name.to_str()) == Some("plan.json") {
+            continue;
+        }
+        evidence.push(paths.evidence_from_path(&file)?);
+        break;
+    }
+    Ok(evidence)
+}
+
 fn build_parse_error_summary(
     paths: &enrich::DocPackPaths,
     binary_name: Option<&str>,
     config_state: &ConfigState,
+    scenario_plan_state: &ScenarioPlanState,
     lock_status: enrich::LockStatus,
     lock_parse_error: Option<String>,
     plan_parse_error: Option<String>,
@@ -693,20 +875,11 @@ fn build_parse_error_summary(
         ConfigState::Valid(config) => {
             let missing_inputs = enrich::resolve_inputs(config, paths.root()).is_err();
             if missing_inputs {
-                if !paths.pack_manifest_path().is_file() {
-                    Some(enrich::NextAction::Edit {
-                        path: "enrich/bootstrap.json".to_string(),
-                        content: enrich::bootstrap_stub(),
-                        reason: "pack missing; init requires binary; set enrich/bootstrap.json"
-                            .to_string(),
-                    })
-                } else {
-                    Some(enrich::NextAction::Edit {
-                        path: "enrich/config.json".to_string(),
-                        content: enrich::config_stub(),
-                        reason: "config inputs missing; replace with a minimal stub".to_string(),
-                    })
-                }
+                Some(next_action_for_missing_inputs(
+                    paths,
+                    binary_name,
+                    scenario_plan_state,
+                ))
             } else {
                 None
             }
@@ -966,8 +1139,8 @@ fn load_surface_for_render(
 fn install_usage_lens_templates(paths: &enrich::DocPackPaths, force: bool) -> Result<()> {
     write_usage_lens_template(
         paths.root(),
-        enrich::PROBE_LENS_TEMPLATE_REL,
-        templates::USAGE_FROM_PROBES_SQL,
+        enrich::SCENARIO_USAGE_LENS_TEMPLATE_REL,
+        templates::USAGE_FROM_SCENARIOS_SQL,
         force,
     )?;
     write_usage_lens_template(
@@ -978,23 +1151,32 @@ fn install_usage_lens_templates(paths: &enrich::DocPackPaths, force: bool) -> Re
     )?;
     write_usage_lens_template(
         paths.root(),
-        enrich::SUBCOMMANDS_FROM_PROBES_TEMPLATE_REL,
-        templates::SUBCOMMANDS_FROM_PROBES_SQL,
+        enrich::SUBCOMMANDS_FROM_SCENARIOS_TEMPLATE_REL,
+        templates::SUBCOMMANDS_FROM_SCENARIOS_SQL,
+        force,
+    )?;
+    write_usage_lens_template(
+        paths.root(),
+        enrich::OPTIONS_FROM_SCENARIOS_TEMPLATE_REL,
+        templates::OPTIONS_FROM_SCENARIOS_SQL,
         force,
     )?;
     Ok(())
 }
 
-fn install_probe_plan(paths: &enrich::DocPackPaths, force: bool) -> Result<()> {
-    let path = paths.probes_plan_path();
+fn install_scenario_plan(
+    paths: &enrich::DocPackPaths,
+    force: bool,
+    binary_name: Option<&str>,
+) -> Result<()> {
+    let path = paths.scenarios_plan_path();
     if path.is_file() && !force {
         return Ok(());
     }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
-    let plan = surface::default_probe_plan();
-    let text = serde_json::to_string_pretty(&plan).context("serialize probe plan")?;
+    let text = scenarios::plan_stub(binary_name);
     fs::write(&path, text.as_bytes()).with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }

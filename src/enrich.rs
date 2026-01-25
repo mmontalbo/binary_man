@@ -15,15 +15,17 @@ pub const PLAN_SCHEMA_VERSION: u32 = 1;
 pub const REPORT_SCHEMA_VERSION: u32 = 1;
 pub const HISTORY_SCHEMA_VERSION: u32 = 1;
 
-pub const PROBE_LENS_TEMPLATE_REL: &str = "queries/usage_from_probes.sql";
+pub const SCENARIO_USAGE_LENS_TEMPLATE_REL: &str = "queries/usage_from_scenarios.sql";
 pub const SCOPED_USAGE_LENS_TEMPLATE_REL: &str = "queries/usage_from_scoped_usage_functions.sql";
 pub const DEFAULT_LENS_TEMPLATE_REL: &str = "binary.lens/views/queries/string_occurrences.sql";
-pub const SUBCOMMANDS_FROM_PROBES_TEMPLATE_REL: &str = "queries/subcommands_from_probes.sql";
+pub const SUBCOMMANDS_FROM_SCENARIOS_TEMPLATE_REL: &str = "queries/subcommands_from_scenarios.sql";
+pub const OPTIONS_FROM_SCENARIOS_TEMPLATE_REL: &str = "queries/options_from_scenarios.sql";
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RequirementId {
     Surface,
+    Coverage,
     CoverageLedger,
     ExamplesReport,
     ManPage,
@@ -33,6 +35,7 @@ impl RequirementId {
     pub fn as_str(&self) -> &'static str {
         match self {
             RequirementId::Surface => "surface",
+            RequirementId::Coverage => "coverage",
             RequirementId::CoverageLedger => "coverage_ledger",
             RequirementId::ExamplesReport => "examples_report",
             RequirementId::ManPage => "man_page",
@@ -42,6 +45,7 @@ impl RequirementId {
     pub fn planned_action(&self) -> PlannedAction {
         match self {
             RequirementId::Surface => PlannedAction::SurfaceDiscovery,
+            RequirementId::Coverage => PlannedAction::CoverageLedger,
             RequirementId::CoverageLedger => PlannedAction::CoverageLedger,
             RequirementId::ExamplesReport => PlannedAction::ScenarioRuns,
             RequirementId::ManPage => PlannedAction::RenderManPage,
@@ -179,6 +183,8 @@ pub struct EnrichLock {
 pub struct SelectedInputs {
     #[serde(default)]
     pub usage_lens_templates: Vec<String>,
+    #[serde(default)]
+    pub scenario_plan: Option<String>,
     #[serde(default)]
     pub scenario_catalogs: Vec<String>,
     #[serde(default)]
@@ -382,12 +388,16 @@ impl DocPackPaths {
         self.root.join("inventory")
     }
 
-    pub fn probes_dir(&self) -> PathBuf {
-        self.inventory_dir().join("probes")
+    pub fn inventory_scenarios_dir(&self) -> PathBuf {
+        self.inventory_dir().join("scenarios")
     }
 
-    pub fn probes_plan_path(&self) -> PathBuf {
-        self.probes_dir().join("plan.json")
+    pub fn scenarios_dir(&self) -> PathBuf {
+        self.root.join("scenarios")
+    }
+
+    pub fn scenarios_plan_path(&self) -> PathBuf {
+        self.scenarios_dir().join("plan.json")
     }
 
     pub fn surface_path(&self) -> PathBuf {
@@ -425,7 +435,7 @@ pub fn default_requirements() -> Vec<RequirementId> {
 
 pub fn default_config() -> EnrichConfig {
     let mut usage_lens_templates = Vec::new();
-    usage_lens_templates.push(PROBE_LENS_TEMPLATE_REL.to_string());
+    usage_lens_templates.push(SCENARIO_USAGE_LENS_TEMPLATE_REL.to_string());
     usage_lens_templates.push(SCOPED_USAGE_LENS_TEMPLATE_REL.to_string());
     usage_lens_templates.push(DEFAULT_LENS_TEMPLATE_REL.to_string());
     EnrichConfig {
@@ -553,17 +563,6 @@ pub fn validate_config(config: &EnrichConfig) -> Result<()> {
         ));
     }
     let requirements = normalized_requirements(config);
-    let needs_scenarios = requirements.iter().any(|req| {
-        matches!(
-            req,
-            RequirementId::ExamplesReport | RequirementId::CoverageLedger
-        )
-    });
-    if needs_scenarios && config.scenario_catalogs.is_empty() {
-        return Err(anyhow!(
-            "scenario_catalogs must include at least one entry for examples/coverage requirements"
-        ));
-    }
     if config.scenario_catalogs.len() > 1 {
         return Err(anyhow!(
             "only a single scenario catalog is supported (got {})",
@@ -586,7 +585,12 @@ pub fn validate_config(config: &EnrichConfig) -> Result<()> {
 pub fn resolve_inputs(config: &EnrichConfig, doc_pack_root: &Path) -> Result<SelectedInputs> {
     let usage_lens_templates = config.usage_lens_templates.clone();
     let scenario_catalogs = config.scenario_catalogs.clone();
-    for rel in usage_lens_templates.iter().chain(scenario_catalogs.iter()) {
+    let scenario_plan = "scenarios/plan.json".to_string();
+    for rel in usage_lens_templates
+        .iter()
+        .chain(scenario_catalogs.iter())
+        .chain(std::iter::once(&scenario_plan))
+    {
         validate_relative_path(rel, "input")?;
         let path = doc_pack_root.join(rel);
         if !path.exists() {
@@ -600,6 +604,7 @@ pub fn resolve_inputs(config: &EnrichConfig, doc_pack_root: &Path) -> Result<Sel
     };
     Ok(SelectedInputs {
         usage_lens_templates,
+        scenario_plan: Some(scenario_plan),
         scenario_catalogs,
         fixtures_root,
     })
@@ -620,36 +625,21 @@ pub fn build_lock(
     {
         inputs.push(doc_pack_root.join(rel));
     }
+    if let Some(rel) = selected_inputs.scenario_plan.as_ref() {
+        inputs.push(doc_pack_root.join(rel));
+    }
     inputs.push(doc_pack_root.join("inventory").join("surface.seed.json"));
     inputs.push(doc_pack_root.join("binary.lens").join("manifest.json"));
-    inputs.push(doc_pack_root.join("scenarios"));
-    let probes_plan = doc_pack_root
-        .join("inventory")
-        .join("probes")
-        .join("plan.json");
-    if probes_plan.exists() {
-        inputs.push(probes_plan);
-    }
     if let Some(fixtures_root) = selected_inputs.fixtures_root.as_ref() {
         inputs.push(doc_pack_root.join(fixtures_root));
     }
-    let probes_config = doc_pack_root
-        .join("inventory")
-        .join("probes")
-        .join("config.json");
-    if probes_config.exists() {
-        inputs.push(probes_config);
-    }
-    let probes_config_dir = doc_pack_root
-        .join("inventory")
-        .join("probes")
-        .join("config");
-    if probes_config_dir.is_dir() {
-        inputs.push(probes_config_dir);
-    }
-    let subcommands_template = doc_pack_root.join(SUBCOMMANDS_FROM_PROBES_TEMPLATE_REL);
+    let subcommands_template = doc_pack_root.join(SUBCOMMANDS_FROM_SCENARIOS_TEMPLATE_REL);
     if subcommands_template.exists() {
         inputs.push(subcommands_template);
+    }
+    let options_template = doc_pack_root.join(OPTIONS_FROM_SCENARIOS_TEMPLATE_REL);
+    if options_template.exists() {
+        inputs.push(options_template);
     }
     inputs.sort();
     inputs.dedup();
