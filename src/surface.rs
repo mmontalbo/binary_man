@@ -488,7 +488,7 @@ pub fn apply_surface_discovery(
     if !subcommand_hint_evidence.is_empty() {
         let has_subcommands = items.iter().any(|item| item.kind == "subcommand");
         if !has_subcommands {
-            dedupe_evidence(&mut subcommand_hint_evidence);
+            enrich::dedupe_evidence_refs(&mut subcommand_hint_evidence);
             blockers.push(enrich::Blocker {
                 code: "surface_subcommands_missing".to_string(),
                 message: "multi-command usage detected but no subcommands extracted".to_string(),
@@ -699,11 +699,6 @@ fn merge_evidence(target: &mut Vec<enrich::EvidenceRef>, incoming: &[enrich::Evi
             target.push(entry.clone());
         }
     }
-}
-
-fn dedupe_evidence(entries: &mut Vec<enrich::EvidenceRef>) {
-    let mut seen = BTreeSet::new();
-    entries.retain(|entry| seen.insert(entry.path.clone()));
 }
 
 fn surface_item_key(item: &SurfaceItem) -> String {

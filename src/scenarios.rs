@@ -768,7 +768,7 @@ pub fn build_coverage_ledger(
         let mut evidence = entry.evidence.clone();
         evidence.push(surface_evidence.clone());
         evidence.push(plan_evidence.clone());
-        let evidence = dedup_evidence(evidence);
+        enrich::dedupe_evidence_refs(&mut evidence);
 
         entries.push(CoverageOptionEntry {
             option_id,
@@ -861,17 +861,6 @@ pub fn normalize_surface_id(token: &str) -> String {
 
 fn is_surface_item_kind(kind: &str) -> bool {
     matches!(kind, "option" | "command" | "subcommand")
-}
-
-fn dedup_evidence(entries: Vec<enrich::EvidenceRef>) -> Vec<enrich::EvidenceRef> {
-    let mut seen = BTreeSet::new();
-    let mut deduped = Vec::new();
-    for entry in entries {
-        if seen.insert(entry.path.clone()) {
-            deduped.push(entry);
-        }
-    }
-    deduped
 }
 
 fn display_path(path: &Path, base: Option<&Path>) -> String {

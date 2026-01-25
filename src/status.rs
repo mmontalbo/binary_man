@@ -308,7 +308,7 @@ fn evaluate_requirements(
                             continue;
                         }
                         let entry = surface_evidence_map.entry(normalized).or_default();
-                        merge_evidence_refs(entry, &item.evidence);
+                        entry.extend(item.evidence.iter().cloned());
                     }
 
                     for (id, item_evidence) in surface_evidence_map {
@@ -316,7 +316,7 @@ fn evaluate_requirements(
                             continue;
                         }
                         uncovered_ids.push(id);
-                        merge_evidence_refs(&mut evidence, &item_evidence);
+                        evidence.extend(item_evidence);
                     }
 
                     uncovered_ids.sort();
@@ -334,7 +334,7 @@ fn evaluate_requirements(
                     }
                 }
 
-                dedupe_evidence_refs(&mut evidence);
+                enrich::dedupe_evidence_refs(&mut evidence);
                 let (status, reason) = if !local_blockers.is_empty() {
                     (
                         enrich::RequirementState::Blocked,
@@ -872,23 +872,6 @@ fn empty_expect() -> scenarios::ScenarioExpect {
         stderr_regex_all: Vec::new(),
         stderr_regex_any: Vec::new(),
     }
-}
-
-fn merge_evidence_refs(target: &mut Vec<enrich::EvidenceRef>, incoming: &[enrich::EvidenceRef]) {
-    let mut seen = BTreeSet::new();
-    for entry in target.iter() {
-        seen.insert(entry.path.clone());
-    }
-    for entry in incoming {
-        if seen.insert(entry.path.clone()) {
-            target.push(entry.clone());
-        }
-    }
-}
-
-fn dedupe_evidence_refs(entries: &mut Vec<enrich::EvidenceRef>) {
-    let mut seen = BTreeSet::new();
-    entries.retain(|entry| seen.insert(entry.path.clone()));
 }
 
 pub fn planned_actions_from_requirements(

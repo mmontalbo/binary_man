@@ -2,6 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
+use std::collections::BTreeSet;
 use std::fmt;
 use std::fs;
 use std::io::Write;
@@ -211,6 +212,11 @@ pub struct RequirementStatus {
 pub struct EvidenceRef {
     pub path: String,
     pub sha256: Option<String>,
+}
+
+pub fn dedupe_evidence_refs(entries: &mut Vec<EvidenceRef>) {
+    let mut seen = BTreeSet::new();
+    entries.retain(|entry| seen.insert(entry.path.clone()));
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
