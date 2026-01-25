@@ -404,83 +404,101 @@ fn evaluate_requirements(
                     if multi_command {
                         requirement_evidence.push(surface_evidence.clone());
                     }
-                    let (status, reason, local_blockers) = if lock_status.present && !lock_status.stale
-                    {
-                        if !meta_path.is_file() {
-                            missing_artifacts.push(meta_evidence.path.clone());
+                    let (status, reason, local_blockers) =
+                        if lock_status.present && !lock_status.stale {
+                            if !meta_path.is_file() {
+                                missing_artifacts.push(meta_evidence.path.clone());
+                                (
+                                    enrich::RequirementState::Unmet,
+                                    "man metadata missing".to_string(),
+                                    Vec::new(),
+                                )
+                            } else {
+                                #[derive(Deserialize)]
+                                struct ManMetaInputs {
+                                    #[serde(default)]
+                                    inputs_hash: Option<String>,
+                                }
+                                let bytes = std::fs::read(&meta_path)
+                                    .with_context(|| format!("read {}", meta_path.display()))?;
+                                match serde_json::from_slice::<ManMetaInputs>(&bytes) {
+                                    Ok(meta) => {
+                                        let lock_hash = lock_status.inputs_hash.as_deref();
+                                        let stale = match (meta.inputs_hash.as_deref(), lock_hash) {
+                                            (Some(meta_hash), Some(lock_hash)) => {
+                                                meta_hash != lock_hash
+                                            }
+                                            (None, Some(_)) => true,
+                                            _ => false,
+                                        };
+                                        if stale {
+                                            (
+                                                enrich::RequirementState::Unmet,
+                                                "man outputs stale relative to lock".to_string(),
+                                                Vec::new(),
+                                            )
+                                        } else {
+                                            (
+                                                enrich::RequirementState::Met,
+                                                "man page present".to_string(),
+                                                Vec::new(),
+                                            )
+                                        }
+                                    }
+                                    Err(err) => {
+                                        let blocker = enrich::Blocker {
+                                            code: "man_meta_parse_error".to_string(),
+                                            message: err.to_string(),
+                                            evidence: vec![meta_evidence.clone()],
+                                            next_action: Some(format!(
+                                                "bman apply --doc-pack {}",
+                                                paths.root().display()
+                                            )),
+                                        };
+                                        (
+                                            enrich::RequirementState::Blocked,
+                                            "man metadata parse error".to_string(),
+                                            vec![blocker],
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
                             (
-                                enrich::RequirementState::Unmet,
-                                "man metadata missing".to_string(),
+                                enrich::RequirementState::Met,
+                                "man page present".to_string(),
                                 Vec::new(),
                             )
-                        } else {
-                            #[derive(Deserialize)]
-                            struct ManMetaInputs {
-                                #[serde(default)]
-                                inputs_hash: Option<String>,
-                            }
-                            let bytes = std::fs::read(&meta_path)
-                                .with_context(|| format!("read {}", meta_path.display()))?;
-                            match serde_json::from_slice::<ManMetaInputs>(&bytes) {
-                                Ok(meta) => {
-                                    let lock_hash = lock_status.inputs_hash.as_deref();
-                                    let stale = match (meta.inputs_hash.as_deref(), lock_hash) {
-                                        (Some(meta_hash), Some(lock_hash)) => meta_hash != lock_hash,
-                                        (None, Some(_)) => true,
-                                        _ => false,
-                                    };
-                                    if stale {
-                                        (
-                                            enrich::RequirementState::Unmet,
-                                            "man outputs stale relative to lock".to_string(),
-                                            Vec::new(),
-                                        )
+                        };
+                    let (status, reason, local_blockers) =
+                        if status == enrich::RequirementState::Met && multi_command {
+                            match std::fs::read_to_string(&man_path) {
+                                Ok(text) => {
+                                    if man_has_commands_section(&text) {
+                                        (status, reason, local_blockers)
                                     } else {
+                                        let blocker = enrich::Blocker {
+                                            code: "man_commands_missing".to_string(),
+                                            message:
+                                                "man page missing COMMANDS section for subcommands"
+                                                    .to_string(),
+                                            evidence: requirement_evidence.clone(),
+                                            next_action: Some(format!(
+                                                "bman apply --doc-pack {}",
+                                                paths.root().display()
+                                            )),
+                                        };
                                         (
-                                            enrich::RequirementState::Met,
-                                            "man page present".to_string(),
-                                            Vec::new(),
+                                            enrich::RequirementState::Blocked,
+                                            "man page missing COMMANDS section".to_string(),
+                                            vec![blocker],
                                         )
                                     }
                                 }
                                 Err(err) => {
                                     let blocker = enrich::Blocker {
-                                        code: "man_meta_parse_error".to_string(),
+                                        code: "man_read_error".to_string(),
                                         message: err.to_string(),
-                                        evidence: vec![meta_evidence.clone()],
-                                        next_action: Some(format!(
-                                            "bman apply --doc-pack {}",
-                                            paths.root().display()
-                                        )),
-                                    };
-                                    (
-                                        enrich::RequirementState::Blocked,
-                                        "man metadata parse error".to_string(),
-                                        vec![blocker],
-                                    )
-                                }
-                            }
-                        }
-                    } else {
-                        (
-                            enrich::RequirementState::Met,
-                            "man page present".to_string(),
-                            Vec::new(),
-                        )
-                    };
-                    let (status, reason, local_blockers) = if status == enrich::RequirementState::Met
-                        && multi_command
-                    {
-                        match std::fs::read_to_string(&man_path) {
-                            Ok(text) => {
-                                if man_has_commands_section(&text) {
-                                    (status, reason, local_blockers)
-                                } else {
-                                    let blocker = enrich::Blocker {
-                                        code: "man_commands_missing".to_string(),
-                                        message:
-                                            "man page missing COMMANDS section for subcommands"
-                                                .to_string(),
                                         evidence: requirement_evidence.clone(),
                                         next_action: Some(format!(
                                             "bman apply --doc-pack {}",
@@ -489,31 +507,14 @@ fn evaluate_requirements(
                                     };
                                     (
                                         enrich::RequirementState::Blocked,
-                                        "man page missing COMMANDS section".to_string(),
+                                        "man page read error".to_string(),
                                         vec![blocker],
                                     )
                                 }
                             }
-                            Err(err) => {
-                                let blocker = enrich::Blocker {
-                                    code: "man_read_error".to_string(),
-                                    message: err.to_string(),
-                                    evidence: requirement_evidence.clone(),
-                                    next_action: Some(format!(
-                                        "bman apply --doc-pack {}",
-                                        paths.root().display()
-                                    )),
-                                };
-                                (
-                                    enrich::RequirementState::Blocked,
-                                    "man page read error".to_string(),
-                                    vec![blocker],
-                                )
-                            }
-                        }
-                    } else {
-                        (status, reason, local_blockers)
-                    };
+                        } else {
+                            (status, reason, local_blockers)
+                        };
                     blockers.extend(local_blockers.clone());
                     requirements.push(enrich::RequirementStatus {
                         id: req.clone(),
