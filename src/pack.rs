@@ -5,20 +5,20 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct BinaryHashes {
     pub sha256: String,
     pub md5: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct ToolInfo {
     pub name: String,
     pub version: String,
     pub revision: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct PackManifest {
     pub binary_hashes: BinaryHashes,
     pub binary_lens_version: String,
@@ -61,23 +61,6 @@ struct LensQuery {
     rendered_sql: String,
 }
 
-pub fn resolve_pack_root(path: &Path) -> Result<PathBuf> {
-    let path = path
-        .canonicalize()
-        .with_context(|| format!("resolve pack path {}", path.display()))?;
-    if path.is_dir() && path.file_name().and_then(|name| name.to_str()) == Some("binary.lens") {
-        return Ok(path);
-    }
-    let candidate = path.join("binary.lens");
-    if candidate.is_dir() {
-        return Ok(candidate);
-    }
-    Err(anyhow!(
-        "pack root not found; expected binary.lens at {}",
-        path.display()
-    ))
-}
-
 pub fn generate_pack(binary: &str, out_dir: &Path, lens_flake: &str) -> Result<PathBuf> {
     fs::create_dir_all(out_dir).context("create pack output dir")?;
 
@@ -106,9 +89,12 @@ pub fn generate_pack(binary: &str, out_dir: &Path, lens_flake: &str) -> Result<P
     Ok(pack_root)
 }
 
-pub fn load_pack_context(pack_root: &Path) -> Result<PackContext> {
+pub fn load_pack_context_with_template(
+    pack_root: &Path,
+    template_path: &Path,
+) -> Result<PackContext> {
     let manifest = load_manifest(pack_root)?;
-    let usage_lens = run_usage_lens(pack_root, &manifest.binary_name)?;
+    let usage_lens = run_usage_lens(pack_root, template_path)?;
     if usage_lens.rows.is_empty() {
         return Err(anyhow!("usage lens returned no rows"));
     }
@@ -135,8 +121,8 @@ pub fn load_manifest(pack_root: &Path) -> Result<PackManifest> {
     Ok(manifest)
 }
 
-fn run_usage_lens(pack_root: &Path, binary_name: &str) -> Result<UsageLensOutput> {
-    let query = render_usage_lens(pack_root, binary_name)?;
+fn run_usage_lens(pack_root: &Path, template_path: &Path) -> Result<UsageLensOutput> {
+    let query = render_usage_lens(pack_root, template_path)?;
     let output = run_duckdb_query(&query.rendered_sql, pack_root)?;
     let rows: Vec<UsageEvidenceRow> =
         serde_json::from_slice(&output).context("parse usage evidence JSON output")?;
@@ -150,45 +136,41 @@ fn run_usage_lens(pack_root: &Path, binary_name: &str) -> Result<UsageLensOutput
     })
 }
 
-fn render_usage_lens(pack_root: &Path, binary_name: &str) -> Result<LensQuery> {
-    let lens_filename = format!("{binary_name}_usage_evidence.sql");
-    let repo_lens_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("queries")
-        .join(&lens_filename);
-    let lens_path = match pack_root.parent() {
-        Some(doc_pack_root) => {
-            let doc_pack_path = doc_pack_root.join("queries").join(&lens_filename);
-            if doc_pack_path.is_file() {
-                doc_pack_path
-            } else {
-                repo_lens_path
-            }
-        }
-        None => repo_lens_path,
-    };
-    let template_sql = fs::read_to_string(&lens_path)
-        .with_context(|| format!("read usage lens {}", lens_path.display()))?;
-
-    let call_edges = facts_relative_path(pack_root, "call_edges.parquet")?;
-    let callgraph_nodes = facts_relative_path(pack_root, "callgraph_nodes.parquet")?;
-    let callsite_args = facts_relative_path(pack_root, "callsite_arg_observations.parquet")?;
-    let callsites = facts_relative_path(pack_root, "callsites.parquet")?;
-    let strings = facts_relative_path(pack_root, "strings.parquet")?;
-
+fn render_usage_lens(pack_root: &Path, template_path: &Path) -> Result<LensQuery> {
+    let template_sql = fs::read_to_string(template_path)
+        .with_context(|| format!("read usage lens template {}", template_path.display()))?;
     let mut rendered_sql = template_sql.clone();
-    let replacements = [
-        ("{{call_edges}}", call_edges),
-        ("{{callgraph_nodes}}", callgraph_nodes),
-        ("{{callsite_arg_observations}}", callsite_args),
-        ("{{callsites}}", callsites),
-        ("{{strings}}", strings),
-    ];
-    for (token, path) in replacements {
-        rendered_sql = rendered_sql.replace(token, &sql_quote_literal(&path));
+    if template_sql.contains("{{call_edges}}") {
+        let call_edges = facts_relative_path(pack_root, "call_edges.parquet")?;
+        let callgraph_nodes = facts_relative_path(pack_root, "callgraph_nodes.parquet")?;
+        let callsite_args = facts_relative_path(pack_root, "callsite_arg_observations.parquet")?;
+        let callsites = facts_relative_path(pack_root, "callsites.parquet")?;
+        let strings = facts_relative_path(pack_root, "strings.parquet")?;
+
+        let replacements = [
+            ("{{call_edges}}", call_edges),
+            ("{{callgraph_nodes}}", callgraph_nodes),
+            ("{{callsite_arg_observations}}", callsite_args),
+            ("{{callsites}}", callsites),
+            ("{{strings}}", strings),
+        ];
+        for (token, path) in replacements {
+            rendered_sql = rendered_sql.replace(token, &sql_quote_literal(&path));
+        }
+    }
+
+    let loader_path = pack_root
+        .join("views")
+        .join("queries")
+        .join("load_tables.sql");
+    if loader_path.is_file() {
+        let loader_sql = fs::read_to_string(&loader_path)
+            .with_context(|| format!("read usage lens loader {}", loader_path.display()))?;
+        rendered_sql = format!("{loader_sql}\n\n{rendered_sql}");
     }
 
     Ok(LensQuery {
-        template_path: lens_path,
+        template_path: template_path.to_path_buf(),
         template_sql,
         rendered_sql,
     })
@@ -202,7 +184,7 @@ fn facts_relative_path(pack_root: &Path, file_name: &str) -> Result<String> {
     Ok(format!("facts/{}", file_name))
 }
 
-fn run_duckdb_query(sql: &str, cwd: &Path) -> Result<Vec<u8>> {
+pub(crate) fn run_duckdb_query(sql: &str, cwd: &Path) -> Result<Vec<u8>> {
     let output = Command::new("nix")
         .args(["run", "nixpkgs#duckdb", "--", "-json", "-c"])
         .arg(sql)

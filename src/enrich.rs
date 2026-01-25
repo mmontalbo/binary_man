@@ -1,0 +1,827 @@
+use anyhow::{anyhow, Context, Result};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::cmp::Ordering;
+use std::fmt;
+use std::fs;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+pub const CONFIG_SCHEMA_VERSION: u32 = 1;
+pub const BOOTSTRAP_SCHEMA_VERSION: u32 = 1;
+pub const LOCK_SCHEMA_VERSION: u32 = 1;
+pub const PLAN_SCHEMA_VERSION: u32 = 1;
+pub const STATE_SCHEMA_VERSION: u32 = 1;
+pub const REPORT_SCHEMA_VERSION: u32 = 1;
+pub const HISTORY_SCHEMA_VERSION: u32 = 1;
+
+pub const PROBE_LENS_TEMPLATE_REL: &str = "queries/usage_from_probes.sql";
+pub const SCOPED_USAGE_LENS_TEMPLATE_REL: &str =
+    "queries/usage_from_scoped_usage_functions.sql";
+pub const DEFAULT_LENS_TEMPLATE_REL: &str = "binary.lens/views/queries/string_occurrences.sql";
+pub const SUBCOMMANDS_FROM_PROBES_TEMPLATE_REL: &str = "queries/subcommands_from_probes.sql";
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RequirementId {
+    Surface,
+    CoverageLedger,
+    ExamplesReport,
+    ManPage,
+}
+
+impl RequirementId {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RequirementId::Surface => "surface",
+            RequirementId::CoverageLedger => "coverage_ledger",
+            RequirementId::ExamplesReport => "examples_report",
+            RequirementId::ManPage => "man_page",
+        }
+    }
+
+    pub fn planned_action(&self) -> PlannedAction {
+        match self {
+            RequirementId::Surface => PlannedAction::SurfaceDiscovery,
+            RequirementId::CoverageLedger => PlannedAction::CoverageLedger,
+            RequirementId::ExamplesReport => PlannedAction::ScenarioRuns,
+            RequirementId::ManPage => PlannedAction::RenderManPage,
+        }
+    }
+}
+
+impl fmt::Display for RequirementId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum PlannedAction {
+    CoverageLedger,
+    RenderManPage,
+    ScenarioRuns,
+    SurfaceDiscovery,
+}
+
+impl PlannedAction {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PlannedAction::CoverageLedger => "coverage_ledger",
+            PlannedAction::RenderManPage => "render_man_page",
+            PlannedAction::ScenarioRuns => "scenario_runs",
+            PlannedAction::SurfaceDiscovery => "surface_discovery",
+        }
+    }
+}
+
+impl fmt::Display for PlannedAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Ord for PlannedAction {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.as_str().cmp(other.as_str())
+    }
+}
+
+impl PartialOrd for PlannedAction {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RequirementState {
+    Met,
+    Unmet,
+    Blocked,
+}
+
+impl RequirementState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RequirementState::Met => "met",
+            RequirementState::Unmet => "unmet",
+            RequirementState::Blocked => "blocked",
+        }
+    }
+}
+
+impl fmt::Display for RequirementState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Decision {
+    Complete,
+    Incomplete,
+    Blocked,
+}
+
+impl Decision {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Decision::Complete => "complete",
+            Decision::Incomplete => "incomplete",
+            Decision::Blocked => "blocked",
+        }
+    }
+}
+
+impl fmt::Display for Decision {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct EnrichConfig {
+    pub schema_version: u32,
+    #[serde(default)]
+    pub usage_lens_templates: Vec<String>,
+    #[serde(default)]
+    pub scenario_catalogs: Vec<String>,
+    #[serde(default)]
+    pub requirements: Vec<RequirementId>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct EnrichBootstrap {
+    pub schema_version: u32,
+    pub binary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lens_flake: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct EnrichLock {
+    pub schema_version: u32,
+    pub generated_at_epoch_ms: u128,
+    pub binary_name: Option<String>,
+    pub config_path: String,
+    pub inputs: Vec<String>,
+    pub inputs_hash: String,
+    pub selected_inputs: SelectedInputs,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+#[serde(deny_unknown_fields)]
+pub struct SelectedInputs {
+    #[serde(default)]
+    pub usage_lens_templates: Vec<String>,
+    #[serde(default)]
+    pub scenario_catalogs: Vec<String>,
+    #[serde(default)]
+    pub fixtures_root: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct LockStatus {
+    pub present: bool,
+    pub stale: bool,
+    pub inputs_hash: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct RequirementStatus {
+    pub id: RequirementId,
+    pub status: RequirementState,
+    pub reason: String,
+    pub evidence: Vec<EvidenceRef>,
+    pub blockers: Vec<Blocker>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct EvidenceRef {
+    pub path: String,
+    pub sha256: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct Blocker {
+    pub code: String,
+    pub message: String,
+    pub evidence: Vec<EvidenceRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_action: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum NextAction {
+    Command {
+        command: String,
+        reason: String,
+    },
+    Edit {
+        path: String,
+        content: String,
+        reason: String,
+    },
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct StatusSummary {
+    pub schema_version: u32,
+    pub generated_at_epoch_ms: u128,
+    pub binary_name: Option<String>,
+    pub lock: LockStatus,
+    pub requirements: Vec<RequirementStatus>,
+    pub missing_artifacts: Vec<String>,
+    pub blockers: Vec<Blocker>,
+    pub decision: Decision,
+    pub decision_reason: Option<String>,
+    pub next_action: NextAction,
+    pub warnings: Vec<String>,
+    pub force_used: bool,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct EnrichState {
+    pub schema_version: u32,
+    pub generated_at_epoch_ms: u128,
+    pub binary_name: Option<String>,
+    pub status: StatusSummary,
+    pub last_run: Option<EnrichRunSummary>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct EnrichRunSummary {
+    pub step: String,
+    pub started_at_epoch_ms: u128,
+    pub finished_at_epoch_ms: u128,
+    pub success: bool,
+    pub inputs_hash: Option<String>,
+    pub outputs_hash: Option<String>,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct EnrichHistoryEntry {
+    pub schema_version: u32,
+    pub started_at_epoch_ms: u128,
+    pub finished_at_epoch_ms: u128,
+    pub step: String,
+    pub inputs_hash: Option<String>,
+    pub outputs_hash: Option<String>,
+    pub success: bool,
+    pub message: Option<String>,
+    pub force_used: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct EnrichPlan {
+    pub schema_version: u32,
+    pub generated_at_epoch_ms: u128,
+    pub binary_name: Option<String>,
+    pub lock: EnrichLock,
+    pub requirements: Vec<RequirementStatus>,
+    pub planned_actions: Vec<PlannedAction>,
+    pub next_action: NextAction,
+    pub decision: Decision,
+    pub decision_reason: Option<String>,
+    pub force_used: bool,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct EnrichReport {
+    pub schema_version: u32,
+    pub generated_at_epoch_ms: u128,
+    pub binary_name: Option<String>,
+    pub lock: Option<EnrichLock>,
+    pub requirements: Vec<RequirementStatus>,
+    pub blockers: Vec<Blocker>,
+    pub missing_artifacts: Vec<String>,
+    pub decision: Decision,
+    pub decision_reason: Option<String>,
+    pub next_action: NextAction,
+    pub last_run: Option<EnrichRunSummary>,
+    pub force_used: bool,
+}
+
+pub fn config_path(doc_pack_root: &Path) -> PathBuf {
+    doc_pack_root.join("enrich").join("config.json")
+}
+
+pub fn bootstrap_path(doc_pack_root: &Path) -> PathBuf {
+    doc_pack_root.join("enrich").join("bootstrap.json")
+}
+
+pub fn lock_path(doc_pack_root: &Path) -> PathBuf {
+    doc_pack_root.join("enrich").join("lock.json")
+}
+
+pub fn plan_path(doc_pack_root: &Path) -> PathBuf {
+    doc_pack_root.join("enrich").join("plan.out.json")
+}
+
+pub fn state_path(doc_pack_root: &Path) -> PathBuf {
+    doc_pack_root.join("enrich").join("state.json")
+}
+
+pub fn report_path(doc_pack_root: &Path) -> PathBuf {
+    doc_pack_root.join("enrich").join("report.json")
+}
+
+pub fn history_path(doc_pack_root: &Path) -> PathBuf {
+    doc_pack_root.join("enrich").join("history.jsonl")
+}
+
+#[derive(Debug, Clone)]
+pub struct DocPackPaths {
+    root: PathBuf,
+}
+
+impl DocPackPaths {
+    pub fn new(root: PathBuf) -> Self {
+        Self { root }
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn enrich_dir(&self) -> PathBuf {
+        self.root.join("enrich")
+    }
+
+    pub fn config_path(&self) -> PathBuf {
+        self.enrich_dir().join("config.json")
+    }
+
+    pub fn lock_path(&self) -> PathBuf {
+        self.enrich_dir().join("lock.json")
+    }
+
+    pub fn plan_path(&self) -> PathBuf {
+        self.enrich_dir().join("plan.out.json")
+    }
+
+    pub fn state_path(&self) -> PathBuf {
+        self.enrich_dir().join("state.json")
+    }
+
+    pub fn txns_root(&self) -> PathBuf {
+        self.enrich_dir().join("txns")
+    }
+
+    pub fn txn_root(&self, txn_id: &str) -> PathBuf {
+        self.txns_root().join(txn_id)
+    }
+
+    pub fn txn_staging_root(&self, txn_id: &str) -> PathBuf {
+        self.txn_root(txn_id).join("staging")
+    }
+
+    pub fn pack_root(&self) -> PathBuf {
+        self.root.join("binary.lens")
+    }
+
+    pub fn pack_manifest_path(&self) -> PathBuf {
+        self.pack_root().join("manifest.json")
+    }
+
+    pub fn inventory_dir(&self) -> PathBuf {
+        self.root.join("inventory")
+    }
+
+    pub fn probes_dir(&self) -> PathBuf {
+        self.inventory_dir().join("probes")
+    }
+
+    pub fn probes_plan_path(&self) -> PathBuf {
+        self.probes_dir().join("plan.json")
+    }
+
+    pub fn surface_path(&self) -> PathBuf {
+        self.inventory_dir().join("surface.json")
+    }
+
+    pub fn surface_seed_path(&self) -> PathBuf {
+        self.inventory_dir().join("surface.seed.json")
+    }
+
+    pub fn man_dir(&self) -> PathBuf {
+        self.root.join("man")
+    }
+
+    pub fn man_page_path(&self, binary_name: &str) -> PathBuf {
+        self.man_dir().join(format!("{binary_name}.1"))
+    }
+
+    pub fn examples_report_path(&self) -> PathBuf {
+        self.man_dir().join("examples_report.json")
+    }
+
+    pub fn usage_evidence_path(&self) -> PathBuf {
+        self.man_dir().join("usage_evidence.json")
+    }
+
+    pub fn usage_lens_template_path(&self) -> PathBuf {
+        self.man_dir().join("usage_lens.template.sql")
+    }
+
+    pub fn usage_lens_rendered_path(&self) -> PathBuf {
+        self.man_dir().join("usage_lens.sql")
+    }
+
+    pub fn rel_path(&self, path: &Path) -> Result<String> {
+        rel_path(&self.root, path)
+    }
+
+    pub fn evidence_from_path(&self, path: &Path) -> Result<EvidenceRef> {
+        evidence_from_path(&self.root, path)
+    }
+}
+
+pub fn default_requirements() -> Vec<RequirementId> {
+    vec![RequirementId::Surface, RequirementId::ManPage]
+}
+
+pub fn default_config() -> EnrichConfig {
+    let mut usage_lens_templates = Vec::new();
+    usage_lens_templates.push(PROBE_LENS_TEMPLATE_REL.to_string());
+    usage_lens_templates.push(SCOPED_USAGE_LENS_TEMPLATE_REL.to_string());
+    usage_lens_templates.push(DEFAULT_LENS_TEMPLATE_REL.to_string());
+    EnrichConfig {
+        schema_version: CONFIG_SCHEMA_VERSION,
+        usage_lens_templates,
+        scenario_catalogs: Vec::new(),
+        requirements: default_requirements(),
+    }
+}
+
+pub fn config_stub() -> String {
+    let config = default_config();
+    serde_json::to_string_pretty(&config).expect("serialize config stub")
+}
+
+pub fn bootstrap_stub() -> String {
+    let stub = EnrichBootstrap {
+        schema_version: BOOTSTRAP_SCHEMA_VERSION,
+        binary: "REPLACE_ME".to_string(),
+        lens_flake: None,
+    };
+    serde_json::to_string_pretty(&stub).expect("serialize bootstrap stub")
+}
+
+pub fn load_config(doc_pack_root: &Path) -> Result<EnrichConfig> {
+    let path = config_path(doc_pack_root);
+    let bytes = fs::read(&path).with_context(|| format!("read config {}", path.display()))?;
+    let config: EnrichConfig =
+        serde_json::from_slice(&bytes).context("parse enrich config JSON")?;
+    Ok(config)
+}
+
+pub fn load_bootstrap_optional(doc_pack_root: &Path) -> Result<Option<EnrichBootstrap>> {
+    let path = bootstrap_path(doc_pack_root);
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let bytes = fs::read(&path).with_context(|| format!("read bootstrap {}", path.display()))?;
+    let bootstrap: EnrichBootstrap =
+        serde_json::from_slice(&bytes).context("parse enrich bootstrap JSON")?;
+    validate_bootstrap(&bootstrap)?;
+    Ok(Some(bootstrap))
+}
+
+fn validate_bootstrap(bootstrap: &EnrichBootstrap) -> Result<()> {
+    if bootstrap.schema_version != BOOTSTRAP_SCHEMA_VERSION {
+        return Err(anyhow!(
+            "unsupported bootstrap schema_version {}",
+            bootstrap.schema_version
+        ));
+    }
+    if bootstrap.binary.trim().is_empty() {
+        return Err(anyhow!("bootstrap binary must be non-empty"));
+    }
+    Ok(())
+}
+
+pub fn write_config(doc_pack_root: &Path, config: &EnrichConfig) -> Result<()> {
+    let path = config_path(doc_pack_root);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).context("create enrich dir")?;
+    }
+    let text = serde_json::to_string_pretty(config).context("serialize enrich config")?;
+    fs::write(&path, text.as_bytes()).with_context(|| format!("write {}", path.display()))?;
+    Ok(())
+}
+
+pub fn load_lock(doc_pack_root: &Path) -> Result<EnrichLock> {
+    let path = lock_path(doc_pack_root);
+    let bytes = fs::read(&path).with_context(|| format!("read lock {}", path.display()))?;
+    let lock: EnrichLock = serde_json::from_slice(&bytes).context("parse enrich lock JSON")?;
+    Ok(lock)
+}
+
+pub fn write_lock(doc_pack_root: &Path, lock: &EnrichLock) -> Result<()> {
+    let path = lock_path(doc_pack_root);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).context("create enrich dir")?;
+    }
+    let text = serde_json::to_string_pretty(lock).context("serialize enrich lock")?;
+    fs::write(&path, text.as_bytes()).with_context(|| format!("write {}", path.display()))?;
+    Ok(())
+}
+
+pub fn write_state(doc_pack_root: &Path, state: &EnrichState) -> Result<()> {
+    let path = state_path(doc_pack_root);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).context("create enrich dir")?;
+    }
+    let text = serde_json::to_string_pretty(state).context("serialize enrich state")?;
+    fs::write(&path, text.as_bytes()).with_context(|| format!("write {}", path.display()))?;
+    Ok(())
+}
+
+pub fn write_report(doc_pack_root: &Path, report: &EnrichReport) -> Result<()> {
+    let path = report_path(doc_pack_root);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).context("create enrich dir")?;
+    }
+    let text = serde_json::to_string_pretty(report).context("serialize enrich report")?;
+    fs::write(&path, text.as_bytes()).with_context(|| format!("write {}", path.display()))?;
+    Ok(())
+}
+
+pub fn append_history(doc_pack_root: &Path, entry: &EnrichHistoryEntry) -> Result<()> {
+    let path = history_path(doc_pack_root);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).context("create enrich dir")?;
+    }
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .with_context(|| format!("open {}", path.display()))?;
+    let line = serde_json::to_string(entry).context("serialize enrich history entry")?;
+    file.write_all(line.as_bytes())
+        .with_context(|| format!("write {}", path.display()))?;
+    file.write_all(b"\n")
+        .with_context(|| format!("write {}", path.display()))?;
+    Ok(())
+}
+
+pub fn normalized_requirements(config: &EnrichConfig) -> Vec<RequirementId> {
+    if config.requirements.is_empty() {
+        return default_requirements();
+    }
+    config.requirements.clone()
+}
+
+pub fn validate_config(config: &EnrichConfig) -> Result<()> {
+    if config.schema_version != CONFIG_SCHEMA_VERSION {
+        return Err(anyhow!(
+            "unsupported enrich config schema_version {}",
+            config.schema_version
+        ));
+    }
+    let requirements = normalized_requirements(config);
+    let needs_scenarios = requirements.iter().any(|req| {
+        matches!(
+            req,
+            RequirementId::ExamplesReport | RequirementId::CoverageLedger
+        )
+    });
+    if needs_scenarios && config.scenario_catalogs.is_empty() {
+        return Err(anyhow!(
+            "scenario_catalogs must include at least one entry for examples/coverage requirements"
+        ));
+    }
+    if config.scenario_catalogs.len() > 1 {
+        return Err(anyhow!(
+            "only a single scenario catalog is supported (got {})",
+            config.scenario_catalogs.len()
+        ));
+    }
+    let needs_lens = requirements
+        .iter()
+        .any(|req| matches!(req, RequirementId::ManPage));
+    if needs_lens && config.usage_lens_templates.is_empty() {
+        return Err(anyhow!(
+            "usage_lens_templates must include at least one entry for man/coverage requirements"
+        ));
+    }
+    validate_relative_list(&config.usage_lens_templates, "usage_lens_templates")?;
+    validate_relative_list(&config.scenario_catalogs, "scenario_catalogs")?;
+    Ok(())
+}
+
+pub fn resolve_inputs(
+    config: &EnrichConfig,
+    doc_pack_root: &Path,
+) -> Result<SelectedInputs> {
+    let usage_lens_templates = config.usage_lens_templates.clone();
+    let scenario_catalogs = config.scenario_catalogs.clone();
+    for rel in usage_lens_templates.iter().chain(scenario_catalogs.iter()) {
+        validate_relative_path(rel, "input")?;
+        let path = doc_pack_root.join(rel);
+        if !path.exists() {
+            return Err(anyhow!("missing input {}", rel));
+        }
+    }
+    let fixtures_root = if doc_pack_root.join("fixtures").is_dir() {
+        Some("fixtures".to_string())
+    } else {
+        None
+    };
+    Ok(SelectedInputs {
+        usage_lens_templates,
+        scenario_catalogs,
+        fixtures_root,
+    })
+}
+
+pub fn build_lock(
+    doc_pack_root: &Path,
+    config: &EnrichConfig,
+    binary_name: Option<&str>,
+) -> Result<EnrichLock> {
+    validate_config(config)?;
+    let selected_inputs = resolve_inputs(config, doc_pack_root)?;
+    let mut inputs = vec![config_path(doc_pack_root)];
+    for rel in selected_inputs
+        .usage_lens_templates
+        .iter()
+        .chain(selected_inputs.scenario_catalogs.iter())
+    {
+        inputs.push(doc_pack_root.join(rel));
+    }
+    inputs.push(doc_pack_root.join("inventory").join("surface.seed.json"));
+    inputs.push(doc_pack_root.join("binary.lens").join("manifest.json"));
+    inputs.push(doc_pack_root.join("scenarios"));
+    let probes_plan = doc_pack_root.join("inventory").join("probes").join("plan.json");
+    if probes_plan.exists() {
+        inputs.push(probes_plan);
+    }
+    if let Some(fixtures_root) = selected_inputs.fixtures_root.as_ref() {
+        inputs.push(doc_pack_root.join(fixtures_root));
+    }
+    let probes_config = doc_pack_root
+        .join("inventory")
+        .join("probes")
+        .join("config.json");
+    if probes_config.exists() {
+        inputs.push(probes_config);
+    }
+    let probes_config_dir = doc_pack_root.join("inventory").join("probes").join("config");
+    if probes_config_dir.is_dir() {
+        inputs.push(probes_config_dir);
+    }
+    let subcommands_template = doc_pack_root.join(SUBCOMMANDS_FROM_PROBES_TEMPLATE_REL);
+    if subcommands_template.exists() {
+        inputs.push(subcommands_template);
+    }
+    inputs.sort();
+    inputs.dedup();
+    let inputs_hash = hash_paths(doc_pack_root, &inputs)?;
+    let inputs_rel = inputs
+        .iter()
+        .map(|path| rel_path(doc_pack_root, path))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(EnrichLock {
+        schema_version: LOCK_SCHEMA_VERSION,
+        generated_at_epoch_ms: now_epoch_ms()?,
+        binary_name: binary_name.map(|name| name.to_string()),
+        config_path: rel_path(doc_pack_root, &config_path(doc_pack_root))?,
+        inputs: inputs_rel,
+        inputs_hash,
+        selected_inputs,
+    })
+}
+
+pub fn lock_status(doc_pack_root: &Path, lock: Option<&EnrichLock>) -> Result<LockStatus> {
+    let Some(lock) = lock else {
+        return Ok(LockStatus {
+            present: false,
+            stale: false,
+            inputs_hash: None,
+        });
+    };
+    let input_paths = lock
+        .inputs
+        .iter()
+        .map(|rel| doc_pack_root.join(rel))
+        .collect::<Vec<_>>();
+    let current_hash = hash_paths(doc_pack_root, &input_paths)?;
+    let stale = current_hash != lock.inputs_hash;
+    Ok(LockStatus {
+        present: true,
+        stale,
+        inputs_hash: Some(lock.inputs_hash.clone()),
+    })
+}
+
+pub fn rel_path(doc_pack_root: &Path, path: &Path) -> Result<String> {
+    let rel = path
+        .strip_prefix(doc_pack_root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .to_string();
+    Ok(rel)
+}
+
+pub fn validate_relative_path(rel: &str, label: &str) -> Result<()> {
+    let path = Path::new(rel);
+    if path.is_absolute() || has_parent_components(path) {
+        return Err(anyhow!(
+            "{label} entries must be relative paths without '..' (got {rel:?})"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_relative_list(entries: &[String], label: &str) -> Result<()> {
+    for rel in entries {
+        validate_relative_path(rel, label)?;
+    }
+    Ok(())
+}
+
+fn has_parent_components(path: &Path) -> bool {
+    path.components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+}
+
+pub fn hash_paths(doc_pack_root: &Path, paths: &[PathBuf]) -> Result<String> {
+    let mut hasher = Sha256::new();
+    let mut sorted = paths.to_vec();
+    sorted.sort();
+    for path in sorted {
+        hash_path(&mut hasher, doc_pack_root, &path)?;
+    }
+    let digest = hasher.finalize();
+    Ok(format!("{:x}", digest))
+}
+
+pub fn now_epoch_ms() -> Result<u128> {
+    Ok(SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("compute timestamp")?
+        .as_millis())
+}
+
+fn hash_path(hasher: &mut Sha256, root: &Path, path: &Path) -> Result<()> {
+    let rel = path.strip_prefix(root).unwrap_or(path);
+    if !path.exists() {
+        hasher.update(b"missing:");
+        hasher.update(rel.to_string_lossy().as_bytes());
+        return Ok(());
+    }
+    let meta = fs::symlink_metadata(path).with_context(|| format!("inspect {}", path.display()))?;
+    let file_type = meta.file_type();
+    if file_type.is_symlink() {
+        hasher.update(b"symlink:");
+        hasher.update(rel.to_string_lossy().as_bytes());
+        let target = fs::read_link(path).with_context(|| format!("read {}", path.display()))?;
+        hasher.update(target.to_string_lossy().as_bytes());
+        return Ok(());
+    }
+    if file_type.is_dir() {
+        hasher.update(b"dir:");
+        hasher.update(rel.to_string_lossy().as_bytes());
+        let mut entries: Vec<_> = fs::read_dir(path)
+            .with_context(|| format!("read {}", path.display()))?
+            .filter_map(|entry| entry.ok())
+            .collect();
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            hash_path(hasher, root, &entry.path())?;
+        }
+        return Ok(());
+    }
+    if file_type.is_file() {
+        hasher.update(b"file:");
+        hasher.update(rel.to_string_lossy().as_bytes());
+        let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
+        hasher.update(&bytes);
+        return Ok(());
+    }
+    Ok(())
+}
+
+pub fn evidence_from_path(doc_pack_root: &Path, path: &Path) -> Result<EvidenceRef> {
+    let rel = rel_path(doc_pack_root, path)?;
+    let sha256 = if path.exists() {
+        let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
+        let mut hasher = Sha256::new();
+        hasher.update(&bytes);
+        Some(format!("{:x}", hasher.finalize()))
+    } else {
+        None
+    };
+    Ok(EvidenceRef { path: rel, sha256 })
+}

@@ -6,6 +6,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+use crate::enrich;
+use crate::surface;
 
 const DEFAULT_SNIPPET_MAX_BYTES: usize = 4096;
 const DEFAULT_SNIPPET_MAX_LINES: usize = 60;
@@ -127,7 +129,7 @@ struct RunResult {
     timed_out: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ExamplesReport {
     pub schema_version: u32,
     pub generated_at_epoch_ms: u128,
@@ -141,7 +143,7 @@ pub struct ExamplesReport {
     pub scenarios: Vec<ScenarioOutcome>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ScenarioOutcome {
     pub scenario_id: String,
     pub publish: bool,
@@ -171,7 +173,7 @@ pub struct ScenarioOutcome {
     pub stderr_snippet: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct CoverageLedger {
     pub schema_version: u32,
     pub generated_at_epoch_ms: u128,
@@ -189,7 +191,7 @@ pub struct CoverageLedger {
     pub warnings: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct CoverageOptionEntry {
     pub option_id: String,
     pub aliases: Vec<String>,
@@ -199,6 +201,8 @@ pub struct CoverageOptionEntry {
     pub acceptance_scenarios: Vec<String>,
     pub blocked_reason: Option<String>,
     pub blocked_details: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<enrich::EvidenceRef>,
 }
 
 pub fn load_catalog(path: &Path) -> Result<ScenarioCatalog> {
@@ -228,10 +232,6 @@ pub fn load_catalog(path: &Path) -> Result<ScenarioCatalog> {
         }
     }
     Ok(catalog)
-}
-
-pub fn default_scenarios_path(binary_name: &str) -> PathBuf {
-    PathBuf::from("scenarios").join(format!("{binary_name}.json"))
 }
 
 pub fn run_scenarios(
@@ -290,7 +290,7 @@ pub fn run_scenarios(
             &scenario.argv,
             &env,
         )
-            .with_context(|| format!("invoke binary_lens for scenario {}", scenario.id))?;
+        .with_context(|| format!("invoke binary_lens for scenario {}", scenario.id))?;
         if !status.success() {
             let argv = scenario.argv.clone();
             let command_line = format_command_line(binary_name, &argv);
@@ -372,16 +372,10 @@ pub fn run_scenarios(
         let pass = failures.is_empty();
 
         let command_line = format_command_line(binary_name, &scenario.argv);
-        let stdout_snippet = bounded_snippet(
-            stdout_text.as_ref(),
-            snippet_max_lines,
-            snippet_max_bytes,
-        );
-        let stderr_snippet = bounded_snippet(
-            stderr_text.as_ref(),
-            snippet_max_lines,
-            snippet_max_bytes,
-        );
+        let stdout_snippet =
+            bounded_snippet(stdout_text.as_ref(), snippet_max_lines, snippet_max_bytes);
+        let stderr_snippet =
+            bounded_snippet(stderr_text.as_ref(), snippet_max_lines, snippet_max_bytes);
 
         if verbose && !pass {
             eprintln!("scenario {} failed: {}", scenario.id, failures.join("; "));
@@ -465,9 +459,9 @@ fn invoke_binary_lens_run(
 
 pub fn build_coverage_ledger(
     binary_name: &str,
-    help_text: &str,
+    surface: &surface::SurfaceInventory,
+    doc_pack_root: &Path,
     scenarios_path: &Path,
-    examples_report: Option<&ExamplesReport>,
     display_root: Option<&Path>,
 ) -> Result<CoverageLedger> {
     let catalog = load_catalog(scenarios_path)?;
@@ -481,24 +475,21 @@ pub fn build_coverage_ledger(
         }
     }
 
-    let option_groups = option_groups_from_help(help_text);
-    let mut alias_map = HashMap::new();
+    let surface_path = doc_pack_root.join("inventory").join("surface.json");
+    let surface_evidence = enrich::evidence_from_path(doc_pack_root, &surface_path)?;
+    let catalog_evidence = enrich::evidence_from_path(doc_pack_root, scenarios_path)?;
     let mut options: BTreeMap<String, CoverageState> = BTreeMap::new();
-    for group in option_groups {
-        let mut aliases = sorted_aliases(&group.aliases);
-        if aliases.is_empty() {
-            continue;
-        }
-        for alias in &aliases {
-            alias_map.insert(alias.clone(), group.id.clone());
-        }
+    for item in surface.items.iter().filter(|item| is_surface_item_kind(&item.kind)) {
+        let aliases = if item.display != item.id {
+            vec![item.display.clone()]
+        } else {
+            Vec::new()
+        };
         options.insert(
-            group.id.clone(),
+            item.id.clone(),
             CoverageState {
-                aliases: {
-                    aliases.retain(|alias| !alias.is_empty());
-                    aliases
-                },
+                aliases,
+                evidence: item.evidence.clone(),
                 ..CoverageState::default()
             },
         );
@@ -510,15 +501,11 @@ pub fn build_coverage_ledger(
     if let Some(coverage) = catalog.coverage.as_ref() {
         for blocked in &coverage.blocked {
             for option_id in &blocked.option_ids {
-                let normalized = normalize_option_token(option_id);
+                let normalized = normalize_surface_id(option_id);
                 if normalized.is_empty() {
                     continue;
                 }
-                let canonical = alias_map
-                    .get(&normalized)
-                    .cloned()
-                    .unwrap_or_else(|| normalized.clone());
-                let entry = blocked_map.entry(canonical).or_insert(BlockedInfo {
+                let entry = blocked_map.entry(normalized).or_insert(BlockedInfo {
                     reason: blocked.reason.clone(),
                     details: blocked.details.clone(),
                 });
@@ -539,36 +526,21 @@ pub fn build_coverage_ledger(
         }
     }
 
-    let mut scenario_pass = HashMap::new();
-    if let Some(report) = examples_report {
-        for scenario in &report.scenarios {
-            scenario_pass.insert(scenario.scenario_id.clone(), scenario.pass);
-        }
-    }
-
     for scenario in &catalog.scenarios {
-        if let Some(pass) = scenario_pass.get(&scenario.id) {
-            if !*pass {
-                continue;
-            }
-        } else if examples_report.is_some() {
-            warnings.push(format!(
-                "scenario {:?} missing from examples_report",
-                scenario.id
-            ));
-            continue;
-        }
-
         validate_scenario_spec(scenario)
             .with_context(|| format!("validate scenario {}", scenario.id))?;
         if scenario.coverage_ignore {
             continue;
         }
-        let tier = coverage_tier(scenario);
-        let (option_ids, unknown) = scenario_option_ids(scenario, &alias_map);
-        for option_id in unknown {
-            unknown_options.insert(option_id);
+        if scenario.covers_options.is_empty() {
+            warnings.push(format!(
+                "scenario {:?} missing covers_options for coverage",
+                scenario.id
+            ));
+            continue;
         }
+        let tier = coverage_tier(scenario);
+        let option_ids = scenario_surface_ids(scenario);
         for option_id in option_ids {
             match options.get_mut(&option_id) {
                 Some(entry) => match tier {
@@ -602,7 +574,7 @@ pub fn build_coverage_ledger(
             }
             None => {
                 warnings.push(format!(
-                    "blocked option {:?} not found in help text",
+                    "blocked option {:?} not found in surface inventory",
                     option_id
                 ));
                 unknown_options.insert(option_id);
@@ -618,19 +590,13 @@ pub fn build_coverage_ledger(
     let mut uncovered_count = 0;
 
     for (option_id, entry) in options {
-        let behavior_scenarios: Vec<String> =
-            entry.behavior_scenarios.into_iter().collect();
-        let rejection_scenarios: Vec<String> =
-            entry.rejection_scenarios.into_iter().collect();
-        let acceptance_scenarios: Vec<String> =
-            entry.acceptance_scenarios.into_iter().collect();
+        let behavior_scenarios: Vec<String> = entry.behavior_scenarios.into_iter().collect();
+        let rejection_scenarios: Vec<String> = entry.rejection_scenarios.into_iter().collect();
+        let acceptance_scenarios: Vec<String> = entry.acceptance_scenarios.into_iter().collect();
         let (blocked_reason, blocked_details) = match entry.blocked.as_ref() {
             Some(blocked) => {
                 blocked_count += 1;
-                (
-                    Some(blocked.reason.clone()),
-                    blocked.details.clone(),
-                )
+                (Some(blocked.reason.clone()), blocked.details.clone())
             }
             None => (None, None),
         };
@@ -648,6 +614,11 @@ pub fn build_coverage_ledger(
             "uncovered"
         };
 
+        let mut evidence = entry.evidence.clone();
+        evidence.push(surface_evidence.clone());
+        evidence.push(catalog_evidence.clone());
+        let evidence = dedup_evidence(evidence);
+
         entries.push(CoverageOptionEntry {
             option_id,
             aliases: entry.aliases,
@@ -657,6 +628,7 @@ pub fn build_coverage_ledger(
             acceptance_scenarios,
             blocked_reason,
             blocked_details,
+            evidence,
         });
     }
 
@@ -670,11 +642,7 @@ pub fn build_coverage_ledger(
         generated_at_epoch_ms,
         binary_name: binary_name.to_string(),
         scenarios_path: display_path(scenarios_path, display_root),
-        validation_source: if examples_report.is_some() {
-            "examples_report".to_string()
-        } else {
-            "catalog".to_string()
-        },
+        validation_source: "catalog".to_string(),
         options_total: entries.len(),
         behavior_count,
         rejected_count,
@@ -687,18 +655,6 @@ pub fn build_coverage_ledger(
     })
 }
 
-pub fn write_coverage_ledger(ledger: &CoverageLedger, path: &Path) -> Result<()> {
-    let text = serde_json::to_string_pretty(ledger).context("serialize coverage ledger")?;
-    fs::write(path, text.as_bytes()).with_context(|| format!("write {}", path.display()))?;
-    Ok(())
-}
-
-#[derive(Debug)]
-struct OptionGroup {
-    id: String,
-    aliases: Vec<String>,
-}
-
 #[derive(Debug, Clone)]
 struct BlockedInfo {
     reason: String,
@@ -708,6 +664,7 @@ struct BlockedInfo {
 #[derive(Debug, Default)]
 struct CoverageState {
     aliases: Vec<String>,
+    evidence: Vec<enrich::EvidenceRef>,
     behavior_scenarios: BTreeSet<String>,
     rejection_scenarios: BTreeSet<String>,
     acceptance_scenarios: BTreeSet<String>,
@@ -729,72 +686,18 @@ fn coverage_tier(scenario: &ScenarioSpec) -> CoverageTier {
     }
 }
 
-fn scenario_option_ids(
-    scenario: &ScenarioSpec,
-    alias_map: &HashMap<String, String>,
-) -> (Vec<String>, Vec<String>) {
-    let tokens = if !scenario.covers_options.is_empty() {
-        scenario.covers_options.clone()
-    } else {
-        extract_options_from_argv(&scenario.argv)
-    };
-    let mut normalized: Vec<String> = tokens
-        .into_iter()
-        .map(|token| normalize_option_token(&token))
-        .collect();
-    let has_non_help = normalized
-        .iter()
-        .any(|token| token != "--help" && token != "-h");
-    if has_non_help {
-        normalized.retain(|token| token != "--help" && token != "-h");
-    }
-
-    let mut option_ids = BTreeSet::new();
-    let mut unknown = BTreeSet::new();
-    for token in normalized {
-        if token.is_empty() {
-            continue;
-        }
-        if let Some(option_id) = alias_map.get(&token) {
-            option_ids.insert(option_id.clone());
-        } else {
-            unknown.insert(token);
+fn scenario_surface_ids(scenario: &ScenarioSpec) -> Vec<String> {
+    let mut ids = BTreeSet::new();
+    for token in &scenario.covers_options {
+        let normalized = normalize_surface_id(token);
+        if !normalized.is_empty() {
+            ids.insert(normalized);
         }
     }
-
-    (option_ids.into_iter().collect(), unknown.into_iter().collect())
+    ids.into_iter().collect()
 }
 
-fn extract_options_from_argv(argv: &[String]) -> Vec<String> {
-    let mut options = Vec::new();
-    for arg in argv {
-        if arg == "--" {
-            break;
-        }
-        if arg.starts_with("--") {
-            let base = arg.splitn(2, '=').next().unwrap_or(arg);
-            if base != "--" {
-                options.push(base.to_string());
-            }
-            continue;
-        }
-        if arg.starts_with('-') && arg.len() > 1 {
-            let tail = &arg[1..];
-            if tail.len() == 1 {
-                options.push(format!("-{}", tail));
-            } else if tail.chars().all(|ch| ch.is_ascii_alphabetic()) {
-                for ch in tail.chars() {
-                    options.push(format!("-{}", ch));
-                }
-            } else if let Some(first) = tail.chars().next() {
-                options.push(format!("-{}", first));
-            }
-        }
-    }
-    options
-}
-
-fn normalize_option_token(token: &str) -> String {
+fn normalize_surface_id(token: &str) -> String {
     let trimmed = token.trim();
     if let Some((head, _)) = trimmed.split_once('=') {
         head.to_string()
@@ -803,109 +706,19 @@ fn normalize_option_token(token: &str) -> String {
     }
 }
 
-fn option_groups_from_help(help_text: &str) -> Vec<OptionGroup> {
-    let option_re =
-        Regex::new(r"--?[A-Za-z0-9][A-Za-z0-9_-]*").expect("option regex");
-    let usage_option_re =
-        Regex::new(r"--[A-Za-z0-9][A-Za-z0-9_-]*").expect("usage option regex");
-    let mut groups = Vec::new();
-
-    for raw in help_text.lines() {
-        let trimmed = raw.trim_end();
-        let stripped = trimmed.trim_start();
-        if !is_option_line(stripped) {
-            continue;
-        }
-        let names = split_option_names(stripped);
-        let aliases = extract_option_aliases(&option_re, &names);
-        if aliases.is_empty() {
-            continue;
-        }
-        let id = canonical_option_id(&aliases);
-        groups.push(OptionGroup { id, aliases });
-    }
-
-    let mut alias_map = HashMap::new();
-    for group in &groups {
-        for alias in &group.aliases {
-            alias_map.insert(alias.clone(), group.id.clone());
-        }
-    }
-
-    for raw in help_text.lines() {
-        let stripped = raw.trim_start();
-        let Some(usage) = stripped.strip_prefix("Usage:") else {
-            continue;
-        };
-        let aliases = extract_option_aliases(&usage_option_re, usage);
-        for alias in aliases {
-            if alias_map.contains_key(&alias) {
-                continue;
-            }
-            let id = canonical_option_id(&[alias.clone()]);
-            groups.push(OptionGroup {
-                id: id.clone(),
-                aliases: vec![alias.clone()],
-            });
-            alias_map.insert(alias, id);
-        }
-    }
-
-    groups
+fn is_surface_item_kind(kind: &str) -> bool {
+    matches!(kind, "option" | "command" | "subcommand")
 }
 
-fn extract_option_aliases(option_re: &Regex, text: &str) -> Vec<String> {
-    let mut aliases = Vec::new();
-    for matched in option_re.find_iter(text) {
-        let alias = matched.as_str().to_string();
-        if !aliases.contains(&alias) {
-            aliases.push(alias);
+fn dedup_evidence(entries: Vec<enrich::EvidenceRef>) -> Vec<enrich::EvidenceRef> {
+    let mut seen = BTreeSet::new();
+    let mut deduped = Vec::new();
+    for entry in entries {
+        if seen.insert(entry.path.clone()) {
+            deduped.push(entry);
         }
     }
-    aliases
-}
-
-fn canonical_option_id(aliases: &[String]) -> String {
-    aliases
-        .iter()
-        .find(|alias| alias.starts_with("--"))
-        .cloned()
-        .or_else(|| aliases.first().cloned())
-        .unwrap_or_default()
-}
-
-fn sorted_aliases(aliases: &[String]) -> Vec<String> {
-    let mut set = BTreeSet::new();
-    for alias in aliases {
-        let normalized = normalize_option_token(alias);
-        if !normalized.is_empty() {
-            set.insert(normalized);
-        }
-    }
-    set.into_iter().collect()
-}
-
-fn is_option_line(line: &str) -> bool {
-    if !line.starts_with('-') {
-        return false;
-    }
-    let mut chars = line.chars();
-    chars.next();
-    match chars.next() {
-        Some(ch) if ch.is_whitespace() => false,
-        Some(_) => true,
-        None => false,
-    }
-}
-
-fn split_option_names(line: &str) -> String {
-    let bytes = line.as_bytes();
-    for idx in 0..bytes.len().saturating_sub(1) {
-        if bytes[idx] == b' ' && bytes[idx + 1] == b' ' {
-            return line[..idx].trim().to_string();
-        }
-    }
-    line.trim().to_string()
+    deduped
 }
 
 fn display_path(path: &Path, base: Option<&Path>) -> String {
@@ -1051,7 +864,10 @@ fn validate_scenario(
             }
         }
         if !invalid.is_empty() {
-            failures.push(format!("invalid stdout regex_any patterns: {}", invalid.join("; ")));
+            failures.push(format!(
+                "invalid stdout regex_any patterns: {}",
+                invalid.join("; ")
+            ));
         }
         if !any_match {
             failures.push(format!(
@@ -1107,7 +923,10 @@ fn validate_scenario(
             }
         }
         if !invalid.is_empty() {
-            failures.push(format!("invalid stderr regex_any patterns: {}", invalid.join("; ")));
+            failures.push(format!(
+                "invalid stderr regex_any patterns: {}",
+                invalid.join("; ")
+            ));
         }
         if !any_match {
             failures.push(format!(

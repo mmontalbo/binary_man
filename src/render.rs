@@ -2,12 +2,18 @@
 
 use crate::pack::PackContext;
 use crate::scenarios::ExamplesReport;
+use crate::surface;
 use std::collections::BTreeSet;
 
-pub fn render_man_page(context: &PackContext, examples_report: Option<&ExamplesReport>) -> String {
+pub fn render_man_page(
+    context: &PackContext,
+    examples_report: Option<&ExamplesReport>,
+    surface: Option<&surface::SurfaceInventory>,
+) -> String {
     let binary_name = context.manifest.binary_name.as_str();
     let upper = binary_name.to_uppercase();
     let help_text = context.help_text.as_str();
+    let subcommands = collect_subcommands(surface);
 
     let sections = parse_help_text(help_text);
     let synopsis_lines = select_synopsis_lines(&sections.usage_lines);
@@ -51,6 +57,17 @@ pub fn render_man_page(context: &PackContext, examples_report: Option<&ExamplesR
     if !description_lines.is_empty() {
         out.push_str(".SH DESCRIPTION\n");
         out.push_str(&paragraphs_to_roff(&description_lines));
+    }
+
+    if !subcommands.is_empty() {
+        out.push_str(".SH COMMANDS\n");
+        for cmd in subcommands {
+            out.push_str(".TP\n");
+            out.push_str(&format!(".B {}\n", escape_option(&cmd.name)));
+            if let Some(desc) = cmd.description.as_ref() {
+                out.push_str(&format!("{}\n", escape_text(desc)));
+            }
+        }
     }
 
     if !sections.options.is_empty() {
@@ -138,6 +155,11 @@ struct HelpSections {
     options: Vec<OptionItem>,
     exit_status: Vec<String>,
     notes: Vec<String>,
+}
+
+struct CommandEntry {
+    name: String,
+    description: Option<String>,
 }
 
 enum OptionItem {
@@ -247,7 +269,8 @@ fn parse_help_text(help_text: &str) -> HelpSections {
 }
 
 fn is_usage_line(line: &str) -> bool {
-    line.starts_with("Usage:") || line.starts_with("or:")
+    let lower = line.to_ascii_lowercase();
+    lower.starts_with("usage:") || lower.starts_with("or:")
 }
 
 fn is_option_line(line: &str) -> bool {
@@ -289,10 +312,10 @@ fn parse_option_line(line: &str) -> OptionEntry {
 
 fn split_usage_line(line: &str, binary_name: &str) -> (String, String) {
     let mut trimmed = line;
-    if let Some(rest) = trimmed.strip_prefix("Usage:") {
-        trimmed = rest.trim();
-    } else if let Some(rest) = trimmed.strip_prefix("or:") {
-        trimmed = rest.trim();
+    if trimmed.len() >= 6 && trimmed[..6].eq_ignore_ascii_case("usage:") {
+        trimmed = trimmed[6..].trim();
+    } else if trimmed.len() >= 3 && trimmed[..3].eq_ignore_ascii_case("or:") {
+        trimmed = trimmed[3..].trim();
     }
 
     if let Some(rest) = trimmed.strip_prefix(binary_name) {
@@ -307,6 +330,31 @@ fn split_usage_line(line: &str, binary_name: &str) -> (String, String) {
     let cmd = parts.next().unwrap_or(binary_name);
     let rest = parts.next().unwrap_or("").trim();
     (cmd.to_string(), rest.to_string())
+}
+
+fn collect_subcommands(surface: Option<&surface::SurfaceInventory>) -> Vec<CommandEntry> {
+    let mut entries = Vec::new();
+    let Some(surface) = surface else {
+        return entries;
+    };
+    for item in surface.items.iter().filter(|item| item.kind == "subcommand") {
+        let name = if !item.display.trim().is_empty() {
+            item.display.trim().to_string()
+        } else {
+            item.id.trim().to_string()
+        };
+        if name.is_empty() {
+            continue;
+        }
+        let description = item
+            .description
+            .as_ref()
+            .map(|desc| desc.trim().to_string())
+            .filter(|desc| !desc.is_empty());
+        entries.push(CommandEntry { name, description });
+    }
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    entries
 }
 
 fn select_synopsis_lines(lines: &[String]) -> Vec<String> {
