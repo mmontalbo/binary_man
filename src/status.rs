@@ -30,13 +30,6 @@ struct EvalResult {
     coverage_next_action: Option<enrich::NextAction>,
 }
 
-#[derive(Clone)]
-struct CoverageBlockedInfo {
-    reason: String,
-    details: Option<String>,
-    tags: Vec<String>,
-}
-
 pub fn build_status_summary(
     doc_pack_root: &Path,
     binary_name: Option<&str>,
@@ -224,6 +217,7 @@ fn evaluate_requirements(
                 let mut local_blockers = Vec::new();
                 let mut missing = Vec::new();
                 let mut uncovered_ids = Vec::new();
+                let mut blocked_ids = BTreeSet::new();
 
                 let surface = if !surface_path.is_file() {
                     missing_artifacts.push(surface_evidence.path.clone());
@@ -292,7 +286,6 @@ fn evaluate_requirements(
                         }
                     }
 
-                    let mut blocked_map: BTreeMap<String, CoverageBlockedInfo> = BTreeMap::new();
                     if let Some(coverage) = plan.coverage.as_ref() {
                         for blocked in &coverage.blocked {
                             for item_id in &blocked.item_ids {
@@ -300,34 +293,7 @@ fn evaluate_requirements(
                                 if normalized.is_empty() {
                                     continue;
                                 }
-                                let entry =
-                                    blocked_map
-                                        .entry(normalized)
-                                        .or_insert(CoverageBlockedInfo {
-                                            reason: blocked.reason.clone(),
-                                            details: blocked.details.clone(),
-                                            tags: blocked.tags.clone(),
-                                        });
-                                if entry.reason != blocked.reason {
-                                    entry.reason = format!("{}, {}", entry.reason, blocked.reason);
-                                }
-                                if let Some(details) = blocked.details.as_ref() {
-                                    let updated = match entry.details.take() {
-                                        Some(existing) if existing != *details => {
-                                            format!("{existing}; {details}")
-                                        }
-                                        Some(existing) => existing,
-                                        None => details.clone(),
-                                    };
-                                    entry.details = Some(updated);
-                                }
-                                for tag in &blocked.tags {
-                                    if !entry.tags.contains(tag) {
-                                        entry.tags.push(tag.clone());
-                                    }
-                                }
-                                entry.tags.sort();
-                                entry.tags.dedup();
+                                blocked_ids.insert(normalized);
                             }
                         }
                     }
@@ -345,29 +311,8 @@ fn evaluate_requirements(
                         merge_evidence_refs(entry, &item.evidence);
                     }
 
-                    for (id, info) in blocked_map.iter() {
-                        let mut blocker_evidence = vec![scenarios_evidence.clone()];
-                        if let Some(item_evidence) = surface_evidence_map.get(id) {
-                            merge_evidence_refs(&mut blocker_evidence, item_evidence);
-                        }
-                        dedupe_evidence_refs(&mut blocker_evidence);
-                        let mut message = format!("coverage blocked for {id}: {}", info.reason);
-                        if let Some(details) = info.details.as_ref() {
-                            message = format!("{message} ({details})");
-                        }
-                        if !info.tags.is_empty() {
-                            message = format!("{message} [tags: {}]", info.tags.join(", "));
-                        }
-                        local_blockers.push(enrich::Blocker {
-                            code: "coverage_blocked".to_string(),
-                            message,
-                            evidence: blocker_evidence,
-                            next_action: None,
-                        });
-                    }
-
                     for (id, item_evidence) in surface_evidence_map {
-                        if covered.contains(&id) || blocked_map.contains_key(&id) {
+                        if covered.contains(&id) || blocked_ids.contains(&id) {
                             continue;
                         }
                         uncovered_ids.push(id);
@@ -375,7 +320,7 @@ fn evaluate_requirements(
                     }
 
                     uncovered_ids.sort();
-                    if !uncovered_ids.is_empty() && local_blockers.is_empty() {
+                    if !uncovered_ids.is_empty() {
                         if let Some(content) = coverage_stub_from_plan(&plan, &uncovered_ids) {
                             coverage_next_action = Some(enrich::NextAction::Edit {
                                 path: "scenarios/plan.json".to_string(),
@@ -393,7 +338,7 @@ fn evaluate_requirements(
                 let (status, reason) = if !local_blockers.is_empty() {
                     (
                         enrich::RequirementState::Blocked,
-                        "coverage blocked".to_string(),
+                        "coverage inputs blocked".to_string(),
                     )
                 } else if !missing.is_empty() {
                     (
@@ -406,10 +351,12 @@ fn evaluate_requirements(
                         format!("uncovered ids: {}", uncovered_ids.join(", ")),
                     )
                 } else {
-                    (
-                        enrich::RequirementState::Met,
-                        "coverage complete".to_string(),
-                    )
+                    let reason = if blocked_ids.is_empty() {
+                        "coverage complete".to_string()
+                    } else {
+                        format!("coverage complete (blocked ids: {})", blocked_ids.len())
+                    };
+                    (enrich::RequirementState::Met, reason)
                 };
 
                 blockers.extend(local_blockers.clone());

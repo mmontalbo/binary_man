@@ -301,32 +301,34 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
             )?;
         }
 
-        if wants_coverage {
-            if !scenarios_path.is_file() {
-                return Err(anyhow!(
-                    "scenarios plan missing at {}",
-                    scenarios_path.display()
-                ));
-            }
+        if wants_coverage && !scenarios_path.is_file() {
+            return Err(anyhow!(
+                "scenarios plan missing at {}",
+                scenarios_path.display()
+            ));
+        }
+        if scenarios_path.is_file() {
             let staged_surface = staging_root.join("inventory").join("surface.json");
             let surface_path = if staged_surface.is_file() {
                 staged_surface
             } else {
                 ctx.paths.surface_path()
             };
-            let surface = crate::surface::load_surface_inventory(&surface_path)?;
-            let coverage_binary = binary_name
-                .map(|name| name.to_string())
-                .or_else(|| surface.binary_name.clone())
-                .ok_or_else(|| anyhow!("binary name unavailable for coverage ledger"))?;
-            let ledger = scenarios::build_coverage_ledger(
-                &coverage_binary,
-                &surface,
-                ctx.paths.root(),
-                &scenarios_path,
-                Some(ctx.paths.root()),
-            )?;
-            crate::staging::write_staged_json(&staging_root, "coverage_ledger.json", &ledger)?;
+            if surface_path.is_file() {
+                let surface = crate::surface::load_surface_inventory(&surface_path)?;
+                let coverage_binary = binary_name
+                    .map(|name| name.to_string())
+                    .or_else(|| surface.binary_name.clone())
+                    .ok_or_else(|| anyhow!("binary name unavailable for coverage ledger"))?;
+                let ledger = scenarios::build_coverage_ledger(
+                    &coverage_binary,
+                    &surface,
+                    ctx.paths.root(),
+                    &scenarios_path,
+                    Some(ctx.paths.root()),
+                )?;
+                crate::staging::write_staged_json(&staging_root, "coverage_ledger.json", &ledger)?;
+            }
         }
 
         let published_paths = publish_staging(&staging_root, ctx.paths.root())?;
@@ -493,16 +495,7 @@ pub fn run_status(args: StatusArgs) -> Result<()> {
     let force_used = args.force && (!lock_status.present || lock_status.stale);
     let parse_errors_present = lock_parse_error.is_some() || plan_parse_error.is_some();
 
-    let legacy_probe_evidence = legacy_probe_evidence(&paths)?;
-    let summary = if !legacy_probe_evidence.is_empty() {
-        build_probe_migration_summary(
-            &paths,
-            binary_name.as_deref(),
-            lock_status,
-            legacy_probe_evidence,
-            force_used,
-        )?
-    } else if let ScenarioPlanState::Invalid { code, message } = &scenario_plan_state {
+    let summary = if let ScenarioPlanState::Invalid { code, message } = &scenario_plan_state {
         build_invalid_plan_summary(
             &paths,
             binary_name.as_deref(),
@@ -735,40 +728,6 @@ fn build_invalid_plan_summary(
     })
 }
 
-fn build_probe_migration_summary(
-    _paths: &enrich::DocPackPaths,
-    binary_name: Option<&str>,
-    lock_status: enrich::LockStatus,
-    evidence: Vec<enrich::EvidenceRef>,
-    force_used: bool,
-) -> Result<enrich::StatusSummary> {
-    let blocker = enrich::Blocker {
-        code: "probe_migration_required".to_string(),
-        message: "legacy probe artifacts detected".to_string(),
-        evidence: evidence.clone(),
-        next_action: None,
-    };
-    let stub = scenarios::plan_stub(binary_name);
-    Ok(enrich::StatusSummary {
-        schema_version: 1,
-        generated_at_epoch_ms: enrich::now_epoch_ms()?,
-        binary_name: binary_name.map(|name| name.to_string()),
-        lock: lock_status,
-        requirements: Vec::new(),
-        missing_artifacts: Vec::new(),
-        blockers: vec![blocker],
-        decision: enrich::Decision::Blocked,
-        decision_reason: Some("blockers present: probe_migration_required".to_string()),
-        next_action: enrich::NextAction::Edit {
-            path: "scenarios/plan.json".to_string(),
-            content: stub,
-            reason: "probe artifacts detected; migrate to scenarios/plan.json".to_string(),
-        },
-        warnings: Vec::new(),
-        force_used,
-    })
-}
-
 fn next_action_for_missing_inputs(
     paths: &enrich::DocPackPaths,
     binary_name: Option<&str>,
@@ -793,29 +752,6 @@ fn next_action_for_missing_inputs(
         content: enrich::config_stub(),
         reason: "config inputs missing; replace with a minimal stub".to_string(),
     }
-}
-
-fn legacy_probe_evidence(paths: &enrich::DocPackPaths) -> Result<Vec<enrich::EvidenceRef>> {
-    let probes_root = paths.inventory_dir().join("probes");
-    if !probes_root.is_dir() {
-        return Ok(Vec::new());
-    }
-    let mut evidence = Vec::new();
-    let plan_path = probes_root.join("plan.json");
-    if plan_path.is_file() {
-        evidence.push(paths.evidence_from_path(&plan_path)?);
-    }
-    for file in crate::staging::collect_files_recursive(&probes_root)? {
-        if file.extension().and_then(|ext| ext.to_str()) != Some("json") {
-            continue;
-        }
-        if file.file_name().and_then(|name| name.to_str()) == Some("plan.json") {
-            continue;
-        }
-        evidence.push(paths.evidence_from_path(&file)?);
-        break;
-    }
-    Ok(evidence)
 }
 
 fn build_parse_error_summary(

@@ -238,6 +238,8 @@ pub struct CoverageOptionEntry {
     pub blocked_reason: Option<String>,
     pub blocked_details: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocked_tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<enrich::EvidenceRef>,
 }
 
@@ -645,6 +647,7 @@ pub fn build_coverage_ledger(
                 let entry = blocked_map.entry(normalized).or_insert(BlockedInfo {
                     reason: blocked.reason.clone(),
                     details: blocked.details.clone(),
+                    tags: blocked.tags.clone(),
                 });
                 if entry.reason != blocked.reason {
                     entry.reason = format!("{}, {}", entry.reason, blocked.reason);
@@ -659,6 +662,13 @@ pub fn build_coverage_ledger(
                     };
                     entry.details = Some(updated);
                 }
+                for tag in &blocked.tags {
+                    if !entry.tags.contains(tag) {
+                        entry.tags.push(tag.clone());
+                    }
+                }
+                entry.tags.sort();
+                entry.tags.dedup();
             }
         }
     }
@@ -728,13 +738,16 @@ pub fn build_coverage_ledger(
         let behavior_scenarios: Vec<String> = entry.behavior_scenarios.into_iter().collect();
         let rejection_scenarios: Vec<String> = entry.rejection_scenarios.into_iter().collect();
         let acceptance_scenarios: Vec<String> = entry.acceptance_scenarios.into_iter().collect();
-        let (blocked_reason, blocked_details) = match entry.blocked.as_ref() {
-            Some(blocked) => {
-                blocked_count += 1;
-                (Some(blocked.reason.clone()), blocked.details.clone())
-            }
-            None => (None, None),
-        };
+        let (blocked_reason, blocked_details, blocked_tags, is_blocked) =
+            match entry.blocked.as_ref() {
+                Some(blocked) => (
+                    Some(blocked.reason.clone()),
+                    blocked.details.clone(),
+                    blocked.tags.clone(),
+                    true,
+                ),
+                None => (None, None, Vec::new(), false),
+            };
         let status = if !behavior_scenarios.is_empty() {
             behavior_count += 1;
             "behavior"
@@ -744,6 +757,9 @@ pub fn build_coverage_ledger(
         } else if !acceptance_scenarios.is_empty() {
             acceptance_count += 1;
             "acceptance"
+        } else if is_blocked {
+            blocked_count += 1;
+            "blocked"
         } else {
             uncovered_count += 1;
             "uncovered"
@@ -763,6 +779,7 @@ pub fn build_coverage_ledger(
             acceptance_scenarios,
             blocked_reason,
             blocked_details,
+            blocked_tags,
             evidence,
         });
     }
@@ -773,7 +790,7 @@ pub fn build_coverage_ledger(
         .as_millis();
 
     Ok(CoverageLedger {
-        schema_version: 1,
+        schema_version: 2,
         generated_at_epoch_ms,
         binary_name: binary_name.to_string(),
         scenarios_path: display_path(scenarios_path, display_root),
@@ -794,6 +811,7 @@ pub fn build_coverage_ledger(
 struct BlockedInfo {
     reason: String,
     details: Option<String>,
+    tags: Vec<String>,
 }
 
 #[derive(Debug, Default)]
