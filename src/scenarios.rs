@@ -1,3 +1,5 @@
+use crate::enrich;
+use crate::surface;
 use anyhow::{anyhow, Context, Result};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -6,8 +8,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::enrich;
-use crate::surface;
 
 const DEFAULT_SNIPPET_MAX_BYTES: usize = 4096;
 const DEFAULT_SNIPPET_MAX_LINES: usize = 60;
@@ -479,7 +479,11 @@ pub fn build_coverage_ledger(
     let surface_evidence = enrich::evidence_from_path(doc_pack_root, &surface_path)?;
     let catalog_evidence = enrich::evidence_from_path(doc_pack_root, scenarios_path)?;
     let mut options: BTreeMap<String, CoverageState> = BTreeMap::new();
-    for item in surface.items.iter().filter(|item| is_surface_item_kind(&item.kind)) {
+    for item in surface
+        .items
+        .iter()
+        .filter(|item| is_surface_item_kind(&item.kind))
+    {
         let aliases = if item.display != item.id {
             vec![item.display.clone()]
         } else {

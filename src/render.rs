@@ -337,7 +337,11 @@ fn collect_subcommands(surface: Option<&surface::SurfaceInventory>) -> Vec<Comma
     let Some(surface) = surface else {
         return entries;
     };
-    for item in surface.items.iter().filter(|item| item.kind == "subcommand") {
+    for item in surface
+        .items
+        .iter()
+        .filter(|item| item.kind == "subcommand")
+    {
         let name = if !item.display.trim().is_empty() {
             item.display.trim().to_string()
         } else {

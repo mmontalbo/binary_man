@@ -167,9 +167,7 @@ pub fn apply_surface_discovery(
                     let surface_item = SurfaceItem {
                         kind: item.kind,
                         id: item.id.trim().to_string(),
-                        display: item
-                            .display
-                            .unwrap_or_else(|| item.id.trim().to_string()),
+                        display: item.display.unwrap_or_else(|| item.id.trim().to_string()),
                         description: item.description,
                         evidence: vec![evidence.clone()],
                     };
@@ -243,7 +241,8 @@ pub fn apply_surface_discovery(
                     Ok(result) => {
                         let bytes =
                             serde_json::to_vec_pretty(&result).context("serialize probe")?;
-                        let rel_path = probe_output_rel_path(&result.probe_id, result.generated_at_epoch_ms);
+                        let rel_path =
+                            probe_output_rel_path(&result.probe_id, result.generated_at_epoch_ms);
                         write_staged_bytes(staging_root, &rel_path, &bytes)?;
                     }
                     Err(err) => {
@@ -261,9 +260,7 @@ pub fn apply_surface_discovery(
                 code: "probe_missing_binary".to_string(),
                 message: format!("binary_path {} not found", binary_path.display()),
                 evidence: vec![paths.evidence_from_path(&paths.pack_manifest_path())?],
-                next_action: Some(
-                    "regenerate binary.lens pack to refresh manifest".to_string(),
-                ),
+                next_action: Some("regenerate binary.lens pack to refresh manifest".to_string()),
             });
         }
     } else {
@@ -425,8 +422,7 @@ pub fn apply_surface_discovery(
     if runs_index_path.is_file() {
         let bytes = fs::read(&runs_index_path)
             .with_context(|| format!("read {}", runs_index_path.display()))?;
-        let index: RunsIndex =
-            serde_json::from_slice(&bytes).context("parse runs index JSON")?;
+        let index: RunsIndex = serde_json::from_slice(&bytes).context("parse runs index JSON")?;
         let run_count = index.run_count.unwrap_or_else(|| index.runs.len());
         runs_present = run_count > 0;
         discovery.push(SurfaceDiscovery {
@@ -637,17 +633,17 @@ fn validate_probe_plan(plan: &ProbePlan) -> Result<()> {
             return Err(anyhow!("probe plan entry id must not be empty"));
         }
         if !is_valid_probe_id(id) {
-            return Err(anyhow!("probe plan entry id {:?} is not a safe identifier", id));
+            return Err(anyhow!(
+                "probe plan entry id {:?} is not a safe identifier",
+                id
+            ));
         }
         if !seen.insert(id.to_string()) {
             return Err(anyhow!("probe plan entry id {:?} is duplicated", id));
         }
         for arg in &probe.argv {
             if arg.trim().is_empty() {
-                return Err(anyhow!(
-                    "probe plan entry {:?} has empty argv entries",
-                    id
-                ));
+                return Err(anyhow!("probe plan entry {:?} has empty argv entries", id));
             }
         }
     }
@@ -663,7 +659,10 @@ fn is_valid_probe_id(id: &str) -> bool {
 }
 
 fn probe_output_rel_path(probe_id: &str, generated_at_epoch_ms: u128) -> String {
-    format!("inventory/probes/{}-{}.json", probe_id, generated_at_epoch_ms)
+    format!(
+        "inventory/probes/{}-{}.json",
+        probe_id, generated_at_epoch_ms
+    )
 }
 
 fn run_probe(
@@ -725,33 +724,29 @@ fn collect_probe_evidence(
     let mut candidates: BTreeMap<String, PathBuf> = BTreeMap::new();
     let pack_probe_root = paths.inventory_dir().join("probes");
     let staging_probe_root = staging_root.join("inventory").join("probes");
-    for (root, prefer) in [
-        (pack_probe_root, false),
-        (staging_probe_root, true),
-    ] {
+    for (root, prefer) in [(pack_probe_root, false), (staging_probe_root, true)] {
         if !root.is_dir() {
             continue;
         }
         for file in collect_files_recursive(&root)? {
-        if file.extension().and_then(|ext| ext.to_str()) != Some("json") {
-            continue;
-        }
-        let rel = file.strip_prefix(&root).context("strip probe root")?;
-        if !is_probe_evidence_rel_path(rel) {
-            continue;
-        }
-        let rel_path = Path::new("inventory").join("probes").join(rel);
-        let rel_string = rel_path.to_string_lossy().to_string();
-        if prefer || !candidates.contains_key(&rel_string) {
-            candidates.insert(rel_string, file);
-        }
+            if file.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let rel = file.strip_prefix(&root).context("strip probe root")?;
+            if !is_probe_evidence_rel_path(rel) {
+                continue;
+            }
+            let rel_path = Path::new("inventory").join("probes").join(rel);
+            let rel_string = rel_path.to_string_lossy().to_string();
+            if prefer || !candidates.contains_key(&rel_string) {
+                candidates.insert(rel_string, file);
+            }
         }
     }
 
     let mut outputs = Vec::new();
     for (rel, path) in candidates {
-        let bytes =
-            fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+        let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
         let evidence = enrich::EvidenceRef {
             path: rel.clone(),
             sha256: Some(sha256_hex(&bytes)),
@@ -819,13 +814,12 @@ fn is_probe_evidence_rel_path(rel: &Path) -> bool {
 
 fn run_subcommands_query(root: &Path, template_sql: &str) -> Result<Vec<SubcommandHit>> {
     let output = pack::run_duckdb_query(template_sql, root)?;
-    let rows: Vec<SubcommandRow> = if output.is_empty()
-        || output.iter().all(|byte| byte.is_ascii_whitespace())
-    {
-        Vec::new()
-    } else {
-        serde_json::from_slice(&output).context("parse subcommands query output")?
-    };
+    let rows: Vec<SubcommandRow> =
+        if output.is_empty() || output.iter().all(|byte| byte.is_ascii_whitespace()) {
+            Vec::new()
+        } else {
+            serde_json::from_slice(&output).context("parse subcommands query output")?
+        };
     Ok(rows
         .into_iter()
         .map(|row| SubcommandHit {

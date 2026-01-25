@@ -2,11 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub fn write_staged_bytes(
-    staging_root: &Path,
-    rel_path: &str,
-    bytes: &[u8],
-) -> Result<()> {
+pub fn write_staged_bytes(staging_root: &Path, rel_path: &str, bytes: &[u8]) -> Result<()> {
     let staging_path = staging_root.join(rel_path);
     if let Some(parent) = staging_path.parent() {
         fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
@@ -15,11 +11,7 @@ pub fn write_staged_bytes(
     Ok(())
 }
 
-pub fn write_staged_text(
-    staging_root: &Path,
-    rel_path: &str,
-    text: &str,
-) -> Result<()> {
+pub fn write_staged_text(staging_root: &Path, rel_path: &str, text: &str) -> Result<()> {
     write_staged_bytes(staging_root, rel_path, text.as_bytes())?;
     Ok(())
 }
