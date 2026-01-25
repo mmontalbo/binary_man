@@ -1,5 +1,5 @@
 {
-  "schema": { "name": "binary_man_scenarios", "version": 1 },
+  "schema_version": 1,
   "binary": "ls",
   "default_env": {
     "LC_ALL": "C",
@@ -10,22 +10,22 @@
   "coverage": {
     "blocked": [
       {
-        "option_ids": ["--time-style", "--full-time", "--time", "-t"],
+        "item_ids": ["--time-style", "--full-time", "--time", "-t"],
         "reason": "timestamp volatility",
         "details": "needs deterministic mtimes/ctimes to validate output"
       },
       {
-        "option_ids": ["--numeric-uid-gid", "-n", "-l", "-g", "-o", "--author"],
+        "item_ids": ["--numeric-uid-gid", "-n", "-l", "-g", "-o", "--author"],
         "reason": "uid/gid variance",
         "details": "requires fixture ownership control"
       },
       {
-        "option_ids": ["--inode", "-i", "--block-size", "--size", "-s"],
+        "item_ids": ["--inode", "-i", "--block-size", "--size", "-s"],
         "reason": "filesystem-dependent metadata",
         "details": "inode and block counts vary across filesystems"
       },
       {
-        "option_ids": ["--context", "-Z"],
+        "item_ids": ["--context", "-Z"],
         "reason": "SELinux/xattrs",
         "details": "requires label preservation and host support"
       }
@@ -34,7 +34,9 @@
   "scenarios": [
     {
       "id": "help",
+      "kind": "help",
       "publish": true,
+      "coverage_ignore": true,
       "argv": ["--help"],
       "timeout_seconds": 3,
       "net_mode": "off",
