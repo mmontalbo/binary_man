@@ -12,21 +12,63 @@ but it is also intended to be readable by humans.
 
 Inputs to read:
 
-- `scenarios/<binary>.json` (current scenarios)
-- `out/man/<binary>/help.txt` (current “option surface” snapshot)
-- `out/man/<binary>/examples_report.json` + `out/man/<binary>/<binary>.1` (what changed)
+- `<doc-pack>/scenarios/<binary>.json` (current scenarios)
+- `<doc-pack>/inventory/surface.json` (canonical surface inventory)
+- `<doc-pack>/inventory/probes/plan.json` (probe plan)
+- `<doc-pack>/inventory/probes/*.json` (probe evidence)
+- `<doc-pack>/man/examples_report.json` + `<doc-pack>/man/<binary>.1` (what changed)
 
-Main command:
+Main commands:
 
 ```
-cargo run --bin bman -- <binary> --run-scenarios
+cargo run --bin bman -- validate --doc-pack /tmp/<binary>-docpack
+cargo run --bin bman -- plan --doc-pack /tmp/<binary>-docpack
+cargo run --bin bman -- apply --doc-pack /tmp/<binary>-docpack
 ```
 
 Outputs to inspect:
 
-- `out/man/<binary>/examples_report.json` (pass/fail + excerpts)
-- `out/man/<binary>/<binary>.1` (what got published into `.SH EXAMPLES`)
-- `out/man/<binary>/coverage_ledger.json` (coverage status + blockers)
+- `<doc-pack>/man/examples_report.json` (pass/fail + excerpts)
+- `<doc-pack>/man/<binary>.1` (what got published into `.SH EXAMPLES`)
+- `<doc-pack>/coverage_ledger.json` (coverage status + blockers)
+
+## Doc-Pack Enrichment Loop (tool-assisted)
+
+When working from a portable doc pack, you can iterate without touching repo
+paths:
+
+1) Initialize and validate:
+
+```
+cargo run --bin bman -- init --doc-pack /tmp/<binary>-docpack --binary <binary>
+cargo run --bin bman -- validate --doc-pack /tmp/<binary>-docpack
+```
+
+2) Edit pack-local inputs as needed:
+- `queries/` (usage lens templates referenced by `enrich/config.json`)
+- `binary.lens/views/queries/` (pack-provided lenses for fallback)
+- `inventory/probes/plan.json` (probe plan for help/usage evidence)
+- `scenarios/` (scenario catalog)
+- `fixtures/` (deterministic inputs)
+- `enrich/config.json` (requirements + input selection)
+
+3) Plan, apply, and check status:
+
+```
+cargo run --bin bman -- plan --doc-pack /tmp/<binary>-docpack
+cargo run --bin bman -- apply --doc-pack /tmp/<binary>-docpack
+cargo run --bin bman -- status --doc-pack /tmp/<binary>-docpack --json
+```
+
+The tool writes `enrich/lock.json` (validated input snapshot),
+`enrich/plan.out.json` (planned actions + requirement eval),
+`enrich/state.json` (current status + last run summary),
+`enrich/report.json` (evidence-linked decision report), and
+`enrich/history.jsonl` (append-only provenance). Surface discovery is captured
+in `inventory/surface.json` with probe evidence in `inventory/probes/*.json`
+(planned via `inventory/probes/plan.json`).
+Decisions are `complete`, `incomplete`, or `blocked` depending on whether
+evidence-linked requirements are met and whether blockers are present.
 
 ## Definition Of Done (coverage pass)
 
@@ -43,7 +85,8 @@ Treat “coverage” as a few explicit tiers instead of “test every flag combo
 1) **Option acceptance coverage**
    - Proves an option is accepted (or rejected) with expected exit status.
    - Cheap + broad; good for enumerating the surface area.
-   - Use `coverage_tier: "rejection"` when an option appears in help but is
+   - Use `coverage_tier: "rejection"` when an option appears in surface
+     inventory but is
      expected to be rejected (e.g., `--coreutils-prog`).
 
 2) **Behavior coverage**
@@ -59,13 +102,17 @@ mostly for confidence + tracking.
 
 ## Project Artifacts
 
-- Scenario catalog: `scenarios/<binary>.json` (or `<doc-pack>/scenarios/<binary>.json`)
-- Fixtures: `fixtures/...` (or `<doc-pack>/fixtures/...`)
-- Usage lens templates: `queries/<binary>_usage_evidence.sql` (or `<doc-pack>/queries/<binary>_usage_evidence.sql`)
-- Runs + evidence: `out/packs/<binary>/binary.lens/runs/` (or `<doc-pack>/binary.lens/runs/`)
-- Validation report: `out/man/<binary>/examples_report.json` (or `<doc-pack>/man/examples_report.json`)
-- Rendered man page: `out/man/<binary>/<binary>.1` (or `<doc-pack>/man/<binary>.1`)
-- Coverage ledger: `out/man/<binary>/coverage_ledger.json` (or `<doc-pack>/coverage_ledger.json`)
+- Scenario catalog: `<doc-pack>/scenarios/<binary>.json`
+- Fixtures: `<doc-pack>/fixtures/...`
+- Usage lens templates: `<doc-pack>/queries/` (project), `<doc-pack>/binary.lens/views/queries/` (pack)
+- Runs + evidence: `<doc-pack>/binary.lens/runs/`
+- Validation report: `<doc-pack>/man/examples_report.json`
+- Rendered man page: `<doc-pack>/man/<binary>.1`
+- Coverage ledger: `<doc-pack>/coverage_ledger.json`
+- Enrichment config/lock/plan: `<doc-pack>/enrich/config.json`, `<doc-pack>/enrich/lock.json`, `<doc-pack>/enrich/plan.out.json`
+- Enrichment state/history: `<doc-pack>/enrich/state.json`, `<doc-pack>/enrich/history.jsonl`
+- Enrichment report: `<doc-pack>/enrich/report.json`
+- Surface inventory: `<doc-pack>/inventory/surface.json`, `<doc-pack>/inventory/probes/*.json`, `<doc-pack>/inventory/probes/plan.json`
 
 ## Current Behavior (important)
 
@@ -78,9 +125,9 @@ mostly for confidence + tracking.
 
 ### 1) Establish the option inventory
 
-- Use the pack-derived help text (what `binary_man` already extracted) as the
-  canonical option list for the current binary.
-- Normalize into **option IDs** (group aliases together, e.g. `-a/--all`).
+- Use `inventory/surface.json` as the canonical surface inventory for the
+  current binary (item kinds: `option`/`command`/`subcommand`).
+- Normalize into **surface IDs** (stable IDs used by scenarios).
 - Tag each option ID with:
   - `tier`: `common` | `advanced` | `edge`
   - `stability`: `stable-output` | `volatile-output` | `platform-dependent`
@@ -166,7 +213,8 @@ Maintain a “coverage ledger” in one of these ways:
   - `covers_behaviors`: list of behavior IDs demonstrated
   - `covers_doc_claims`: list of claim IDs (freeform, but stable strings)
 
-`binary_man` emits a `coverage_ledger.json` by combining help text + scenarios.
+`binary_man` emits a `coverage_ledger.json` by combining surface inventory +
+scenario metadata.
 It uses `coverage_tier` (`acceptance`, `behavior`, or `rejection`) and
 `covers_options` when present, and falls back to argv parsing otherwise. Use
 `coverage_ignore: true` for scenarios that should not affect coverage (e.g.,
@@ -256,11 +304,13 @@ Use this as a starting point for a coding agent:
 > - State an explicit coverage target up front (options vs behaviors vs doc
 >   claims). If not specified, default to comprehensive option acceptance
 >   coverage when feasible.
-> - Update `scenarios/<binary>.json` with new scenarios:
+> - Update `<doc-pack>/scenarios/<binary>.json` with new scenarios:
 >   - acceptance scenarios for uncovered option IDs (prefer `publish:false`)
 >   - at least one fixture-backed behavior scenario if feasible
-> - Run scenarios via `cargo run --bin bman -- <binary> --run-scenarios` and
->   ensure `out/man/<binary>/examples_report.json` reflects the new coverage.
+> - Run `cargo run --bin bman -- validate --doc-pack /tmp/<binary>-docpack`,
+>   `cargo run --bin bman -- plan --doc-pack /tmp/<binary>-docpack`, and
+>   `cargo run --bin bman -- apply --doc-pack /tmp/<binary>-docpack`, then ensure
+>   `<doc-pack>/man/examples_report.json` reflects the new coverage.
 > - Curate `.SH EXAMPLES` so it stays readable (only publish high-value,
 >   deterministic scenarios).
 > - Provide a short “coverage ledger” summary and a “friction log” describing
