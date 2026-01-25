@@ -5,7 +5,63 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured “enrichment loop”
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: TBD (M9 complete; define next milestone).
+Current focus: M10 — Scenario-Only Evidence + Coverage v1 (No Scores).
+
+## M10 — Scenario-Only Evidence + Coverage v1 (No Scores) (in progress)
+
+Goal: Use a single concept — **scenarios** — for all execution-based evidence
+(help/usage capture, surface discovery, examples, and optional coverage),
+removing the separate “probe” concept. Keep decisions evidence-linked and avoid
+heuristic scoring.
+
+Motivation:
+- Reduce concepts and file formats a small LM must learn (scenarios only).
+- Avoid baking help parsing semantics into the tool; keep parsing/editability in
+  pack-local SQL templates.
+- Make “coverage” mean “missing evidence items”, not a percent score.
+
+Design constraints (non-negotiable for this milestone):
+- JSON-only structured artifacts in the doc pack (JSONL permitted for history).
+- Mechanical gating remains: edits don’t count until `validate` refreshes `lock.json`.
+- Portability: everything runs from the doc pack, from any CWD.
+- Keep it lean: do not add debug/provenance artifacts unless they’re needed as
+  evidence inputs or hard requirements.
+
+Deliverables:
+- Unify probes + scenarios:
+  - Agent-edited: `<doc-pack>/scenarios/plan.json` (strict schema; includes help-style
+    scenarios and behavior scenarios; includes optional `covers` claims).
+  - Tool-written, append-only evidence: `<doc-pack>/inventory/scenarios/*.json`
+    (normalized scenario results with bounded stdout/stderr).
+  - Remove `<doc-pack>/inventory/probes/**` entirely (migration supported via a
+    deterministic `status --json next_action` edit).
+- Lens-driven surface discovery from scenario evidence:
+  - Install/standardize templates that read scenario evidence (not tool-parsed help):
+    - `queries/usage_from_scenarios.sql`
+    - `queries/subcommands_from_scenarios.sql`
+    - `queries/options_from_scenarios.sql`
+  - `inventory/surface.json` is derived from scenario evidence + optional seed and
+    records discovery attempts and evidence refs; it blocks only when necessary
+    (e.g., multi-command CLI detected but no subcommands extracted).
+- Optional coverage gate (no scores):
+  - Add an opt-in coverage requirement (not in `default_requirements`) that is met
+    only when the uncovered surface ID list is empty (explicit list of missing items,
+    evidence refs, and structured blockers/capability tags).
+  - Coverage claims may be used as hints, but the tool must remain able to produce an
+    uncovered list deterministically (no confidence scoring).
+
+Acceptance criteria:
+- Fresh `ls` and `git` packs can reach `decision=complete` for default requirements.
+- When coverage is enabled, `status --json` drives the smallest next edit (scenario
+  stubs or fixes) until uncovered is empty or blockers are explicit.
+- Multi-command CLIs produce `.SH COMMANDS` or block with a single, concrete next action.
+- Lock inputs include scenario plan + relevant lens templates so agents cannot
+  “progress” by editing without re-validating.
+
+Out of scope:
+- Automatic scenario synthesis (LM-driven).
+- A full interactive wizard/REPL UI.
+- Perfect rollback of append-only evidence artifacts.
 
 ## M9 — Enrich v1 (JSON-only + Validate/Lock + Evidence-First Plan/Apply) (done)
 
@@ -39,11 +95,10 @@ Artifacts (doc pack):
   - `<doc-pack>/inventory/surface.json` (canonical surface inventory; stable IDs + evidence refs)
 - Tool-written workflow/state:
   - `<doc-pack>/enrich/lock.json` (authoritative input snapshot: selected inputs + hashes/snapshot id)
-  - `<doc-pack>/enrich/state.json` (authoritative pointer to last committed txn)
   - `<doc-pack>/enrich/history.jsonl` (authoritative event log; JSONL)
   - `<doc-pack>/enrich/plan.out.json` (derived plan; must match `lock.json`)
   - `<doc-pack>/enrich/report.json` (derived report; evidence-linked)
-  - `<doc-pack>/enrich/txns/<txn_id>/**` (staging + committed outputs)
+  - temporary: `<doc-pack>/enrich/txns/<txn_id>/**` (staging + backups for atomic apply; cleaned on success)
 - Derived outputs (not authoritative for decisions):
   - `<doc-pack>/man/**` (rendered man page artifacts)
   - `<doc-pack>/coverage_ledger.json` (derived convenience view; never a progress gate)
@@ -52,7 +107,7 @@ Commands (clean break):
 - `bman init --doc-pack <dir> [--binary <bin>]` writes a schema-valid starter `<doc-pack>/enrich/config.json` (and generates the pack if missing; uses `enrich/bootstrap.json` if `--binary` is omitted).
 - `bman validate --doc-pack <dir>` validates inputs and writes `<doc-pack>/enrich/lock.json`.
 - `bman plan --doc-pack <dir>` writes `<doc-pack>/enrich/plan.out.json`.
-- `bman apply --doc-pack <dir>` applies transactionally and updates `<doc-pack>/enrich/state.json`.
+- `bman apply --doc-pack <dir>` applies transactionally and writes `<doc-pack>/enrich/report.json`.
 - `bman status --doc-pack <dir> [--json]` reports issues and the deterministic next action (stable machine-readable contract in `--json` mode).
 - `bman enrich` is removed; use `init/validate/plan/apply/status`.
 
@@ -192,8 +247,7 @@ validation is deferred to a later milestone (implemented for `EXAMPLES` in M6).
 Deliverables:
 - Fresh `binary_lens` pack under `<doc-pack>/binary.lens/`.
 - `<doc-pack>/man/ls.1` rendered from the pack + lens output.
-- Provenance artifacts (`usage_evidence.json`, `meta.json`).
-- Evidence trail (`usage_evidence.json`, `usage_lens.template.sql`, `usage_lens.sql`).
+- Provenance artifact (`meta.json`).
 
 Out of scope:
 - Dynamic execution or sandbox validation.
