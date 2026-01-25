@@ -193,7 +193,7 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
         manifest = load_manifest_optional(&ctx.paths)?;
     }
 
-    let binary_name = manifest.as_ref().map(|m| m.binary_name.as_str());
+    let binary_name = manifest.as_ref().map(|m| m.binary_name.clone());
 
     let started_at_epoch_ms = enrich::now_epoch_ms()?;
     let txn_id = format!("{started_at_epoch_ms}");
@@ -222,10 +222,7 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
             return Err(anyhow!(
                 "pack root missing at {} (run `bman {} --doc-pack {}` first)",
                 pack_root.display(),
-                manifest
-                    .as_ref()
-                    .map(|m| m.binary_name.as_str())
-                    .unwrap_or("<binary>"),
+                binary_name.as_deref().unwrap_or("<binary>"),
                 ctx.paths.root().display()
             ));
         }
@@ -238,7 +235,6 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
             pack_root
         };
 
-        let templates = compute_lens_templates(ctx.paths.root(), &ctx.config);
         let mut examples_report = None;
         let scenarios_path = ctx.paths.scenarios_plan_path();
 
@@ -254,11 +250,13 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
         }
 
         if wants_scenarios {
-            let binary_name = ensure_manifest_binary_name(manifest.as_ref(), binary_name)?;
+            let binary_name = binary_name
+                .as_deref()
+                .ok_or_else(|| anyhow!("binary name unavailable; manifest missing"))?;
             examples_report = Some(scenarios::run_scenarios(
                 &pack_root,
                 ctx.paths.root(),
-                &binary_name,
+                binary_name,
                 &scenarios_path,
                 &lens_flake,
                 Some(ctx.paths.root()),
@@ -271,7 +269,7 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
         }
 
         let context = if wants_render {
-            Some(resolve_pack_context_for_templates(&pack_root, &templates)?)
+            Some(resolve_pack_context(&pack_root, ctx.paths.root(), &ctx.config)?)
         } else {
             None
         };
@@ -317,7 +315,7 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
             if surface_path.is_file() {
                 let surface = crate::surface::load_surface_inventory(&surface_path)?;
                 let coverage_binary = binary_name
-                    .map(|name| name.to_string())
+                    .clone()
                     .or_else(|| surface.binary_name.clone())
                     .ok_or_else(|| anyhow!("binary name unavailable for coverage ledger"))?;
                 let ledger = scenarios::build_coverage_ledger(
@@ -394,7 +392,7 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
     let plan_status = plan_status(lock.as_ref(), Some(&plan));
     let summary = build_status_summary(
         ctx.paths.root(),
-        binary_name,
+        binary_name.as_deref(),
         &ctx.config,
         true,
         lock_status,
@@ -415,7 +413,7 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
     let report = enrich::EnrichReport {
         schema_version: enrich::REPORT_SCHEMA_VERSION,
         generated_at_epoch_ms: finished_at_epoch_ms,
-        binary_name: binary_name.map(|name| name.to_string()),
+        binary_name: binary_name.clone(),
         lock,
         requirements: summary.requirements.clone(),
         blockers: summary.blockers.clone(),
@@ -518,7 +516,6 @@ pub fn run_status(args: StatusArgs) -> Result<()> {
             &paths,
             binary_name.as_deref(),
             &config_state,
-            &scenario_plan_state,
             lock_status,
             lock_parse_error,
             plan_parse_error,
@@ -728,37 +725,10 @@ fn build_invalid_plan_summary(
     })
 }
 
-fn next_action_for_missing_inputs(
-    paths: &enrich::DocPackPaths,
-    binary_name: Option<&str>,
-    scenario_plan_state: &ScenarioPlanState,
-) -> enrich::NextAction {
-    if matches!(scenario_plan_state, ScenarioPlanState::Missing) {
-        return enrich::NextAction::Edit {
-            path: "scenarios/plan.json".to_string(),
-            content: scenarios::plan_stub(binary_name),
-            reason: "scenarios/plan.json missing; create a minimal stub".to_string(),
-        };
-    }
-    if !paths.pack_manifest_path().is_file() {
-        return enrich::NextAction::Edit {
-            path: "enrich/bootstrap.json".to_string(),
-            content: enrich::bootstrap_stub(),
-            reason: "pack missing; init requires binary; set enrich/bootstrap.json".to_string(),
-        };
-    }
-    enrich::NextAction::Edit {
-        path: "enrich/config.json".to_string(),
-        content: enrich::config_stub(),
-        reason: "config inputs missing; replace with a minimal stub".to_string(),
-    }
-}
-
 fn build_parse_error_summary(
     paths: &enrich::DocPackPaths,
     binary_name: Option<&str>,
     config_state: &ConfigState,
-    scenario_plan_state: &ScenarioPlanState,
     lock_status: enrich::LockStatus,
     lock_parse_error: Option<String>,
     plan_parse_error: Option<String>,
@@ -811,10 +781,9 @@ fn build_parse_error_summary(
         ConfigState::Valid(config) => {
             let missing_inputs = enrich::resolve_inputs(config, paths.root()).is_err();
             if missing_inputs {
-                Some(next_action_for_missing_inputs(
+                Some(crate::status::next_action_for_missing_inputs(
                     paths,
                     binary_name,
-                    scenario_plan_state,
                 ))
             } else {
                 None
@@ -1018,34 +987,15 @@ fn load_examples_report_optional(
     Ok(Some(report))
 }
 
-fn ensure_manifest_binary_name(
-    manifest: Option<&pack::PackManifest>,
-    binary_name: Option<&str>,
-) -> Result<String> {
-    if let Some(name) = binary_name {
-        return Ok(name.to_string());
-    }
-    if let Some(manifest) = manifest {
-        return Ok(manifest.binary_name.clone());
-    }
-    Err(anyhow!("binary name unavailable; manifest missing"))
-}
-
-fn compute_lens_templates(doc_pack_root: &Path, config: &enrich::EnrichConfig) -> Vec<PathBuf> {
-    config
-        .usage_lens_templates
-        .iter()
-        .map(|rel| doc_pack_root.join(rel))
-        .collect()
-}
-
-fn resolve_pack_context_for_templates(
+fn resolve_pack_context(
     pack_root: &Path,
-    templates: &[PathBuf],
+    doc_pack_root: &Path,
+    config: &enrich::EnrichConfig,
 ) -> Result<pack::PackContext> {
     let mut errors = Vec::new();
-    for template in templates {
-        match pack::load_pack_context_with_template(pack_root, template) {
+    for rel in &config.usage_lens_templates {
+        let template = doc_pack_root.join(rel);
+        match pack::load_pack_context_with_template(pack_root, &template) {
             Ok(context) => return Ok(context),
             Err(err) => errors.push(format!("{}: {}", template.display(), err)),
         }
