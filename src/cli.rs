@@ -9,7 +9,7 @@ pub const DEFAULT_LENS_FLAKE: &str = "../binary_lens#binary_lens";
     name = "bman",
     version,
     about = "Doc-pack enrichment workflow for binary man pages",
-    after_help = "Commands:\n  init --doc-pack <dir> --binary <bin>  Bootstrap a doc pack (pack + config)\n  validate --doc-pack <dir>            Validate inputs and write enrich/lock.json\n  plan --doc-pack <dir>                Evaluate requirements and write enrich/plan.out.json\n  apply --doc-pack <dir>               Apply plan transactionally (writes enrich/state.json)\n  status --doc-pack <dir>              Summarize requirements and next action\n\nExamples:\n  bman init --doc-pack /tmp/ls-docpack --binary ls\n  bman validate --doc-pack /tmp/ls-docpack\n  bman plan --doc-pack /tmp/ls-docpack\n  bman apply --doc-pack /tmp/ls-docpack\n  bman status --doc-pack /tmp/ls-docpack --json",
+    after_help = "Commands:\n  init --doc-pack <dir> --binary <bin>  Bootstrap a doc pack (pack + config)\n  validate --doc-pack <dir>            Validate inputs and write enrich/lock.json\n  plan --doc-pack <dir>                Evaluate requirements and write enrich/plan.out.json\n  apply --doc-pack <dir>               Apply plan transactionally (writes enrich/report.json)\n  status --doc-pack <dir>              Summarize requirements and next action\n\nExamples:\n  bman init --doc-pack /tmp/ls-docpack --binary ls\n  bman validate --doc-pack /tmp/ls-docpack\n  bman plan --doc-pack /tmp/ls-docpack\n  bman apply --doc-pack /tmp/ls-docpack\n  bman status --doc-pack /tmp/ls-docpack --json",
     subcommand_required = true,
     arg_required_else_help = true
 )]

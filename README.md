@@ -51,7 +51,7 @@ Commands:
 - `init --doc-pack <dir> [--binary <bin>]`: generate a pack (if missing) and write a starter `enrich/config.json` (reads `enrich/bootstrap.json` when `--binary` is omitted)
 - `validate --doc-pack <dir>`: validate inputs and write `enrich/lock.json`
 - `plan --doc-pack <dir>`: evaluate requirements and write `enrich/plan.out.json`
-- `apply --doc-pack <dir>`: apply the plan transactionally (writes `enrich/state.json`)
+- `apply --doc-pack <dir>`: apply the plan transactionally (writes `enrich/report.json`)
 - `status --doc-pack <dir> [--json]`: summarize requirements and emit a deterministic next action
 
 Multi-command CLIs (example: `git`):

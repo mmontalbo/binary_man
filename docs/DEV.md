@@ -60,8 +60,8 @@ cargo run --bin bman -- apply --doc-pack /tmp/empty
 `enrich/config.json` declares the inputs and requirements to evaluate. `bman`
 enforces the loop with `validate → plan → apply`, and `status` reports a
 decision of `complete`, `incomplete`, or `blocked` based on evidence-linked
-requirements and blockers. `apply` writes `enrich/state.json` and
-`enrich/report.json` with the latest evaluation.
+requirements and blockers. `apply` writes `enrich/report.json` with the latest
+evaluation.
 
 Scenarios are defined per-binary under `<doc-pack>/scenarios/<binary>.json` and
 are referenced by `enrich/config.json`. Scenario runs are appended to the pack

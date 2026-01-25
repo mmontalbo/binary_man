@@ -12,13 +12,11 @@ pub const CONFIG_SCHEMA_VERSION: u32 = 1;
 pub const BOOTSTRAP_SCHEMA_VERSION: u32 = 1;
 pub const LOCK_SCHEMA_VERSION: u32 = 1;
 pub const PLAN_SCHEMA_VERSION: u32 = 1;
-pub const STATE_SCHEMA_VERSION: u32 = 1;
 pub const REPORT_SCHEMA_VERSION: u32 = 1;
 pub const HISTORY_SCHEMA_VERSION: u32 = 1;
 
 pub const PROBE_LENS_TEMPLATE_REL: &str = "queries/usage_from_probes.sql";
-pub const SCOPED_USAGE_LENS_TEMPLATE_REL: &str =
-    "queries/usage_from_scoped_usage_functions.sql";
+pub const SCOPED_USAGE_LENS_TEMPLATE_REL: &str = "queries/usage_from_scoped_usage_functions.sql";
 pub const DEFAULT_LENS_TEMPLATE_REL: &str = "binary.lens/views/queries/string_occurrences.sql";
 pub const SUBCOMMANDS_FROM_PROBES_TEMPLATE_REL: &str = "queries/subcommands_from_probes.sql";
 
@@ -249,15 +247,6 @@ pub struct StatusSummary {
 }
 
 #[derive(Debug, Serialize, Clone)]
-pub struct EnrichState {
-    pub schema_version: u32,
-    pub generated_at_epoch_ms: u128,
-    pub binary_name: Option<String>,
-    pub status: StatusSummary,
-    pub last_run: Option<EnrichRunSummary>,
-}
-
-#[derive(Debug, Serialize, Clone)]
 pub struct EnrichRunSummary {
     pub step: String,
     pub started_at_epoch_ms: u128,
@@ -327,10 +316,6 @@ pub fn plan_path(doc_pack_root: &Path) -> PathBuf {
     doc_pack_root.join("enrich").join("plan.out.json")
 }
 
-pub fn state_path(doc_pack_root: &Path) -> PathBuf {
-    doc_pack_root.join("enrich").join("state.json")
-}
-
 pub fn report_path(doc_pack_root: &Path) -> PathBuf {
     doc_pack_root.join("enrich").join("report.json")
 }
@@ -369,8 +354,8 @@ impl DocPackPaths {
         self.enrich_dir().join("plan.out.json")
     }
 
-    pub fn state_path(&self) -> PathBuf {
-        self.enrich_dir().join("state.json")
+    pub fn report_path(&self) -> PathBuf {
+        self.enrich_dir().join("report.json")
     }
 
     pub fn txns_root(&self) -> PathBuf {
@@ -537,16 +522,6 @@ pub fn write_lock(doc_pack_root: &Path, lock: &EnrichLock) -> Result<()> {
     Ok(())
 }
 
-pub fn write_state(doc_pack_root: &Path, state: &EnrichState) -> Result<()> {
-    let path = state_path(doc_pack_root);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).context("create enrich dir")?;
-    }
-    let text = serde_json::to_string_pretty(state).context("serialize enrich state")?;
-    fs::write(&path, text.as_bytes()).with_context(|| format!("write {}", path.display()))?;
-    Ok(())
-}
-
 pub fn write_report(doc_pack_root: &Path, report: &EnrichReport) -> Result<()> {
     let path = report_path(doc_pack_root);
     if let Some(parent) = path.parent() {
@@ -620,10 +595,7 @@ pub fn validate_config(config: &EnrichConfig) -> Result<()> {
     Ok(())
 }
 
-pub fn resolve_inputs(
-    config: &EnrichConfig,
-    doc_pack_root: &Path,
-) -> Result<SelectedInputs> {
+pub fn resolve_inputs(config: &EnrichConfig, doc_pack_root: &Path) -> Result<SelectedInputs> {
     let usage_lens_templates = config.usage_lens_templates.clone();
     let scenario_catalogs = config.scenario_catalogs.clone();
     for rel in usage_lens_templates.iter().chain(scenario_catalogs.iter()) {
@@ -663,7 +635,10 @@ pub fn build_lock(
     inputs.push(doc_pack_root.join("inventory").join("surface.seed.json"));
     inputs.push(doc_pack_root.join("binary.lens").join("manifest.json"));
     inputs.push(doc_pack_root.join("scenarios"));
-    let probes_plan = doc_pack_root.join("inventory").join("probes").join("plan.json");
+    let probes_plan = doc_pack_root
+        .join("inventory")
+        .join("probes")
+        .join("plan.json");
     if probes_plan.exists() {
         inputs.push(probes_plan);
     }
@@ -677,7 +652,10 @@ pub fn build_lock(
     if probes_config.exists() {
         inputs.push(probes_config);
     }
-    let probes_config_dir = doc_pack_root.join("inventory").join("probes").join("config");
+    let probes_config_dir = doc_pack_root
+        .join("inventory")
+        .join("probes")
+        .join("config");
     if probes_config_dir.is_dir() {
         inputs.push(probes_config_dir);
     }

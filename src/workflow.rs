@@ -284,8 +284,11 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
             let context = context
                 .as_ref()
                 .ok_or_else(|| anyhow!("pack context required for man rendering"))?;
-            let man_page =
-                render::render_man_page(context, examples_report.as_ref(), surface_for_render.as_ref());
+            let man_page = render::render_man_page(
+                context,
+                examples_report.as_ref(),
+                surface_for_render.as_ref(),
+            );
             write_outputs_staged(
                 &staging_root,
                 ctx.paths.root(),
@@ -351,6 +354,37 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
             return Err(err);
         }
     };
+
+    // Successful publish: discard staging/backups to keep doc packs lean.
+    let txn_root = ctx.paths.txn_root(&txn_id);
+    if txn_root.is_dir() {
+        if let Err(err) = fs::remove_dir_all(&txn_root) {
+            if args.verbose {
+                eprintln!(
+                    "warning: failed to clean txn dir {}: {err}",
+                    txn_root.display()
+                );
+            }
+        }
+    }
+    let txns_root = ctx.paths.txns_root();
+    if txns_root.is_dir() {
+        match fs::read_dir(&txns_root) {
+            Ok(mut entries) => {
+                if entries.next().is_none() {
+                    let _ = fs::remove_dir(&txns_root);
+                }
+            }
+            Err(err) => {
+                if args.verbose {
+                    eprintln!(
+                        "warning: failed to read txns dir {}: {err}",
+                        txns_root.display()
+                    );
+                }
+            }
+        }
+    }
     let plan_status = plan_status(lock.as_ref(), Some(&plan));
     let summary = build_status_summary(
         ctx.paths.root(),
@@ -371,15 +405,6 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
         outputs_hash,
         message: None,
     };
-
-    let state = enrich::EnrichState {
-        schema_version: enrich::STATE_SCHEMA_VERSION,
-        generated_at_epoch_ms: finished_at_epoch_ms,
-        binary_name: binary_name.map(|name| name.to_string()),
-        status: summary.clone(),
-        last_run: Some(last_run.clone()),
-    };
-    enrich::write_state(ctx.paths.root(), &state)?;
 
     let report = enrich::EnrichReport {
         schema_version: enrich::REPORT_SCHEMA_VERSION,
@@ -413,7 +438,7 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
     if args.verbose {
         eprintln!(
             "apply completed; wrote {}",
-            ctx.paths.state_path().display()
+            ctx.paths.report_path().display()
         );
     }
     Ok(())
@@ -666,8 +691,7 @@ fn build_parse_error_summary(
             }
         }
         ConfigState::Valid(config) => {
-            let missing_inputs =
-                enrich::resolve_inputs(config, paths.root()).is_err();
+            let missing_inputs = enrich::resolve_inputs(config, paths.root()).is_err();
             if missing_inputs {
                 if !paths.pack_manifest_path().is_file() {
                     Some(enrich::NextAction::Edit {
@@ -720,7 +744,10 @@ fn build_parse_error_summary(
         command: format!("bman status --doc-pack {}", paths.root().display()),
         reason: "status blocked; recheck when needed".to_string(),
     });
-    let codes: Vec<String> = blockers.iter().map(|blocker| blocker.code.clone()).collect();
+    let codes: Vec<String> = blockers
+        .iter()
+        .map(|blocker| blocker.code.clone())
+        .collect();
 
     Ok(enrich::StatusSummary {
         schema_version: 1,
@@ -983,10 +1010,8 @@ fn write_usage_lens_template(
         return Ok(());
     }
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("create {}", parent.display()))?;
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
-    fs::write(&path, contents.as_bytes())
-        .with_context(|| format!("write {}", path.display()))?;
+    fs::write(&path, contents.as_bytes()).with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }

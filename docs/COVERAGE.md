@@ -62,7 +62,6 @@ cargo run --bin bman -- status --doc-pack /tmp/<binary>-docpack --json
 
 The tool writes `enrich/lock.json` (validated input snapshot),
 `enrich/plan.out.json` (planned actions + requirement eval),
-`enrich/state.json` (current status + last run summary),
 `enrich/report.json` (evidence-linked decision report), and
 `enrich/history.jsonl` (append-only provenance). Surface discovery is captured
 in `inventory/surface.json` with probe evidence in `inventory/probes/*.json`
@@ -110,7 +109,7 @@ mostly for confidence + tracking.
 - Rendered man page: `<doc-pack>/man/<binary>.1`
 - Coverage ledger: `<doc-pack>/coverage_ledger.json`
 - Enrichment config/lock/plan: `<doc-pack>/enrich/config.json`, `<doc-pack>/enrich/lock.json`, `<doc-pack>/enrich/plan.out.json`
-- Enrichment state/history: `<doc-pack>/enrich/state.json`, `<doc-pack>/enrich/history.jsonl`
+- Enrichment history: `<doc-pack>/enrich/history.jsonl`
 - Enrichment report: `<doc-pack>/enrich/report.json`
 - Surface inventory: `<doc-pack>/inventory/surface.json`, `<doc-pack>/inventory/probes/*.json`, `<doc-pack>/inventory/probes/plan.json`
 
