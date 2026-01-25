@@ -63,18 +63,16 @@ decision of `complete`, `incomplete`, or `blocked` based on evidence-linked
 requirements and blockers. `apply` writes `enrich/report.json` with the latest
 evaluation.
 
-Scenarios are defined per-binary under `<doc-pack>/scenarios/<binary>.json` and
-are referenced by `enrich/config.json`. Scenario runs are appended to the pack
-under `<doc-pack>/binary.lens/runs/` and summarized in
-`<doc-pack>/man/examples_report.json` when planned. Usage + subcommand templates
+Scenarios are defined under `<doc-pack>/scenarios/plan.json`. Scenario runs are
+appended to the pack under `<doc-pack>/binary.lens/runs/` and summarized in
+`<doc-pack>/man/examples_report.json` when planned. Usage + discovery templates
 are installed under `<doc-pack>/queries/` and referenced by `enrich/config.json`,
 with the pack's `binary.lens/views/queries/` templates used as fallbacks.
 Enrichment control and state live under `<doc-pack>/enrich/`, including
 `bootstrap.json`, `config.json`, `lock.json`, and `plan.out.json`.
-Surface inventory lives under `<doc-pack>/inventory/surface.json` with probe
-evidence in `<doc-pack>/inventory/probes/*.json` (planned via
-`<doc-pack>/inventory/probes/plan.json`); `coverage_ledger.json` is a derived
-view and not used for gating. Optionally, agents can provide a surface seed
+Surface inventory lives under `<doc-pack>/inventory/surface.json` with scenario
+evidence in `<doc-pack>/inventory/scenarios/*.json`; `coverage_ledger.json` is a
+derived view and not used for gating. Optionally, agents can provide a surface seed
 under `<doc-pack>/inventory/surface.seed.json`.
 
 Use `--lens-flake <ref>` to point at a different `binary_lens` flake if needed.

@@ -7,7 +7,7 @@ section from captured stdout/stderr, proving documented invocations behave as
 described.
 
 Note: help-text extraction is used only for derived rendering; inventory and
-gating rely on `inventory/surface.json` plus probe/run evidence.
+gating rely on `inventory/surface.json` plus scenario evidence and run artifacts.
 
 ## Usage
 
@@ -64,15 +64,15 @@ bman apply --doc-pack /tmp/git-docpack
 bman status --doc-pack /tmp/git-docpack --json
 ```
 
-If `status --json` returns a `next_action` edit for `inventory/probes/plan.json`,
-apply it (typically adds a `help -a` probe), then rerun validate/plan/apply.
+If `status --json` returns a `next_action` edit for `scenarios/plan.json`,
+apply it (typically adds help scenarios), then rerun validate/plan/apply.
 
 ## Outputs
 
 Doc pack layout under `<doc-pack>/`:
 
 - `<doc-pack>/binary.lens/` (pack)
-- `<doc-pack>/scenarios/<binary>.json` (scenario catalog)
+- `<doc-pack>/scenarios/plan.json` (scenario plan)
 - `<doc-pack>/fixtures/...` (fixture trees)
 - `<doc-pack>/binary.lens/views/queries/` (usage lens templates packaged with the pack)
 - `<doc-pack>/queries/` (project templates installed by init, including usage + subcommand extraction lenses)
@@ -85,8 +85,7 @@ Doc pack layout under `<doc-pack>/`:
 - temporary: `<doc-pack>/enrich/txns/<txn_id>/...` (staging + backups for atomic apply; cleaned on success)
 - optional: `<doc-pack>/inventory/surface.seed.json` (agent-provided surface seed)
 - `<doc-pack>/inventory/surface.json` (canonical surface inventory; items are `option`/`command`/`subcommand`)
-- `<doc-pack>/inventory/probes/plan.json` (agent-edited probe plan; strict schema)
-- `<doc-pack>/inventory/probes/*.json` (probe evidence)
+- `<doc-pack>/inventory/scenarios/*.json` (scenario evidence)
 - `<doc-pack>/man/<binary>.1` (man page)
 - `<doc-pack>/man/examples_report.json` (derived scenario validation + run refs; only when scenarios are run)
 - `<doc-pack>/coverage_ledger.json` (derived coverage ledger; never a gate)
@@ -114,17 +113,18 @@ Help/usage text is extracted via the lens templates referenced in
 `<doc-pack>/enrich/config.json`. `bman init` installs project templates under
 `<doc-pack>/queries/` and uses a fallback chain:
 
-1. `queries/usage_from_probes.sql`
+1. `queries/usage_from_scenarios.sql`
 2. `queries/usage_from_scoped_usage_functions.sql`
 3. `binary.lens/views/queries/string_occurrences.sql`
 
 DuckDB is invoked via `nix run nixpkgs#duckdb --`. This help text is used for
 rendering only; surface inventory is separate.
 
-Surface discovery uses `queries/subcommands_from_probes.sql` to extract
-subcommands from probe stdout into `inventory/surface.json`. If subcommands are
-missing for a multi-command CLI, update `inventory/probes/plan.json` (add an
-additional help probe) or adjust the query template, then re-run the loop.
+Surface discovery uses `queries/subcommands_from_scenarios.sql` and
+`queries/options_from_scenarios.sql` to extract items from scenario stdout into
+`inventory/surface.json`. If subcommands are missing for a multi-command CLI,
+add help scenarios in `scenarios/plan.json` or adjust the query template, then
+re-run the loop.
 
 ## Rendering
 

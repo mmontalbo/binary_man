@@ -12,10 +12,9 @@ but it is also intended to be readable by humans.
 
 Inputs to read:
 
-- `<doc-pack>/scenarios/<binary>.json` (current scenarios)
+- `<doc-pack>/scenarios/plan.json` (scenario plan)
 - `<doc-pack>/inventory/surface.json` (canonical surface inventory)
-- `<doc-pack>/inventory/probes/plan.json` (probe plan)
-- `<doc-pack>/inventory/probes/*.json` (probe evidence)
+- `<doc-pack>/inventory/scenarios/*.json` (scenario evidence)
 - `<doc-pack>/man/examples_report.json` + `<doc-pack>/man/<binary>.1` (what changed)
 
 Main commands:
@@ -47,8 +46,7 @@ cargo run --bin bman -- validate --doc-pack /tmp/<binary>-docpack
 2) Edit pack-local inputs as needed:
 - `queries/` (usage lens templates referenced by `enrich/config.json`)
 - `binary.lens/views/queries/` (pack-provided lenses for fallback)
-- `inventory/probes/plan.json` (probe plan for help/usage evidence)
-- `scenarios/` (scenario catalog)
+- `scenarios/plan.json` (scenario plan for help/behavior coverage)
 - `fixtures/` (deterministic inputs)
 - `enrich/config.json` (requirements + input selection)
 
@@ -64,8 +62,7 @@ The tool writes `enrich/lock.json` (validated input snapshot),
 `enrich/plan.out.json` (planned actions + requirement eval),
 `enrich/report.json` (evidence-linked decision report), and
 `enrich/history.jsonl` (append-only provenance). Surface discovery is captured
-in `inventory/surface.json` with probe evidence in `inventory/probes/*.json`
-(planned via `inventory/probes/plan.json`).
+in `inventory/surface.json` with scenario evidence in `inventory/scenarios/*.json`.
 Decisions are `complete`, `incomplete`, or `blocked` depending on whether
 evidence-linked requirements are met and whether blockers are present.
 
@@ -76,6 +73,10 @@ Don’t stop after smoke tests. A “coverage pass” is done only when:
 - you state an explicit coverage target (options vs behaviors vs doc claims)
 - you produce a small coverage ledger (total, covered, uncovered + reasons)
 - you either reach the target, or explain why specific items are out-of-scope
+
+To make coverage a hard gate, add `coverage` to `enrich/config.json`
+`requirements`. The tool will remain incomplete until uncovered IDs are empty
+or blockers are recorded explicitly.
 
 ## Coverage Model (avoid combinatorics)
 
@@ -101,7 +102,7 @@ mostly for confidence + tracking.
 
 ## Project Artifacts
 
-- Scenario catalog: `<doc-pack>/scenarios/<binary>.json`
+- Scenario plan: `<doc-pack>/scenarios/plan.json`
 - Fixtures: `<doc-pack>/fixtures/...`
 - Usage lens templates: `<doc-pack>/queries/` (project), `<doc-pack>/binary.lens/views/queries/` (pack)
 - Runs + evidence: `<doc-pack>/binary.lens/runs/`
@@ -111,7 +112,7 @@ mostly for confidence + tracking.
 - Enrichment config/lock/plan: `<doc-pack>/enrich/config.json`, `<doc-pack>/enrich/lock.json`, `<doc-pack>/enrich/plan.out.json`
 - Enrichment history: `<doc-pack>/enrich/history.jsonl`
 - Enrichment report: `<doc-pack>/enrich/report.json`
-- Surface inventory: `<doc-pack>/inventory/surface.json`, `<doc-pack>/inventory/probes/*.json`, `<doc-pack>/inventory/probes/plan.json`
+- Surface inventory: `<doc-pack>/inventory/surface.json`, `<doc-pack>/inventory/scenarios/*.json`
 
 ## Current Behavior (important)
 
@@ -204,28 +205,22 @@ feature needed to unlock it.
 
 ### 6) Track coverage explicitly (don’t guess)
 
-Maintain a “coverage ledger” in one of these ways:
+Maintain a “coverage ledger” using explicit scenario metadata in
+`scenarios/plan.json`:
 
-- **Preferred (simple):** add *conventions* inside each scenario object:
-  - `intent`: one sentence of what this proves
-  - `covers_options`: list of option IDs covered by this scenario (consumed)
-  - `covers_behaviors`: list of behavior IDs demonstrated
-  - `covers_doc_claims`: list of claim IDs (freeform, but stable strings)
+- `covers`: list of surface IDs covered by this scenario
+- `coverage_tier`: `acceptance` | `behavior` | `rejection`
+- `coverage_ignore: true` for scenarios that should not affect coverage
 
 `binary_man` emits a `coverage_ledger.json` by combining surface inventory +
-scenario metadata.
-It uses `coverage_tier` (`acceptance`, `behavior`, or `rejection`) and
-`covers_options` when present, and falls back to argv parsing otherwise. Use
-`coverage_ignore: true` for scenarios that should not affect coverage (e.g.,
-negative tests or non-option probes), while still allowing them to appear in
-`examples_report.json` and the man page.
+scenario plan metadata. Coverage gating and ledger output are driven by explicit
+`covers` claims and `coverage.blocked` entries (no argv parsing).
 
-Use the catalog-level `coverage.blocked` list to record options that are
-blocked for deterministic *behavior* validation. Blocked entries attach a
-reason to the ledger but do not prevent acceptance or rejection coverage.
+Use the plan-level `coverage.blocked` list to record blocked items with
+`item_ids`, `reason`, optional `details`, and optional `tags` for capability
+blockers.
 
-If you add new metadata keys, ensure the scenario loader tolerates them (unknown
-fields must not break parsing).
+The scenario plan schema is strict; unknown fields are rejected.
 
 Iterate: if your ledger still has uncovered items, add scenarios and rerun until
 you hit your stated target (or mark items out-of-scope with reasons).
@@ -303,7 +298,7 @@ Use this as a starting point for a coding agent:
 > - State an explicit coverage target up front (options vs behaviors vs doc
 >   claims). If not specified, default to comprehensive option acceptance
 >   coverage when feasible.
-> - Update `<doc-pack>/scenarios/<binary>.json` with new scenarios:
+> - Update `<doc-pack>/scenarios/plan.json` with new scenarios:
 >   - acceptance scenarios for uncovered option IDs (prefer `publish:false`)
 >   - at least one fixture-backed behavior scenario if feasible
 > - Run `cargo run --bin bman -- validate --doc-pack /tmp/<binary>-docpack`,
