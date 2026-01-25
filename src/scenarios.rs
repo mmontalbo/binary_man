@@ -251,6 +251,13 @@ pub fn load_plan(path: &Path) -> Result<ScenarioPlan> {
     Ok(plan)
 }
 
+pub(crate) fn load_plan_if_exists(path: &Path) -> Result<Option<ScenarioPlan>> {
+    if !path.is_file() {
+        return Ok(None);
+    }
+    Ok(Some(load_plan(path)?))
+}
+
 pub fn validate_plan(plan: &ScenarioPlan) -> Result<()> {
     if plan.schema_version != SCENARIO_PLAN_SCHEMA_VERSION {
         return Err(anyhow!(
@@ -367,9 +374,6 @@ pub fn run_scenarios(
         if verbose {
             eprintln!("running scenario {} {}", binary_name, scenario.id);
         }
-
-        validate_scenario_spec(&scenario)
-            .with_context(|| format!("validate scenario {}", scenario.id))?;
 
         let env = merge_env(&plan.default_env, &scenario.env);
         let seed_dir = scenario.seed_dir.clone();
