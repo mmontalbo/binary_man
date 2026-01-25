@@ -5,9 +5,63 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured “enrichment loop”
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M10 — Scenario-Only Evidence + Coverage v1 (No Scores).
+Current focus: M11 — Execution-Backed Verification v1.
 
-## M10 — Scenario-Only Evidence + Coverage v1 (No Scores) (in progress)
+## M11 — Execution-Backed Verification v1 (in progress)
+
+Goal: Move from “help-derived surface claims” to **execution-backed verification**
+for surface IDs (starting with `ls`), using scenario evidence as the source of
+truth. Keep decisions evidence-linked and avoid heuristic scoring.
+
+Motivation:
+- Help output is a claim, not evidence that an option/subcommand is accepted or
+  behaves as documented.
+- We want a simple LM to make progress mechanically by proposing scenarios (and
+  inline seeds) without the tool baking in per-binary help/CLI parsing logic.
+
+Design constraints (non-negotiable for this milestone):
+- JSON-only structured artifacts in the doc pack (JSONL permitted for history).
+- Scenarios remain the only execution concept; evidence is append-only.
+- Keep parsing semantics out of Rust: interpretation lives in pack-local SQL
+  templates over scenario evidence, not hardcoded parsers.
+- Safety-first execution: bounded timeouts, bounded outputs, and sandboxing
+  defaults remain enforced.
+
+Deliverables:
+- Scenario plan extensions (strict schema; schema bump):
+  - Optional `scope` field on scenarios to support multi-command CLIs (e.g.
+    `["commit"]` for `git commit`).
+  - Inline `seed` specification on scenarios so agents can define deterministic
+    filesystem fixtures without authoring `fixtures/**` trees by hand. The tool
+    materializes seeds into an isolated per-run directory.
+- Pack-local verification lens:
+  - Install/standardize `queries/verification_from_scenarios.sql` that produces a
+    deterministic, evidence-linked verification status per surface ID using:
+    `<doc-pack>/inventory/scenarios/*.json`, `<doc-pack>/inventory/surface.json`,
+    and `<doc-pack>/scenarios/plan.json`.
+  - Verified status must come from scenario outcomes (not plan-only `covers`
+    claims). No confidence scores.
+- Evidence-linked verification ledger:
+  - Emit a derived ledger (either a new `verification_ledger.json` or updated
+    `coverage_ledger.json` semantics) that:
+    - enumerates `verified`, `blocked`, and `unverified` surface IDs
+    - links each decision to concrete evidence refs (`inventory/scenarios/*.json`,
+      `inventory/surface.json`, `scenarios/plan.json`)
+- Mechanical gating and deterministic next actions:
+  - When verification is enabled as a requirement, `status --json` drives the
+    smallest next action to reduce unverified IDs (edit/add a single scenario,
+    then `validate → plan → apply`).
+
+Acceptance criteria:
+- `ls`: starting from help-derived surface, agents can mechanically add acceptance
+  scenarios (with inline seeds where needed) until every surface ID is
+  `verified` or explicitly `blocked` with evidence-linked reasons.
+- `git`: scoped IDs are supported so verification can target `commit.--amend`
+  style surface items without ambiguity (behavior verification may remain
+  blocked until multi-step scenarios are supported).
+- No scoring; all verification decisions and blockers cite concrete evidence.
+
+## M10 — Scenario-Only Evidence + Coverage v1 (done)
 
 Goal: Use a single concept — **scenarios** — for all execution-based evidence
 (help/usage capture, surface discovery, examples, and optional coverage). Keep
