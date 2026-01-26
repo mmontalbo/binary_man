@@ -37,6 +37,9 @@ Enrichment config lives in `<doc-pack>/enrich/config.json`; `bman validate`
 writes a lock snapshot, `bman plan` writes `plan.out.json`, and `bman apply`
 executes transactionally. `bman status` reports a decision of `complete`,
 `incomplete`, or `blocked` based on evidence-linked requirements and blockers.
+Add `verification` to the `requirements` list to require execution-backed
+verification; `status --json` will list unverified IDs and emit a single-scenario
+edit stub for `scenarios/plan.json`.
 
 Flags:
 - `--doc-pack <dir>`: doc pack root for init/validate/plan/apply/status
@@ -77,6 +80,7 @@ Doc pack layout under `<doc-pack>/`:
 - `<doc-pack>/binary.lens/views/queries/` (usage lens templates packaged with the pack)
 - `<doc-pack>/queries/` (project templates installed by init, including usage + subcommand extraction lenses)
 - `<doc-pack>/enrich/config.json` (enrichment config)
+- `<doc-pack>/enrich/agent_prompt.md` (tool-provided prompt for LM agents)
 - `<doc-pack>/enrich/bootstrap.json` (optional bootstrap seed; used when pack is missing)
 - `<doc-pack>/enrich/lock.json` (validated input snapshot)
 - `<doc-pack>/enrich/plan.out.json` (planned actions + requirement eval)
@@ -89,6 +93,7 @@ Doc pack layout under `<doc-pack>/`:
 - `<doc-pack>/man/<binary>.1` (man page)
 - `<doc-pack>/man/examples_report.json` (derived scenario validation + run refs; only when scenarios are run)
 - `<doc-pack>/coverage_ledger.json` (derived coverage ledger; updated on apply; never a gate)
+- `<doc-pack>/verification_ledger.json` (derived verification ledger; updated on apply; never a gate)
 - `<doc-pack>/man/meta.json` (provenance metadata)
 
 ## binary_lens integration

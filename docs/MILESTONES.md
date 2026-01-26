@@ -5,9 +5,65 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured “enrichment loop”
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M11 — Execution-Backed Verification v1.
+Current focus: M11.1 — Scenario Loop Rough-Edge Smoothing.
 
-## M11 — Execution-Backed Verification v1 (in progress)
+## M11.1 — Scenario Loop Rough-Edge Smoothing (in progress)
+
+Goal: Keep “learn-by-executing scenarios” as the core agent job, but make the
+loop cheaper and failures mechanically actionable (especially for small LMs).
+
+Motivation:
+- Scenario-based verification is the right direction, but can become slow and
+  boilerplate-heavy as surface size grows.
+- Small LMs should be able to progress mechanically from `status --json` without
+  needing bespoke per-binary prompting or manual debugging.
+
+Design constraints (non-negotiable for this milestone):
+- JSON-only structured artifacts in the doc pack (JSONL permitted for history).
+- Keep parsing semantics out of Rust: do not add help/CLI parsers; interpretation
+  remains in pack-local SQL templates over scenario evidence.
+- Evidence remains append-only; `apply` remains transactional.
+- Safety defaults remain enforced (bounded timeouts/outputs + sandboxing).
+
+Deliverables:
+- Incremental scenario execution:
+  - `apply` runs only new/changed/failed scenarios by default, keyed by a stable
+    `scenario_digest` over the effective scenario + seed materialization inputs.
+  - Provide explicit escape hatches: `--rerun-all` and `--rerun-failed`.
+- Scenario plan `defaults` to reduce boilerplate:
+  - Extend `scenarios/plan.json` to support a strict, schema-validated top-level
+    `defaults` object (timeouts, net/sandbox/no_strace, snippet limits, cwd, env).
+  - Evidence must record effective values so decisions remain reproducible.
+- Runner environment normalization:
+  - Apply safe, binary-agnostic env defaults (e.g. `LC_ALL=C`, `LANG=C`,
+    `TERM=dumb`, `NO_COLOR=1`, `PAGER=cat`, `GIT_PAGER=cat`) unless overridden.
+  - Record the final env used in scenario evidence.
+- Status failure UX (deterministic next actions):
+  - When a scenario fails, `status --json` includes a compact machine-readable
+    failure summary and the evidence path(s), and recommends editing a single
+    specific scenario ID.
+- Two-tier verification (no scores):
+  - Keep “accepted” (option/subcommand recognized) separate from “behavior”
+    (seed + output/FS predicates), both evidence-linked in `verification_ledger.json`.
+  - `enrich/config.json` can require either tier (default `accepted`).
+- Pack-local agent prompt update:
+  - Update `<doc-pack>/enrich/agent_prompt.md` to rely on incremental apply,
+    plan defaults, and the accepted/behavior split; remove binary-specific argv hints.
+
+Non-goals:
+- Negative-testing framework or exhaustive combination testing.
+- Auto-inference of option argument values or baked-in help parsing semantics.
+
+Acceptance criteria:
+- Editing one scenario and re-running `apply` re-executes only that scenario (and
+  any required discovery), not the entire plan.
+- A failing scenario yields a single deterministic next action plus evidence
+  pointers sufficient for a small LM to proceed without extra narration.
+- Haiku can reach “accepted” verification complete for `ls` using only
+  `<doc-pack>/enrich/agent_prompt.md` + `status --json` loop, with stable iteration
+  time due to incremental apply.
+
+## M11 — Execution-Backed Verification v1 (done)
 
 Goal: Move from “help-derived surface claims” to **execution-backed verification**
 for surface IDs (starting with `ls`), using scenario evidence as the source of
@@ -42,9 +98,9 @@ Deliverables:
   - Verified status must come from scenario outcomes (not plan-only `covers`
     claims). No confidence scores.
 - Evidence-linked verification ledger:
-  - Emit a derived ledger (either a new `verification_ledger.json` or updated
-    `coverage_ledger.json` semantics) that:
-    - enumerates `verified`, `blocked`, and `unverified` surface IDs
+  - Emit `verification_ledger.json` that:
+    - enumerates per-surface status (`verified`, `recognized`, `unknown`, `inconclusive`)
+      and an explicit unverified list
     - links each decision to concrete evidence refs (`inventory/scenarios/*.json`,
       `inventory/surface.json`, `scenarios/plan.json`)
 - Mechanical gating and deterministic next actions:

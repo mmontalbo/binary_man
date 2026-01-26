@@ -72,8 +72,9 @@ Enrichment control and state live under `<doc-pack>/enrich/`, including
 `bootstrap.json`, `config.json`, `lock.json`, and `plan.out.json`.
 Surface inventory lives under `<doc-pack>/inventory/surface.json` with scenario
 evidence in `<doc-pack>/inventory/scenarios/*.json`; `coverage_ledger.json` is a
-derived view and not used for gating. Optionally, agents can provide a surface seed
-under `<doc-pack>/inventory/surface.seed.json`.
+derived view and not used for gating. `verification_ledger.json` is an execution-backed
+verification view. Optionally, agents can provide a surface seed under
+`<doc-pack>/inventory/surface.seed.json`.
 
 Use `--lens-flake <ref>` to point at a different `binary_lens` flake if needed.
 `bman init` requires `--binary` (or `enrich/bootstrap.json`) when
@@ -82,10 +83,20 @@ Use `--lens-flake <ref>` to point at a different `binary_lens` flake if needed.
 Fixture-backed scenarios can declare:
 
 - `seed_dir`: path to a fixture tree copied into the per-run work dir
+- `seed`: inline seed spec (entries with `path`, `kind`, optional `contents`/`target`/`mode`)
 - `cwd`: relative working directory inside the seeded tree (defaults to `.`)
 
 `seed_dir` is resolved relative to the doc-pack root (the parent of the
-`scenarios/` directory), so doc packs can be moved without path fixes.
+`scenarios/` directory), so doc packs can be moved without path fixes. Inline
+`seed` entries are materialized into an isolated per-run directory.
+
+Use `scope` on scenarios to record command paths for multi-command CLIs
+(e.g., `["commit"]` for `git commit`).
+
+Verification is opt-in via `enrich/config.json` requirements. When enabled,
+`status --json` lists unverified IDs and emits an edit stub for
+`scenarios/plan.json` so you can add a single acceptance scenario, then rerun
+`validate → plan → apply`.
 
 For a principled approach to expanding scenario coverage (options vs behaviors
 vs doc claims) and curating `.SH EXAMPLES`, see `docs/COVERAGE.md`.

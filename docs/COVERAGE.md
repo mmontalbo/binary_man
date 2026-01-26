@@ -182,10 +182,12 @@ If the behavior depends on filesystem contents, define a fixture spec:
 Scenario fixtures can be seeded declaratively:
 
 - `seed_dir`: path to a fixture tree copied into the per-run work dir
+- `seed`: inline seed spec (entries with `path`, `kind`, optional `contents`/`target`/`mode`)
 - `cwd`: relative working directory inside the seeded tree (defaults to `.`)
 
 `seed_dir` is resolved relative to the doc-pack root (the parent of
-`scenarios/`), so doc packs remain relocatable.
+`scenarios/`), so doc packs remain relocatable. Inline `seed` entries are
+materialized into an isolated per-run directory.
 
 Prefer relative paths in argv (e.g., `.` or `subdir/file`) to avoid absolute
 path leakage in captured output.
