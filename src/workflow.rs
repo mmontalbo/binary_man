@@ -689,6 +689,7 @@ fn build_invalid_config_summary(
         requirements: Vec::new(),
         missing_artifacts: Vec::new(),
         blockers: vec![blocker],
+        scenario_failures: Vec::new(),
         decision: enrich::Decision::Blocked,
         decision_reason: Some(format!("blockers present: {}", code)),
         next_action: enrich::NextAction::Edit {
@@ -725,6 +726,7 @@ fn build_invalid_plan_summary(
         requirements: Vec::new(),
         missing_artifacts: Vec::new(),
         blockers: vec![blocker],
+        scenario_failures: Vec::new(),
         decision: enrich::Decision::Blocked,
         decision_reason: Some(format!("blockers present: {}", code)),
         next_action: enrich::NextAction::Edit {
@@ -847,6 +849,7 @@ fn build_parse_error_summary(
         requirements: Vec::new(),
         missing_artifacts: Vec::new(),
         blockers,
+        scenario_failures: Vec::new(),
         decision: enrich::Decision::Blocked,
         decision_reason: Some(format!("blockers present: {}", codes.join(", "))),
         next_action,

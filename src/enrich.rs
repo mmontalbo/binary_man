@@ -21,6 +21,9 @@ pub const SCOPED_USAGE_LENS_TEMPLATE_REL: &str = "queries/usage_from_scoped_usag
 pub const DEFAULT_LENS_TEMPLATE_REL: &str = "binary.lens/views/queries/string_occurrences.sql";
 pub const SUBCOMMANDS_FROM_SCENARIOS_TEMPLATE_REL: &str = "queries/subcommands_from_scenarios.sql";
 pub const OPTIONS_FROM_SCENARIOS_TEMPLATE_REL: &str = "queries/options_from_scenarios.sql";
+pub const VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL: &str =
+    "queries/verification_from_scenarios.sql";
+pub const ENRICH_AGENT_PROMPT_REL: &str = "enrich/agent_prompt.md";
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -28,6 +31,7 @@ pub enum RequirementId {
     Surface,
     Coverage,
     CoverageLedger,
+    Verification,
     ExamplesReport,
     ManPage,
 }
@@ -38,6 +42,7 @@ impl RequirementId {
             RequirementId::Surface => "surface",
             RequirementId::Coverage => "coverage",
             RequirementId::CoverageLedger => "coverage_ledger",
+            RequirementId::Verification => "verification",
             RequirementId::ExamplesReport => "examples_report",
             RequirementId::ManPage => "man_page",
         }
@@ -48,6 +53,7 @@ impl RequirementId {
             RequirementId::Surface => PlannedAction::SurfaceDiscovery,
             RequirementId::Coverage => PlannedAction::CoverageLedger,
             RequirementId::CoverageLedger => PlannedAction::CoverageLedger,
+            RequirementId::Verification => PlannedAction::ScenarioRuns,
             RequirementId::ExamplesReport => PlannedAction::ScenarioRuns,
             RequirementId::ManPage => PlannedAction::RenderManPage,
         }
@@ -156,6 +162,8 @@ pub struct EnrichConfig {
     pub scenario_catalogs: Vec<String>,
     #[serde(default)]
     pub requirements: Vec<RequirementId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification_tier: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -204,6 +212,10 @@ pub struct RequirementStatus {
     pub id: RequirementId,
     pub status: RequirementState,
     pub reason: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unverified_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unverified_count: Option<usize>,
     pub evidence: Vec<EvidenceRef>,
     pub blockers: Vec<Blocker>,
 }
@@ -212,6 +224,15 @@ pub struct RequirementStatus {
 pub struct EvidenceRef {
     pub path: String,
     pub sha256: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ScenarioFailure {
+    pub scenario_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failures: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<EvidenceRef>,
 }
 
 pub fn dedupe_evidence_refs(entries: &mut Vec<EvidenceRef>) {
@@ -251,6 +272,8 @@ pub struct StatusSummary {
     pub requirements: Vec<RequirementStatus>,
     pub missing_artifacts: Vec<String>,
     pub blockers: Vec<Blocker>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scenario_failures: Vec<ScenarioFailure>,
     pub decision: Decision,
     pub decision_reason: Option<String>,
     pub next_action: NextAction,
@@ -358,6 +381,10 @@ impl DocPackPaths {
         self.enrich_dir().join("config.json")
     }
 
+    pub fn agent_prompt_path(&self) -> PathBuf {
+        self.root.join(ENRICH_AGENT_PROMPT_REL)
+    }
+
     pub fn lock_path(&self) -> PathBuf {
         self.enrich_dir().join("lock.json")
     }
@@ -449,6 +476,7 @@ pub fn default_config() -> EnrichConfig {
         usage_lens_templates,
         scenario_catalogs: Vec::new(),
         requirements: default_requirements(),
+        verification_tier: None,
     }
 }
 
@@ -575,6 +603,13 @@ pub fn validate_config(config: &EnrichConfig) -> Result<()> {
             config.scenario_catalogs.len()
         ));
     }
+    if let Some(tier) = config.verification_tier.as_deref() {
+        if tier != "accepted" && tier != "behavior" {
+            return Err(anyhow!(
+                "verification_tier must be \"accepted\" or \"behavior\" (got {tier:?})"
+            ));
+        }
+    }
     let needs_lens = requirements
         .iter()
         .any(|req| matches!(req, RequirementId::ManPage));
@@ -646,6 +681,10 @@ pub fn build_lock(
     let options_template = doc_pack_root.join(OPTIONS_FROM_SCENARIOS_TEMPLATE_REL);
     if options_template.exists() {
         inputs.push(options_template);
+    }
+    let verification_template = doc_pack_root.join(VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL);
+    if verification_template.exists() {
+        inputs.push(verification_template);
     }
     inputs.sort();
     inputs.dedup();
