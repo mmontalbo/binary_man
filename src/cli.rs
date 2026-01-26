@@ -114,6 +114,14 @@ pub struct ApplyArgs {
     #[arg(long)]
     pub verbose: bool,
 
+    /// Rerun all scenarios, ignoring cached results
+    #[arg(long, conflicts_with = "rerun_failed")]
+    pub rerun_all: bool,
+
+    /// Rerun only scenarios that previously failed
+    #[arg(long, conflicts_with = "rerun_all")]
+    pub rerun_failed: bool,
+
     /// Nix flake reference for binary_lens
     #[arg(long, value_name = "REF", default_value = DEFAULT_LENS_FLAKE)]
     pub lens_flake: String,

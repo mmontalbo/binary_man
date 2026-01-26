@@ -253,6 +253,13 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
             let binary_name = binary_name
                 .as_deref()
                 .ok_or_else(|| anyhow!("binary name unavailable; manifest missing"))?;
+            let run_mode = if args.rerun_all {
+                scenarios::ScenarioRunMode::RerunAll
+            } else if args.rerun_failed {
+                scenarios::ScenarioRunMode::RerunFailed
+            } else {
+                scenarios::ScenarioRunMode::Default
+            };
             examples_report = Some(scenarios::run_scenarios(
                 &pack_root,
                 ctx.paths.root(),
@@ -262,6 +269,7 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
                 Some(ctx.paths.root()),
                 Some(&staging_root),
                 None,
+                run_mode,
                 args.verbose,
             )?);
         } else if wants_render {
@@ -269,7 +277,11 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
         }
 
         let context = if wants_render {
-            Some(resolve_pack_context(&pack_root, ctx.paths.root(), &ctx.config)?)
+            Some(resolve_pack_context(
+                &pack_root,
+                ctx.paths.root(),
+                &ctx.config,
+            )?)
         } else {
             None
         };

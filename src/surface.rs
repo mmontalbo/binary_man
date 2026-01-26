@@ -285,6 +285,7 @@ pub fn apply_surface_discovery(
                     Some(doc_pack_root),
                     Some(staging_root),
                     Some(scenarios::ScenarioKind::Help),
+                    scenarios::ScenarioRunMode::Default,
                     verbose,
                 )?;
                 staging_has_scenarios = has_scenario_files(&staging_scenarios)?;
@@ -317,17 +318,16 @@ pub fn apply_surface_discovery(
                 let mut query_errors = run.errors;
                 let mut found_options = false;
                 for (row, source_root) in run.hits {
-                    let evidence = match evidence_from_scenario_path(
-                        &source_root,
-                        row.scenario_path.as_ref(),
-                    ) {
-                        Ok(Some(evidence)) => evidence,
-                        Ok(None) => continue,
-                        Err(err) => {
-                            query_errors.push(err.to_string());
-                            continue;
-                        }
-                    };
+                    let evidence =
+                        match evidence_from_scenario_path(&source_root, row.scenario_path.as_ref())
+                        {
+                            Ok(Some(evidence)) => evidence,
+                            Ok(None) => continue,
+                            Err(err) => {
+                                query_errors.push(err.to_string());
+                                continue;
+                            }
+                        };
                     if let Some(id) = row.option.as_ref().map(|s| s.trim()) {
                         if id.is_empty() {
                             continue;
@@ -348,8 +348,7 @@ pub fn apply_surface_discovery(
                         found_options = true;
                     }
                 }
-                let status =
-                    query_status(run.ran, found_options, !query_errors.is_empty());
+                let status = query_status(run.ran, found_options, !query_errors.is_empty());
                 discovery.push(SurfaceDiscovery {
                     code: "options_from_scenarios".to_string(),
                     status: status.to_string(),
@@ -416,17 +415,16 @@ pub fn apply_surface_discovery(
                 let mut query_errors = run.errors;
                 let mut found_subcommands = false;
                 for (row, source_root) in run.hits {
-                    let evidence = match evidence_from_scenario_path(
-                        &source_root,
-                        row.scenario_path.as_ref(),
-                    ) {
-                        Ok(Some(evidence)) => evidence,
-                        Ok(None) => continue,
-                        Err(err) => {
-                            query_errors.push(err.to_string());
-                            continue;
-                        }
-                    };
+                    let evidence =
+                        match evidence_from_scenario_path(&source_root, row.scenario_path.as_ref())
+                        {
+                            Ok(Some(evidence)) => evidence,
+                            Ok(None) => continue,
+                            Err(err) => {
+                                query_errors.push(err.to_string());
+                                continue;
+                            }
+                        };
                     if row.multi_command_hint {
                         subcommand_hint_evidence.push(evidence.clone());
                     }
@@ -450,8 +448,7 @@ pub fn apply_surface_discovery(
                         found_subcommands = true;
                     }
                 }
-                let status =
-                    query_status(run.ran, found_subcommands, !query_errors.is_empty());
+                let status = query_status(run.ran, found_subcommands, !query_errors.is_empty());
                 discovery.push(SurfaceDiscovery {
                     code: "subcommands_from_scenarios".to_string(),
                     status: status.to_string(),
@@ -594,7 +591,10 @@ fn has_scenario_files(root: &Path) -> Result<bool> {
     Ok(false)
 }
 
-fn run_subcommands_query(root: &Path, template_sql: &str) -> Result<Vec<ScenarioHit<SubcommandRow>>> {
+fn run_subcommands_query(
+    root: &Path,
+    template_sql: &str,
+) -> Result<Vec<ScenarioHit<SubcommandRow>>> {
     let output = pack::run_duckdb_query(template_sql, root)?;
     let rows: Vec<SubcommandRow> =
         if output.is_empty() || output.iter().all(|byte| byte.is_ascii_whitespace()) {

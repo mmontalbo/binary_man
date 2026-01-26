@@ -1,7 +1,8 @@
 use crate::enrich;
-use crate::staging::write_staged_json;
+use crate::pack;
+use crate::staging::{collect_files_recursive, write_staged_json};
 use crate::surface;
-use crate::util::truncate_bytes;
+use crate::util::{sha256_hex, truncate_bytes};
 use anyhow::{anyhow, Context, Result};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -14,8 +15,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const DEFAULT_SNIPPET_MAX_BYTES: usize = 4096;
 const DEFAULT_SNIPPET_MAX_LINES: usize = 60;
 const MAX_SCENARIO_EVIDENCE_BYTES: usize = 64 * 1024;
-const SCENARIO_PLAN_SCHEMA_VERSION: u32 = 1;
-const SCENARIO_EVIDENCE_SCHEMA_VERSION: u32 = 1;
+const SCENARIO_PLAN_SCHEMA_VERSION: u32 = 2;
+const SCENARIO_EVIDENCE_SCHEMA_VERSION: u32 = 3;
+const SCENARIO_INDEX_SCHEMA_VERSION: u32 = 1;
+const MAX_SEED_ENTRIES: usize = 128;
+const MAX_SEED_TOTAL_BYTES: usize = 64 * 1024;
 
 fn default_true() -> bool {
     true
@@ -32,6 +36,58 @@ pub enum ScenarioKind {
     Behavior,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScenarioRunMode {
+    Default,
+    RerunAll,
+    RerunFailed,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SeedEntryKind {
+    Dir,
+    File,
+    Symlink,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct ScenarioSeedEntry {
+    pub path: String,
+    pub kind: SeedEntryKind,
+    #[serde(default)]
+    pub contents: Option<String>,
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub mode: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct ScenarioSeedSpec {
+    #[serde(default)]
+    pub entries: Vec<ScenarioSeedEntry>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ScenarioDefaults {
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    #[serde(default)]
+    pub seed_dir: Option<String>,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    pub timeout_seconds: Option<f64>,
+    pub net_mode: Option<String>,
+    pub no_sandbox: Option<bool>,
+    pub no_strace: Option<bool>,
+    pub snippet_max_lines: Option<usize>,
+    pub snippet_max_bytes: Option<usize>,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct ScenarioPlan {
@@ -40,6 +96,8 @@ pub struct ScenarioPlan {
     pub binary: Option<String>,
     #[serde(default)]
     pub default_env: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub defaults: Option<ScenarioDefaults>,
     #[serde(default)]
     pub coverage: Option<CoverageNotes>,
     #[serde(default)]
@@ -74,11 +132,15 @@ pub struct ScenarioSpec {
     #[serde(default = "default_true")]
     pub publish: bool,
     #[serde(default)]
+    pub scope: Vec<String>,
+    #[serde(default)]
     pub argv: Vec<String>,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
     #[serde(default)]
     pub seed_dir: Option<String>,
+    #[serde(default)]
+    pub seed: Option<ScenarioSeedSpec>,
     #[serde(default)]
     pub cwd: Option<String>,
     pub timeout_seconds: Option<f64>,
@@ -202,11 +264,44 @@ pub struct ScenarioEvidence {
     pub scenario_id: String,
     #[serde(default)]
     pub argv: Vec<String>,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    #[serde(default)]
+    pub seed_dir: Option<String>,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    pub timeout_seconds: Option<f64>,
+    pub net_mode: Option<String>,
+    pub no_sandbox: Option<bool>,
+    pub no_strace: Option<bool>,
+    pub snippet_max_lines: usize,
+    pub snippet_max_bytes: usize,
     pub exit_code: Option<i32>,
+    pub exit_signal: Option<i32>,
     pub timed_out: bool,
     pub duration_ms: u128,
     pub stdout: String,
     pub stderr: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ScenarioIndex {
+    pub schema_version: u32,
+    pub scenarios: Vec<ScenarioIndexEntry>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ScenarioIndexEntry {
+    pub scenario_id: String,
+    pub scenario_digest: String,
+    #[serde(default)]
+    pub last_run_epoch_ms: Option<u128>,
+    #[serde(default)]
+    pub last_pass: Option<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failures: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence_paths: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -241,6 +336,72 @@ pub struct CoverageOptionEntry {
     pub blocked_tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<enrich::EvidenceRef>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct VerificationLedger {
+    pub schema_version: u32,
+    pub generated_at_epoch_ms: u128,
+    pub binary_name: String,
+    pub scenarios_path: String,
+    pub surface_path: String,
+    pub total_count: usize,
+    pub verified_count: usize,
+    pub unverified_count: usize,
+    pub unverified_ids: Vec<String>,
+    pub behavior_verified_count: usize,
+    pub behavior_unverified_count: usize,
+    pub behavior_unverified_ids: Vec<String>,
+    pub entries: Vec<VerificationEntry>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct VerificationEntry {
+    pub surface_id: String,
+    pub status: String,
+    pub behavior_status: String,
+    #[serde(default)]
+    pub scenario_ids: Vec<String>,
+    #[serde(default)]
+    pub scenario_paths: Vec<String>,
+    #[serde(default)]
+    pub behavior_scenario_ids: Vec<String>,
+    #[serde(default)]
+    pub behavior_scenario_paths: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<enrich::EvidenceRef>,
+}
+
+#[derive(Debug, Deserialize)]
+struct VerificationRow {
+    #[serde(default)]
+    surface_id: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    behavior_status: Option<String>,
+    #[serde(default)]
+    scenario_ids: Vec<String>,
+    #[serde(default)]
+    scenario_paths: Vec<String>,
+    #[serde(default)]
+    behavior_scenario_ids: Vec<String>,
+    #[serde(default)]
+    behavior_scenario_paths: Vec<String>,
+}
+
+struct VerificationQueryRoot {
+    root: PathBuf,
+    cleanup: bool,
+}
+
+impl Drop for VerificationQueryRoot {
+    fn drop(&mut self) {
+        if self.cleanup {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
 }
 
 pub fn load_plan(path: &Path) -> Result<ScenarioPlan> {
@@ -278,6 +439,9 @@ pub fn validate_plan(plan: &ScenarioPlan) -> Result<()> {
             }
         }
     }
+    if let Some(defaults) = plan.defaults.as_ref() {
+        validate_scenario_defaults(defaults).context("validate scenario defaults")?;
+    }
     for scenario in &plan.scenarios {
         validate_scenario_spec(scenario)
             .with_context(|| format!("validate scenario {}", scenario.id))?;
@@ -295,6 +459,7 @@ fn default_plan(binary_name: Option<&str>) -> ScenarioPlan {
         schema_version: SCENARIO_PLAN_SCHEMA_VERSION,
         binary: binary_name.map(|name| name.to_string()),
         default_env: BTreeMap::new(),
+        defaults: None,
         coverage: None,
         scenarios: vec![default_help_scenario()],
     }
@@ -305,9 +470,11 @@ fn default_help_scenario() -> ScenarioSpec {
         id: "help".to_string(),
         kind: ScenarioKind::Help,
         publish: false,
+        scope: Vec::new(),
         argv: vec!["--help".to_string()],
         env: BTreeMap::new(),
         seed_dir: None,
+        seed: None,
         cwd: None,
         timeout_seconds: Some(3.0),
         net_mode: Some("off".to_string()),
@@ -321,7 +488,7 @@ fn default_help_scenario() -> ScenarioSpec {
         expect: ScenarioExpect {
             exit_code: Some(0),
             exit_signal: None,
-            stdout_contains_all: vec!["Usage:".to_string()],
+            stdout_contains_all: Vec::new(),
             stdout_contains_any: Vec::new(),
             stdout_regex_all: Vec::new(),
             stdout_regex_any: Vec::new(),
@@ -342,6 +509,7 @@ pub fn run_scenarios(
     display_root: Option<&Path>,
     staging_root: Option<&Path>,
     kind_filter: Option<ScenarioKind>,
+    run_mode: ScenarioRunMode,
     verbose: bool,
 ) -> Result<ExamplesReport> {
     let plan = load_plan(scenarios_path)?;
@@ -359,33 +527,92 @@ pub fn run_scenarios(
         .canonicalize()
         .with_context(|| format!("resolve pack root {}", pack_root.display()))?;
 
-    let mut outcomes = Vec::new();
-    let mut run_ids = Vec::new();
+    let scenarios_index_path = run_root
+        .join("inventory")
+        .join("scenarios")
+        .join("index.json");
+    let index_state = load_scenario_index_state(&scenarios_index_path, &plan, verbose);
+    let has_existing_index = index_state.existing.is_some();
+    let mut index_entries = index_state.entries;
+    let mut index_changed = index_state.changed;
 
-    let scenarios = plan
-        .scenarios
-        .into_iter()
-        .filter(|scenario| match kind_filter {
-            Some(kind) => scenario.kind == kind,
-            None => true,
-        });
+    let mut previous_outcomes = load_previous_outcomes(run_root, verbose);
+    let cache_ready = previous_outcomes.available && has_existing_index;
+    if verbose && !cache_ready {
+        let report_state = if previous_outcomes.available {
+            "present"
+        } else {
+            "missing"
+        };
+        let index_status = if has_existing_index {
+            "present"
+        } else {
+            "missing"
+        };
+        eprintln!(
+            "note: scenario cache incomplete (report {report_state}, index {index_status}); rerunning all scenarios"
+        );
+    }
+    let mut outcomes = Vec::new();
+
+    let scenarios = plan.scenarios.iter().filter(|scenario| match kind_filter {
+        Some(kind) => scenario.kind == kind,
+        None => true,
+    });
 
     for scenario in scenarios {
+        let run_config = effective_scenario_config(&plan, scenario)?;
+        let has_previous_outcome =
+            cache_ready && previous_outcomes.outcomes.contains_key(&scenario.id);
+        // Skip only when we can reuse prior outcomes for a complete examples report.
+        let should_run = should_run_scenario(
+            run_mode,
+            &run_config.scenario_digest,
+            index_entries.get(&scenario.id),
+            has_previous_outcome,
+        );
+
+        if !should_run {
+            if let Some(outcome) = previous_outcomes.outcomes.remove(&scenario.id) {
+                outcomes.push(outcome);
+            }
+            continue;
+        }
+
         if verbose {
             eprintln!("running scenario {} {}", binary_name, scenario.id);
         }
 
-        let env = merge_env(&plan.default_env, &scenario.env);
-        let seed_dir = scenario.seed_dir.clone();
-        let cwd = scenario.cwd.clone();
-        let snippet_max_lines = scenario
-            .snippet_max_lines
-            .unwrap_or(DEFAULT_SNIPPET_MAX_LINES);
-        let snippet_max_bytes = scenario
-            .snippet_max_bytes
-            .unwrap_or(DEFAULT_SNIPPET_MAX_BYTES);
         let run_argv0 = binary_name.to_string();
-        let run_kv_args = build_run_kv_args(&scenario, &run_argv0)?;
+        let materialized_seed = if let Some(seed) = scenario.seed.as_ref() {
+            let staging_root = staging_root.ok_or_else(|| {
+                anyhow!(
+                    "inline seed requires a staging root for scenario {}",
+                    scenario.id
+                )
+            })?;
+            Some(materialize_inline_seed(
+                staging_root,
+                run_root,
+                &scenario.id,
+                seed,
+            )?)
+        } else {
+            None
+        };
+        let run_seed_dir = materialized_seed
+            .as_ref()
+            .map(|seed| seed.rel_path.as_str())
+            .or_else(|| run_config.seed_dir.as_deref());
+        let run_kv_args = build_run_kv_args(
+            &run_argv0,
+            run_seed_dir,
+            run_config.cwd.as_deref(),
+            run_config.timeout_seconds,
+            run_config.net_mode.as_deref(),
+            run_config.no_sandbox,
+            run_config.no_strace,
+        )?;
         let before = read_runs_index(&pack_root).context("read runs index (before)")?;
 
         let started = std::time::Instant::now();
@@ -395,7 +622,7 @@ pub fn run_scenarios(
             lens_flake,
             &run_kv_args,
             &scenario.argv,
-            &env,
+            &run_config.env,
         )
         .with_context(|| format!("invoke binary_lens for scenario {}", scenario.id))?;
         let duration_ms = started.elapsed().as_millis();
@@ -407,20 +634,20 @@ pub fn run_scenarios(
                 exit_status_string(&status)
             )];
             outcomes.push(ScenarioOutcome {
-                scenario_id: scenario.id,
+                scenario_id: scenario.id.clone(),
                 publish: scenario.publish,
                 argv,
-                env,
-                seed_dir,
-                cwd,
-                timeout_seconds: scenario.timeout_seconds,
-                net_mode: scenario.net_mode.clone(),
-                no_sandbox: scenario.no_sandbox,
-                no_strace: scenario.no_strace,
-                snippet_max_lines,
-                snippet_max_bytes,
+                env: run_config.env.clone(),
+                seed_dir: run_config.seed_dir.clone(),
+                cwd: run_config.cwd.clone(),
+                timeout_seconds: run_config.timeout_seconds,
+                net_mode: run_config.net_mode.clone(),
+                no_sandbox: run_config.no_sandbox,
+                no_strace: run_config.no_strace,
+                snippet_max_lines: run_config.snippet_max_lines,
+                snippet_max_bytes: run_config.snippet_max_bytes,
                 run_argv0,
-                expected: scenario.expect,
+                expected: scenario.expect.clone(),
                 run_id: None,
                 manifest_ref: None,
                 stdout_ref: None,
@@ -429,18 +656,29 @@ pub fn run_scenarios(
                 observed_exit_signal: None,
                 observed_timed_out: false,
                 pass: false,
-                failures,
+                failures: failures.clone(),
                 command_line,
                 stdout_snippet: String::new(),
                 stderr_snippet: String::new(),
             });
+            index_entries.insert(
+                scenario.id.clone(),
+                ScenarioIndexEntry {
+                    scenario_id: scenario.id.clone(),
+                    scenario_digest: run_config.scenario_digest.clone(),
+                    last_run_epoch_ms: Some(enrich::now_epoch_ms()?),
+                    last_pass: Some(false),
+                    failures,
+                    evidence_paths: Vec::new(),
+                },
+            );
+            index_changed = true;
             continue;
         }
 
         let after = read_runs_index(&pack_root).context("read runs index (after)")?;
         let (run_id, entry) = resolve_new_run(&before, &after)
             .with_context(|| format!("resolve new run for scenario {}", scenario.id))?;
-        run_ids.push(run_id.clone());
 
         let manifest_ref = entry
             .manifest_ref
@@ -469,22 +707,37 @@ pub fn run_scenarios(
         let observed_exit_signal = run_manifest.result.exit_signal;
         let observed_timed_out = run_manifest.result.timed_out;
 
+        let mut evidence_paths = Vec::new();
+        let mut evidence_epoch_ms = None;
         if let Some(staging_root) = staging_root {
             let mut argv_full = Vec::with_capacity(scenario.argv.len() + 1);
             argv_full.push(run_argv0.clone());
             argv_full.extend(scenario.argv.iter().cloned());
+            let generated_at_epoch_ms = enrich::now_epoch_ms()?;
             let evidence = ScenarioEvidence {
                 schema_version: SCENARIO_EVIDENCE_SCHEMA_VERSION,
-                generated_at_epoch_ms: enrich::now_epoch_ms()?,
+                generated_at_epoch_ms,
                 scenario_id: scenario.id.clone(),
                 argv: argv_full,
+                env: run_config.env.clone(),
+                seed_dir: run_seed_dir.map(|value| value.to_string()),
+                cwd: run_config.cwd.clone(),
+                timeout_seconds: run_config.timeout_seconds,
+                net_mode: run_config.net_mode.clone(),
+                no_sandbox: run_config.no_sandbox,
+                no_strace: run_config.no_strace,
+                snippet_max_lines: run_config.snippet_max_lines,
+                snippet_max_bytes: run_config.snippet_max_bytes,
                 exit_code: observed_exit_code,
+                exit_signal: observed_exit_signal,
                 timed_out: observed_timed_out,
                 duration_ms,
                 stdout: truncate_bytes(&stdout_bytes, MAX_SCENARIO_EVIDENCE_BYTES),
                 stderr: truncate_bytes(&stderr_bytes, MAX_SCENARIO_EVIDENCE_BYTES),
             };
-            stage_scenario_evidence(staging_root, &evidence)?;
+            let rel = stage_scenario_evidence(staging_root, &evidence)?;
+            evidence_paths.push(rel);
+            evidence_epoch_ms = Some(generated_at_epoch_ms);
         }
 
         let failures = validate_scenario(
@@ -498,30 +751,36 @@ pub fn run_scenarios(
         let pass = failures.is_empty();
 
         let command_line = format_command_line(binary_name, &scenario.argv);
-        let stdout_snippet =
-            bounded_snippet(stdout_text.as_ref(), snippet_max_lines, snippet_max_bytes);
-        let stderr_snippet =
-            bounded_snippet(stderr_text.as_ref(), snippet_max_lines, snippet_max_bytes);
+        let stdout_snippet = bounded_snippet(
+            stdout_text.as_ref(),
+            run_config.snippet_max_lines,
+            run_config.snippet_max_bytes,
+        );
+        let stderr_snippet = bounded_snippet(
+            stderr_text.as_ref(),
+            run_config.snippet_max_lines,
+            run_config.snippet_max_bytes,
+        );
 
         if verbose && !pass {
             eprintln!("scenario {} failed: {}", scenario.id, failures.join("; "));
         }
 
         outcomes.push(ScenarioOutcome {
-            scenario_id: scenario.id,
+            scenario_id: scenario.id.clone(),
             publish: scenario.publish,
-            argv: scenario.argv,
-            env,
-            seed_dir,
-            cwd,
-            timeout_seconds: scenario.timeout_seconds,
-            net_mode: scenario.net_mode,
-            no_sandbox: scenario.no_sandbox,
-            no_strace: scenario.no_strace,
-            snippet_max_lines,
-            snippet_max_bytes,
+            argv: scenario.argv.clone(),
+            env: run_config.env.clone(),
+            seed_dir: run_config.seed_dir.clone(),
+            cwd: run_config.cwd.clone(),
+            timeout_seconds: run_config.timeout_seconds,
+            net_mode: run_config.net_mode.clone(),
+            no_sandbox: run_config.no_sandbox,
+            no_strace: run_config.no_strace,
+            snippet_max_lines: run_config.snippet_max_lines,
+            snippet_max_bytes: run_config.snippet_max_bytes,
             run_argv0,
-            expected: scenario.expect,
+            expected: scenario.expect.clone(),
             run_id: Some(run_id),
             manifest_ref: Some(manifest_ref),
             stdout_ref: Some(stdout_ref),
@@ -530,15 +789,49 @@ pub fn run_scenarios(
             observed_exit_signal,
             observed_timed_out,
             pass,
-            failures,
+            failures: failures.clone(),
             command_line,
             stdout_snippet,
             stderr_snippet,
         });
+        index_entries.insert(
+            scenario.id.clone(),
+            ScenarioIndexEntry {
+                scenario_id: scenario.id.clone(),
+                scenario_digest: run_config.scenario_digest.clone(),
+                last_run_epoch_ms: evidence_epoch_ms,
+                last_pass: Some(pass),
+                failures,
+                evidence_paths,
+            },
+        );
+        index_changed = true;
     }
+
+    write_scenario_index_if_needed(
+        staging_root,
+        index_entries,
+        has_existing_index,
+        index_changed,
+    )?;
 
     let pass_count = outcomes.iter().filter(|outcome| outcome.pass).count();
     let fail_count = outcomes.len() - pass_count;
+    if verbose {
+        eprintln!(
+            "scenario run summary: {} total, {} passed, {} failed",
+            outcomes.len(),
+            pass_count,
+            fail_count
+        );
+    }
+    let mut run_id_set = BTreeSet::new();
+    for outcome in &outcomes {
+        if let Some(run_id) = outcome.run_id.as_ref() {
+            run_id_set.insert(run_id.clone());
+        }
+    }
+    let run_ids: Vec<String> = run_id_set.into_iter().collect();
     let generated_at_epoch_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .context("compute timestamp")?
@@ -583,10 +876,10 @@ fn invoke_binary_lens_run(
     Ok(status)
 }
 
-fn stage_scenario_evidence(staging_root: &Path, evidence: &ScenarioEvidence) -> Result<()> {
+fn stage_scenario_evidence(staging_root: &Path, evidence: &ScenarioEvidence) -> Result<String> {
     let rel = scenario_output_rel_path(&evidence.scenario_id, evidence.generated_at_epoch_ms);
     write_staged_json(staging_root, &rel, evidence)?;
-    Ok(())
+    Ok(rel)
 }
 
 fn scenario_output_rel_path(scenario_id: &str, generated_at_epoch_ms: u128) -> String {
@@ -811,6 +1104,267 @@ pub fn build_coverage_ledger(
     })
 }
 
+pub fn build_verification_ledger(
+    binary_name: &str,
+    surface: &surface::SurfaceInventory,
+    doc_pack_root: &Path,
+    scenarios_path: &Path,
+    template_path: &Path,
+    staging_root: Option<&Path>,
+    display_root: Option<&Path>,
+) -> Result<VerificationLedger> {
+    let template_sql = fs::read_to_string(template_path)
+        .with_context(|| format!("read {}", template_path.display()))?;
+    let (query_root, rows) = run_verification_query(doc_pack_root, staging_root, &template_sql)?;
+
+    let mut surface_evidence_map: BTreeMap<String, Vec<enrich::EvidenceRef>> = BTreeMap::new();
+    for item in surface
+        .items
+        .iter()
+        .filter(|item| is_surface_item_kind(&item.kind))
+    {
+        let id = item.id.trim();
+        if id.is_empty() {
+            continue;
+        }
+        surface_evidence_map
+            .entry(id.to_string())
+            .or_default()
+            .extend(item.evidence.iter().cloned());
+    }
+
+    let surface_evidence = evidence_from_rel_path(&query_root.root, "inventory/surface.json")?;
+    let plan_evidence = evidence_from_rel_path(&query_root.root, "scenarios/plan.json")?;
+
+    let mut entries = Vec::new();
+    let mut warnings = Vec::new();
+    let mut verified_count = 0;
+    let mut unverified_ids = Vec::new();
+    let mut behavior_verified_count = 0;
+    let mut behavior_unverified_ids = Vec::new();
+
+    for row in rows {
+        let Some(surface_id) = row.surface_id.clone() else {
+            warnings.push("verification row missing surface_id".to_string());
+            continue;
+        };
+        let status = row.status.clone().unwrap_or_else(|| "unknown".to_string());
+        let behavior_status = row
+            .behavior_status
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
+        if status == "verified" {
+            verified_count += 1;
+        } else {
+            unverified_ids.push(surface_id.clone());
+        }
+        if behavior_status == "verified" {
+            behavior_verified_count += 1;
+        } else {
+            behavior_unverified_ids.push(surface_id.clone());
+        }
+
+        let mut evidence = surface_evidence_map
+            .get(&surface_id)
+            .cloned()
+            .unwrap_or_default();
+        evidence.push(surface_evidence.clone());
+        evidence.push(plan_evidence.clone());
+        for scenario_path in row
+            .scenario_paths
+            .iter()
+            .chain(row.behavior_scenario_paths.iter())
+        {
+            match evidence_from_rel_path(&query_root.root, scenario_path) {
+                Ok(evidence_ref) => evidence.push(evidence_ref),
+                Err(err) => warnings.push(err.to_string()),
+            }
+        }
+        enrich::dedupe_evidence_refs(&mut evidence);
+
+        entries.push(VerificationEntry {
+            surface_id,
+            status,
+            behavior_status,
+            scenario_ids: row.scenario_ids,
+            scenario_paths: row.scenario_paths,
+            behavior_scenario_ids: row.behavior_scenario_ids,
+            behavior_scenario_paths: row.behavior_scenario_paths,
+            evidence,
+        });
+    }
+
+    entries.sort_by(|a, b| a.surface_id.cmp(&b.surface_id));
+    unverified_ids.sort();
+    unverified_ids.dedup();
+    behavior_unverified_ids.sort();
+    behavior_unverified_ids.dedup();
+
+    let generated_at_epoch_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("compute timestamp")?
+        .as_millis();
+
+    Ok(VerificationLedger {
+        schema_version: 2,
+        generated_at_epoch_ms,
+        binary_name: binary_name.to_string(),
+        scenarios_path: display_path(scenarios_path, display_root),
+        surface_path: display_path(
+            &doc_pack_root.join("inventory").join("surface.json"),
+            display_root,
+        ),
+        total_count: entries.len(),
+        verified_count,
+        unverified_count: unverified_ids.len(),
+        unverified_ids,
+        behavior_verified_count,
+        behavior_unverified_count: behavior_unverified_ids.len(),
+        behavior_unverified_ids,
+        entries,
+        warnings,
+    })
+}
+
+fn run_verification_query(
+    doc_pack_root: &Path,
+    staging_root: Option<&Path>,
+    template_sql: &str,
+) -> Result<(VerificationQueryRoot, Vec<VerificationRow>)> {
+    let query_root = prepare_verification_root(doc_pack_root, staging_root)?;
+    let output = pack::run_duckdb_query(template_sql, &query_root.root)?;
+    let rows: Vec<VerificationRow> =
+        if output.is_empty() || output.iter().all(|byte| byte.is_ascii_whitespace()) {
+            Vec::new()
+        } else {
+            serde_json::from_slice(&output).context("parse verification query output")?
+        };
+    Ok((query_root, rows))
+}
+
+fn prepare_verification_root(
+    doc_pack_root: &Path,
+    staging_root: Option<&Path>,
+) -> Result<VerificationQueryRoot> {
+    let (root, cleanup) = if let Some(staging_root) = staging_root {
+        let txn_root = staging_root
+            .parent()
+            .ok_or_else(|| anyhow!("staging root has no parent"))?;
+        let now = enrich::now_epoch_ms()?;
+        (
+            txn_root
+                .join("scratch")
+                .join(format!("verification_root-{now}")),
+            false,
+        )
+    } else {
+        let now = enrich::now_epoch_ms()?;
+        (
+            std::env::temp_dir().join(format!("bman-verification-{now}")),
+            true,
+        )
+    };
+    fs::create_dir_all(&root).with_context(|| format!("create {}", root.display()))?;
+
+    let inventory_root = root.join("inventory");
+    let scenarios_root = root.join("scenarios");
+    fs::create_dir_all(inventory_root.join("scenarios"))
+        .with_context(|| format!("create {}", inventory_root.display()))?;
+    fs::create_dir_all(&scenarios_root)
+        .with_context(|| format!("create {}", scenarios_root.display()))?;
+
+    let plan_src = doc_pack_root.join("scenarios").join("plan.json");
+    let plan_dest = scenarios_root.join("plan.json");
+    fs::copy(&plan_src, &plan_dest).with_context(|| format!("copy {}", plan_src.display()))?;
+
+    let staged_surface = staging_root
+        .map(|root| root.join("inventory").join("surface.json"))
+        .filter(|path| path.is_file());
+    let surface_src =
+        staged_surface.unwrap_or_else(|| doc_pack_root.join("inventory").join("surface.json"));
+    let surface_dest = inventory_root.join("surface.json");
+    fs::copy(&surface_src, &surface_dest)
+        .with_context(|| format!("copy {}", surface_src.display()))?;
+
+    copy_scenario_evidence(
+        &doc_pack_root.join("inventory").join("scenarios"),
+        &inventory_root.join("scenarios"),
+    )?;
+    if let Some(staging_root) = staging_root {
+        copy_scenario_evidence(
+            &staging_root.join("inventory").join("scenarios"),
+            &inventory_root.join("scenarios"),
+        )?;
+    }
+
+    let placeholder = format!(
+        concat!(
+            "{{\"schema_version\":{schema},",
+            "\"generated_at_epoch_ms\":0,",
+            "\"scenario_id\":null,",
+            "\"argv\":[],",
+            "\"env\":{{}},",
+            "\"seed_dir\":null,",
+            "\"cwd\":null,",
+            "\"timeout_seconds\":null,",
+            "\"net_mode\":null,",
+            "\"no_sandbox\":null,",
+            "\"no_strace\":null,",
+            "\"snippet_max_lines\":0,",
+            "\"snippet_max_bytes\":0,",
+            "\"exit_code\":null,",
+            "\"exit_signal\":null,",
+            "\"timed_out\":false,",
+            "\"duration_ms\":0,",
+            "\"stdout\":\"\",",
+            "\"stderr\":\"\"}}"
+        ),
+        schema = SCENARIO_EVIDENCE_SCHEMA_VERSION
+    );
+    let placeholder_path = inventory_root.join("scenarios").join("schema.json");
+    fs::write(&placeholder_path, placeholder.as_bytes())
+        .with_context(|| format!("write placeholder {}", placeholder_path.display()))?;
+
+    Ok(VerificationQueryRoot { root, cleanup })
+}
+
+fn copy_scenario_evidence(src_root: &Path, dest_root: &Path) -> Result<usize> {
+    if !src_root.is_dir() {
+        return Ok(0);
+    }
+    let mut copied = 0usize;
+    for file in collect_files_recursive(src_root)? {
+        if file.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let rel = file
+            .strip_prefix(src_root)
+            .context("strip scenario evidence prefix")?;
+        let dest = dest_root.join(rel);
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+        }
+        fs::copy(&file, &dest)
+            .with_context(|| format!("copy {} to {}", file.display(), dest.display()))?;
+        copied += 1;
+    }
+    Ok(copied)
+}
+
+fn evidence_from_rel_path(root: &Path, rel: &str) -> Result<enrich::EvidenceRef> {
+    let path = root.join(rel);
+    let sha256 = if path.exists() {
+        let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+        Some(sha256_hex(&bytes))
+    } else {
+        None
+    };
+    Ok(enrich::EvidenceRef {
+        path: rel.to_string(),
+        sha256,
+    })
+}
+
 #[derive(Debug, Clone)]
 struct BlockedInfo {
     reason: String,
@@ -891,6 +1445,154 @@ fn read_runs_index(pack_root: &Path) -> Result<Vec<RunIndexEntry>> {
     };
     let index: RunsIndex = serde_json::from_slice(&bytes).context("parse runs index JSON")?;
     Ok(index.runs)
+}
+
+pub(crate) fn read_scenario_index(path: &Path) -> Result<Option<ScenarioIndex>> {
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
+    let index: ScenarioIndex = serde_json::from_slice(&bytes).context("parse scenarios index")?;
+    if index.schema_version != SCENARIO_INDEX_SCHEMA_VERSION {
+        return Err(anyhow!(
+            "unsupported scenarios index schema_version {}",
+            index.schema_version
+        ));
+    }
+    Ok(Some(index))
+}
+
+struct ScenarioIndexState {
+    existing: Option<ScenarioIndex>,
+    entries: BTreeMap<String, ScenarioIndexEntry>,
+    changed: bool,
+}
+
+fn load_scenario_index_state(
+    scenarios_index_path: &Path,
+    plan: &ScenarioPlan,
+    verbose: bool,
+) -> ScenarioIndexState {
+    let existing = match read_scenario_index(scenarios_index_path) {
+        Ok(index) => index,
+        Err(err) => {
+            if verbose {
+                eprintln!(
+                    "warning: failed to read scenario index {}: {err}",
+                    scenarios_index_path.display()
+                );
+            }
+            None
+        }
+    };
+    let mut entries = BTreeMap::new();
+    if let Some(index) = existing.as_ref() {
+        for entry in &index.scenarios {
+            entries.insert(entry.scenario_id.clone(), entry.clone());
+        }
+    }
+    let plan_ids: BTreeSet<String> = plan.scenarios.iter().map(|s| s.id.clone()).collect();
+    let before_retain = entries.len();
+    entries.retain(|id, _| plan_ids.contains(id));
+    let changed = before_retain != entries.len();
+    ScenarioIndexState {
+        existing,
+        entries,
+        changed,
+    }
+}
+
+struct PreviousOutcomes {
+    available: bool,
+    outcomes: HashMap<String, ScenarioOutcome>,
+}
+
+fn load_previous_outcomes(doc_pack_root: &Path, verbose: bool) -> PreviousOutcomes {
+    let report_path = doc_pack_root.join("man").join("examples_report.json");
+    if !report_path.is_file() {
+        return PreviousOutcomes {
+            available: false,
+            outcomes: HashMap::new(),
+        };
+    }
+    let bytes = match fs::read(&report_path) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            if verbose {
+                eprintln!("warning: failed to read {}: {err}", report_path.display());
+            }
+            return PreviousOutcomes {
+                available: false,
+                outcomes: HashMap::new(),
+            };
+        }
+    };
+    let report: ExamplesReport = match serde_json::from_slice(&bytes) {
+        Ok(report) => report,
+        Err(err) => {
+            if verbose {
+                eprintln!("warning: failed to parse {}: {err}", report_path.display());
+            }
+            return PreviousOutcomes {
+                available: false,
+                outcomes: HashMap::new(),
+            };
+        }
+    };
+    let outcomes = report
+        .scenarios
+        .into_iter()
+        .map(|scenario| (scenario.scenario_id.clone(), scenario))
+        .collect();
+    PreviousOutcomes {
+        available: true,
+        outcomes,
+    }
+}
+
+fn should_run_scenario(
+    run_mode: ScenarioRunMode,
+    scenario_digest: &str,
+    entry: Option<&ScenarioIndexEntry>,
+    has_previous_outcome: bool,
+) -> bool {
+    if !has_previous_outcome {
+        return true;
+    }
+    match run_mode {
+        ScenarioRunMode::RerunAll => true,
+        ScenarioRunMode::RerunFailed => match entry {
+            Some(entry) => entry.last_pass != Some(true),
+            None => true,
+        },
+        ScenarioRunMode::Default => match entry {
+            Some(entry) => {
+                entry.last_pass != Some(true) || entry.scenario_digest != scenario_digest
+            }
+            None => true,
+        },
+    }
+}
+
+fn write_scenario_index_if_needed(
+    staging_root: Option<&Path>,
+    entries: BTreeMap<String, ScenarioIndexEntry>,
+    has_existing_index: bool,
+    index_changed: bool,
+) -> Result<()> {
+    let Some(staging_root) = staging_root else {
+        return Ok(());
+    };
+    if index_changed || !has_existing_index {
+        let mut entries: Vec<ScenarioIndexEntry> = entries.into_values().collect();
+        entries.sort_by(|a, b| a.scenario_id.cmp(&b.scenario_id));
+        let index = ScenarioIndex {
+            schema_version: SCENARIO_INDEX_SCHEMA_VERSION,
+            scenarios: entries,
+        };
+        write_staged_json(staging_root, "inventory/scenarios/index.json", &index)?;
+    }
+    Ok(())
 }
 
 fn resolve_new_run(
@@ -1103,6 +1805,196 @@ fn merge_env(
     merged
 }
 
+fn runner_env_defaults() -> BTreeMap<String, String> {
+    let mut env = BTreeMap::new();
+    env.insert("LC_ALL".to_string(), "C".to_string());
+    env.insert("LANG".to_string(), "C".to_string());
+    env.insert("TERM".to_string(), "dumb".to_string());
+    env.insert("NO_COLOR".to_string(), "1".to_string());
+    env.insert("PAGER".to_string(), "cat".to_string());
+    env.insert("GIT_PAGER".to_string(), "cat".to_string());
+    env
+}
+
+struct ScenarioRunConfig {
+    env: BTreeMap<String, String>,
+    seed_dir: Option<String>,
+    cwd: Option<String>,
+    timeout_seconds: Option<f64>,
+    net_mode: Option<String>,
+    no_sandbox: Option<bool>,
+    no_strace: Option<bool>,
+    snippet_max_lines: usize,
+    snippet_max_bytes: usize,
+    scenario_digest: String,
+}
+
+#[derive(Serialize)]
+struct ScenarioSeedEntryDigest {
+    path: String,
+    kind: SeedEntryKind,
+    contents: Option<String>,
+    target: Option<String>,
+    mode: Option<u32>,
+}
+
+#[derive(Serialize)]
+struct ScenarioSeedSpecDigest {
+    entries: Vec<ScenarioSeedEntryDigest>,
+}
+
+#[derive(Serialize)]
+struct ScenarioDigestInput {
+    argv: Vec<String>,
+    expect: ScenarioExpect,
+    scope: Vec<String>,
+    seed_dir: Option<String>,
+    seed: Option<ScenarioSeedSpecDigest>,
+    cwd: Option<String>,
+    timeout_seconds: Option<f64>,
+    net_mode: Option<String>,
+    no_sandbox: Option<bool>,
+    no_strace: Option<bool>,
+    snippet_max_lines: usize,
+    snippet_max_bytes: usize,
+    env: BTreeMap<String, String>,
+}
+
+fn effective_scenario_config(
+    plan: &ScenarioPlan,
+    scenario: &ScenarioSpec,
+) -> Result<ScenarioRunConfig> {
+    let defaults = plan.defaults.as_ref();
+
+    let mut env = runner_env_defaults();
+    env = merge_env(&env, &plan.default_env);
+    if let Some(defaults) = defaults {
+        env = merge_env(&env, &defaults.env);
+    }
+    env = merge_env(&env, &scenario.env);
+
+    let seed_dir = if scenario.seed.is_some() {
+        None
+    } else {
+        scenario
+            .seed_dir
+            .clone()
+            .or_else(|| defaults.and_then(|value| value.seed_dir.clone()))
+    };
+
+    let cwd = scenario
+        .cwd
+        .clone()
+        .or_else(|| defaults.and_then(|value| value.cwd.clone()));
+    let timeout_seconds = scenario
+        .timeout_seconds
+        .or_else(|| defaults.and_then(|value| value.timeout_seconds));
+    let net_mode = scenario
+        .net_mode
+        .clone()
+        .or_else(|| defaults.and_then(|value| value.net_mode.clone()));
+    let no_sandbox = scenario
+        .no_sandbox
+        .or_else(|| defaults.and_then(|value| value.no_sandbox));
+    let no_strace = scenario
+        .no_strace
+        .or_else(|| defaults.and_then(|value| value.no_strace));
+    let snippet_max_lines = scenario
+        .snippet_max_lines
+        .or_else(|| defaults.and_then(|value| value.snippet_max_lines))
+        .unwrap_or(DEFAULT_SNIPPET_MAX_LINES);
+    let snippet_max_bytes = scenario
+        .snippet_max_bytes
+        .or_else(|| defaults.and_then(|value| value.snippet_max_bytes))
+        .unwrap_or(DEFAULT_SNIPPET_MAX_BYTES);
+
+    let scenario_digest = scenario_digest(
+        scenario,
+        &env,
+        seed_dir.as_deref(),
+        cwd.as_deref(),
+        timeout_seconds,
+        net_mode.as_deref(),
+        no_sandbox,
+        no_strace,
+        snippet_max_lines,
+        snippet_max_bytes,
+    )?;
+
+    Ok(ScenarioRunConfig {
+        env,
+        seed_dir,
+        cwd,
+        timeout_seconds,
+        net_mode,
+        no_sandbox,
+        no_strace,
+        snippet_max_lines,
+        snippet_max_bytes,
+        scenario_digest,
+    })
+}
+
+fn scenario_digest(
+    scenario: &ScenarioSpec,
+    env: &BTreeMap<String, String>,
+    seed_dir: Option<&str>,
+    cwd: Option<&str>,
+    timeout_seconds: Option<f64>,
+    net_mode: Option<&str>,
+    no_sandbox: Option<bool>,
+    no_strace: Option<bool>,
+    snippet_max_lines: usize,
+    snippet_max_bytes: usize,
+) -> Result<String> {
+    let seed = if let Some(seed) = scenario.seed.as_ref() {
+        let mut entries: Vec<ScenarioSeedEntryDigest> = seed
+            .entries
+            .iter()
+            .map(|entry| {
+                let path = normalize_seed_path(&entry.path)
+                    .with_context(|| format!("seed entry path {:?}", entry.path))?;
+                let target = match entry.target.as_ref() {
+                    Some(target) => Some(
+                        normalize_seed_path(target)
+                            .with_context(|| format!("seed entry target {:?}", target))?,
+                    ),
+                    None => None,
+                };
+                Ok(ScenarioSeedEntryDigest {
+                    path,
+                    kind: entry.kind,
+                    contents: entry.contents.clone(),
+                    target,
+                    mode: entry.mode,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        entries.sort_by(|a, b| a.path.cmp(&b.path));
+        Some(ScenarioSeedSpecDigest { entries })
+    } else {
+        None
+    };
+
+    let payload = ScenarioDigestInput {
+        argv: scenario.argv.clone(),
+        expect: scenario.expect.clone(),
+        scope: scenario.scope.clone(),
+        seed_dir: seed_dir.map(|value| value.to_string()),
+        seed,
+        cwd: cwd.map(|value| value.to_string()),
+        timeout_seconds,
+        net_mode: net_mode.map(|value| value.to_string()),
+        no_sandbox,
+        no_strace,
+        snippet_max_lines,
+        snippet_max_bytes,
+        env: env.clone(),
+    };
+    let bytes = serde_json::to_vec(&payload).context("serialize scenario digest input")?;
+    Ok(sha256_hex(&bytes))
+}
+
 fn bounded_snippet(text: &str, max_lines: usize, max_bytes: usize) -> String {
     let marker = "\n[... output truncated ...]\n";
     if max_lines == 0 || max_bytes == 0 {
@@ -1145,6 +2037,174 @@ fn bounded_snippet(text: &str, max_lines: usize, max_bytes: usize) -> String {
     out
 }
 
+fn parse_cover_invocation(cover: &str) -> (Vec<String>, String) {
+    let trimmed = cover.trim();
+    let (scope_part, token_part) = match trimmed.rsplit_once('.') {
+        Some((scope, token)) => (Some(scope), token),
+        None => (None, trimmed),
+    };
+    let token_head = match token_part.split_once('=') {
+        Some((head, _)) => head,
+        None => token_part,
+    };
+    let scope = scope_part
+        .map(|scope| scope.split('.').map(|seg| seg.to_string()).collect())
+        .unwrap_or_default();
+    (scope, token_head.to_string())
+}
+
+fn argv_starts_with_scope(argv: &[String], scope: &[String]) -> bool {
+    if scope.is_empty() {
+        return true;
+    }
+    if argv.len() < scope.len() {
+        return false;
+    }
+    argv.iter()
+        .take(scope.len())
+        .zip(scope)
+        .all(|(arg, scope_token)| arg == scope_token)
+}
+
+fn cover_invoked_by_argv(cover_token: &str, argv: &[String]) -> bool {
+    if cover_token.is_empty() {
+        return false;
+    }
+    if cover_token.starts_with("--") {
+        for arg in argv {
+            if arg == cover_token || arg.starts_with(&format!("{cover_token}=")) {
+                return true;
+            }
+        }
+        return false;
+    }
+    if cover_token.starts_with('-') {
+        let short_char = cover_token.strip_prefix('-').and_then(|stripped| {
+            let mut chars = stripped.chars();
+            match (chars.next(), chars.next()) {
+                (Some(ch), None) => Some(ch),
+                _ => None,
+            }
+        });
+        for arg in argv {
+            if arg == cover_token || arg.starts_with(cover_token) {
+                return true;
+            }
+            if let Some(ch) = short_char {
+                if arg.starts_with('-')
+                    && !arg.starts_with("--")
+                    && arg.len() > 2
+                    && arg.chars().skip(1).any(|candidate| candidate == ch)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    argv.iter().any(|arg| arg == cover_token)
+}
+
+fn validate_covers_invoked(scenario: &ScenarioSpec) -> Result<()> {
+    if scenario.coverage_ignore || scenario.covers.is_empty() {
+        return Ok(());
+    }
+
+    let mut missing = Vec::new();
+    for cover in &scenario.covers {
+        let cover_trimmed = cover.trim();
+        if cover_trimmed.is_empty() {
+            continue;
+        }
+        let (cover_scope, cover_token) = parse_cover_invocation(cover_trimmed);
+        let mut scope_ok = true;
+
+        if !cover_scope.is_empty() {
+            if cover_scope != scenario.scope {
+                scope_ok = false;
+            }
+            if scope_ok && !argv_starts_with_scope(&scenario.argv, &scenario.scope) {
+                scope_ok = false;
+            }
+        } else if !scenario.scope.is_empty() && !cover_token.starts_with('-') {
+            if !argv_starts_with_scope(&scenario.argv, &scenario.scope) {
+                scope_ok = false;
+            }
+        }
+
+        if !scope_ok || !cover_invoked_by_argv(&cover_token, &scenario.argv) {
+            missing.push(cover_trimmed.to_string());
+        }
+    }
+
+    if !missing.is_empty() {
+        return Err(anyhow!(
+            "covers not invoked by argv: {}",
+            missing.join(", ")
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_scenario_defaults(defaults: &ScenarioDefaults) -> Result<()> {
+    if let Some(timeout_seconds) = defaults.timeout_seconds {
+        if !timeout_seconds.is_finite() || timeout_seconds < 0.0 {
+            return Err(anyhow!("defaults.timeout_seconds must be >= 0"));
+        }
+    }
+    if let Some(seed_dir) = defaults.seed_dir.as_deref() {
+        let trimmed = seed_dir.trim();
+        if trimmed.is_empty() {
+            return Err(anyhow!("defaults.seed_dir must not be empty"));
+        }
+        let path = Path::new(trimmed);
+        if path.is_absolute() {
+            return Err(anyhow!("defaults.seed_dir must be a relative path"));
+        }
+        if path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+        {
+            return Err(anyhow!("defaults.seed_dir must not contain '..'"));
+        }
+    }
+    if let Some(cwd) = defaults.cwd.as_deref() {
+        let trimmed = cwd.trim();
+        if trimmed.is_empty() {
+            return Err(anyhow!("defaults.cwd must not be empty"));
+        }
+        let path = Path::new(trimmed);
+        if path.is_absolute() {
+            return Err(anyhow!("defaults.cwd must be a relative path"));
+        }
+        if path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+        {
+            return Err(anyhow!("defaults.cwd must not contain '..'"));
+        }
+    }
+    if let Some(net_mode) = defaults.net_mode.as_deref() {
+        if net_mode != "off" && net_mode != "inherit" {
+            return Err(anyhow!(
+                "defaults.net_mode must be \"off\" or \"inherit\" (got {net_mode:?})"
+            ));
+        }
+    }
+    if let Some(max_lines) = defaults.snippet_max_lines {
+        if max_lines == 0 {
+            return Err(anyhow!("defaults.snippet_max_lines must be > 0"));
+        }
+    }
+    if let Some(max_bytes) = defaults.snippet_max_bytes {
+        if max_bytes == 0 {
+            return Err(anyhow!("defaults.snippet_max_bytes must be > 0"));
+        }
+    }
+    Ok(())
+}
+
 fn validate_scenario_spec(scenario: &ScenarioSpec) -> Result<()> {
     let id = scenario.id.trim();
     if id.is_empty() {
@@ -1152,6 +2212,21 @@ fn validate_scenario_spec(scenario: &ScenarioSpec) -> Result<()> {
     }
     if id.contains('/') || id.contains('\\') {
         return Err(anyhow!("scenario id must not include path separators"));
+    }
+    for scope in &scenario.scope {
+        let trimmed = scope.trim();
+        if trimmed.is_empty() {
+            return Err(anyhow!("scope entries must not be empty"));
+        }
+        if trimmed.contains('/') || trimmed.contains('\\') {
+            return Err(anyhow!("scope entries must not include path separators"));
+        }
+    }
+    if scenario.seed_dir.is_some() && scenario.seed.is_some() {
+        return Err(anyhow!("use only one of seed_dir or seed"));
+    }
+    if let Some(seed) = scenario.seed.as_ref() {
+        validate_seed_spec(seed)?;
     }
     if let Some(timeout_seconds) = scenario.timeout_seconds {
         if !timeout_seconds.is_finite() || timeout_seconds < 0.0 {
@@ -1222,6 +2297,7 @@ fn validate_scenario_spec(scenario: &ScenarioSpec) -> Result<()> {
             return Err(anyhow!("covers entries must not be empty"));
         }
     }
+    validate_covers_invoked(scenario)?;
     validate_scenario_expect(&scenario.expect)?;
     Ok(())
 }
@@ -1242,29 +2318,283 @@ fn validate_regex_patterns(patterns: &[String], field: &str) -> Result<()> {
     Ok(())
 }
 
-fn build_run_kv_args(scenario: &ScenarioSpec, run_argv0: &str) -> Result<Vec<String>> {
+fn build_run_kv_args(
+    run_argv0: &str,
+    run_seed_dir: Option<&str>,
+    cwd: Option<&str>,
+    timeout_seconds: Option<f64>,
+    net_mode: Option<&str>,
+    no_sandbox: Option<bool>,
+    no_strace: Option<bool>,
+) -> Result<Vec<String>> {
     let mut args = vec![String::from("run=1"), format!("run_argv0={run_argv0}")];
 
-    if let Some(seed_dir) = scenario.seed_dir.as_deref() {
+    if let Some(seed_dir) = run_seed_dir {
         args.push(format!("run_seed_dir={seed_dir}"));
     }
-    if let Some(cwd) = scenario.cwd.as_deref() {
+    if let Some(cwd) = cwd {
         args.push(format!("run_cwd={cwd}"));
     }
-    if let Some(timeout_seconds) = scenario.timeout_seconds {
+    if let Some(timeout_seconds) = timeout_seconds {
         args.push(format!("run_timeout_seconds={timeout_seconds}"));
     }
-    if let Some(net_mode) = scenario.net_mode.as_deref() {
+    if let Some(net_mode) = net_mode {
         args.push(format!("run_net={net_mode}"));
     }
-    if let Some(no_sandbox) = scenario.no_sandbox {
+    if let Some(no_sandbox) = no_sandbox {
         args.push(format!("run_no_sandbox={}", if no_sandbox { 1 } else { 0 }));
     }
-    if let Some(no_strace) = scenario.no_strace {
+    if let Some(no_strace) = no_strace {
         args.push(format!("run_no_strace={}", if no_strace { 1 } else { 0 }));
     }
 
     Ok(args)
+}
+
+struct MaterializedSeed {
+    rel_path: String,
+    _abs_path: PathBuf,
+}
+
+fn materialize_inline_seed(
+    staging_root: &Path,
+    run_root: &Path,
+    scenario_id: &str,
+    seed: &ScenarioSeedSpec,
+) -> Result<MaterializedSeed> {
+    validate_seed_spec(seed).with_context(|| format!("validate seed for {scenario_id}"))?;
+    let now = enrich::now_epoch_ms()?;
+    let txn_root = staging_root
+        .parent()
+        .ok_or_else(|| anyhow!("staging root has no parent"))?;
+    let seed_root = txn_root
+        .join("scratch")
+        .join("seeds")
+        .join(format!("{scenario_id}-{now}"));
+    fs::create_dir_all(&seed_root)
+        .with_context(|| format!("create seed root {}", seed_root.display()))?;
+
+    let mut seen = HashSet::new();
+    let mut total_bytes = 0usize;
+
+    for entry in &seed.entries {
+        let rel_path = normalize_seed_path(&entry.path)
+            .with_context(|| format!("seed entry path {:?}", entry.path))?;
+        if !seen.insert(rel_path.clone()) {
+            return Err(anyhow!("seed entry path {:?} is duplicated", rel_path));
+        }
+        let target_path = seed_root.join(&rel_path);
+        if let Some(parent) = target_path.parent() {
+            fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+        }
+        match entry.kind {
+            SeedEntryKind::Dir => {
+                if entry.contents.is_some() {
+                    return Err(anyhow!("seed dir {:?} must not include contents", rel_path));
+                }
+                if entry.target.is_some() {
+                    return Err(anyhow!("seed dir {:?} must not include target", rel_path));
+                }
+                fs::create_dir_all(&target_path)
+                    .with_context(|| format!("create dir {}", target_path.display()))?;
+                apply_seed_mode(&target_path, entry.mode)?;
+            }
+            SeedEntryKind::File => {
+                if entry.target.is_some() {
+                    return Err(anyhow!("seed file {:?} must not include target", rel_path));
+                }
+                let contents = entry
+                    .contents
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("seed file {:?} missing contents", rel_path))?;
+                total_bytes = total_bytes
+                    .checked_add(contents.as_bytes().len())
+                    .ok_or_else(|| anyhow!("seed size overflow"))?;
+                if total_bytes > MAX_SEED_TOTAL_BYTES {
+                    return Err(anyhow!(
+                        "seed exceeds max total bytes ({MAX_SEED_TOTAL_BYTES})"
+                    ));
+                }
+                fs::write(&target_path, contents.as_bytes())
+                    .with_context(|| format!("write {}", target_path.display()))?;
+                apply_seed_mode(&target_path, entry.mode)?;
+            }
+            SeedEntryKind::Symlink => {
+                if entry.contents.is_some() {
+                    return Err(anyhow!(
+                        "seed symlink {:?} must not include contents",
+                        rel_path
+                    ));
+                }
+                let target = entry
+                    .target
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("seed symlink {:?} missing target", rel_path))?;
+                let target_rel = normalize_seed_path(target)
+                    .with_context(|| format!("symlink target {target:?}"))?;
+                total_bytes = total_bytes
+                    .checked_add(target_rel.as_bytes().len())
+                    .ok_or_else(|| anyhow!("seed size overflow"))?;
+                if total_bytes > MAX_SEED_TOTAL_BYTES {
+                    return Err(anyhow!(
+                        "seed exceeds max total bytes ({MAX_SEED_TOTAL_BYTES})"
+                    ));
+                }
+                apply_seed_symlink(&target_rel, &target_path)?;
+            }
+        }
+    }
+
+    let rel_path = seed_root
+        .strip_prefix(run_root)
+        .with_context(|| format!("seed root {} outside run root", seed_root.display()))?
+        .to_string_lossy()
+        .to_string();
+
+    Ok(MaterializedSeed {
+        rel_path,
+        _abs_path: seed_root,
+    })
+}
+
+fn validate_seed_spec(seed: &ScenarioSeedSpec) -> Result<()> {
+    if seed.entries.len() > MAX_SEED_ENTRIES {
+        return Err(anyhow!("seed exceeds max entries ({MAX_SEED_ENTRIES})"));
+    }
+    let mut seen = HashSet::new();
+    let mut total_bytes = 0usize;
+    for entry in &seed.entries {
+        let rel_path = normalize_seed_path(&entry.path)
+            .with_context(|| format!("seed entry path {:?}", entry.path))?;
+        if !seen.insert(rel_path) {
+            return Err(anyhow!("seed entry paths must be unique"));
+        }
+        match entry.kind {
+            SeedEntryKind::Dir => {
+                if entry.contents.is_some() {
+                    return Err(anyhow!("seed dir must not include contents"));
+                }
+                if entry.target.is_some() {
+                    return Err(anyhow!("seed dir must not include target"));
+                }
+            }
+            SeedEntryKind::File => {
+                if entry.target.is_some() {
+                    return Err(anyhow!("seed file must not include target"));
+                }
+                let contents = entry
+                    .contents
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("seed file missing contents"))?;
+                total_bytes = total_bytes
+                    .checked_add(contents.as_bytes().len())
+                    .ok_or_else(|| anyhow!("seed size overflow"))?;
+            }
+            SeedEntryKind::Symlink => {
+                #[cfg(not(unix))]
+                {
+                    return Err(anyhow!("seed symlinks are unsupported on this platform"));
+                }
+                if entry.contents.is_some() {
+                    return Err(anyhow!("seed symlink must not include contents"));
+                }
+                let target = entry
+                    .target
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("seed symlink missing target"))?;
+                normalize_seed_path(target)
+                    .with_context(|| format!("symlink target {target:?}"))?;
+                total_bytes = total_bytes
+                    .checked_add(target.as_bytes().len())
+                    .ok_or_else(|| anyhow!("seed size overflow"))?;
+            }
+        }
+        validate_seed_mode(entry.mode)?;
+        if total_bytes > MAX_SEED_TOTAL_BYTES {
+            return Err(anyhow!(
+                "seed exceeds max total bytes ({MAX_SEED_TOTAL_BYTES})"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn normalize_seed_path(raw: &str) -> Result<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow!("seed paths must not be empty"));
+    }
+    let normalized = trimmed.replace('\\', "/");
+    let path = Path::new(&normalized);
+    if path.is_absolute() {
+        return Err(anyhow!("seed paths must be relative"));
+    }
+    let mut cleaned = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(part) => cleaned.push(part),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                return Err(anyhow!("seed paths must not contain '..'"));
+            }
+            _ => return Err(anyhow!("seed paths must be relative")),
+        }
+    }
+    let cleaned = cleaned.to_string_lossy().to_string();
+    if cleaned.is_empty() {
+        return Err(anyhow!("seed paths must not be empty"));
+    }
+    Ok(cleaned)
+}
+
+fn validate_seed_mode(mode: Option<u32>) -> Result<()> {
+    if let Some(mode) = mode {
+        #[cfg(not(unix))]
+        {
+            return Err(anyhow!("seed mode is unsupported on this platform"));
+        }
+        if mode > 0o777 {
+            return Err(anyhow!("seed mode must be <= 0777"));
+        }
+    }
+    Ok(())
+}
+
+fn apply_seed_mode(path: &Path, mode: Option<u32>) -> Result<()> {
+    let Some(mode) = mode else {
+        return Ok(());
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(path)
+            .with_context(|| format!("inspect {}", path.display()))?
+            .permissions();
+        perms.set_mode(mode);
+        fs::set_permissions(path, perms)
+            .with_context(|| format!("set permissions on {}", path.display()))?;
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        return Err(anyhow!("seed mode is unsupported on this platform"));
+    }
+    Ok(())
+}
+
+fn apply_seed_symlink(target: &str, path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target, path)
+            .with_context(|| format!("create symlink {}", path.display()))?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = target;
+        let _ = path;
+        Err(anyhow!("seed symlinks are unsupported on this platform"))
+    }
 }
 
 fn truncate_utf8(text: &str, max_bytes: usize) -> &str {
@@ -1309,4 +2639,269 @@ fn shell_quote(arg: &str) -> String {
     }
     let escaped = arg.replace('\'', "'\"'\"'");
     format!("'{escaped}'")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scenario_with(argv: &[&str], scope: &[&str], covers: &[&str]) -> ScenarioSpec {
+        ScenarioSpec {
+            id: "test".to_string(),
+            kind: ScenarioKind::Behavior,
+            publish: true,
+            scope: scope.iter().map(|s| s.to_string()).collect(),
+            argv: argv.iter().map(|s| s.to_string()).collect(),
+            env: BTreeMap::new(),
+            seed_dir: None,
+            seed: None,
+            cwd: None,
+            timeout_seconds: None,
+            net_mode: None,
+            no_sandbox: None,
+            no_strace: None,
+            snippet_max_lines: None,
+            snippet_max_bytes: None,
+            coverage_tier: None,
+            covers: covers.iter().map(|s| s.to_string()).collect(),
+            coverage_ignore: false,
+            expect: ScenarioExpect {
+                exit_code: Some(0),
+                exit_signal: None,
+                stdout_contains_all: Vec::new(),
+                stdout_contains_any: Vec::new(),
+                stdout_regex_all: Vec::new(),
+                stdout_regex_any: Vec::new(),
+                stderr_contains_all: Vec::new(),
+                stderr_contains_any: Vec::new(),
+                stderr_regex_all: Vec::new(),
+                stderr_regex_any: Vec::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn cover_invoked_long_option_matches_equals() {
+        let argv = vec!["--all".to_string(), "--block-size=1M".to_string()];
+        assert!(cover_invoked_by_argv("--all", &argv));
+        assert!(cover_invoked_by_argv("--block-size", &argv));
+    }
+
+    #[test]
+    fn cover_invoked_short_cluster_and_prefix() {
+        let argv = vec!["-al".to_string(), "-T4".to_string()];
+        assert!(cover_invoked_by_argv("-a", &argv));
+        assert!(cover_invoked_by_argv("-l", &argv));
+        assert!(cover_invoked_by_argv("-T", &argv));
+    }
+
+    #[test]
+    fn scoped_cover_requires_scope_prefix() {
+        let scenario = scenario_with(&["commit", "--amend"], &["commit"], &["commit.--amend"]);
+        assert!(validate_covers_invoked(&scenario).is_ok());
+
+        let scenario = scenario_with(&["status", "--amend"], &["commit"], &["commit.--amend"]);
+        assert!(validate_covers_invoked(&scenario).is_err());
+    }
+
+    #[test]
+    fn non_option_cover_requires_scope_prefix_when_present() {
+        let scenario = scenario_with(&["remote", "add"], &["remote"], &["add"]);
+        assert!(validate_covers_invoked(&scenario).is_ok());
+
+        let scenario = scenario_with(&["add"], &["remote"], &["add"]);
+        assert!(validate_covers_invoked(&scenario).is_err());
+    }
+
+    #[test]
+    fn cover_with_equals_is_normalized_for_invocation() {
+        let scenario = scenario_with(&["--block-size=1M"], &[], &["--block-size=1K"]);
+        assert!(validate_covers_invoked(&scenario).is_ok());
+    }
+
+    fn base_expect() -> ScenarioExpect {
+        ScenarioExpect {
+            exit_code: Some(0),
+            exit_signal: None,
+            stdout_contains_all: Vec::new(),
+            stdout_contains_any: Vec::new(),
+            stdout_regex_all: Vec::new(),
+            stdout_regex_any: Vec::new(),
+            stderr_contains_all: Vec::new(),
+            stderr_contains_any: Vec::new(),
+            stderr_regex_all: Vec::new(),
+            stderr_regex_any: Vec::new(),
+        }
+    }
+
+    fn base_scenario() -> ScenarioSpec {
+        ScenarioSpec {
+            id: "scenario".to_string(),
+            kind: ScenarioKind::Behavior,
+            publish: false,
+            scope: Vec::new(),
+            argv: vec!["--help".to_string()],
+            env: BTreeMap::new(),
+            seed_dir: None,
+            seed: None,
+            cwd: None,
+            timeout_seconds: None,
+            net_mode: None,
+            no_sandbox: None,
+            no_strace: None,
+            snippet_max_lines: None,
+            snippet_max_bytes: None,
+            coverage_tier: None,
+            covers: Vec::new(),
+            coverage_ignore: true,
+            expect: base_expect(),
+        }
+    }
+
+    fn plan_with(scenarios: Vec<ScenarioSpec>, defaults: Option<ScenarioDefaults>) -> ScenarioPlan {
+        ScenarioPlan {
+            schema_version: SCENARIO_PLAN_SCHEMA_VERSION,
+            binary: None,
+            default_env: BTreeMap::new(),
+            defaults,
+            coverage: None,
+            scenarios,
+        }
+    }
+
+    #[test]
+    fn scenario_digest_stable_and_sensitive_to_env() {
+        let scenario = base_scenario();
+        let plan = plan_with(vec![scenario.clone()], None);
+        let first = effective_scenario_config(&plan, &scenario).unwrap();
+        let second = effective_scenario_config(&plan, &scenario).unwrap();
+        assert_eq!(first.scenario_digest, second.scenario_digest);
+
+        let mut scenario_changed = scenario.clone();
+        scenario_changed
+            .env
+            .insert("NO_COLOR".to_string(), "0".to_string());
+        let changed = effective_scenario_config(&plan, &scenario_changed).unwrap();
+        assert_ne!(first.scenario_digest, changed.scenario_digest);
+    }
+
+    #[test]
+    fn defaults_merge_and_env_precedence() {
+        let mut default_env = BTreeMap::new();
+        default_env.insert("LANG".to_string(), "C".to_string());
+        let mut defaults_env = BTreeMap::new();
+        defaults_env.insert("LANG".to_string(), "C.UTF-8".to_string());
+        let defaults = ScenarioDefaults {
+            env: defaults_env,
+            seed_dir: Some("fixtures".to_string()),
+            cwd: Some("work".to_string()),
+            timeout_seconds: Some(3.0),
+            net_mode: Some("off".to_string()),
+            no_sandbox: Some(false),
+            no_strace: Some(true),
+            snippet_max_lines: Some(7),
+            snippet_max_bytes: Some(77),
+        };
+
+        let mut scenario = base_scenario();
+        scenario.timeout_seconds = Some(5.0);
+        scenario.snippet_max_lines = Some(11);
+        let mut plan = plan_with(vec![scenario.clone()], Some(defaults));
+        plan.default_env = default_env;
+
+        let config = effective_scenario_config(&plan, &scenario).unwrap();
+        assert_eq!(config.timeout_seconds, Some(5.0));
+        assert_eq!(config.net_mode.as_deref(), Some("off"));
+        assert_eq!(config.no_sandbox, Some(false));
+        assert_eq!(config.no_strace, Some(true));
+        assert_eq!(config.snippet_max_lines, 11);
+        assert_eq!(config.snippet_max_bytes, 77);
+        assert_eq!(config.cwd.as_deref(), Some("work"));
+        assert_eq!(config.seed_dir.as_deref(), Some("fixtures"));
+        assert_eq!(config.env.get("LANG").map(String::as_str), Some("C.UTF-8"));
+
+        scenario.env.insert("LANG".to_string(), "POSIX".to_string());
+        let config_override = effective_scenario_config(&plan, &scenario).unwrap();
+        assert_eq!(
+            config_override.env.get("LANG").map(String::as_str),
+            Some("POSIX")
+        );
+    }
+
+    #[test]
+    fn env_normalization_applies_runner_defaults() {
+        let scenario = base_scenario();
+        let plan = plan_with(vec![scenario.clone()], None);
+        let config = effective_scenario_config(&plan, &scenario).unwrap();
+        assert_eq!(config.env.get("LC_ALL").map(String::as_str), Some("C"));
+        assert_eq!(config.env.get("LANG").map(String::as_str), Some("C"));
+        assert_eq!(config.env.get("TERM").map(String::as_str), Some("dumb"));
+        assert_eq!(config.env.get("NO_COLOR").map(String::as_str), Some("1"));
+        assert_eq!(config.env.get("PAGER").map(String::as_str), Some("cat"));
+        assert_eq!(config.env.get("GIT_PAGER").map(String::as_str), Some("cat"));
+    }
+
+    #[test]
+    fn should_run_scenario_respects_run_mode() {
+        let entry = ScenarioIndexEntry {
+            scenario_id: "scenario".to_string(),
+            scenario_digest: "abc".to_string(),
+            last_run_epoch_ms: None,
+            last_pass: Some(true),
+            failures: Vec::new(),
+            evidence_paths: Vec::new(),
+        };
+        assert!(!should_run_scenario(
+            ScenarioRunMode::Default,
+            "abc",
+            Some(&entry),
+            true
+        ));
+        assert!(should_run_scenario(
+            ScenarioRunMode::Default,
+            "def",
+            Some(&entry),
+            true
+        ));
+        let failed_entry = ScenarioIndexEntry {
+            last_pass: Some(false),
+            ..entry.clone()
+        };
+        assert!(should_run_scenario(
+            ScenarioRunMode::Default,
+            "abc",
+            Some(&failed_entry),
+            true
+        ));
+        assert!(should_run_scenario(
+            ScenarioRunMode::Default,
+            "abc",
+            None,
+            true
+        ));
+        assert!(should_run_scenario(
+            ScenarioRunMode::RerunAll,
+            "abc",
+            Some(&entry),
+            true
+        ));
+        assert!(!should_run_scenario(
+            ScenarioRunMode::RerunFailed,
+            "def",
+            Some(&entry),
+            true
+        ));
+        assert!(should_run_scenario(
+            ScenarioRunMode::RerunFailed,
+            "abc",
+            Some(&failed_entry),
+            true
+        ));
+        assert!(should_run_scenario(
+            ScenarioRunMode::Default,
+            "abc",
+            Some(&entry),
+            false
+        ));
+    }
 }
