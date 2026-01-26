@@ -176,9 +176,27 @@ pub(crate) fn run_duckdb_query(sql: &str, cwd: &Path) -> Result<Vec<u8>> {
         .output()
         .context("run duckdb query")?;
 
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr_trimmed = stderr.trim();
+    let stderr_line = stderr_trimmed.lines().next().unwrap_or_default();
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("duckdb failed: {}", stderr.trim()));
+        let detail = if stderr_line.is_empty() {
+            format!("status {}", output.status)
+        } else {
+            stderr_line.to_string()
+        };
+        return Err(anyhow!("duckdb failed: {detail}"));
+    }
+    // DuckDB reports many query failures on stderr while still returning exit code 0.
+    if !stderr_trimmed.is_empty()
+        && (stderr_trimmed.contains("Error") || stderr_trimmed.contains("ERROR"))
+    {
+        let detail = if stderr_line.is_empty() {
+            stderr_trimmed
+        } else {
+            stderr_line
+        };
+        return Err(anyhow!("duckdb failed: {detail}"));
     }
 
     Ok(output.stdout)
