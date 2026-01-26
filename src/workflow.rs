@@ -73,6 +73,7 @@ pub fn run_init(args: InitArgs) -> Result<()> {
         args.force,
         manifest.as_ref().map(|m| m.binary_name.as_str()),
     )?;
+    install_agent_prompt(&paths, args.force)?;
 
     let config = enrich::default_config();
     enrich::write_config(paths.root(), &config)?;
@@ -338,6 +339,33 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
                     Some(ctx.paths.root()),
                 )?;
                 crate::staging::write_staged_json(&staging_root, "coverage_ledger.json", &ledger)?;
+
+                let verification_template = ctx
+                    .paths
+                    .root()
+                    .join(enrich::VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL);
+                if verification_template.is_file() {
+                    let verification_binary = binary_name
+                        .clone()
+                        .or_else(|| surface.binary_name.clone())
+                        .ok_or_else(|| {
+                            anyhow!("binary name unavailable for verification ledger")
+                        })?;
+                    let ledger = scenarios::build_verification_ledger(
+                        &verification_binary,
+                        &surface,
+                        ctx.paths.root(),
+                        &scenarios_path,
+                        &verification_template,
+                        Some(&staging_root),
+                        Some(ctx.paths.root()),
+                    )?;
+                    crate::staging::write_staged_json(
+                        &staging_root,
+                        "verification_ledger.json",
+                        &ledger,
+                    )?;
+                }
             }
         }
 
@@ -1062,6 +1090,12 @@ fn install_usage_lens_templates(paths: &enrich::DocPackPaths, force: bool) -> Re
         templates::OPTIONS_FROM_SCENARIOS_SQL,
         force,
     )?;
+    write_usage_lens_template(
+        paths.root(),
+        enrich::VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL,
+        templates::VERIFICATION_FROM_SCENARIOS_SQL,
+        force,
+    )?;
     Ok(())
 }
 
@@ -1079,6 +1113,19 @@ fn install_scenario_plan(
     }
     let text = scenarios::plan_stub(binary_name);
     fs::write(&path, text.as_bytes()).with_context(|| format!("write {}", path.display()))?;
+    Ok(())
+}
+
+fn install_agent_prompt(paths: &enrich::DocPackPaths, force: bool) -> Result<()> {
+    let path = paths.agent_prompt_path();
+    if path.is_file() && !force {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    fs::write(&path, templates::ENRICH_AGENT_PROMPT_MD.as_bytes())
+        .with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }
 
