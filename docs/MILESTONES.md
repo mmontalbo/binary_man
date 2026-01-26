@@ -7,6 +7,60 @@ that supports iterative static + dynamic passes from portable doc packs.
 
 Current focus: M12 — Pack-Owned Semantics v1.
 
+## M12 — Pack-Owned Semantics v1 (in progress)
+
+Goal: Remove “meaning” heuristics from Rust (hardcoded strings/patterns for help
+parsing/rendering). Make semantics a **pack-owned, schema-validated JSON
+artifact** that an LM can edit, while Rust enforces mechanics (schemas,
+determinism, gating).
+
+Motivation:
+- We still have implicit semantics in code (e.g., help section heuristics in
+  `src/render.rs`) that are English/formatting-biased and brittle under
+  localization or atypical help layouts.
+- We want the LM to own interpretation, not the tool.
+
+Design constraints (non-negotiable for this milestone):
+- JSON-only structured artifacts in the doc pack (JSONL permitted for history).
+- Keep parsing semantics out of Rust: no new help/CLI parsers. Semantics must be
+  driven by pack-owned artifacts.
+- Evidence remains append-only; `apply` remains transactional.
+- Portability: pack runs from any CWD; no repo-root dependencies.
+
+Deliverables:
+- New pack-owned semantics artifact:
+  - `<doc-pack>/enrich/semantics.json` (strict schema; deny unknown fields),
+    installed by `bman init`.
+  - Describes how to interpret help/usage evidence for rendering, via rule sets
+    (e.g., regex/prefix selectors for synopsis lines, exit-status headings,
+    boilerplate line filters, optional see-also extraction).
+- Renderer becomes semantics-driven:
+  - Refactor `src/render.rs` to use `enrich/semantics.json` for extraction and
+    filtering instead of hardcoded strings.
+  - Keep rendering deterministic; when semantics yield no results, render still
+    succeeds but status reports the missing semantics as unmet with an explicit
+    next action.
+- Workflow integration + gating:
+  - `bman validate` validates `enrich/semantics.json` and includes it in
+    `enrich/lock.json` inputs.
+  - `status --json` recommends editing `enrich/semantics.json` when rendering is
+    blocked/unmet due to insufficient semantics.
+- LM edit surface update:
+  - Update `<doc-pack>/enrich/agent_prompt.md` to allow editing
+    `enrich/semantics.json` (and only recommend editing `queries/**` when status
+    explicitly points there).
+
+Acceptance criteria:
+- Fresh `ls` and `git` packs reach `decision: complete` without any tool-owned
+  hardcoded `"Usage:"`-style assumptions.
+- When help output is localized or atypically formatted, an LM can fix the man
+  rendering loop by editing only pack-owned artifacts (starting with
+  `enrich/semantics.json`), guided by `status --json`.
+
+Out of scope:
+- “Universal” help parsing or auto-learning semantics.
+- Adding new binary-specific heuristics in Rust.
+
 ## M11.1 — Scenario Loop Rough-Edge Smoothing (done)
 
 Goal: Keep “learn-by-executing scenarios” as the core agent job, but make the
