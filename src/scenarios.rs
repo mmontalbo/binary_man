@@ -486,7 +486,7 @@ fn default_help_scenario() -> ScenarioSpec {
         covers: Vec::new(),
         coverage_ignore: true,
         expect: ScenarioExpect {
-            exit_code: Some(0),
+            exit_code: None,
             exit_signal: None,
             stdout_contains_all: Vec::new(),
             stdout_contains_any: Vec::new(),
@@ -2295,6 +2295,14 @@ fn validate_scenario_spec(scenario: &ScenarioSpec) -> Result<()> {
     for option_id in &scenario.covers {
         if option_id.trim().is_empty() {
             return Err(anyhow!("covers entries must not be empty"));
+        }
+    }
+    let tier = scenario.coverage_tier.as_deref().unwrap_or("acceptance");
+    if !scenario.coverage_ignore && !scenario.covers.is_empty() && tier != "rejection" {
+        if scenario.expect.exit_code != Some(0) {
+            return Err(anyhow!(
+                "scenarios that cover items must set expect.exit_code=0 (coverage_tier {tier:?})"
+            ));
         }
     }
     validate_covers_invoked(scenario)?;

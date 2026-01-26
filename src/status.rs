@@ -461,8 +461,9 @@ fn evaluate_requirements(
                                 path: "scenarios/plan.json".to_string(),
                                 content,
                                 reason: format!(
-                                    "add coverage claims for uncovered ids: {}",
-                                    uncovered_ids.join(", ")
+                                    "add coverage claim (1 of {}): {}",
+                                    uncovered_ids.len(),
+                                    uncovered_ids[0]
                                 ),
                             });
                         }
@@ -1204,17 +1205,16 @@ fn coverage_stub_from_plan(
     plan: &scenarios::ScenarioPlan,
     uncovered_ids: &[String],
 ) -> Option<String> {
-    if uncovered_ids.is_empty() {
-        return None;
-    }
+    let target_id = uncovered_ids.first()?.clone();
     let mut updated = plan.clone();
     let stub_id = coverage_stub_id(&updated);
+    let (scope, argv) = stub_scope_and_argv(&target_id);
     updated.scenarios.push(scenarios::ScenarioSpec {
         id: stub_id,
         kind: scenarios::ScenarioKind::Behavior,
         publish: false,
-        scope: Vec::new(),
-        argv: Vec::new(),
+        scope,
+        argv,
         env: BTreeMap::new(),
         seed_dir: None,
         seed: None,
@@ -1226,9 +1226,9 @@ fn coverage_stub_from_plan(
         snippet_max_lines: None,
         snippet_max_bytes: None,
         coverage_tier: Some("acceptance".to_string()),
-        covers: uncovered_ids.to_vec(),
+        covers: vec![target_id],
         coverage_ignore: false,
-        expect: empty_expect(),
+        expect: expect_exit_code(0),
     });
     serde_json::to_string_pretty(&updated).ok()
 }
@@ -1265,12 +1265,13 @@ fn verification_stub_from_plan(
     } else {
         Some("acceptance".to_string())
     };
+    let (scope, argv) = stub_scope_and_argv(&target_id);
     updated.scenarios.push(scenarios::ScenarioSpec {
         id: stub_id,
         kind: scenarios::ScenarioKind::Behavior,
         publish: false,
-        scope: Vec::new(),
-        argv: Vec::new(),
+        scope,
+        argv,
         env: BTreeMap::new(),
         seed_dir: None,
         seed: None,
@@ -1284,7 +1285,7 @@ fn verification_stub_from_plan(
         coverage_tier,
         covers: vec![target_id],
         coverage_ignore: false,
-        expect: empty_expect(),
+        expect: expect_exit_code(0),
     });
     serde_json::to_string_pretty(&updated).ok()
 }
@@ -1321,6 +1322,39 @@ fn empty_expect() -> scenarios::ScenarioExpect {
         stderr_regex_all: Vec::new(),
         stderr_regex_any: Vec::new(),
     }
+}
+
+fn expect_exit_code(code: i32) -> scenarios::ScenarioExpect {
+    let mut expect = empty_expect();
+    expect.exit_code = Some(code);
+    expect
+}
+
+fn stub_scope_and_argv(surface_id: &str) -> (Vec<String>, Vec<String>) {
+    let trimmed = surface_id.trim();
+    if trimmed.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    let Some((scope_part, token)) = trimmed.rsplit_once('.') else {
+        return (Vec::new(), vec![trimmed.to_string()]);
+    };
+    let scope: Vec<String> = scope_part
+        .split('.')
+        .filter_map(|segment| {
+            let segment = segment.trim();
+            if segment.is_empty() {
+                None
+            } else {
+                Some(segment.to_string())
+            }
+        })
+        .collect();
+    if scope.is_empty() {
+        return (Vec::new(), vec![trimmed.to_string()]);
+    }
+    let mut argv = scope.clone();
+    argv.push(token.to_string());
+    (scope, argv)
 }
 
 pub fn planned_actions_from_requirements(

@@ -5,9 +5,9 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured “enrichment loop”
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M11.1 — Scenario Loop Rough-Edge Smoothing.
+Current focus: M12 — Pack-Owned Semantics v1.
 
-## M11.1 — Scenario Loop Rough-Edge Smoothing (in progress)
+## M11.1 — Scenario Loop Rough-Edge Smoothing (done)
 
 Goal: Keep “learn-by-executing scenarios” as the core agent job, but make the
 loop cheaper and failures mechanically actionable (especially for small LMs).
