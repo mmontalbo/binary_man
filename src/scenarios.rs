@@ -2,7 +2,8 @@ use crate::enrich;
 use crate::pack;
 use crate::staging::{collect_files_recursive, write_staged_json};
 use crate::surface;
-use crate::util::{sha256_hex, truncate_bytes};
+use crate::templates;
+use crate::util::{display_path, sha256_hex, truncate_bytes};
 use anyhow::{anyhow, Context, Result};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -311,20 +312,20 @@ pub struct CoverageLedger {
     pub binary_name: String,
     pub scenarios_path: String,
     pub validation_source: String,
-    pub options_total: usize,
+    pub items_total: usize,
     pub behavior_count: usize,
     pub rejected_count: usize,
     pub acceptance_count: usize,
     pub blocked_count: usize,
     pub uncovered_count: usize,
-    pub options: Vec<CoverageOptionEntry>,
-    pub unknown_options: Vec<String>,
+    pub items: Vec<CoverageItemEntry>,
+    pub unknown_items: Vec<String>,
     pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct CoverageOptionEntry {
-    pub option_id: String,
+pub struct CoverageItemEntry {
+    pub item_id: String,
     pub aliases: Vec<String>,
     pub status: String,
     pub behavior_scenarios: Vec<String>,
@@ -450,54 +451,12 @@ pub fn validate_plan(plan: &ScenarioPlan) -> Result<()> {
 }
 
 pub fn plan_stub(binary_name: Option<&str>) -> String {
-    let plan = default_plan(binary_name);
+    let mut plan: ScenarioPlan = serde_json::from_str(templates::SCENARIOS_PLAN_JSON)
+        .expect("parse scenarios plan template");
+    if let Some(binary) = binary_name {
+        plan.binary = Some(binary.to_string());
+    }
     serde_json::to_string_pretty(&plan).expect("serialize scenarios plan stub")
-}
-
-fn default_plan(binary_name: Option<&str>) -> ScenarioPlan {
-    ScenarioPlan {
-        schema_version: SCENARIO_PLAN_SCHEMA_VERSION,
-        binary: binary_name.map(|name| name.to_string()),
-        default_env: BTreeMap::new(),
-        defaults: None,
-        coverage: None,
-        scenarios: vec![default_help_scenario()],
-    }
-}
-
-fn default_help_scenario() -> ScenarioSpec {
-    ScenarioSpec {
-        id: "help".to_string(),
-        kind: ScenarioKind::Help,
-        publish: false,
-        scope: Vec::new(),
-        argv: vec!["--help".to_string()],
-        env: BTreeMap::new(),
-        seed_dir: None,
-        seed: None,
-        cwd: None,
-        timeout_seconds: Some(3.0),
-        net_mode: Some("off".to_string()),
-        no_sandbox: Some(false),
-        no_strace: Some(true),
-        snippet_max_lines: Some(12),
-        snippet_max_bytes: Some(1024),
-        coverage_tier: None,
-        covers: Vec::new(),
-        coverage_ignore: true,
-        expect: ScenarioExpect {
-            exit_code: None,
-            exit_signal: None,
-            stdout_contains_all: Vec::new(),
-            stdout_contains_any: Vec::new(),
-            stdout_regex_all: Vec::new(),
-            stdout_regex_any: Vec::new(),
-            stderr_contains_all: Vec::new(),
-            stderr_contains_any: Vec::new(),
-            stderr_regex_all: Vec::new(),
-            stderr_regex_any: Vec::new(),
-        },
-    }
 }
 
 pub fn run_scenarios(
@@ -910,7 +869,7 @@ pub fn build_coverage_ledger(
     let surface_path = doc_pack_root.join("inventory").join("surface.json");
     let surface_evidence = enrich::evidence_from_path(doc_pack_root, &surface_path)?;
     let plan_evidence = enrich::evidence_from_path(doc_pack_root, scenarios_path)?;
-    let mut options: BTreeMap<String, CoverageState> = BTreeMap::new();
+    let mut items: BTreeMap<String, CoverageState> = BTreeMap::new();
     for item in surface
         .items
         .iter()
@@ -921,7 +880,7 @@ pub fn build_coverage_ledger(
         } else {
             Vec::new()
         };
-        options.insert(
+        items.insert(
             item.id.clone(),
             CoverageState {
                 aliases,
@@ -932,7 +891,7 @@ pub fn build_coverage_ledger(
     }
 
     let mut warnings = Vec::new();
-    let mut unknown_options = BTreeSet::new();
+    let mut unknown_items = BTreeSet::new();
     let mut blocked_map: HashMap<String, BlockedInfo> = HashMap::new();
     if let Some(coverage) = plan.coverage.as_ref() {
         for blocked in &coverage.blocked {
@@ -983,8 +942,8 @@ pub fn build_coverage_ledger(
         }
         let tier = coverage_tier(scenario);
         let option_ids = scenario_surface_ids(scenario);
-        for option_id in option_ids {
-            match options.get_mut(&option_id) {
+        for item_id in option_ids {
+            match items.get_mut(&item_id) {
                 Some(entry) => match tier {
                     CoverageTier::Behavior => {
                         entry.behavior_scenarios.insert(scenario.id.clone());
@@ -997,18 +956,18 @@ pub fn build_coverage_ledger(
                     }
                 },
                 None => {
-                    unknown_options.insert(option_id);
+                    unknown_items.insert(item_id);
                 }
             }
         }
     }
 
     for (option_id, blocked) in blocked_map {
-        match options.get_mut(&option_id) {
+        match items.get_mut(&option_id) {
             Some(entry) => {
                 if !entry.behavior_scenarios.is_empty() {
                     warnings.push(format!(
-                        "option {:?} marked blocked but has behavior coverage",
+                        "item {:?} marked blocked but has behavior coverage",
                         option_id
                     ));
                 }
@@ -1016,10 +975,10 @@ pub fn build_coverage_ledger(
             }
             None => {
                 warnings.push(format!(
-                    "blocked option {:?} not found in surface inventory",
+                    "blocked item {:?} not found in surface inventory",
                     option_id
                 ));
-                unknown_options.insert(option_id);
+                unknown_items.insert(option_id);
             }
         }
     }
@@ -1031,7 +990,7 @@ pub fn build_coverage_ledger(
     let mut blocked_count = 0;
     let mut uncovered_count = 0;
 
-    for (option_id, entry) in options {
+    for (item_id, entry) in items {
         let behavior_scenarios: Vec<String> = entry.behavior_scenarios.into_iter().collect();
         let rejection_scenarios: Vec<String> = entry.rejection_scenarios.into_iter().collect();
         let acceptance_scenarios: Vec<String> = entry.acceptance_scenarios.into_iter().collect();
@@ -1067,8 +1026,8 @@ pub fn build_coverage_ledger(
         evidence.push(plan_evidence.clone());
         enrich::dedupe_evidence_refs(&mut evidence);
 
-        entries.push(CoverageOptionEntry {
-            option_id,
+        entries.push(CoverageItemEntry {
+            item_id,
             aliases: entry.aliases,
             status: status.to_string(),
             behavior_scenarios,
@@ -1087,19 +1046,19 @@ pub fn build_coverage_ledger(
         .as_millis();
 
     Ok(CoverageLedger {
-        schema_version: 2,
+        schema_version: 3,
         generated_at_epoch_ms,
         binary_name: binary_name.to_string(),
         scenarios_path: display_path(scenarios_path, display_root),
         validation_source: "plan".to_string(),
-        options_total: entries.len(),
+        items_total: entries.len(),
         behavior_count,
         rejected_count,
         acceptance_count,
         blocked_count,
         uncovered_count,
-        options: entries,
-        unknown_options: unknown_options.into_iter().collect(),
+        items: entries,
+        unknown_items: unknown_items.into_iter().collect(),
         warnings,
     })
 }
@@ -1133,8 +1092,8 @@ pub fn build_verification_ledger(
             .extend(item.evidence.iter().cloned());
     }
 
-    let surface_evidence = evidence_from_rel_path(&query_root.root, "inventory/surface.json")?;
-    let plan_evidence = evidence_from_rel_path(&query_root.root, "scenarios/plan.json")?;
+    let surface_evidence = enrich::evidence_from_rel(&query_root.root, "inventory/surface.json")?;
+    let plan_evidence = enrich::evidence_from_rel(&query_root.root, "scenarios/plan.json")?;
 
     let mut entries = Vec::new();
     let mut warnings = Vec::new();
@@ -1175,7 +1134,7 @@ pub fn build_verification_ledger(
             .iter()
             .chain(row.behavior_scenario_paths.iter())
         {
-            match evidence_from_rel_path(&query_root.root, scenario_path) {
+            match enrich::evidence_from_rel(&query_root.root, scenario_path) {
                 Ok(evidence_ref) => evidence.push(evidence_ref),
                 Err(err) => warnings.push(err.to_string()),
             }
@@ -1351,20 +1310,6 @@ fn copy_scenario_evidence(src_root: &Path, dest_root: &Path) -> Result<usize> {
     Ok(copied)
 }
 
-fn evidence_from_rel_path(root: &Path, rel: &str) -> Result<enrich::EvidenceRef> {
-    let path = root.join(rel);
-    let sha256 = if path.exists() {
-        let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
-        Some(sha256_hex(&bytes))
-    } else {
-        None
-    };
-    Ok(enrich::EvidenceRef {
-        path: rel.to_string(),
-        sha256,
-    })
-}
-
 #[derive(Debug, Clone)]
 struct BlockedInfo {
     reason: String,
@@ -1419,15 +1364,6 @@ pub fn normalize_surface_id(token: &str) -> String {
 
 fn is_surface_item_kind(kind: &str) -> bool {
     matches!(kind, "option" | "command" | "subcommand")
-}
-
-fn display_path(path: &Path, base: Option<&Path>) -> String {
-    if let Some(base) = base {
-        if let Ok(relative) = path.strip_prefix(base) {
-            return relative.display().to_string();
-        }
-    }
-    path.display().to_string()
 }
 
 pub(crate) fn read_runs_index_bytes(pack_root: &Path) -> Result<Option<Vec<u8>>> {
@@ -1805,17 +1741,6 @@ fn merge_env(
     merged
 }
 
-fn runner_env_defaults() -> BTreeMap<String, String> {
-    let mut env = BTreeMap::new();
-    env.insert("LC_ALL".to_string(), "C".to_string());
-    env.insert("LANG".to_string(), "C".to_string());
-    env.insert("TERM".to_string(), "dumb".to_string());
-    env.insert("NO_COLOR".to_string(), "1".to_string());
-    env.insert("PAGER".to_string(), "cat".to_string());
-    env.insert("GIT_PAGER".to_string(), "cat".to_string());
-    env
-}
-
 struct ScenarioRunConfig {
     env: BTreeMap<String, String>,
     seed_dir: Option<String>,
@@ -1866,8 +1791,7 @@ fn effective_scenario_config(
 ) -> Result<ScenarioRunConfig> {
     let defaults = plan.defaults.as_ref();
 
-    let mut env = runner_env_defaults();
-    env = merge_env(&env, &plan.default_env);
+    let mut env = plan.default_env.clone();
     if let Some(defaults) = defaults {
         env = merge_env(&env, &defaults.env);
     }
@@ -2037,116 +1961,6 @@ fn bounded_snippet(text: &str, max_lines: usize, max_bytes: usize) -> String {
     out
 }
 
-fn parse_cover_invocation(cover: &str) -> (Vec<String>, String) {
-    let trimmed = cover.trim();
-    let (scope_part, token_part) = match trimmed.rsplit_once('.') {
-        Some((scope, token)) => (Some(scope), token),
-        None => (None, trimmed),
-    };
-    let token_head = match token_part.split_once('=') {
-        Some((head, _)) => head,
-        None => token_part,
-    };
-    let scope = scope_part
-        .map(|scope| scope.split('.').map(|seg| seg.to_string()).collect())
-        .unwrap_or_default();
-    (scope, token_head.to_string())
-}
-
-fn argv_starts_with_scope(argv: &[String], scope: &[String]) -> bool {
-    if scope.is_empty() {
-        return true;
-    }
-    if argv.len() < scope.len() {
-        return false;
-    }
-    argv.iter()
-        .take(scope.len())
-        .zip(scope)
-        .all(|(arg, scope_token)| arg == scope_token)
-}
-
-fn cover_invoked_by_argv(cover_token: &str, argv: &[String]) -> bool {
-    if cover_token.is_empty() {
-        return false;
-    }
-    if cover_token.starts_with("--") {
-        for arg in argv {
-            if arg == cover_token || arg.starts_with(&format!("{cover_token}=")) {
-                return true;
-            }
-        }
-        return false;
-    }
-    if cover_token.starts_with('-') {
-        let short_char = cover_token.strip_prefix('-').and_then(|stripped| {
-            let mut chars = stripped.chars();
-            match (chars.next(), chars.next()) {
-                (Some(ch), None) => Some(ch),
-                _ => None,
-            }
-        });
-        for arg in argv {
-            if arg == cover_token || arg.starts_with(cover_token) {
-                return true;
-            }
-            if let Some(ch) = short_char {
-                if arg.starts_with('-')
-                    && !arg.starts_with("--")
-                    && arg.len() > 2
-                    && arg.chars().skip(1).any(|candidate| candidate == ch)
-                {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-    argv.iter().any(|arg| arg == cover_token)
-}
-
-fn validate_covers_invoked(scenario: &ScenarioSpec) -> Result<()> {
-    if scenario.coverage_ignore || scenario.covers.is_empty() {
-        return Ok(());
-    }
-
-    let mut missing = Vec::new();
-    for cover in &scenario.covers {
-        let cover_trimmed = cover.trim();
-        if cover_trimmed.is_empty() {
-            continue;
-        }
-        let (cover_scope, cover_token) = parse_cover_invocation(cover_trimmed);
-        let mut scope_ok = true;
-
-        if !cover_scope.is_empty() {
-            if cover_scope != scenario.scope {
-                scope_ok = false;
-            }
-            if scope_ok && !argv_starts_with_scope(&scenario.argv, &scenario.scope) {
-                scope_ok = false;
-            }
-        } else if !scenario.scope.is_empty() && !cover_token.starts_with('-') {
-            if !argv_starts_with_scope(&scenario.argv, &scenario.scope) {
-                scope_ok = false;
-            }
-        }
-
-        if !scope_ok || !cover_invoked_by_argv(&cover_token, &scenario.argv) {
-            missing.push(cover_trimmed.to_string());
-        }
-    }
-
-    if !missing.is_empty() {
-        return Err(anyhow!(
-            "covers not invoked by argv: {}",
-            missing.join(", ")
-        ));
-    }
-
-    Ok(())
-}
-
 fn validate_scenario_defaults(defaults: &ScenarioDefaults) -> Result<()> {
     if let Some(timeout_seconds) = defaults.timeout_seconds {
         if !timeout_seconds.is_finite() || timeout_seconds < 0.0 {
@@ -2305,7 +2119,6 @@ fn validate_scenario_spec(scenario: &ScenarioSpec) -> Result<()> {
             ));
         }
     }
-    validate_covers_invoked(scenario)?;
     validate_scenario_expect(&scenario.expect)?;
     Ok(())
 }
@@ -2653,80 +2466,6 @@ fn shell_quote(arg: &str) -> String {
 mod tests {
     use super::*;
 
-    fn scenario_with(argv: &[&str], scope: &[&str], covers: &[&str]) -> ScenarioSpec {
-        ScenarioSpec {
-            id: "test".to_string(),
-            kind: ScenarioKind::Behavior,
-            publish: true,
-            scope: scope.iter().map(|s| s.to_string()).collect(),
-            argv: argv.iter().map(|s| s.to_string()).collect(),
-            env: BTreeMap::new(),
-            seed_dir: None,
-            seed: None,
-            cwd: None,
-            timeout_seconds: None,
-            net_mode: None,
-            no_sandbox: None,
-            no_strace: None,
-            snippet_max_lines: None,
-            snippet_max_bytes: None,
-            coverage_tier: None,
-            covers: covers.iter().map(|s| s.to_string()).collect(),
-            coverage_ignore: false,
-            expect: ScenarioExpect {
-                exit_code: Some(0),
-                exit_signal: None,
-                stdout_contains_all: Vec::new(),
-                stdout_contains_any: Vec::new(),
-                stdout_regex_all: Vec::new(),
-                stdout_regex_any: Vec::new(),
-                stderr_contains_all: Vec::new(),
-                stderr_contains_any: Vec::new(),
-                stderr_regex_all: Vec::new(),
-                stderr_regex_any: Vec::new(),
-            },
-        }
-    }
-
-    #[test]
-    fn cover_invoked_long_option_matches_equals() {
-        let argv = vec!["--all".to_string(), "--block-size=1M".to_string()];
-        assert!(cover_invoked_by_argv("--all", &argv));
-        assert!(cover_invoked_by_argv("--block-size", &argv));
-    }
-
-    #[test]
-    fn cover_invoked_short_cluster_and_prefix() {
-        let argv = vec!["-al".to_string(), "-T4".to_string()];
-        assert!(cover_invoked_by_argv("-a", &argv));
-        assert!(cover_invoked_by_argv("-l", &argv));
-        assert!(cover_invoked_by_argv("-T", &argv));
-    }
-
-    #[test]
-    fn scoped_cover_requires_scope_prefix() {
-        let scenario = scenario_with(&["commit", "--amend"], &["commit"], &["commit.--amend"]);
-        assert!(validate_covers_invoked(&scenario).is_ok());
-
-        let scenario = scenario_with(&["status", "--amend"], &["commit"], &["commit.--amend"]);
-        assert!(validate_covers_invoked(&scenario).is_err());
-    }
-
-    #[test]
-    fn non_option_cover_requires_scope_prefix_when_present() {
-        let scenario = scenario_with(&["remote", "add"], &["remote"], &["add"]);
-        assert!(validate_covers_invoked(&scenario).is_ok());
-
-        let scenario = scenario_with(&["add"], &["remote"], &["add"]);
-        assert!(validate_covers_invoked(&scenario).is_err());
-    }
-
-    #[test]
-    fn cover_with_equals_is_normalized_for_invocation() {
-        let scenario = scenario_with(&["--block-size=1M"], &[], &["--block-size=1K"]);
-        assert!(validate_covers_invoked(&scenario).is_ok());
-    }
-
     fn base_expect() -> ScenarioExpect {
         ScenarioExpect {
             exit_code: Some(0),
@@ -2837,16 +2576,71 @@ mod tests {
     }
 
     #[test]
-    fn env_normalization_applies_runner_defaults() {
+    fn env_defaults_are_plan_owned() {
         let scenario = base_scenario();
-        let plan = plan_with(vec![scenario.clone()], None);
+        let mut plan = plan_with(vec![scenario.clone()], None);
+        let config = effective_scenario_config(&plan, &scenario).unwrap();
+        assert!(config.env.get("LC_ALL").is_none());
+        assert!(config.env.get("LANG").is_none());
+
+        plan.default_env
+            .insert("LC_ALL".to_string(), "C".to_string());
         let config = effective_scenario_config(&plan, &scenario).unwrap();
         assert_eq!(config.env.get("LC_ALL").map(String::as_str), Some("C"));
-        assert_eq!(config.env.get("LANG").map(String::as_str), Some("C"));
-        assert_eq!(config.env.get("TERM").map(String::as_str), Some("dumb"));
-        assert_eq!(config.env.get("NO_COLOR").map(String::as_str), Some("1"));
-        assert_eq!(config.env.get("PAGER").map(String::as_str), Some("cat"));
-        assert_eq!(config.env.get("GIT_PAGER").map(String::as_str), Some("cat"));
+    }
+
+    #[test]
+    fn plan_stub_includes_multiple_help_scenarios() {
+        let plan: ScenarioPlan = serde_json::from_str(&plan_stub(Some("tool"))).unwrap();
+        assert_eq!(plan.schema_version, SCENARIO_PLAN_SCHEMA_VERSION);
+        assert_eq!(plan.binary.as_deref(), Some("tool"));
+        assert_eq!(
+            plan.default_env.get("LC_ALL").map(String::as_str),
+            Some("C")
+        );
+        assert_eq!(plan.default_env.get("LANG").map(String::as_str), Some("C"));
+        assert_eq!(
+            plan.default_env.get("TERM").map(String::as_str),
+            Some("dumb")
+        );
+        assert_eq!(
+            plan.default_env.get("NO_COLOR").map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            plan.default_env.get("PAGER").map(String::as_str),
+            Some("cat")
+        );
+        assert_eq!(
+            plan.default_env.get("GIT_PAGER").map(String::as_str),
+            Some("cat")
+        );
+
+        let expected = [
+            ("help--help", "--help"),
+            ("help--usage", "--usage"),
+            ("help--question", "-?"),
+        ];
+        let ids: Vec<&str> = plan
+            .scenarios
+            .iter()
+            .map(|scenario| scenario.id.as_str())
+            .collect();
+        assert_eq!(ids, expected.iter().map(|(id, _)| *id).collect::<Vec<_>>());
+
+        for (scenario, (expected_id, expected_arg)) in plan.scenarios.iter().zip(expected.iter()) {
+            assert_eq!(scenario.id, *expected_id);
+            assert_eq!(scenario.kind, ScenarioKind::Help);
+            assert!(!scenario.publish);
+            assert!(scenario.coverage_ignore);
+            assert_eq!(scenario.argv, vec![(*expected_arg).to_string()]);
+            assert_eq!(scenario.timeout_seconds, Some(3.0));
+            assert_eq!(scenario.net_mode.as_deref(), Some("off"));
+            assert_eq!(scenario.no_sandbox, Some(false));
+            assert_eq!(scenario.no_strace, Some(true));
+            assert_eq!(scenario.snippet_max_lines, Some(12));
+            assert_eq!(scenario.snippet_max_bytes, Some(1024));
+        }
     }
 
     #[test]

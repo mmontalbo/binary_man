@@ -242,13 +242,13 @@ Stop and ask for feedback (or log it as “friction”) if:
 
 ## Coverage Tracking Templates
 
-### Option inventory table (example)
+### Surface inventory table (example)
 
 Keep a table (in the PR description or a companion doc) like:
 
-| option_id | aliases | tier | acceptance_scenarios | behavior_scenarios | notes |
+| item_id | aliases | tier | acceptance_scenarios | behavior_scenarios | notes |
 |---|---|---:|---|---|---|
-| all | `-a`, `--all` | common | `show-hidden` | `show-hidden` | needs fixture |
+| `--all` | `-a`, `--all` | common | `show-hidden` | `show-hidden` | needs fixture |
 
 ### Behavior inventory table (example)
 
