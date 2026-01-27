@@ -1,5 +1,6 @@
 use crate::enrich;
 use crate::pack;
+use crate::render;
 use crate::scenarios;
 use crate::staging::{write_staged_json, write_staged_text};
 use crate::util::display_path;
@@ -26,6 +27,8 @@ struct Meta {
     tool_revision: Option<String>,
     usage_lens_source_path: String,
     warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    render_summary: Option<render::RenderSummary>,
     examples: Option<ExamplesMeta>,
 }
 
@@ -46,6 +49,7 @@ pub fn write_outputs_staged(
     pack_root: &Path,
     inputs_hash: Option<&str>,
     man_page: Option<&str>,
+    render_summary: Option<&render::RenderSummary>,
     examples_report: Option<&scenarios::ExamplesReport>,
 ) -> Result<()> {
     let paths = enrich::DocPackPaths::new(doc_pack_root.to_path_buf());
@@ -73,7 +77,7 @@ pub fn write_outputs_staged(
         .as_millis();
 
     let meta = Meta {
-        schema_version: 4,
+        schema_version: 5,
         generated_at_epoch_ms,
         binary_name: context.manifest.binary_name.clone(),
         binary_path: context.manifest.binary_path.clone(),
@@ -92,6 +96,7 @@ pub fn write_outputs_staged(
             Some(doc_pack_root),
         ),
         warnings: context.warnings.clone(),
+        render_summary: render_summary.cloned(),
         examples: examples_meta,
     };
 

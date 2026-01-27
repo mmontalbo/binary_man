@@ -2,7 +2,6 @@ use crate::enrich;
 use crate::pack;
 use crate::scenarios;
 use crate::staging::{collect_files_recursive, write_staged_bytes};
-use crate::util::sha256_hex;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -60,25 +59,19 @@ struct SurfaceSeedItem {
 }
 
 #[derive(Deserialize)]
-struct SubcommandRow {
+struct SurfaceLensRow {
     #[serde(default)]
-    subcommand: Option<String>,
+    kind: Option<String>,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    display: Option<String>,
     #[serde(default)]
     description: Option<String>,
     #[serde(default)]
     scenario_path: Option<String>,
     #[serde(default)]
     multi_command_hint: bool,
-}
-
-#[derive(Deserialize)]
-struct OptionRow {
-    #[serde(default)]
-    option: Option<String>,
-    #[serde(default)]
-    description: Option<String>,
-    #[serde(default)]
-    scenario_path: Option<String>,
 }
 
 type ScenarioHit<T> = (T, PathBuf);
@@ -139,6 +132,7 @@ pub fn apply_surface_discovery(
     staging_root: &Path,
     inputs_hash: Option<&str>,
     manifest: Option<&pack::PackManifest>,
+    surface_lens_templates: &[String],
     lens_flake: &str,
     verbose: bool,
 ) -> Result<()> {
@@ -288,6 +282,12 @@ pub fn apply_surface_discovery(
                     scenarios::ScenarioRunMode::Default,
                     verbose,
                 )?;
+                discovery.push(SurfaceDiscovery {
+                    code: "help_scenarios_auto_run".to_string(),
+                    status: "used".to_string(),
+                    evidence: vec![plan_evidence.clone()],
+                    message: Some("auto-ran help scenarios for surface discovery".to_string()),
+                });
                 staging_has_scenarios = has_scenario_files(&staging_scenarios)?;
             }
         } else {
@@ -302,200 +302,121 @@ pub fn apply_surface_discovery(
 
     let mut subcommand_hint_evidence = Vec::new();
 
-    let options_template_path = doc_pack_root.join(enrich::OPTIONS_FROM_SCENARIOS_TEMPLATE_REL);
-    let options_template_evidence = paths.evidence_from_path(&options_template_path)?;
-    if options_template_path.is_file() {
-        match fs::read_to_string(&options_template_path) {
-            Ok(template_sql) => {
-                let run = run_scenario_query(
-                    doc_pack_root,
-                    staging_root,
-                    &template_sql,
-                    pack_has_scenarios,
-                    staging_has_scenarios,
-                    run_options_query,
-                );
-                let mut query_errors = run.errors;
-                let mut found_options = false;
-                for (row, source_root) in run.hits {
-                    let evidence =
-                        match evidence_from_scenario_path(&source_root, row.scenario_path.as_ref())
-                        {
+    for template_rel in surface_lens_templates {
+        let template_path = doc_pack_root.join(template_rel);
+        let template_evidence = paths.evidence_from_path(&template_path)?;
+        if template_path.is_file() {
+            match fs::read_to_string(&template_path) {
+                Ok(template_sql) => {
+                    let run = run_scenario_query(
+                        doc_pack_root,
+                        staging_root,
+                        &template_sql,
+                        pack_has_scenarios,
+                        staging_has_scenarios,
+                        run_surface_lens_query,
+                    );
+                    let mut query_errors = run.errors;
+                    let mut found_any = false;
+                    for (row, source_root) in run.hits {
+                        let evidence = match evidence_from_scenario_path(
+                            &source_root,
+                            row.scenario_path.as_ref(),
+                        ) {
                             Ok(Some(evidence)) => evidence,
-                            Ok(None) => continue,
+                            Ok(None) => {
+                                if row.multi_command_hint {
+                                    query_errors.push(format!(
+                                        "lens row missing scenario_path (template {template_rel})"
+                                    ));
+                                }
+                                continue;
+                            }
                             Err(err) => {
                                 query_errors.push(err.to_string());
                                 continue;
                             }
                         };
-                    if let Some(id) = row.option.as_ref().map(|s| s.trim()) {
-                        if id.is_empty() {
+                        if row.multi_command_hint {
+                            subcommand_hint_evidence.push(evidence.clone());
+                            found_any = true;
+                        }
+                        let kind = row.kind.as_ref().map(|value| value.trim()).unwrap_or("");
+                        let id = row.id.as_ref().map(|value| value.trim()).unwrap_or("");
+                        if kind.is_empty() || id.is_empty() {
                             continue;
                         }
+                        if !is_supported_surface_kind(kind) {
+                            query_errors.push(format!(
+                                "unsupported surface kind {kind:?} (template {template_rel})"
+                            ));
+                            continue;
+                        }
+                        let display = row
+                            .display
+                            .as_ref()
+                            .map(|value| value.trim())
+                            .filter(|value| !value.is_empty())
+                            .unwrap_or(id)
+                            .to_string();
                         let description = row
                             .description
                             .as_ref()
                             .map(|desc| desc.trim().to_string())
                             .filter(|desc| !desc.is_empty());
                         let item = SurfaceItem {
-                            kind: "option".to_string(),
+                            kind: kind.to_string(),
                             id: id.to_string(),
-                            display: id.to_string(),
+                            display,
                             description,
                             evidence: vec![evidence],
                         };
                         merge_surface_item(&mut items, &mut seen, item);
-                        found_options = true;
+                        found_any = true;
+                    }
+                    let status = query_status(run.ran, found_any, !query_errors.is_empty());
+                    discovery.push(SurfaceDiscovery {
+                        code: template_rel.to_string(),
+                        status: status.to_string(),
+                        evidence: vec![template_evidence.clone()],
+                        message: if query_errors.is_empty() {
+                            None
+                        } else {
+                            Some(query_errors.join("; "))
+                        },
+                    });
+                    if !query_errors.is_empty() {
+                        blockers.push(enrich::Blocker {
+                            code: "surface_lens_query_error".to_string(),
+                            message: format!("surface lens query failed ({template_rel})"),
+                            evidence: vec![template_evidence.clone()],
+                            next_action: Some(format!("fix {template_rel}")),
+                        });
                     }
                 }
-                let status = query_status(run.ran, found_options, !query_errors.is_empty());
-                discovery.push(SurfaceDiscovery {
-                    code: "options_from_scenarios".to_string(),
-                    status: status.to_string(),
-                    evidence: vec![options_template_evidence.clone()],
-                    message: if query_errors.is_empty() {
-                        None
-                    } else {
-                        Some(query_errors.join("; "))
-                    },
-                });
-                if !query_errors.is_empty() {
+                Err(err) => {
+                    discovery.push(SurfaceDiscovery {
+                        code: template_rel.to_string(),
+                        status: "error".to_string(),
+                        evidence: vec![template_evidence.clone()],
+                        message: Some(err.to_string()),
+                    });
                     blockers.push(enrich::Blocker {
-                        code: "options_query_error".to_string(),
-                        message: "options query failed".to_string(),
-                        evidence: vec![options_template_evidence.clone()],
-                        next_action: Some(format!(
-                            "fix {}",
-                            enrich::OPTIONS_FROM_SCENARIOS_TEMPLATE_REL
-                        )),
+                        code: "surface_lens_template_read_error".to_string(),
+                        message: err.to_string(),
+                        evidence: vec![template_evidence.clone()],
+                        next_action: Some(format!("fix {template_rel}")),
                     });
                 }
             }
-            Err(err) => {
-                discovery.push(SurfaceDiscovery {
-                    code: "options_from_scenarios".to_string(),
-                    status: "error".to_string(),
-                    evidence: vec![options_template_evidence.clone()],
-                    message: Some(err.to_string()),
-                });
-                blockers.push(enrich::Blocker {
-                    code: "options_template_read_error".to_string(),
-                    message: err.to_string(),
-                    evidence: vec![options_template_evidence.clone()],
-                    next_action: Some(format!(
-                        "fix {}",
-                        enrich::OPTIONS_FROM_SCENARIOS_TEMPLATE_REL
-                    )),
-                });
-            }
+        } else {
+            discovery.push(SurfaceDiscovery {
+                code: template_rel.to_string(),
+                status: "missing".to_string(),
+                evidence: vec![template_evidence.clone()],
+                message: Some("surface lens template missing".to_string()),
+            });
         }
-    } else {
-        discovery.push(SurfaceDiscovery {
-            code: "options_from_scenarios".to_string(),
-            status: "missing".to_string(),
-            evidence: vec![options_template_evidence.clone()],
-            message: Some("options template missing".to_string()),
-        });
-    }
-
-    let subcommands_template_path =
-        doc_pack_root.join(enrich::SUBCOMMANDS_FROM_SCENARIOS_TEMPLATE_REL);
-    let subcommands_template_evidence = paths.evidence_from_path(&subcommands_template_path)?;
-    if subcommands_template_path.is_file() {
-        match fs::read_to_string(&subcommands_template_path) {
-            Ok(template_sql) => {
-                let run = run_scenario_query(
-                    doc_pack_root,
-                    staging_root,
-                    &template_sql,
-                    pack_has_scenarios,
-                    staging_has_scenarios,
-                    run_subcommands_query,
-                );
-                let mut query_errors = run.errors;
-                let mut found_subcommands = false;
-                for (row, source_root) in run.hits {
-                    let evidence =
-                        match evidence_from_scenario_path(&source_root, row.scenario_path.as_ref())
-                        {
-                            Ok(Some(evidence)) => evidence,
-                            Ok(None) => continue,
-                            Err(err) => {
-                                query_errors.push(err.to_string());
-                                continue;
-                            }
-                        };
-                    if row.multi_command_hint {
-                        subcommand_hint_evidence.push(evidence.clone());
-                    }
-                    if let Some(id) = row.subcommand.as_ref().map(|s| s.trim()) {
-                        if id.is_empty() {
-                            continue;
-                        }
-                        let description = row
-                            .description
-                            .as_ref()
-                            .map(|desc| desc.trim().to_string())
-                            .filter(|desc| !desc.is_empty());
-                        let item = SurfaceItem {
-                            kind: "subcommand".to_string(),
-                            id: id.to_string(),
-                            display: id.to_string(),
-                            description,
-                            evidence: vec![evidence],
-                        };
-                        merge_surface_item(&mut items, &mut seen, item);
-                        found_subcommands = true;
-                    }
-                }
-                let status = query_status(run.ran, found_subcommands, !query_errors.is_empty());
-                discovery.push(SurfaceDiscovery {
-                    code: "subcommands_from_scenarios".to_string(),
-                    status: status.to_string(),
-                    evidence: vec![subcommands_template_evidence.clone()],
-                    message: if query_errors.is_empty() {
-                        None
-                    } else {
-                        Some(query_errors.join("; "))
-                    },
-                });
-                if !query_errors.is_empty() {
-                    blockers.push(enrich::Blocker {
-                        code: "subcommands_query_error".to_string(),
-                        message: "subcommands query failed".to_string(),
-                        evidence: vec![subcommands_template_evidence.clone()],
-                        next_action: Some(format!(
-                            "fix {}",
-                            enrich::SUBCOMMANDS_FROM_SCENARIOS_TEMPLATE_REL
-                        )),
-                    });
-                }
-            }
-            Err(err) => {
-                discovery.push(SurfaceDiscovery {
-                    code: "subcommands_from_scenarios".to_string(),
-                    status: "error".to_string(),
-                    evidence: vec![subcommands_template_evidence.clone()],
-                    message: Some(err.to_string()),
-                });
-                blockers.push(enrich::Blocker {
-                    code: "subcommands_template_read_error".to_string(),
-                    message: err.to_string(),
-                    evidence: vec![subcommands_template_evidence.clone()],
-                    next_action: Some(format!(
-                        "fix {}",
-                        enrich::SUBCOMMANDS_FROM_SCENARIOS_TEMPLATE_REL
-                    )),
-                });
-            }
-        }
-    } else {
-        discovery.push(SurfaceDiscovery {
-            code: "subcommands_from_scenarios".to_string(),
-            status: "missing".to_string(),
-            evidence: vec![subcommands_template_evidence.clone()],
-            message: Some("subcommands template missing".to_string()),
-        });
     }
 
     if !subcommand_hint_evidence.is_empty() {
@@ -591,30 +512,16 @@ fn has_scenario_files(root: &Path) -> Result<bool> {
     Ok(false)
 }
 
-fn run_subcommands_query(
+fn run_surface_lens_query(
     root: &Path,
     template_sql: &str,
-) -> Result<Vec<ScenarioHit<SubcommandRow>>> {
+) -> Result<Vec<ScenarioHit<SurfaceLensRow>>> {
     let output = pack::run_duckdb_query(template_sql, root)?;
-    let rows: Vec<SubcommandRow> =
+    let rows: Vec<SurfaceLensRow> =
         if output.is_empty() || output.iter().all(|byte| byte.is_ascii_whitespace()) {
             Vec::new()
         } else {
-            serde_json::from_slice(&output).context("parse subcommands query output")?
-        };
-    Ok(rows
-        .into_iter()
-        .map(|row| (row, root.to_path_buf()))
-        .collect())
-}
-
-fn run_options_query(root: &Path, template_sql: &str) -> Result<Vec<ScenarioHit<OptionRow>>> {
-    let output = pack::run_duckdb_query(template_sql, root)?;
-    let rows: Vec<OptionRow> =
-        if output.is_empty() || output.iter().all(|byte| byte.is_ascii_whitespace()) {
-            Vec::new()
-        } else {
-            serde_json::from_slice(&output).context("parse options query output")?
+            serde_json::from_slice(&output).context("parse surface lens query output")?
         };
     Ok(rows
         .into_iter()
@@ -634,7 +541,7 @@ fn evidence_from_scenario_path(
         Some(rel) => rel,
         None => return Ok(None),
     };
-    Ok(Some(evidence_from_rel_path(source_root, &rel)?))
+    Ok(Some(enrich::evidence_from_rel(source_root, &rel)?))
 }
 
 fn normalize_scenario_rel_path(raw: &str) -> Option<String> {
@@ -647,20 +554,6 @@ fn normalize_scenario_rel_path(raw: &str) -> Option<String> {
     }
     let trimmed = normalized.strip_prefix("./").unwrap_or(normalized.as_str());
     Some(trimmed.to_string())
-}
-
-fn evidence_from_rel_path(root: &Path, rel: &str) -> Result<enrich::EvidenceRef> {
-    let path = root.join(rel);
-    let sha256 = if path.exists() {
-        let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
-        Some(sha256_hex(&bytes))
-    } else {
-        None
-    };
-    Ok(enrich::EvidenceRef {
-        path: rel.to_string(),
-        sha256,
-    })
 }
 
 fn merge_surface_item(

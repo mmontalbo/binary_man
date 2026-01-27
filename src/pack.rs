@@ -1,6 +1,5 @@
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
-use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -30,8 +29,7 @@ pub struct PackManifest {
 
 #[derive(Deserialize)]
 pub struct UsageEvidenceRow {
-    pub status: String,
-    pub basis: String,
+    #[serde(default)]
     pub string_value: Option<String>,
 }
 
@@ -80,17 +78,18 @@ pub fn generate_pack(binary: &str, out_dir: &Path, lens_flake: &str) -> Result<P
     Ok(pack_root)
 }
 
-pub fn load_pack_context_with_template(
+pub fn load_pack_context_with_template_at(
     pack_root: &Path,
     template_path: &Path,
+    duckdb_cwd: &Path,
 ) -> Result<PackContext> {
     let manifest = load_manifest(pack_root)?;
-    let usage_lens = run_usage_lens(pack_root, template_path)?;
+    let usage_lens = run_usage_lens_at(pack_root, template_path, duckdb_cwd)?;
     if usage_lens.rows.is_empty() {
         return Err(anyhow!("usage lens returned no rows"));
     }
 
-    let help = extract_help_text_from_usage_evidence(&usage_lens.rows, &manifest.binary_name);
+    let help = extract_help_text_from_usage_evidence(&usage_lens.rows);
     if help.text.trim().is_empty() {
         return Err(anyhow!("usage evidence produced empty help text"));
     }
@@ -112,9 +111,13 @@ pub fn load_manifest(pack_root: &Path) -> Result<PackManifest> {
     Ok(manifest)
 }
 
-fn run_usage_lens(pack_root: &Path, template_path: &Path) -> Result<UsageLensOutput> {
+fn run_usage_lens_at(
+    pack_root: &Path,
+    template_path: &Path,
+    duckdb_cwd: &Path,
+) -> Result<UsageLensOutput> {
     let rendered_sql = render_usage_lens(pack_root, template_path)?;
-    let output = run_duckdb_query(&rendered_sql, pack_root)?;
+    let output = run_duckdb_query(&rendered_sql, duckdb_cwd)?;
     let rows: Vec<UsageEvidenceRow> =
         serde_json::from_slice(&output).context("parse usage evidence JSON output")?;
 
@@ -206,10 +209,7 @@ fn sql_quote_literal(value: &str) -> String {
     value.replace('\'', "''")
 }
 
-fn extract_help_text_from_usage_evidence(
-    rows: &[UsageEvidenceRow],
-    binary_name: &str,
-) -> HelpExtraction {
+fn extract_help_text_from_usage_evidence(rows: &[UsageEvidenceRow]) -> HelpExtraction {
     let mut warnings = Vec::new();
     if rows.is_empty() {
         warnings.push("usage evidence is empty".to_string());
@@ -219,37 +219,15 @@ fn extract_help_text_from_usage_evidence(
         };
     }
 
-    let mut seen = HashSet::new();
     let mut text = String::new();
 
-    for row in rows.iter().filter(|row| is_reliable_string(row)) {
-        let value = match row.string_value.as_ref() {
-            Some(value) => value,
-            None => continue,
+    for row in rows {
+        let Some(value) = row.string_value.as_ref() else {
+            continue;
         };
-        let cleaned = replace_program_name(value, binary_name);
-        if seen.insert(cleaned.clone()) {
-            text.push_str(&cleaned);
-            if !text.ends_with('\n') {
-                text.push('\n');
-            }
-        }
-    }
-
-    if text.trim().is_empty() {
-        warnings.push("no resolved usage strings; falling back to unresolved".to_string());
-        for row in rows {
-            let value = match row.string_value.as_ref() {
-                Some(value) => value,
-                None => continue,
-            };
-            let cleaned = replace_program_name(value, binary_name);
-            if seen.insert(cleaned.clone()) {
-                text.push_str(&cleaned);
-                if !text.ends_with('\n') {
-                    text.push('\n');
-                }
-            }
+        text.push_str(value);
+        if !text.ends_with('\n') {
+            text.push('\n');
         }
     }
 
@@ -258,12 +236,4 @@ fn extract_help_text_from_usage_evidence(
     }
 
     HelpExtraction { text, warnings }
-}
-
-fn is_reliable_string(row: &UsageEvidenceRow) -> bool {
-    row.status == "resolved" && (row.basis == "string_direct" || row.basis == "string_gettext")
-}
-
-fn replace_program_name(text: &str, binary_name: &str) -> String {
-    text.replace("%s", binary_name)
 }

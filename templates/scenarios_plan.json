@@ -1,0 +1,118 @@
+{
+  "schema_version": 2,
+  "binary": null,
+  "default_env": {
+    "LC_ALL": "C",
+    "LANG": "C",
+    "TERM": "dumb",
+    "NO_COLOR": "1",
+    "PAGER": "cat",
+    "GIT_PAGER": "cat"
+  },
+  "defaults": null,
+  "coverage": null,
+  "scenarios": [
+    {
+      "id": "help--help",
+      "kind": "help",
+      "publish": false,
+      "scope": [],
+      "argv": [
+        "--help"
+      ],
+      "env": {},
+      "seed_dir": null,
+      "seed": null,
+      "cwd": null,
+      "timeout_seconds": 3.0,
+      "net_mode": "off",
+      "no_sandbox": false,
+      "no_strace": true,
+      "snippet_max_lines": 12,
+      "snippet_max_bytes": 1024,
+      "coverage_tier": null,
+      "covers": [],
+      "coverage_ignore": true,
+      "expect": {
+        "exit_code": null,
+        "exit_signal": null,
+        "stdout_contains_all": [],
+        "stdout_contains_any": [],
+        "stdout_regex_all": [],
+        "stdout_regex_any": [],
+        "stderr_contains_all": [],
+        "stderr_contains_any": [],
+        "stderr_regex_all": [],
+        "stderr_regex_any": []
+      }
+    },
+    {
+      "id": "help--usage",
+      "kind": "help",
+      "publish": false,
+      "scope": [],
+      "argv": [
+        "--usage"
+      ],
+      "env": {},
+      "seed_dir": null,
+      "seed": null,
+      "cwd": null,
+      "timeout_seconds": 3.0,
+      "net_mode": "off",
+      "no_sandbox": false,
+      "no_strace": true,
+      "snippet_max_lines": 12,
+      "snippet_max_bytes": 1024,
+      "coverage_tier": null,
+      "covers": [],
+      "coverage_ignore": true,
+      "expect": {
+        "exit_code": null,
+        "exit_signal": null,
+        "stdout_contains_all": [],
+        "stdout_contains_any": [],
+        "stdout_regex_all": [],
+        "stdout_regex_any": [],
+        "stderr_contains_all": [],
+        "stderr_contains_any": [],
+        "stderr_regex_all": [],
+        "stderr_regex_any": []
+      }
+    },
+    {
+      "id": "help--question",
+      "kind": "help",
+      "publish": false,
+      "scope": [],
+      "argv": [
+        "-?"
+      ],
+      "env": {},
+      "seed_dir": null,
+      "seed": null,
+      "cwd": null,
+      "timeout_seconds": 3.0,
+      "net_mode": "off",
+      "no_sandbox": false,
+      "no_strace": true,
+      "snippet_max_lines": 12,
+      "snippet_max_bytes": 1024,
+      "coverage_tier": null,
+      "covers": [],
+      "coverage_ignore": true,
+      "expect": {
+        "exit_code": null,
+        "exit_signal": null,
+        "stdout_contains_all": [],
+        "stdout_contains_any": [],
+        "stdout_regex_all": [],
+        "stdout_regex_any": [],
+        "stderr_contains_all": [],
+        "stderr_contains_any": [],
+        "stderr_regex_all": [],
+        "stderr_regex_any": []
+      }
+    }
+  ]
+}

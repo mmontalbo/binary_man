@@ -7,6 +7,7 @@ mod output;
 mod pack;
 mod render;
 mod scenarios;
+mod semantics;
 mod staging;
 mod status;
 mod surface;

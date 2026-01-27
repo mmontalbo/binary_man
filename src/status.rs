@@ -1,5 +1,6 @@
 use crate::enrich;
 use crate::scenarios;
+use crate::semantics;
 use crate::surface;
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
@@ -43,6 +44,16 @@ struct ScenarioPlanLoadResult {
     error: Option<ScenarioPlanLoadError>,
 }
 
+enum SemanticsLoadError {
+    Missing,
+    Invalid(String),
+}
+
+struct SemanticsLoadResult {
+    evidence: enrich::EvidenceRef,
+    error: Option<SemanticsLoadError>,
+}
+
 struct EvalResult {
     requirements: Vec<enrich::RequirementStatus>,
     missing_artifacts: Vec<String>,
@@ -51,6 +62,7 @@ struct EvalResult {
     decision_reason: Option<String>,
     coverage_next_action: Option<enrich::NextAction>,
     verification_next_action: Option<enrich::NextAction>,
+    man_semantics_next_action: Option<enrich::NextAction>,
 }
 
 pub fn build_status_summary(
@@ -114,33 +126,39 @@ pub fn build_status_summary(
         };
     let next_action = if missing_inputs {
         next_action_for_missing_inputs(&paths, binary_name)
+    } else if config_exists && eval.man_semantics_next_action.is_some() {
+        eval.man_semantics_next_action.clone().unwrap()
+    } else if gating_ok
+        && matches!(first_unmet.clone(), Some(enrich::RequirementId::Coverage))
+        && eval.coverage_next_action.is_some()
+    {
+        eval.coverage_next_action.clone().unwrap()
+    } else if gating_ok
+        && matches!(
+            first_unmet.clone(),
+            Some(enrich::RequirementId::Verification)
+        )
+        && eval.verification_next_action.is_some()
+    {
+        eval.verification_next_action.clone().unwrap()
+    } else if gating_ok && scenario_failure_next_action.is_some() {
+        scenario_failure_next_action.clone().unwrap()
     } else {
-        if gating_ok
-            && matches!(first_unmet.clone(), Some(enrich::RequirementId::Coverage))
-            && eval.coverage_next_action.is_some()
-        {
-            eval.coverage_next_action.clone().unwrap()
-        } else if gating_ok
-            && matches!(
-                first_unmet.clone(),
-                Some(enrich::RequirementId::Verification)
-            )
-            && eval.verification_next_action.is_some()
-        {
-            eval.verification_next_action.clone().unwrap()
-        } else if gating_ok && scenario_failure_next_action.is_some() {
-            scenario_failure_next_action.clone().unwrap()
-        } else {
-            determine_next_action(
-                doc_pack_root,
-                config_exists,
-                &lock_status,
-                &plan_status,
-                &eval.decision,
-                &eval.requirements,
-            )
-        }
+        determine_next_action(
+            doc_pack_root,
+            config_exists,
+            &lock_status,
+            &plan_status,
+            &eval.decision,
+            &eval.requirements,
+        )
     };
+    let man_meta = read_man_meta(&paths);
+    let man_warnings = man_meta
+        .as_ref()
+        .map(|meta| meta.warnings.clone())
+        .unwrap_or_default();
+    let lens_summary = build_lens_summary(&paths, config, &mut warnings, man_meta.as_ref());
 
     Ok(enrich::StatusSummary {
         schema_version: 1,
@@ -155,8 +173,158 @@ pub fn build_status_summary(
         decision_reason: eval.decision_reason,
         next_action,
         warnings,
+        man_warnings,
+        lens_summary,
         force_used,
     })
+}
+
+#[derive(Deserialize, Default)]
+struct ManMeta {
+    #[serde(default)]
+    warnings: Vec<String>,
+    #[serde(default)]
+    usage_lens_source_path: Option<String>,
+}
+
+fn read_man_meta(paths: &enrich::DocPackPaths) -> Option<ManMeta> {
+    let meta_path = paths.man_dir().join("meta.json");
+    if !meta_path.is_file() {
+        return None;
+    }
+    let bytes = std::fs::read(&meta_path).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn build_lens_summary(
+    paths: &enrich::DocPackPaths,
+    config: &enrich::EnrichConfig,
+    warnings: &mut Vec<String>,
+    man_meta: Option<&ManMeta>,
+) -> Vec<enrich::LensSummary> {
+    let mut summary = Vec::new();
+    let empty_warnings: &[String] = &[];
+    let used_template = man_meta.and_then(|meta| meta.usage_lens_source_path.as_deref());
+    let usage_warnings = man_meta
+        .map(|meta| meta.warnings.as_slice())
+        .unwrap_or(empty_warnings);
+    let usage_present = man_meta.is_some();
+    let usage_failures = usage_lens_failures(usage_warnings);
+
+    for rel in &config.usage_lens_templates {
+        let template_path = paths.root().join(rel);
+        let evidence = match paths.evidence_from_path(&template_path) {
+            Ok(evidence) => vec![evidence],
+            Err(err) => {
+                warnings.push(err.to_string());
+                Vec::new()
+            }
+        };
+        let status = if !template_path.is_file() {
+            "error"
+        } else if used_template == Some(rel.as_str()) {
+            "used"
+        } else if usage_failures.contains_key(rel) {
+            "error"
+        } else {
+            "empty"
+        };
+        let message = if !template_path.is_file() {
+            Some("usage lens template missing".to_string())
+        } else if let Some(message) = usage_failures.get(rel) {
+            Some(message.clone())
+        } else if !usage_present {
+            Some("man/meta.json missing".to_string())
+        } else {
+            None
+        };
+        summary.push(enrich::LensSummary {
+            kind: "usage".to_string(),
+            template_path: rel.clone(),
+            status: status.to_string(),
+            evidence,
+            message,
+        });
+    }
+
+    let surface_path = paths.surface_path();
+    let surface_state = if surface_path.is_file() {
+        surface::load_surface_inventory(&surface_path)
+            .map(|surface| {
+                surface
+                    .discovery
+                    .into_iter()
+                    .map(|entry| (entry.code.clone(), entry))
+                    .collect::<BTreeMap<_, _>>()
+            })
+            .map_err(|err| err.to_string())
+    } else {
+        Err("surface inventory missing".to_string())
+    };
+
+    for rel in &config.surface_lens_templates {
+        let template_path = paths.root().join(rel);
+        let fallback_evidence = match paths.evidence_from_path(&template_path) {
+            Ok(evidence) => vec![evidence],
+            Err(err) => {
+                warnings.push(err.to_string());
+                Vec::new()
+            }
+        };
+        let (status, evidence, message) = match surface_state.as_ref() {
+            Ok(entries) => match entries.get(rel) {
+                Some(entry) => {
+                    let normalized = normalize_lens_status(&entry.status);
+                    (normalized, entry.evidence.clone(), entry.message.clone())
+                }
+                None => (
+                    "error".to_string(),
+                    fallback_evidence,
+                    Some("surface lens not found in discovery".to_string()),
+                ),
+            },
+            Err(err) => (
+                "error".to_string(),
+                fallback_evidence,
+                Some(err.to_string()),
+            ),
+        };
+        summary.push(enrich::LensSummary {
+            kind: "surface".to_string(),
+            template_path: rel.clone(),
+            status,
+            evidence,
+            message,
+        });
+    }
+
+    summary
+}
+
+fn usage_lens_failures(warnings: &[String]) -> BTreeMap<String, String> {
+    let mut failures = BTreeMap::new();
+    for warning in warnings {
+        let Some(rest) = warning.strip_prefix("usage lens fallback: ") else {
+            continue;
+        };
+        let Some((template, detail)) = rest.split_once(": ") else {
+            continue;
+        };
+        failures.insert(template.to_string(), detail.to_string());
+    }
+    failures
+}
+
+fn normalize_lens_status(raw: &str) -> String {
+    match raw {
+        "used" => "used",
+        "empty" => "empty",
+        "error" => "error",
+        "missing" => "error",
+        "skipped" => "empty",
+        _ => "error",
+    }
+    .to_string()
 }
 
 fn load_surface_inventory_state(
@@ -225,6 +393,42 @@ fn load_scenario_plan_state(
     }
 }
 
+fn load_semantics_state(
+    paths: &enrich::DocPackPaths,
+    missing_artifacts: &mut Vec<String>,
+) -> Result<SemanticsLoadResult> {
+    let semantics_path = paths.semantics_path();
+    let evidence = paths.evidence_from_path(&semantics_path)?;
+    if !semantics_path.is_file() {
+        missing_artifacts.push(evidence.path.clone());
+        return Ok(SemanticsLoadResult {
+            evidence,
+            error: Some(SemanticsLoadError::Missing),
+        });
+    }
+    let bytes = std::fs::read(&semantics_path)
+        .with_context(|| format!("read {}", semantics_path.display()))?;
+    let semantics = match serde_json::from_slice::<semantics::Semantics>(&bytes) {
+        Ok(semantics) => semantics,
+        Err(err) => {
+            return Ok(SemanticsLoadResult {
+                evidence,
+                error: Some(SemanticsLoadError::Invalid(err.to_string())),
+            })
+        }
+    };
+    if let Err(err) = semantics::validate_semantics(&semantics) {
+        return Ok(SemanticsLoadResult {
+            evidence,
+            error: Some(SemanticsLoadError::Invalid(err.to_string())),
+        });
+    }
+    Ok(SemanticsLoadResult {
+        evidence,
+        error: None,
+    })
+}
+
 fn evaluate_requirements(
     paths: &enrich::DocPackPaths,
     binary_name: Option<&str>,
@@ -236,6 +440,7 @@ fn evaluate_requirements(
     let mut blockers = Vec::new();
     let mut coverage_next_action = None;
     let mut verification_next_action = None;
+    let mut man_semantics_next_action = None;
 
     for req in enrich::normalized_requirements(config) {
         match req {
@@ -865,6 +1070,45 @@ fn evaluate_requirements(
                         continue;
                     }
                 };
+                let semantics_state = load_semantics_state(paths, &mut missing_artifacts)?;
+                let semantics_evidence = semantics_state.evidence.clone();
+                match semantics_state.error {
+                    Some(SemanticsLoadError::Missing) => {
+                        man_semantics_next_action = Some(enrich::NextAction::Edit {
+                            path: "enrich/semantics.json".to_string(),
+                            content: semantics::semantics_stub(Some(binary_name)),
+                            reason: "semantics missing; add render rules".to_string(),
+                        });
+                        requirements.push(enrich::RequirementStatus {
+                            id: req.clone(),
+                            status: enrich::RequirementState::Unmet,
+                            reason: "semantics missing".to_string(),
+                            unverified_ids: Vec::new(),
+                            unverified_count: None,
+                            evidence: vec![semantics_evidence],
+                            blockers: Vec::new(),
+                        });
+                        continue;
+                    }
+                    Some(SemanticsLoadError::Invalid(message)) => {
+                        man_semantics_next_action = Some(enrich::NextAction::Edit {
+                            path: "enrich/semantics.json".to_string(),
+                            content: semantics::semantics_stub(Some(binary_name)),
+                            reason: format!("fix semantics: {message}"),
+                        });
+                        requirements.push(enrich::RequirementStatus {
+                            id: req.clone(),
+                            status: enrich::RequirementState::Unmet,
+                            reason: "semantics invalid".to_string(),
+                            unverified_ids: Vec::new(),
+                            unverified_count: None,
+                            evidence: vec![semantics_evidence],
+                            blockers: Vec::new(),
+                        });
+                        continue;
+                    }
+                    None => {}
+                }
                 let surface_path = paths.surface_path();
                 let surface_evidence = paths.evidence_from_path(&surface_path)?;
                 let multi_command = if surface_path.is_file() {
@@ -901,121 +1145,133 @@ fn evaluate_requirements(
                 } else {
                     let meta_path = paths.man_dir().join("meta.json");
                     let meta_evidence = paths.evidence_from_path(&meta_path)?;
-                    let mut requirement_evidence = vec![evidence.clone(), meta_evidence.clone()];
+                    let mut requirement_evidence = vec![
+                        evidence.clone(),
+                        meta_evidence.clone(),
+                        semantics_evidence.clone(),
+                    ];
                     if multi_command {
                         requirement_evidence.push(surface_evidence.clone());
                     }
-                    let (status, reason, local_blockers) =
-                        if lock_status.present && !lock_status.stale {
-                            if !meta_path.is_file() {
-                                missing_artifacts.push(meta_evidence.path.clone());
-                                (
-                                    enrich::RequirementState::Unmet,
-                                    "man metadata missing".to_string(),
-                                    Vec::new(),
-                                )
-                            } else {
-                                #[derive(Deserialize)]
-                                struct ManMetaInputs {
-                                    #[serde(default)]
-                                    inputs_hash: Option<String>,
-                                }
-                                let bytes = std::fs::read(&meta_path)
-                                    .with_context(|| format!("read {}", meta_path.display()))?;
-                                match serde_json::from_slice::<ManMetaInputs>(&bytes) {
-                                    Ok(meta) => {
-                                        let lock_hash = lock_status.inputs_hash.as_deref();
-                                        let stale = match (meta.inputs_hash.as_deref(), lock_hash) {
-                                            (Some(meta_hash), Some(lock_hash)) => {
-                                                meta_hash != lock_hash
-                                            }
-                                            (None, Some(_)) => true,
-                                            _ => false,
-                                        };
-                                        if stale {
-                                            (
-                                                enrich::RequirementState::Unmet,
-                                                "man outputs stale relative to lock".to_string(),
-                                                Vec::new(),
-                                            )
-                                        } else {
-                                            (
-                                                enrich::RequirementState::Met,
-                                                "man page present".to_string(),
-                                                Vec::new(),
-                                            )
-                                        }
-                                    }
-                                    Err(err) => {
-                                        let blocker = enrich::Blocker {
-                                            code: "man_meta_parse_error".to_string(),
-                                            message: err.to_string(),
-                                            evidence: vec![meta_evidence.clone()],
-                                            next_action: Some(format!(
-                                                "bman apply --doc-pack {}",
-                                                paths.root().display()
-                                            )),
-                                        };
-                                        (
-                                            enrich::RequirementState::Blocked,
-                                            "man metadata parse error".to_string(),
-                                            vec![blocker],
-                                        )
-                                    }
-                                }
+                    #[derive(Deserialize, Default)]
+                    struct RenderSummaryMeta {
+                        #[serde(default)]
+                        semantics_unmet: Vec<String>,
+                        #[serde(default)]
+                        commands_entries: usize,
+                    }
+                    #[derive(Deserialize, Default)]
+                    struct ManMetaInputs {
+                        #[serde(default)]
+                        inputs_hash: Option<String>,
+                        #[serde(default)]
+                        render_summary: Option<RenderSummaryMeta>,
+                    }
+
+                    let meta = if meta_path.is_file() {
+                        let bytes = std::fs::read(&meta_path)
+                            .with_context(|| format!("read {}", meta_path.display()))?;
+                        match serde_json::from_slice::<ManMetaInputs>(&bytes) {
+                            Ok(meta) => Some(meta),
+                            Err(err) => {
+                                let blocker = enrich::Blocker {
+                                    code: "man_meta_parse_error".to_string(),
+                                    message: err.to_string(),
+                                    evidence: vec![meta_evidence.clone()],
+                                    next_action: Some(format!(
+                                        "bman apply --doc-pack {}",
+                                        paths.root().display()
+                                    )),
+                                };
+                                blockers.push(blocker.clone());
+                                requirements.push(enrich::RequirementStatus {
+                                    id: req.clone(),
+                                    status: enrich::RequirementState::Blocked,
+                                    reason: "man metadata parse error".to_string(),
+                                    unverified_ids: Vec::new(),
+                                    unverified_count: None,
+                                    evidence: requirement_evidence,
+                                    blockers: vec![blocker],
+                                });
+                                continue;
                             }
+                        }
+                    } else {
+                        None
+                    };
+
+                    let lock_fresh = lock_status.present && !lock_status.stale;
+                    let (mut status, mut reason, mut local_blockers) = if meta.is_none() {
+                        missing_artifacts.push(meta_evidence.path.clone());
+                        (
+                            enrich::RequirementState::Unmet,
+                            "man metadata missing".to_string(),
+                            Vec::new(),
+                        )
+                    } else if lock_fresh {
+                        let meta = meta.as_ref().expect("meta present");
+                        let lock_hash = lock_status.inputs_hash.as_deref();
+                        let stale = match (meta.inputs_hash.as_deref(), lock_hash) {
+                            (Some(meta_hash), Some(lock_hash)) => meta_hash != lock_hash,
+                            (None, Some(_)) => true,
+                            _ => false,
+                        };
+                        if stale {
+                            (
+                                enrich::RequirementState::Unmet,
+                                "man outputs stale relative to lock".to_string(),
+                                Vec::new(),
+                            )
                         } else {
                             (
                                 enrich::RequirementState::Met,
                                 "man page present".to_string(),
                                 Vec::new(),
                             )
-                        };
-                    let (status, reason, local_blockers) =
-                        if status == enrich::RequirementState::Met && multi_command {
-                            match std::fs::read_to_string(&man_path) {
-                                Ok(text) => {
-                                    if man_has_commands_section(&text) {
-                                        (status, reason, local_blockers)
-                                    } else {
-                                        let blocker = enrich::Blocker {
-                                            code: "man_commands_missing".to_string(),
-                                            message:
-                                                "man page missing COMMANDS section for subcommands"
-                                                    .to_string(),
-                                            evidence: requirement_evidence.clone(),
-                                            next_action: Some(format!(
-                                                "bman apply --doc-pack {}",
-                                                paths.root().display()
-                                            )),
-                                        };
-                                        (
-                                            enrich::RequirementState::Blocked,
-                                            "man page missing COMMANDS section".to_string(),
-                                            vec![blocker],
-                                        )
-                                    }
-                                }
-                                Err(err) => {
-                                    let blocker = enrich::Blocker {
-                                        code: "man_read_error".to_string(),
-                                        message: err.to_string(),
-                                        evidence: requirement_evidence.clone(),
-                                        next_action: Some(format!(
-                                            "bman apply --doc-pack {}",
-                                            paths.root().display()
-                                        )),
-                                    };
-                                    (
-                                        enrich::RequirementState::Blocked,
-                                        "man page read error".to_string(),
-                                        vec![blocker],
-                                    )
-                                }
+                        }
+                    } else {
+                        (
+                            enrich::RequirementState::Met,
+                            "man page present".to_string(),
+                            Vec::new(),
+                        )
+                    };
+
+                    if status == enrich::RequirementState::Met && lock_fresh {
+                        let render_summary =
+                            meta.as_ref().and_then(|meta| meta.render_summary.as_ref());
+                        if let Some(summary) = render_summary {
+                            if !summary.semantics_unmet.is_empty() {
+                                let missing = summary.semantics_unmet.join(", ");
+                                man_semantics_next_action = Some(enrich::NextAction::Edit {
+                                    path: "enrich/semantics.json".to_string(),
+                                    content: semantics::semantics_stub(Some(binary_name)),
+                                    reason: format!(
+                                        "update semantics (missing extractions: {missing})"
+                                    ),
+                                });
+                                status = enrich::RequirementState::Unmet;
+                                reason = format!("rendered but semantics insufficient: {missing}");
+                            } else if multi_command && summary.commands_entries == 0 {
+                                let blocker = enrich::Blocker {
+                                    code: "man_commands_missing".to_string(),
+                                    message: "man page missing COMMANDS section for subcommands"
+                                        .to_string(),
+                                    evidence: requirement_evidence.clone(),
+                                    next_action: Some(format!(
+                                        "bman apply --doc-pack {}",
+                                        paths.root().display()
+                                    )),
+                                };
+                                status = enrich::RequirementState::Blocked;
+                                reason = "man page missing COMMANDS section".to_string();
+                                local_blockers = vec![blocker];
                             }
                         } else {
-                            (status, reason, local_blockers)
-                        };
+                            status = enrich::RequirementState::Unmet;
+                            reason = "man render summary missing".to_string();
+                        }
+                    }
                     blockers.extend(local_blockers.clone());
                     requirements.push(enrich::RequirementStatus {
                         id: req.clone(),
@@ -1060,6 +1316,7 @@ fn evaluate_requirements(
         decision_reason,
         coverage_next_action,
         verification_next_action,
+        man_semantics_next_action,
     })
 }
 
@@ -1335,26 +1592,7 @@ fn stub_scope_and_argv(surface_id: &str) -> (Vec<String>, Vec<String>) {
     if trimmed.is_empty() {
         return (Vec::new(), Vec::new());
     }
-    let Some((scope_part, token)) = trimmed.rsplit_once('.') else {
-        return (Vec::new(), vec![trimmed.to_string()]);
-    };
-    let scope: Vec<String> = scope_part
-        .split('.')
-        .filter_map(|segment| {
-            let segment = segment.trim();
-            if segment.is_empty() {
-                None
-            } else {
-                Some(segment.to_string())
-            }
-        })
-        .collect();
-    if scope.is_empty() {
-        return (Vec::new(), vec![trimmed.to_string()]);
-    }
-    let mut argv = scope.clone();
-    argv.push(token.to_string());
-    (scope, argv)
+    (Vec::new(), vec![trimmed.to_string()])
 }
 
 pub fn planned_actions_from_requirements(
@@ -1391,15 +1629,14 @@ pub fn plan_status(
 }
 
 fn surface_is_multi_command(surface: &surface::SurfaceInventory) -> bool {
-    surface.items.iter().any(|item| item.kind == "subcommand")
+    surface
+        .items
+        .iter()
+        .any(|item| matches!(item.kind.as_str(), "command" | "subcommand"))
         || surface
             .blockers
             .iter()
             .any(|blocker| blocker.code == "surface_subcommands_missing")
-}
-
-fn man_has_commands_section(text: &str) -> bool {
-    text.contains(".SH COMMANDS")
 }
 
 pub fn load_plan(doc_pack_root: &Path) -> Result<enrich::EnrichPlan> {
@@ -1453,6 +1690,7 @@ mod tests {
         let config = enrich::EnrichConfig {
             schema_version: enrich::CONFIG_SCHEMA_VERSION,
             usage_lens_templates: Vec::new(),
+            surface_lens_templates: Vec::new(),
             scenario_catalogs: Vec::new(),
             requirements: vec![enrich::RequirementId::ExamplesReport],
             verification_tier: None,

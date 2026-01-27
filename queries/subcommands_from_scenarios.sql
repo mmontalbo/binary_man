@@ -44,7 +44,9 @@ with
     where subcommand is not null and subcommand <> ''
   )
 select
-  subcommand,
+  'subcommand' as kind,
+  subcommand as id,
+  subcommand as display,
   description,
   scenario_path,
   case when usage_hint.scenario_path is not null then true else false end as multi_command_hint
@@ -53,7 +55,9 @@ left join usage_hint using (scenario_path)
 where rk = 1
 union all
 select
-  null as subcommand,
+  null as kind,
+  null as id,
+  null as display,
   null as description,
   scenario_path,
   true as multi_command_hint

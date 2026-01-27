@@ -26,10 +26,11 @@ with
 select
   a.status,
   a.basis,
-  coalesce(s.value, a.string_value) as string_value
+  replace(coalesce(s.value, a.string_value), '%s', manifest.binary_name) as string_value
 from callsite_arg_observations a
 left join callsites c on c.callsite_id = a.callsite_id
 left join strings s on s.string_id = a.string_id
+cross join manifest
 where a.kind = 'string'
   and c.from_function_id in (select function_id from selected_functions)
 order by

@@ -5,6 +5,7 @@ use crate::output::write_outputs_staged;
 use crate::pack;
 use crate::render;
 use crate::scenarios;
+use crate::semantics;
 use crate::staging::publish_staging;
 use crate::status::{
     build_status_summary, plan_status, planned_actions_from_requirements, PlanStatus,
@@ -74,6 +75,7 @@ pub fn run_init(args: InitArgs) -> Result<()> {
         manifest.as_ref().map(|m| m.binary_name.as_str()),
     )?;
     install_agent_prompt(&paths, args.force)?;
+    install_semantics(&paths, args.force)?;
 
     let config = enrich::default_config();
     enrich::write_config(paths.root(), &config)?;
@@ -86,6 +88,7 @@ pub fn run_validate(args: ValidateArgs) -> Result<()> {
     let ctx = EnrichContext::load(doc_pack_root)?;
     ctx.require_config()?;
     enrich::validate_config(&ctx.config)?;
+    let _semantics = semantics::load_semantics(ctx.paths.root())?;
     let lock = enrich::build_lock(ctx.paths.root(), &ctx.config, ctx.binary_name())?;
     enrich::write_lock(ctx.paths.root(), &lock)?;
     if args.verbose {
@@ -208,12 +211,16 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
     let wants_scenarios = actions
         .iter()
         .any(|action| matches!(action, enrich::PlannedAction::ScenarioRuns));
-    let wants_coverage = actions
-        .iter()
-        .any(|action| matches!(action, enrich::PlannedAction::CoverageLedger));
     let wants_render = actions
         .iter()
         .any(|action| matches!(action, enrich::PlannedAction::RenderManPage));
+    let requirements = enrich::normalized_requirements(&ctx.config);
+    let emit_coverage_ledger = requirements
+        .iter()
+        .any(|req| matches!(req, enrich::RequirementId::CoverageLedger));
+    let emit_verification_ledger = requirements
+        .iter()
+        .any(|req| matches!(req, enrich::RequirementId::Verification));
 
     let apply_result: Result<(Vec<PathBuf>, Option<String>)> = (|| {
         let pack_root = ctx.paths.pack_root();
@@ -245,6 +252,7 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
                 &staging_root,
                 Some(plan.lock.inputs_hash.as_str()),
                 manifest.as_ref(),
+                &ctx.config.surface_lens_templates,
                 &lens_flake,
                 args.verbose,
             )?;
@@ -277,12 +285,28 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
             examples_report = load_examples_report_optional(&ctx.paths)?;
         }
 
+        let lens_pack_root = if wants_render && staged_scenario_evidence_available(&staging_root) {
+            Some(prepare_lens_pack_root(&staging_root, &pack_root)?)
+        } else {
+            None
+        };
         let context = if wants_render {
-            Some(resolve_pack_context(
-                &pack_root,
-                ctx.paths.root(),
-                &ctx.config,
-            )?)
+            let context = if let Some(duckdb_cwd) = lens_pack_root.as_deref() {
+                resolve_pack_context_with_cwd(
+                    &pack_root,
+                    ctx.paths.root(),
+                    &ctx.config,
+                    duckdb_cwd,
+                )?
+            } else {
+                resolve_pack_context(&pack_root, ctx.paths.root(), &ctx.config)?
+            };
+            Some(context)
+        } else {
+            None
+        };
+        let semantics = if wants_render {
+            Some(semantics::load_semantics(ctx.paths.root())?)
         } else {
             None
         };
@@ -296,29 +320,34 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
             let context = context
                 .as_ref()
                 .ok_or_else(|| anyhow!("pack context required for man rendering"))?;
-            let man_page = render::render_man_page(
+            let semantics = semantics
+                .as_ref()
+                .ok_or_else(|| anyhow!("semantics required for man rendering"))?;
+            let rendered = render::render_man_page(
                 context,
+                semantics,
                 examples_report.as_ref(),
                 surface_for_render.as_ref(),
-            );
+            )?;
             write_outputs_staged(
                 &staging_root,
                 ctx.paths.root(),
                 context,
                 &pack_root,
                 Some(plan.lock.inputs_hash.as_str()),
-                Some(&man_page),
+                Some(&rendered.man_page),
+                Some(&rendered.summary),
                 examples_report.as_ref(),
             )?;
         }
 
-        if wants_coverage && !scenarios_path.is_file() {
+        if (emit_coverage_ledger || emit_verification_ledger) && !scenarios_path.is_file() {
             return Err(anyhow!(
                 "scenarios plan missing at {}",
                 scenarios_path.display()
             ));
         }
-        if scenarios_path.is_file() {
+        if scenarios_path.is_file() && (emit_coverage_ledger || emit_verification_ledger) {
             let staged_surface = staging_root.join("inventory").join("surface.json");
             let surface_path = if staged_surface.is_file() {
                 staged_surface
@@ -327,44 +356,63 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
             };
             if surface_path.is_file() {
                 let surface = crate::surface::load_surface_inventory(&surface_path)?;
-                let coverage_binary = binary_name
-                    .clone()
-                    .or_else(|| surface.binary_name.clone())
-                    .ok_or_else(|| anyhow!("binary name unavailable for coverage ledger"))?;
-                let ledger = scenarios::build_coverage_ledger(
-                    &coverage_binary,
-                    &surface,
-                    ctx.paths.root(),
-                    &scenarios_path,
-                    Some(ctx.paths.root()),
-                )?;
-                crate::staging::write_staged_json(&staging_root, "coverage_ledger.json", &ledger)?;
-
-                let verification_template = ctx
-                    .paths
-                    .root()
-                    .join(enrich::VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL);
-                if verification_template.is_file() {
-                    let verification_binary = binary_name
+                if emit_coverage_ledger {
+                    let coverage_binary = binary_name
                         .clone()
                         .or_else(|| surface.binary_name.clone())
-                        .ok_or_else(|| {
-                            anyhow!("binary name unavailable for verification ledger")
-                        })?;
-                    let ledger = scenarios::build_verification_ledger(
-                        &verification_binary,
+                        .ok_or_else(|| anyhow!("binary name unavailable for coverage ledger"))?;
+                    let ledger = scenarios::build_coverage_ledger(
+                        &coverage_binary,
                         &surface,
                         ctx.paths.root(),
                         &scenarios_path,
-                        &verification_template,
-                        Some(&staging_root),
                         Some(ctx.paths.root()),
                     )?;
                     crate::staging::write_staged_json(
                         &staging_root,
-                        "verification_ledger.json",
+                        "coverage_ledger.json",
                         &ledger,
                     )?;
+                }
+
+                if emit_verification_ledger {
+                    let verification_template = ctx
+                        .paths
+                        .root()
+                        .join(enrich::VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL);
+                    if verification_template.is_file() {
+                        let verification_binary = binary_name
+                            .clone()
+                            .or_else(|| surface.binary_name.clone())
+                            .ok_or_else(|| {
+                                anyhow!("binary name unavailable for verification ledger")
+                            })?;
+                        let ledger = scenarios::build_verification_ledger(
+                            &verification_binary,
+                            &surface,
+                            ctx.paths.root(),
+                            &scenarios_path,
+                            &verification_template,
+                            Some(&staging_root),
+                            Some(ctx.paths.root()),
+                        )?;
+                        crate::staging::write_staged_json(
+                            &staging_root,
+                            "verification_ledger.json",
+                            &ledger,
+                        )?;
+                    }
+                }
+            }
+        }
+
+        if let Some(lens_root) = lens_pack_root.as_ref() {
+            if let Err(err) = fs::remove_dir_all(lens_root) {
+                if args.verbose {
+                    eprintln!(
+                        "warning: failed to clean lens root {}: {err}",
+                        lens_root.display()
+                    );
                 }
             }
         }
@@ -718,6 +766,7 @@ fn build_invalid_config_summary(
         missing_artifacts: Vec::new(),
         blockers: vec![blocker],
         scenario_failures: Vec::new(),
+        lens_summary: Vec::new(),
         decision: enrich::Decision::Blocked,
         decision_reason: Some(format!("blockers present: {}", code)),
         next_action: enrich::NextAction::Edit {
@@ -726,6 +775,7 @@ fn build_invalid_config_summary(
             reason: "enrich/config.json invalid; replace with a minimal stub".to_string(),
         },
         warnings: Vec::new(),
+        man_warnings: Vec::new(),
         force_used,
     })
 }
@@ -755,6 +805,7 @@ fn build_invalid_plan_summary(
         missing_artifacts: Vec::new(),
         blockers: vec![blocker],
         scenario_failures: Vec::new(),
+        lens_summary: Vec::new(),
         decision: enrich::Decision::Blocked,
         decision_reason: Some(format!("blockers present: {}", code)),
         next_action: enrich::NextAction::Edit {
@@ -763,6 +814,7 @@ fn build_invalid_plan_summary(
             reason: "scenarios/plan.json invalid; replace with a minimal stub".to_string(),
         },
         warnings: Vec::new(),
+        man_warnings: Vec::new(),
         force_used,
     })
 }
@@ -878,10 +930,12 @@ fn build_parse_error_summary(
         missing_artifacts: Vec::new(),
         blockers,
         scenario_failures: Vec::new(),
+        lens_summary: Vec::new(),
         decision: enrich::Decision::Blocked,
         decision_reason: Some(format!("blockers present: {}", codes.join(", "))),
         next_action,
         warnings: Vec::new(),
+        man_warnings: Vec::new(),
         force_used,
     })
 }
@@ -1035,18 +1089,122 @@ fn resolve_pack_context(
     doc_pack_root: &Path,
     config: &enrich::EnrichConfig,
 ) -> Result<pack::PackContext> {
-    let mut errors = Vec::new();
+    resolve_pack_context_with_cwd(pack_root, doc_pack_root, config, pack_root)
+}
+
+fn resolve_pack_context_with_cwd(
+    pack_root: &Path,
+    doc_pack_root: &Path,
+    config: &enrich::EnrichConfig,
+    duckdb_cwd: &Path,
+) -> Result<pack::PackContext> {
+    let mut failures = Vec::new();
     for rel in &config.usage_lens_templates {
         let template = doc_pack_root.join(rel);
-        match pack::load_pack_context_with_template(pack_root, &template) {
-            Ok(context) => return Ok(context),
-            Err(err) => errors.push(format!("{}: {}", template.display(), err)),
+        match pack::load_pack_context_with_template_at(pack_root, &template, duckdb_cwd) {
+            Ok(mut context) => {
+                if !failures.is_empty() {
+                    context.warnings.extend(
+                        failures
+                            .into_iter()
+                            .map(|failure| format!("usage lens fallback: {failure}")),
+                    );
+                }
+                return Ok(context);
+            }
+            Err(err) => failures.push(format!("{rel}: {err}")),
         }
     }
     Err(anyhow!(
         "all usage lens templates failed: {}",
-        errors.join("; ")
+        failures.join("; ")
     ))
+}
+
+fn staged_scenario_evidence_available(staging_root: &Path) -> bool {
+    let scenarios_dir = staging_root.join("inventory").join("scenarios");
+    let Ok(entries) = fs::read_dir(&scenarios_dir) else {
+        return false;
+    };
+    entries.filter_map(Result::ok).any(|entry| {
+        let path = entry.path();
+        path.is_file()
+            && path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.eq_ignore_ascii_case("json"))
+                .unwrap_or(false)
+    })
+}
+
+fn prepare_lens_pack_root(staging_root: &Path, pack_root: &Path) -> Result<PathBuf> {
+    let lens_root = staging_root.join("binary.lens");
+    fs::create_dir_all(&lens_root)
+        .with_context(|| format!("create lens root {}", lens_root.display()))?;
+
+    link_or_copy_path(&pack_root.join("facts"), &lens_root.join("facts"))?;
+    link_or_copy_path(&pack_root.join("views"), &lens_root.join("views"))?;
+    link_or_copy_path(
+        &pack_root.join("manifest.json"),
+        &lens_root.join("manifest.json"),
+    )?;
+    let runs_src = pack_root.join("runs");
+    if runs_src.exists() {
+        link_or_copy_path(&runs_src, &lens_root.join("runs"))?;
+    }
+
+    Ok(lens_root)
+}
+
+fn link_or_copy_path(src: &Path, dest: &Path) -> Result<()> {
+    if dest.exists() {
+        return Ok(());
+    }
+
+    if try_symlink(src, dest).is_ok() {
+        return Ok(());
+    }
+
+    if src.is_dir() {
+        copy_dir_recursive(src, dest)?;
+    } else {
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+        }
+        fs::copy(src, dest).with_context(|| format!("copy {}", src.display()))?;
+    }
+    Ok(())
+}
+
+fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
+    fs::create_dir_all(dest).with_context(|| format!("create {}", dest.display()))?;
+    for entry in fs::read_dir(src).with_context(|| format!("read {}", src.display()))? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dest_path = dest.join(entry.file_name());
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("inspect {}", src_path.display()))?;
+        if file_type.is_dir() {
+            copy_dir_recursive(&src_path, &dest_path)?;
+        } else {
+            fs::copy(&src_path, &dest_path)
+                .with_context(|| format!("copy {}", src_path.display()))?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn try_symlink(src: &Path, dest: &Path) -> Result<()> {
+    std::os::unix::fs::symlink(src, dest)
+        .with_context(|| format!("symlink {} -> {}", dest.display(), src.display()))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn try_symlink(_src: &Path, _dest: &Path) -> Result<()> {
+    Err(anyhow!("symlinks unavailable on this platform"))
 }
 
 fn load_surface_for_render(
@@ -1125,6 +1283,19 @@ fn install_agent_prompt(paths: &enrich::DocPackPaths, force: bool) -> Result<()>
         fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
     fs::write(&path, templates::ENRICH_AGENT_PROMPT_MD.as_bytes())
+        .with_context(|| format!("write {}", path.display()))?;
+    Ok(())
+}
+
+fn install_semantics(paths: &enrich::DocPackPaths, force: bool) -> Result<()> {
+    let path = paths.semantics_path();
+    if path.is_file() && !force {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    fs::write(&path, templates::ENRICH_SEMANTICS_JSON.as_bytes())
         .with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }

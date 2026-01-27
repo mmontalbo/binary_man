@@ -24,6 +24,7 @@ pub const OPTIONS_FROM_SCENARIOS_TEMPLATE_REL: &str = "queries/options_from_scen
 pub const VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL: &str =
     "queries/verification_from_scenarios.sql";
 pub const ENRICH_AGENT_PROMPT_REL: &str = "enrich/agent_prompt.md";
+pub const ENRICH_SEMANTICS_REL: &str = "enrich/semantics.json";
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -159,6 +160,8 @@ pub struct EnrichConfig {
     #[serde(default)]
     pub usage_lens_templates: Vec<String>,
     #[serde(default)]
+    pub surface_lens_templates: Vec<String>,
+    #[serde(default)]
     pub scenario_catalogs: Vec<String>,
     #[serde(default)]
     pub requirements: Vec<RequirementId>,
@@ -192,6 +195,8 @@ pub struct EnrichLock {
 pub struct SelectedInputs {
     #[serde(default)]
     pub usage_lens_templates: Vec<String>,
+    #[serde(default)]
+    pub surface_lens_templates: Vec<String>,
     #[serde(default)]
     pub scenario_plan: Option<String>,
     #[serde(default)]
@@ -235,6 +240,16 @@ pub struct ScenarioFailure {
     pub evidence: Vec<EvidenceRef>,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct LensSummary {
+    pub kind: String,
+    pub template_path: String,
+    pub status: String,
+    pub evidence: Vec<EvidenceRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
 pub fn dedupe_evidence_refs(entries: &mut Vec<EvidenceRef>) {
     let mut seen = BTreeSet::new();
     entries.retain(|entry| seen.insert(entry.path.clone()));
@@ -274,10 +289,13 @@ pub struct StatusSummary {
     pub blockers: Vec<Blocker>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scenario_failures: Vec<ScenarioFailure>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lens_summary: Vec<LensSummary>,
     pub decision: Decision,
     pub decision_reason: Option<String>,
     pub next_action: NextAction,
     pub warnings: Vec<String>,
+    pub man_warnings: Vec<String>,
     pub force_used: bool,
 }
 
@@ -385,6 +403,10 @@ impl DocPackPaths {
         self.root.join(ENRICH_AGENT_PROMPT_REL)
     }
 
+    pub fn semantics_path(&self) -> PathBuf {
+        self.enrich_dir().join("semantics.json")
+    }
+
     pub fn lock_path(&self) -> PathBuf {
         self.enrich_dir().join("lock.json")
     }
@@ -471,9 +493,13 @@ pub fn default_config() -> EnrichConfig {
     usage_lens_templates.push(SCENARIO_USAGE_LENS_TEMPLATE_REL.to_string());
     usage_lens_templates.push(SCOPED_USAGE_LENS_TEMPLATE_REL.to_string());
     usage_lens_templates.push(DEFAULT_LENS_TEMPLATE_REL.to_string());
+    let mut surface_lens_templates = Vec::new();
+    surface_lens_templates.push(OPTIONS_FROM_SCENARIOS_TEMPLATE_REL.to_string());
+    surface_lens_templates.push(SUBCOMMANDS_FROM_SCENARIOS_TEMPLATE_REL.to_string());
     EnrichConfig {
         schema_version: CONFIG_SCHEMA_VERSION,
         usage_lens_templates,
+        surface_lens_templates,
         scenario_catalogs: Vec::new(),
         requirements: default_requirements(),
         verification_tier: None,
@@ -619,16 +645,19 @@ pub fn validate_config(config: &EnrichConfig) -> Result<()> {
         ));
     }
     validate_relative_list(&config.usage_lens_templates, "usage_lens_templates")?;
+    validate_relative_list(&config.surface_lens_templates, "surface_lens_templates")?;
     validate_relative_list(&config.scenario_catalogs, "scenario_catalogs")?;
     Ok(())
 }
 
 pub fn resolve_inputs(config: &EnrichConfig, doc_pack_root: &Path) -> Result<SelectedInputs> {
     let usage_lens_templates = config.usage_lens_templates.clone();
+    let surface_lens_templates = config.surface_lens_templates.clone();
     let scenario_catalogs = config.scenario_catalogs.clone();
     let scenario_plan = "scenarios/plan.json".to_string();
     for rel in usage_lens_templates
         .iter()
+        .chain(surface_lens_templates.iter())
         .chain(scenario_catalogs.iter())
         .chain(std::iter::once(&scenario_plan))
     {
@@ -645,6 +674,7 @@ pub fn resolve_inputs(config: &EnrichConfig, doc_pack_root: &Path) -> Result<Sel
     };
     Ok(SelectedInputs {
         usage_lens_templates,
+        surface_lens_templates,
         scenario_plan: Some(scenario_plan),
         scenario_catalogs,
         fixtures_root,
@@ -662,6 +692,7 @@ pub fn build_lock(
     for rel in selected_inputs
         .usage_lens_templates
         .iter()
+        .chain(selected_inputs.surface_lens_templates.iter())
         .chain(selected_inputs.scenario_catalogs.iter())
     {
         inputs.push(doc_pack_root.join(rel));
@@ -669,18 +700,11 @@ pub fn build_lock(
     if let Some(rel) = selected_inputs.scenario_plan.as_ref() {
         inputs.push(doc_pack_root.join(rel));
     }
+    inputs.push(doc_pack_root.join(ENRICH_SEMANTICS_REL));
     inputs.push(doc_pack_root.join("inventory").join("surface.seed.json"));
     inputs.push(doc_pack_root.join("binary.lens").join("manifest.json"));
     if let Some(fixtures_root) = selected_inputs.fixtures_root.as_ref() {
         inputs.push(doc_pack_root.join(fixtures_root));
-    }
-    let subcommands_template = doc_pack_root.join(SUBCOMMANDS_FROM_SCENARIOS_TEMPLATE_REL);
-    if subcommands_template.exists() {
-        inputs.push(subcommands_template);
-    }
-    let options_template = doc_pack_root.join(OPTIONS_FROM_SCENARIOS_TEMPLATE_REL);
-    if options_template.exists() {
-        inputs.push(options_template);
     }
     let verification_template = doc_pack_root.join(VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL);
     if verification_template.exists() {
@@ -825,4 +849,9 @@ pub fn evidence_from_path(doc_pack_root: &Path, path: &Path) -> Result<EvidenceR
         None
     };
     Ok(EvidenceRef { path: rel, sha256 })
+}
+
+pub fn evidence_from_rel(doc_pack_root: &Path, rel: &str) -> Result<EvidenceRef> {
+    let path = doc_pack_root.join(rel);
+    evidence_from_path(doc_pack_root, &path)
 }

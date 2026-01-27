@@ -50,8 +50,11 @@ with
     where option is not null and option <> ''
   )
 select
-  option,
+  'option' as kind,
+  option as id,
+  option as display,
   description,
-  scenario_path
+  scenario_path,
+  false as multi_command_hint
 from dedup
 where rk = 1;

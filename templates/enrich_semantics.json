@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "usage": {
+    "line_rules": [
+      {
+        "pattern": "^\\s*usage:\\s*(.+)$",
+        "capture_group": 1,
+        "case_sensitive": false
+      },
+      {
+        "pattern": "^\\s*or:\\s*(.+)$",
+        "capture_group": 1,
+        "case_sensitive": false
+      }
+    ],
+    "prefer_rules": []
+  },
+  "description": {
+    "capture_blocks": [],
+    "section_headers": [],
+    "fallback": "leading"
+  },
+  "options": {
+    "section_headers": [],
+    "heading_rules": [
+      {
+        "kind": "regex",
+        "pattern": "^\\s*.*option.*:\\s*$",
+        "case_sensitive": false
+      }
+    ],
+    "entry_rules": [
+      {
+        "pattern": "^\\s*(-\\S.*?)(?:\\s{2,}(\\S.*))?$",
+        "names_group": 1,
+        "desc_group": 2,
+        "case_sensitive": true
+      }
+    ],
+    "allow_continuation": true
+  },
+  "exit_status": {
+    "section_headers": [
+      {
+        "kind": "prefix",
+        "value": "Exit status:",
+        "case_sensitive": false
+      }
+    ],
+    "line_rules": [],
+    "stop_on_blank": true
+  },
+  "notes": {
+    "section_headers": [],
+    "capture_after_options": true
+  },
+  "boilerplate": {
+    "exclude_lines": [
+      {
+        "kind": "prefix",
+        "value": "Try '",
+        "case_sensitive": false
+      },
+      {
+        "kind": "prefix",
+        "value": "Use: '",
+        "case_sensitive": false
+      }
+    ],
+    "exclude_binary_name": true
+  },
+  "see_also": {
+    "rules": []
+  },
+  "env_vars": {
+    "paragraph_matchers": [
+      {
+        "kind": "contains",
+        "value": "environment variable",
+        "case_sensitive": false
+      }
+    ],
+    "variable_regex": "\\b[A-Z][A-Z0-9_]*_[A-Z0-9_]+\\b"
+  },
+  "requirements": {
+    "synopsis_min_lines": 1
+  }
+}
