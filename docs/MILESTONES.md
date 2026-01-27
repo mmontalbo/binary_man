@@ -5,9 +5,78 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured “enrichment loop”
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M12 — Pack-Owned Semantics v1.
+Current focus: M13 — Verification Triage + Verification By Default v1.
 
-## M12 — Pack-Owned Semantics v1 (in progress)
+## M13 — Verification Triage + Verification By Default v1 (in progress)
+
+Goal: Make verification the default gate for new packs, while keeping the loop
+safe and mechanically navigable for small LMs by requiring **explicit,
+pack-owned triage** of what is in-scope to verify and what evidence is needed.
+
+Motivation:
+- “Surface discovery” from help output is a claim inventory; we still need a
+  reliable, evidence-linked path to confirm options/subcommands are accepted and
+  (eventually) behave as documented.
+- For small LMs, verifying everything is not realistic; the agent should first
+  narrow the target set using objective properties (not subjective “easy/hard”
+  labels), then incrementally execute scenarios to reduce the unverified set.
+
+Design constraints (non-negotiable for this milestone):
+- JSON-only structured artifacts in the doc pack (JSONL permitted for history).
+- Keep parsing semantics out of Rust: verification meaning stays pack-owned
+  (JSON + pack SQL), not hardcoded strings in code.
+- Evidence remains append-only; `apply` remains transactional.
+- Safety-first defaults remain enforced (bounded timeouts/outputs + sandboxing,
+  network off unless explicitly enabled in scenarios).
+
+Deliverables:
+- Verification enabled by default (opt-out, not opt-in):
+  - Fresh `bman init` writes `enrich/config.json` with verification required at a
+    default tier (`accepted`), and documents a simple opt-out (edit config).
+- Pack-owned verification triage (schema bump in `scenarios/plan.json`):
+  - Add a `verification` section with an ordered `queue` of items to verify.
+  - Each queue entry uses objective properties (no fuzzy labels), e.g.:
+    - `surface_id`: the item being verified (matches `inventory/surface.json`).
+    - `intent`: `verify_accepted | verify_behavior | exclude` (exclude requires a
+      reason).
+    - `prereqs`: a small fixed enum list describing required setup, e.g.
+      `needs_arg_value`, `needs_seed_fs`, `needs_repo`, `needs_network`,
+      `needs_interactive`, `needs_privilege`.
+    - Optional `acceptance_invocation`: `{ "scope": [...], "argv": [...] }`
+      (presence makes the next acceptance scenario stub mechanically derivable).
+  - `status --json` uses queue order to choose the next actionable item (no
+    heuristic sorting), and produces a single deterministic next action:
+    add triage → add scenario → rerun validate/plan/apply.
+- Pack-owned semantics for “accepted” verification:
+  - Extend `enrich/semantics.json` with matchers/rules used to classify scenario
+    outputs as accepted vs rejected vs inconclusive, so localization/format
+    differences are handled by pack edits (not tool changes).
+  - Update the pack verification lens (`queries/verification_from_scenarios.sql`)
+    to consume those semantics rules and emit evidence-linked statuses without
+    argv-token parsing assumptions.
+- Clear status reporting (no scores):
+  - `status --json` distinguishes:
+    - discovered-but-not-triaged surface items
+    - triaged-but-unverified targets (accepted/behavior)
+    - excluded targets (with reasons)
+  - Next actions always point at one concrete edit target
+    (`scenarios/plan.json`, a specific scenario id, or `enrich/semantics.json`).
+
+Non-goals:
+- Exhaustive option/subcommand behavior testing.
+- Automatic inference of safe invocations, argument values, or fixtures.
+- Adding per-binary “unknown option” string parsing in Rust.
+
+Acceptance criteria:
+- Fresh `ls` and `git` packs start with verification required by default and
+  produce a deterministic next action to begin triage (then scenarios), without
+  any repo-root dependencies.
+- A small LM can drive `decision: complete` by iterating only on pack-owned
+  artifacts (`scenarios/plan.json`, scenarios, `enrich/semantics.json`) and
+  following `status --json` next actions, producing evidence-linked accepted
+  verification for the queued surface targets.
+
+## M12 — Pack-Owned Semantics v1 (done)
 
 Goal: Remove “meaning” heuristics from Rust (hardcoded strings/patterns for help
 parsing/rendering and surface discovery selection). Make semantics a **pack-owned,
