@@ -10,9 +10,9 @@ Current focus: M12 — Pack-Owned Semantics v1.
 ## M12 — Pack-Owned Semantics v1 (in progress)
 
 Goal: Remove “meaning” heuristics from Rust (hardcoded strings/patterns for help
-parsing/rendering). Make semantics a **pack-owned, schema-validated JSON
-artifact** that an LM can edit, while Rust enforces mechanics (schemas,
-determinism, gating).
+parsing/rendering and surface discovery selection). Make semantics a **pack-owned,
+schema-validated JSON artifact** that an LM can edit, while Rust enforces
+mechanics (schemas, determinism, gating).
 
 Motivation:
 - We still have implicit semantics in code (e.g., help section heuristics in
@@ -40,6 +40,38 @@ Deliverables:
   - Keep rendering deterministic; when semantics yield no results, render still
     succeeds but status reports the missing semantics as unmet with an explicit
     next action.
+- Pack-owned help affordances (bootstrap, not hardcoded):
+  - Default `scenarios/plan.json` includes a small, safe set of help scenarios
+    that cover common help affordances (e.g. `--help`, `--usage`, `-?`), so the LM
+    can adjust based on evidence instead of relying on tool assumptions.
+  - When no usable help output exists (stdout/stderr empty/only noise), `status
+    --json` recommends editing `scenarios/plan.json` to add/adjust help scenarios.
+- Pack-configurable discovery lenses:
+  - Add an opt-in list in `enrich/config.json` (e.g. `surface_lens_templates`)
+    so surface discovery is driven by pack-owned SQL template selection and
+    ordering (not tool-owned constants).
+  - `bman validate` includes configured lens templates in `enrich/lock.json`
+    inputs.
+- Lean artifact policy:
+  - Only write `coverage_ledger.json` / `verification_ledger.json` when required
+    by `enrich/config.json.requirements` (avoid confusing extra artifacts for
+    small LMs).
+  - Rename coverage ledger vocabulary to be surface-agnostic (avoid `option_*`
+    terms when items are subcommands/commands).
+- Reduce remaining tool-owned semantics (help + execution):
+  - Move usage-evidence “reliability” filtering out of Rust (e.g. basis/status
+    selection) and into pack-owned lenses/config, so packs can adjust for
+    nonstandard evidence layouts.
+  - Move runner env defaults (e.g. `LC_ALL`, `TERM`, `PAGER`) out of Rust and
+    into pack-owned `scenarios/plan.json` defaults so the LM can see and edit
+    them directly.
+  - Remove parsing conventions from Rust that encode CLI semantics (e.g. dotted
+    scope in `covers`, argv token heuristics) in favor of pack-owned structure
+    and/or pack-owned SQL interpretation.
+- Status diagnostics for small LMs:
+  - Extend `status --json` to summarize which pack lenses/templates were used
+    (used/empty/error + evidence refs) so the next edit target is mechanically
+    obvious without additional prose.
 - Workflow integration + gating:
   - `bman validate` validates `enrich/semantics.json` and includes it in
     `enrich/lock.json` inputs.
@@ -56,6 +88,10 @@ Acceptance criteria:
 - When help output is localized or atypically formatted, an LM can fix the man
   rendering loop by editing only pack-owned artifacts (starting with
   `enrich/semantics.json`), guided by `status --json`.
+- When a binary’s help affordances differ (e.g. stderr-only usage, multiple help
+  flags), the pack can be adapted by editing only pack-owned artifacts
+  (`scenarios/plan.json` + pack SQL lenses), with `status --json` pointing at the
+  smallest next action.
 
 Out of scope:
 - “Universal” help parsing or auto-learning semantics.

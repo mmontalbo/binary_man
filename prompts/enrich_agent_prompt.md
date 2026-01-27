@@ -1,4 +1,4 @@
-# bman doc-pack enrichment agent prompt (v1)
+# bman doc-pack enrichment agent prompt (v2)
 
 You are operating inside a **binary_man doc pack**. Assume your current working directory is the doc pack root.
 
@@ -9,8 +9,10 @@ Make `bman status --doc-pack . --json` report `decision: "complete"` by satisfyi
 - Do NOT edit repository source code. Work only inside this doc pack.
 - Only edit these files (unless `status --json` explicitly tells you otherwise):
   - `enrich/config.json`
+  - `enrich/semantics.json`
   - `scenarios/plan.json`
   - `inventory/surface.seed.json` (optional; only if surface discovery is blocked)
+- Only edit `queries/**` when `status --json` explicitly recommends it.
 - Do NOT edit tool outputs directly:
   - `inventory/surface.json`
   - `inventory/scenarios/*.json`
@@ -23,6 +25,12 @@ Make `bman status --doc-pack . --json` report `decision: "complete"` by satisfyi
 - After every edit that “counts”, run the gated loop: `validate → plan → apply`.
 - Never use `--force` unless explicitly instructed.
 
+## What to trust (avoid wasted work)
+- Treat `bman status --doc-pack . --json` as the source of truth for what to do next.
+- Ignore artifacts that are not required by `enrich/config.json.requirements`, even if they exist:
+  - If `"verification"` is not required, ignore `verification_ledger.json`.
+  - If `"coverage"` / `"coverage_ledger"` is not required, ignore `coverage_ledger.json`.
+
 ## Scenario defaults
 Prefer setting shared runner defaults once in `scenarios/plan.json` under `defaults`:
 - `timeout_seconds: 3`
@@ -33,7 +41,7 @@ Prefer setting shared runner defaults once in `scenarios/plan.json` under `defau
 - `cwd`, `env`, `seed_dir` when common across scenarios
 - Prefer **relative paths** only; avoid absolute paths.
 
-Runner env normalization (applied unless you override in `defaults.env` or scenario `env`):
+Default runner env lives in `scenarios/plan.json.default_env` (seeded by `bman init`):
 `LC_ALL=C`, `LANG=C`, `TERM=dumb`, `NO_COLOR=1`, `PAGER=cat`, `GIT_PAGER=cat`
 
 ## Mechanical loop (always follow this)
@@ -47,6 +55,18 @@ Runner env normalization (applied unless you override in `defaults.env` or scena
    - `bman plan --doc-pack .`
    - `bman apply --doc-pack .` (incremental; use `--rerun-all` or `--rerun-failed` when needed)
 4) Go back to step 1 until complete.
+
+## Man rendering + semantics (if man is unmet or low quality)
+- Check `bman status --doc-pack . --json` for `man_warnings`:
+  - If warnings mention usage-lens fallback, fix `scenarios/plan.json` or `enrich/semantics.json` (do not edit generated outputs).
+- Read `man/meta.json` (do not edit it):
+  - `.usage_lens_source_path` shows which evidence source produced the help text used for rendering.
+  - `.render_summary.semantics_unmet` lists which extractions are missing according to `enrich/semantics.json`.
+- Read the evidence you are interpreting:
+  - `inventory/scenarios/*.json` (especially help scenarios) for stdout/stderr.
+- Fix by editing `enrich/semantics.json` (pack-owned semantics):
+  - Prefer small changes: add/adjust a single regex/prefix rule, re-run the gated loop, then re-check status.
+  - Do not add Rust parsing logic. Do not edit `queries/**` unless status explicitly recommends it.
 
 ## Verification requirement (if present)
 If `enrich/config.json.requirements` includes `"verification"`:
