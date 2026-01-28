@@ -27,9 +27,11 @@ Make `bman status --doc-pack . --json` report `decision: "complete"` by satisfyi
 
 ## What to trust (avoid wasted work)
 - Treat `bman status --doc-pack . --json` as the source of truth for what to do next.
+- `enrich/plan.out.json` is a snapshot; ignore it unless `status.plan.present=true` and `status.plan.stale=false`.
 - Ignore artifacts that are not required by `enrich/config.json.requirements`, even if they exist:
   - If `"verification"` is not required, ignore `verification_ledger.json`.
   - If `"coverage"` / `"coverage_ledger"` is not required, ignore `coverage_ledger.json`.
+- Use `bman status --doc-pack . --json --full` only for human debugging (it expands full triage lists).
 
 ## Scenario defaults
 Prefer setting shared runner defaults once in `scenarios/plan.json` under `defaults`:
@@ -58,36 +60,50 @@ Default runner env lives in `scenarios/plan.json.default_env` (seeded by `bman i
 
 ## Man rendering + semantics (if man is unmet or low quality)
 - Check `bman status --doc-pack . --json` for `man_warnings`:
-  - If warnings mention usage-lens fallback, fix `scenarios/plan.json` or `enrich/semantics.json` (do not edit generated outputs).
+  - If warnings mention usage lens failures or missing synopsis, fix `scenarios/plan.json` help scenarios or `enrich/semantics.json` (do not edit generated outputs).
 - Read `man/meta.json` (do not edit it):
   - `.usage_lens_source_path` shows which evidence source produced the help text used for rendering.
   - `.render_summary.semantics_unmet` lists which extractions are missing according to `enrich/semantics.json`.
 - Read the evidence you are interpreting:
-  - `inventory/scenarios/*.json` (especially help scenarios) for stdout/stderr.
+  - `inventory/scenarios/*.json` (help evidence lives here; especially help scenarios) for stdout/stderr.
+- Help scenarios (`scenario_id` starts with `help--`) are the only inputs for usage extraction and surface discovery; verification scenarios never drive usage or surface growth.
+- There is no usage-lens fallback by default; if usage is missing, update help scenarios or semantics and rerun the loop.
+- `man/examples_report.json` is only present when there are publishable examples; its absence is normal in fresh packs.
 - Fix by editing `enrich/semantics.json` (pack-owned semantics):
   - Prefer small changes: add/adjust a single regex/prefix rule, re-run the gated loop, then re-check status.
   - Do not add Rust parsing logic. Do not edit `queries/**` unless status explicitly recommends it.
 
 ## Verification requirement (if present)
-If `enrich/config.json.requirements` includes `"verification"`:
+If `enrich/config.json.requirements` includes `"verification"` (default for new packs):
+- Verification is opt-out: remove `"verification"` from `requirements` to disable it.
 - Check `enrich/config.json.verification_tier` (default: `"accepted"`).
-- If tier is `"accepted"`: use `verification_ledger.json.unverified_ids` and add **acceptance** scenarios.
-- If tier is `"behavior"`: use `verification_ledger.json.behavior_unverified_ids` and add **behavior** scenarios.
+- Triage first in `scenarios/plan.json.verification.queue`:
+  - `surface_id` must match an id in `inventory/surface.json`.
+  - `intent`: `verify_accepted | verify_behavior | exclude` (`exclude` requires `reason`).
+  - `prereqs`: use only the allowed enums (e.g. `needs_arg_value`, `needs_seed_fs`, `needs_repo`, `needs_network`, `needs_interactive`, `needs_privilege`).
+  - Optional `acceptance_invocation` (`scope` + `argv`) seeds a scenario stub.
+- Do not exclude just because of `needs_seed_fs`; every scenario already runs with an empty fixture by default.
+- Follow `status --json` next_action deterministically: add triage → add scenario → rerun `validate → plan → apply`.
+- Status triage summaries are compact (counts + previews); the canonical surface list is `inventory/surface.json`.
 
 ### What counts as verifying an id
-For each added scenario where `coverage_ignore=false`, every id you list in `covers` must be **actually invoked** by that scenario’s argv:
-- If a cover is `--opt`: argv must contain `--opt` OR `--opt=value` (and for value-taking options, prefer `--opt=value`).
-- If a cover is `-x`: argv must contain `-x`, or a short-option cluster containing it (e.g. `-xyz` covers `-x`), or an attached form like `-Ipattern` / `-T4`.
-- If a cover is scoped like `subcommand.--opt`:
-  - Set `scope: ["subcommand"]`
-  - Start argv with `["subcommand", ...]`
-  - Also include `--opt` (or `--opt=value`) in argv.
-- Pick required values/operands mechanically from evidence:
-  - `inventory/scenarios/*.json` stdout/stderr
-  - `inventory/surface.json` item descriptions
-- Minimum expectation for existence/acceptance verification:
-  - `expect.exit_code = 0`
-  - Add stdout/stderr expectations only when they are clearly stable.
+- Scenario-to-surface mapping is explicit: every entry in `covers` must be the exact `surface_id` you are verifying (no argv/scope inference).
+- Covers are ignored unless the scenario `argv` actually attempts the `surface_id` (token match rules are enforced by the verification SQL).
+- Always include an explicit token for the `surface_id` in `argv`; do not rely on short-flag clustering.
+- Use `coverage_tier` to declare intent (`"acceptance"` vs `"behavior"`); avoid `"rejection"` unless you are explicitly recording rejection evidence.
+- For existence verification, prefer `argv: ["<surface_id>"]` with `covers: ["<surface_id>"]`; do not force `expect.exit_code=0`.
+- Classification is driven by `enrich/semantics.json.verification` rules (accepted vs rejected vs inconclusive); accepted existence can include missing-arg errors when semantics allow it.
+- Add stdout/stderr expectations only when they are clearly stable.
+
+### Inline seed example (for behavior tests later)
+```json
+{
+  "entries": [
+    { "path": "work", "kind": "dir" },
+    { "path": "work/.keep", "kind": "file", "contents": "" }
+  ]
+}
+```
 
 ## Finish
 When complete:

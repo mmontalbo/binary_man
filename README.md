@@ -37,9 +37,11 @@ Enrichment config lives in `<doc-pack>/enrich/config.json`; `bman validate`
 writes a lock snapshot, `bman plan` writes `plan.out.json`, and `bman apply`
 executes transactionally. `bman status` reports a decision of `complete`,
 `incomplete`, or `blocked` based on evidence-linked requirements and blockers.
-Add `verification` to the `requirements` list to require execution-backed
-verification; `status --json` will list unverified IDs and emit a single-scenario
-edit stub for `scenarios/plan.json`.
+Verification is enabled by default (opt-out by removing `"verification"` from
+`enrich/config.json.requirements`). The workflow is triage-first: use
+`scenarios/plan.json.verification.queue` to record what to verify/exclude, then
+follow the single deterministic `status --json` next action (add triage → add
+scenario → rerun `validate → plan → apply`).
 
 Flags:
 - `--doc-pack <dir>`: doc pack root for init/validate/plan/apply/status
@@ -77,7 +79,6 @@ Doc pack layout under `<doc-pack>/`:
 - `<doc-pack>/binary.lens/` (pack)
 - `<doc-pack>/scenarios/plan.json` (scenario plan)
 - `<doc-pack>/fixtures/...` (fixture trees)
-- `<doc-pack>/binary.lens/views/queries/` (usage lens templates packaged with the pack)
 - `<doc-pack>/queries/` (project templates installed by init, including usage + subcommand extraction lenses)
 - `<doc-pack>/enrich/config.json` (enrichment config)
 - `<doc-pack>/enrich/agent_prompt.md` (tool-provided prompt for LM agents)
@@ -115,12 +116,10 @@ nix run <lens-flake> -- run=1 <doc-pack>/binary.lens --help
 ## DuckDB extraction (lens-based)
 
 Help/usage text is extracted via the lens templates referenced in
-`<doc-pack>/enrich/config.json`. `bman init` installs project templates under
-`<doc-pack>/queries/` and uses a fallback chain:
+`<doc-pack>/enrich/config.json`. By default, `bman init` installs the
+scenario-based usage lens under `<doc-pack>/queries/`:
 
 1. `queries/usage_from_scenarios.sql`
-2. `queries/usage_from_scoped_usage_functions.sql`
-3. `binary.lens/views/queries/string_occurrences.sql`
 
 DuckDB is invoked via `nix run nixpkgs#duckdb --`. This help text is used for
 rendering only; surface inventory is separate.

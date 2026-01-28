@@ -65,9 +65,9 @@ evaluation.
 
 Scenarios are defined under `<doc-pack>/scenarios/plan.json`. Scenario runs are
 appended to the pack under `<doc-pack>/binary.lens/runs/` and summarized in
-`<doc-pack>/man/examples_report.json` when planned. Usage + discovery templates
-are installed under `<doc-pack>/queries/` and referenced by `enrich/config.json`,
-with the pack's `binary.lens/views/queries/` templates used as fallbacks.
+`<doc-pack>/man/examples_report.json` when planned and when publishable examples
+exist. Usage + discovery templates are installed under `<doc-pack>/queries/` and
+referenced by `enrich/config.json`.
 Enrichment control and state live under `<doc-pack>/enrich/`, including
 `bootstrap.json`, `config.json`, `lock.json`, and `plan.out.json`.
 Surface inventory lives under `<doc-pack>/inventory/surface.json` with scenario
@@ -93,10 +93,12 @@ Fixture-backed scenarios can declare:
 Use `scope` on scenarios to record command paths for multi-command CLIs
 (e.g., `["commit"]` for `git commit`).
 
-Verification is opt-in via `enrich/config.json` requirements. When enabled,
-`status --json` lists unverified IDs and emits an edit stub for
-`scenarios/plan.json` so you can add a single acceptance scenario, then rerun
-`validate → plan → apply`.
+Verification is enabled by default (opt-out by editing
+`enrich/config.json.requirements`). The workflow is triage-first:
+`scenarios/plan.json.verification.queue` must list each surface ID as
+`verify_accepted`, `verify_behavior`, or `exclude` (with a reason). When
+verification is required, `status --json` emits a single deterministic next
+action: add triage → add a scenario → rerun `validate → plan → apply`.
 
 For a principled approach to expanding scenario coverage (options vs behaviors
 vs doc claims) and curating `.SH EXAMPLES`, see `docs/COVERAGE.md`.

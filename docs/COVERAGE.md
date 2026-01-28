@@ -14,8 +14,8 @@ Inputs to read:
 
 - `<doc-pack>/scenarios/plan.json` (scenario plan)
 - `<doc-pack>/inventory/surface.json` (canonical surface inventory)
-- `<doc-pack>/inventory/scenarios/*.json` (scenario evidence)
-- `<doc-pack>/man/examples_report.json` + `<doc-pack>/man/<binary>.1` (what changed)
+- `<doc-pack>/inventory/scenarios/*.json` (scenario evidence; help output lives here)
+- `<doc-pack>/man/examples_report.json` + `<doc-pack>/man/<binary>.1` (what changed; examples report only when publishable examples exist)
 
 Main commands:
 
@@ -27,7 +27,7 @@ cargo run --bin bman -- apply --doc-pack /tmp/<binary>-docpack
 
 Outputs to inspect:
 
-- `<doc-pack>/man/examples_report.json` (pass/fail + excerpts)
+- `<doc-pack>/man/examples_report.json` (pass/fail + excerpts; only when publishable examples exist)
 - `<doc-pack>/man/<binary>.1` (what got published into `.SH EXAMPLES`)
 - `<doc-pack>/coverage_ledger.json` (coverage status + blockers)
 
@@ -45,7 +45,6 @@ cargo run --bin bman -- validate --doc-pack /tmp/<binary>-docpack
 
 2) Edit pack-local inputs as needed:
 - `queries/` (usage lens templates referenced by `enrich/config.json`)
-- `binary.lens/views/queries/` (pack-provided lenses for fallback)
 - `scenarios/plan.json` (scenario plan for help/behavior coverage)
 - `fixtures/` (deterministic inputs)
 - `enrich/config.json` (requirements + input selection)
@@ -105,9 +104,9 @@ mostly for confidence + tracking.
 
 - Scenario plan: `<doc-pack>/scenarios/plan.json`
 - Fixtures: `<doc-pack>/fixtures/...`
-- Usage lens templates: `<doc-pack>/queries/` (project), `<doc-pack>/binary.lens/views/queries/` (pack)
+- Usage lens templates: `<doc-pack>/queries/` (project)
 - Runs + evidence: `<doc-pack>/binary.lens/runs/`
-- Validation report: `<doc-pack>/man/examples_report.json`
+- Validation report (when present): `<doc-pack>/man/examples_report.json`
 - Rendered man page: `<doc-pack>/man/<binary>.1`
 - Coverage ledger: `<doc-pack>/coverage_ledger.json`
 - Enrichment config/lock/plan: `<doc-pack>/enrich/config.json`, `<doc-pack>/enrich/lock.json`, `<doc-pack>/enrich/plan.out.json`
@@ -118,7 +117,7 @@ mostly for confidence + tracking.
 ## Current Behavior (important)
 
 - `binary_man` renders `.SH EXAMPLES` from **passing scenarios with
-  `"publish": true`** in the most recent `examples_report.json`.
+  `"publish": true`** in the most recent `examples_report.json` (if present).
   - Use `"publish": false` for “acceptance-only” or noisy scenarios so you can
     track coverage without bloating the man page.
 
@@ -199,7 +198,7 @@ feature needed to unlock it.
 ### 5) Run + validate + curate
 
 - Run scenarios and regenerate outputs.
-- Inspect `examples_report.json`:
+- Inspect `examples_report.json` (if present):
   - Do failures indicate a real doc bug, a flaky expectation, or nondeterminism?
   - Are snippets short and free of host-specific leakage (paths, usernames)?
 - Curate which scenarios become published man page examples:
@@ -310,7 +309,7 @@ Use this as a starting point for a coding agent:
 > - Run `cargo run --bin bman -- validate --doc-pack /tmp/<binary>-docpack`,
 >   `cargo run --bin bman -- plan --doc-pack /tmp/<binary>-docpack`, and
 >   `cargo run --bin bman -- apply --doc-pack /tmp/<binary>-docpack`, then ensure
->   `<doc-pack>/man/examples_report.json` reflects the new coverage.
+>   `<doc-pack>/man/examples_report.json` reflects the new coverage (when present).
 > - Curate `.SH EXAMPLES` so it stays readable (only publish high-value,
 >   deterministic scenarios).
 > - Provide a short “coverage ledger” summary and a “friction log” describing

@@ -394,7 +394,7 @@ Surface discovery (first-class, no “confidence”):
 
 Evidence > scores:
 - Requirements are predicates over canonical inventory IDs (`inventory/surface.json`) and canonical evidence indices (`inventory/scenarios/*.json`, `binary.lens/runs/index.json`).
-- `man/examples_report.json` and `coverage_ledger.json` may exist as derived views, but are never authoritative for gating decisions.
+- `man/examples_report.json` (only when publishable examples exist) and `coverage_ledger.json` may exist as derived views, but are never authoritative for gating decisions.
 - Reports enumerate unmet requirements, missing evidence, and blockers as structured codes/tags with evidence refs.
 - Metrics may be emitted only as derived summaries, never as authoritative decision inputs.
 
@@ -456,8 +456,8 @@ Deliverables:
   - `binary.lens/` pack
   - scenario catalog(s)
   - fixture trees
-- usage lens templates (`queries/*.sql` with `binary.lens/views/queries/*.sql` as fallback)
-  - generated man page + `examples_report.json` + `meta.json`
+- usage lens templates (`queries/*.sql`)
+  - generated man page + `examples_report.json` (when publishable examples exist) + `meta.json`
 - Make scenario fixture paths resolve relative to the doc pack (or the scenario file), not the process working directory.
 - Add a `--lens-flake <ref>` override for pack generation and scenario runs.
 
