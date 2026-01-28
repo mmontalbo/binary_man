@@ -6,6 +6,7 @@ with
       stdout
     from read_json_auto('inventory/scenarios/*.json', filename=true)
     where coalesce(stdout, '') <> ''
+      and scenario_id like 'help--%'
   ),
   lines as (
     select
@@ -49,7 +50,7 @@ select
   subcommand as display,
   description,
   scenario_path,
-  case when usage_hint.scenario_path is not null then true else false end as multi_command_hint
+  usage_hint.scenario_path is not null as multi_command_hint
 from dedup
 left join usage_hint using (scenario_path)
 where rk = 1

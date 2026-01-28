@@ -6,6 +6,7 @@ with
       stdout
     from read_json_auto('inventory/scenarios/*.json', filename=true)
     where coalesce(stdout, '') <> ''
+      and scenario_id like 'help--%'
   ),
   lines as (
     select
@@ -54,7 +55,6 @@ select
   option as id,
   option as display,
   description,
-  scenario_path,
-  false as multi_command_hint
+  scenario_path
 from dedup
 where rk = 1;

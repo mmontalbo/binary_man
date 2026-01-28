@@ -24,8 +24,6 @@ with
     where not exists (select 1 from scoped)
   )
 select
-  a.status,
-  a.basis,
   replace(coalesce(s.value, a.string_value), '%s', manifest.binary_name) as string_value
 from callsite_arg_observations a
 left join callsites c on c.callsite_id = a.callsite_id
