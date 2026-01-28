@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
-pub const SEMANTICS_SCHEMA_VERSION: u32 = 1;
+pub const SEMANTICS_SCHEMA_VERSION: u32 = 2;
 
 fn default_true() -> bool {
     true
@@ -37,6 +37,8 @@ pub struct Semantics {
     pub env_vars: EnvVarsSemantics,
     #[serde(default)]
     pub requirements: RenderRequirements,
+    #[serde(default)]
+    pub verification: VerificationSemantics,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -59,18 +61,13 @@ pub struct DescriptionSemantics {
     pub fallback: DescriptionFallback,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum DescriptionFallback {
+    #[default]
     Leading,
     Section,
     None,
-}
-
-impl Default for DescriptionFallback {
-    fn default() -> Self {
-        DescriptionFallback::Leading
-    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -129,6 +126,40 @@ pub struct EnvVarsSemantics {
     pub paragraph_matchers: Vec<LineMatcher>,
     #[serde(default)]
     pub variable_regex: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+#[serde(deny_unknown_fields)]
+pub struct VerificationSemantics {
+    #[serde(default)]
+    pub accepted: Vec<VerificationRule>,
+    #[serde(default)]
+    pub rejected: Vec<VerificationRule>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+#[serde(deny_unknown_fields)]
+pub struct VerificationRule {
+    #[serde(default)]
+    pub exit_code: Option<i32>,
+    #[serde(default)]
+    pub exit_signal: Option<i32>,
+    #[serde(default)]
+    pub stdout_contains_all: Vec<String>,
+    #[serde(default)]
+    pub stdout_contains_any: Vec<String>,
+    #[serde(default)]
+    pub stdout_regex_all: Vec<String>,
+    #[serde(default)]
+    pub stdout_regex_any: Vec<String>,
+    #[serde(default)]
+    pub stderr_contains_all: Vec<String>,
+    #[serde(default)]
+    pub stderr_contains_any: Vec<String>,
+    #[serde(default)]
+    pub stderr_regex_all: Vec<String>,
+    #[serde(default)]
+    pub stderr_regex_any: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -290,6 +321,12 @@ pub fn validate_semantics(semantics: &Semantics) -> Result<()> {
     for (idx, rule) in semantics.env_vars.paragraph_matchers.iter().enumerate() {
         validate_line_matcher(rule, &format!("env_vars.paragraph_matchers[{idx}]"))?;
     }
+    for (idx, rule) in semantics.verification.accepted.iter().enumerate() {
+        validate_verification_rule(rule, &format!("verification.accepted[{idx}]"))?;
+    }
+    for (idx, rule) in semantics.verification.rejected.iter().enumerate() {
+        validate_verification_rule(rule, &format!("verification.rejected[{idx}]"))?;
+    }
 
     Ok(())
 }
@@ -339,6 +376,22 @@ fn validate_option_entry_rule(rule: &OptionEntryRule, label: &str) -> Result<()>
                 regex.captures_len().saturating_sub(1)
             ));
         }
+    }
+    Ok(())
+}
+
+fn validate_verification_rule(rule: &VerificationRule, label: &str) -> Result<()> {
+    for (idx, pattern) in rule.stdout_regex_all.iter().enumerate() {
+        compile_regex(pattern, true, &format!("{label}.stdout_regex_all[{idx}]"))?;
+    }
+    for (idx, pattern) in rule.stdout_regex_any.iter().enumerate() {
+        compile_regex(pattern, true, &format!("{label}.stdout_regex_any[{idx}]"))?;
+    }
+    for (idx, pattern) in rule.stderr_regex_all.iter().enumerate() {
+        compile_regex(pattern, true, &format!("{label}.stderr_regex_all[{idx}]"))?;
+    }
+    for (idx, pattern) in rule.stderr_regex_any.iter().enumerate() {
+        compile_regex(pattern, true, &format!("{label}.stderr_regex_any[{idx}]"))?;
     }
     Ok(())
 }

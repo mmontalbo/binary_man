@@ -82,9 +82,10 @@ pub fn load_pack_context_with_template_at(
     pack_root: &Path,
     template_path: &Path,
     duckdb_cwd: &Path,
+    scenarios_glob: Option<&str>,
 ) -> Result<PackContext> {
     let manifest = load_manifest(pack_root)?;
-    let usage_lens = run_usage_lens_at(pack_root, template_path, duckdb_cwd)?;
+    let usage_lens = run_usage_lens_at(pack_root, template_path, duckdb_cwd, scenarios_glob)?;
     if usage_lens.rows.is_empty() {
         return Err(anyhow!("usage lens returned no rows"));
     }
@@ -115,8 +116,9 @@ fn run_usage_lens_at(
     pack_root: &Path,
     template_path: &Path,
     duckdb_cwd: &Path,
+    scenarios_glob: Option<&str>,
 ) -> Result<UsageLensOutput> {
-    let rendered_sql = render_usage_lens(pack_root, template_path)?;
+    let rendered_sql = render_usage_lens(pack_root, template_path, scenarios_glob)?;
     let output = run_duckdb_query(&rendered_sql, duckdb_cwd)?;
     let rows: Vec<UsageEvidenceRow> =
         serde_json::from_slice(&output).context("parse usage evidence JSON output")?;
@@ -127,7 +129,11 @@ fn run_usage_lens_at(
     })
 }
 
-fn render_usage_lens(pack_root: &Path, template_path: &Path) -> Result<String> {
+fn render_usage_lens(
+    pack_root: &Path,
+    template_path: &Path,
+    scenarios_glob: Option<&str>,
+) -> Result<String> {
     let template_sql = fs::read_to_string(template_path)
         .with_context(|| format!("read usage lens template {}", template_path.display()))?;
     let mut rendered_sql = template_sql.clone();
@@ -148,6 +154,16 @@ fn render_usage_lens(pack_root: &Path, template_path: &Path) -> Result<String> {
         for (token, path) in replacements {
             rendered_sql = rendered_sql.replace(token, &sql_quote_literal(&path));
         }
+    }
+    if template_sql.contains("{{scenarios_glob}}") {
+        let scenarios_glob = scenarios_glob.ok_or_else(|| {
+            anyhow!(
+                "usage lens template {} requires scenarios_glob",
+                template_path.display()
+            )
+        })?;
+        rendered_sql =
+            rendered_sql.replace("{{scenarios_glob}}", &sql_quote_literal(scenarios_glob));
     }
 
     let loader_path = pack_root

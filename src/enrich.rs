@@ -17,14 +17,11 @@ pub const REPORT_SCHEMA_VERSION: u32 = 1;
 pub const HISTORY_SCHEMA_VERSION: u32 = 1;
 
 pub const SCENARIO_USAGE_LENS_TEMPLATE_REL: &str = "queries/usage_from_scenarios.sql";
-pub const SCOPED_USAGE_LENS_TEMPLATE_REL: &str = "queries/usage_from_scoped_usage_functions.sql";
-pub const DEFAULT_LENS_TEMPLATE_REL: &str = "binary.lens/views/queries/string_occurrences.sql";
 pub const SUBCOMMANDS_FROM_SCENARIOS_TEMPLATE_REL: &str = "queries/subcommands_from_scenarios.sql";
 pub const OPTIONS_FROM_SCENARIOS_TEMPLATE_REL: &str = "queries/options_from_scenarios.sql";
 pub const VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL: &str =
     "queries/verification_from_scenarios.sql";
 pub const ENRICH_AGENT_PROMPT_REL: &str = "enrich/agent_prompt.md";
-pub const ENRICH_SEMANTICS_REL: &str = "enrich/semantics.json";
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -213,6 +210,42 @@ pub struct LockStatus {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct PlanStatus {
+    pub present: bool,
+    pub stale: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inputs_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lock_inputs_hash: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct VerificationExclusion {
+    pub surface_id: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct VerificationTriageSummary {
+    #[serde(default)]
+    pub discovered_untriaged_count: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub discovered_untriaged_preview: Vec<String>,
+    #[serde(default)]
+    pub triaged_unverified_count: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub triaged_unverified_preview: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub excluded: Vec<VerificationExclusion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub excluded_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discovered_untriaged_ids: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub triaged_unverified_ids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct RequirementStatus {
     pub id: RequirementId,
     pub status: RequirementState,
@@ -221,6 +254,8 @@ pub struct RequirementStatus {
     pub unverified_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unverified_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification: Option<VerificationTriageSummary>,
     pub evidence: Vec<EvidenceRef>,
     pub blockers: Vec<Blocker>,
 }
@@ -284,6 +319,7 @@ pub struct StatusSummary {
     pub generated_at_epoch_ms: u128,
     pub binary_name: Option<String>,
     pub lock: LockStatus,
+    pub plan: PlanStatus,
     pub requirements: Vec<RequirementStatus>,
     pub missing_artifacts: Vec<String>,
     pub blockers: Vec<Blocker>,
@@ -353,30 +389,6 @@ pub struct EnrichReport {
     pub force_used: bool,
 }
 
-pub fn config_path(doc_pack_root: &Path) -> PathBuf {
-    doc_pack_root.join("enrich").join("config.json")
-}
-
-pub fn bootstrap_path(doc_pack_root: &Path) -> PathBuf {
-    doc_pack_root.join("enrich").join("bootstrap.json")
-}
-
-pub fn lock_path(doc_pack_root: &Path) -> PathBuf {
-    doc_pack_root.join("enrich").join("lock.json")
-}
-
-pub fn plan_path(doc_pack_root: &Path) -> PathBuf {
-    doc_pack_root.join("enrich").join("plan.out.json")
-}
-
-pub fn report_path(doc_pack_root: &Path) -> PathBuf {
-    doc_pack_root.join("enrich").join("report.json")
-}
-
-pub fn history_path(doc_pack_root: &Path) -> PathBuf {
-    doc_pack_root.join("enrich").join("history.jsonl")
-}
-
 #[derive(Debug, Clone)]
 pub struct DocPackPaths {
     root: PathBuf,
@@ -399,6 +411,10 @@ impl DocPackPaths {
         self.enrich_dir().join("config.json")
     }
 
+    pub fn bootstrap_path(&self) -> PathBuf {
+        self.enrich_dir().join("bootstrap.json")
+    }
+
     pub fn agent_prompt_path(&self) -> PathBuf {
         self.root.join(ENRICH_AGENT_PROMPT_REL)
     }
@@ -417,6 +433,10 @@ impl DocPackPaths {
 
     pub fn report_path(&self) -> PathBuf {
         self.enrich_dir().join("report.json")
+    }
+
+    pub fn history_path(&self) -> PathBuf {
+        self.enrich_dir().join("history.jsonl")
     }
 
     pub fn txns_root(&self) -> PathBuf {
@@ -485,24 +505,26 @@ impl DocPackPaths {
 }
 
 pub fn default_requirements() -> Vec<RequirementId> {
-    vec![RequirementId::Surface, RequirementId::ManPage]
+    vec![
+        RequirementId::Surface,
+        RequirementId::Verification,
+        RequirementId::ManPage,
+    ]
 }
 
 pub fn default_config() -> EnrichConfig {
-    let mut usage_lens_templates = Vec::new();
-    usage_lens_templates.push(SCENARIO_USAGE_LENS_TEMPLATE_REL.to_string());
-    usage_lens_templates.push(SCOPED_USAGE_LENS_TEMPLATE_REL.to_string());
-    usage_lens_templates.push(DEFAULT_LENS_TEMPLATE_REL.to_string());
-    let mut surface_lens_templates = Vec::new();
-    surface_lens_templates.push(OPTIONS_FROM_SCENARIOS_TEMPLATE_REL.to_string());
-    surface_lens_templates.push(SUBCOMMANDS_FROM_SCENARIOS_TEMPLATE_REL.to_string());
+    let usage_lens_templates = vec![SCENARIO_USAGE_LENS_TEMPLATE_REL.to_string()];
+    let surface_lens_templates = vec![
+        OPTIONS_FROM_SCENARIOS_TEMPLATE_REL.to_string(),
+        SUBCOMMANDS_FROM_SCENARIOS_TEMPLATE_REL.to_string(),
+    ];
     EnrichConfig {
         schema_version: CONFIG_SCHEMA_VERSION,
         usage_lens_templates,
         surface_lens_templates,
         scenario_catalogs: Vec::new(),
         requirements: default_requirements(),
-        verification_tier: None,
+        verification_tier: Some("accepted".to_string()),
     }
 }
 
@@ -521,7 +543,8 @@ pub fn bootstrap_stub() -> String {
 }
 
 pub fn load_config(doc_pack_root: &Path) -> Result<EnrichConfig> {
-    let path = config_path(doc_pack_root);
+    let paths = DocPackPaths::new(doc_pack_root.to_path_buf());
+    let path = paths.config_path();
     let bytes = fs::read(&path).with_context(|| format!("read config {}", path.display()))?;
     let config: EnrichConfig =
         serde_json::from_slice(&bytes).context("parse enrich config JSON")?;
@@ -529,7 +552,8 @@ pub fn load_config(doc_pack_root: &Path) -> Result<EnrichConfig> {
 }
 
 pub fn load_bootstrap_optional(doc_pack_root: &Path) -> Result<Option<EnrichBootstrap>> {
-    let path = bootstrap_path(doc_pack_root);
+    let paths = DocPackPaths::new(doc_pack_root.to_path_buf());
+    let path = paths.bootstrap_path();
     if !path.is_file() {
         return Ok(None);
     }
@@ -554,7 +578,8 @@ fn validate_bootstrap(bootstrap: &EnrichBootstrap) -> Result<()> {
 }
 
 pub fn write_config(doc_pack_root: &Path, config: &EnrichConfig) -> Result<()> {
-    let path = config_path(doc_pack_root);
+    let paths = DocPackPaths::new(doc_pack_root.to_path_buf());
+    let path = paths.config_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).context("create enrich dir")?;
     }
@@ -564,14 +589,16 @@ pub fn write_config(doc_pack_root: &Path, config: &EnrichConfig) -> Result<()> {
 }
 
 pub fn load_lock(doc_pack_root: &Path) -> Result<EnrichLock> {
-    let path = lock_path(doc_pack_root);
+    let paths = DocPackPaths::new(doc_pack_root.to_path_buf());
+    let path = paths.lock_path();
     let bytes = fs::read(&path).with_context(|| format!("read lock {}", path.display()))?;
     let lock: EnrichLock = serde_json::from_slice(&bytes).context("parse enrich lock JSON")?;
     Ok(lock)
 }
 
 pub fn write_lock(doc_pack_root: &Path, lock: &EnrichLock) -> Result<()> {
-    let path = lock_path(doc_pack_root);
+    let paths = DocPackPaths::new(doc_pack_root.to_path_buf());
+    let path = paths.lock_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).context("create enrich dir")?;
     }
@@ -581,7 +608,8 @@ pub fn write_lock(doc_pack_root: &Path, lock: &EnrichLock) -> Result<()> {
 }
 
 pub fn write_report(doc_pack_root: &Path, report: &EnrichReport) -> Result<()> {
-    let path = report_path(doc_pack_root);
+    let paths = DocPackPaths::new(doc_pack_root.to_path_buf());
+    let path = paths.report_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).context("create enrich dir")?;
     }
@@ -591,7 +619,8 @@ pub fn write_report(doc_pack_root: &Path, report: &EnrichReport) -> Result<()> {
 }
 
 pub fn append_history(doc_pack_root: &Path, entry: &EnrichHistoryEntry) -> Result<()> {
-    let path = history_path(doc_pack_root);
+    let paths = DocPackPaths::new(doc_pack_root.to_path_buf());
+    let path = paths.history_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).context("create enrich dir")?;
     }
@@ -688,7 +717,8 @@ pub fn build_lock(
 ) -> Result<EnrichLock> {
     validate_config(config)?;
     let selected_inputs = resolve_inputs(config, doc_pack_root)?;
-    let mut inputs = vec![config_path(doc_pack_root)];
+    let paths = DocPackPaths::new(doc_pack_root.to_path_buf());
+    let mut inputs = vec![paths.config_path()];
     for rel in selected_inputs
         .usage_lens_templates
         .iter()
@@ -700,9 +730,9 @@ pub fn build_lock(
     if let Some(rel) = selected_inputs.scenario_plan.as_ref() {
         inputs.push(doc_pack_root.join(rel));
     }
-    inputs.push(doc_pack_root.join(ENRICH_SEMANTICS_REL));
-    inputs.push(doc_pack_root.join("inventory").join("surface.seed.json"));
-    inputs.push(doc_pack_root.join("binary.lens").join("manifest.json"));
+    inputs.push(paths.semantics_path());
+    inputs.push(paths.surface_seed_path());
+    inputs.push(paths.pack_manifest_path());
     if let Some(fixtures_root) = selected_inputs.fixtures_root.as_ref() {
         inputs.push(doc_pack_root.join(fixtures_root));
     }
@@ -721,7 +751,7 @@ pub fn build_lock(
         schema_version: LOCK_SCHEMA_VERSION,
         generated_at_epoch_ms: now_epoch_ms()?,
         binary_name: binary_name.map(|name| name.to_string()),
-        config_path: rel_path(doc_pack_root, &config_path(doc_pack_root))?,
+        config_path: rel_path(doc_pack_root, &paths.config_path())?,
         inputs: inputs_rel,
         inputs_hash,
         selected_inputs,
@@ -750,7 +780,7 @@ pub fn lock_status(doc_pack_root: &Path, lock: Option<&EnrichLock>) -> Result<Lo
     })
 }
 
-pub fn rel_path(doc_pack_root: &Path, path: &Path) -> Result<String> {
+fn rel_path(doc_pack_root: &Path, path: &Path) -> Result<String> {
     let rel = path
         .strip_prefix(doc_pack_root)
         .unwrap_or(path)
@@ -759,7 +789,7 @@ pub fn rel_path(doc_pack_root: &Path, path: &Path) -> Result<String> {
     Ok(rel)
 }
 
-pub fn validate_relative_path(rel: &str, label: &str) -> Result<()> {
+fn validate_relative_path(rel: &str, label: &str) -> Result<()> {
     let path = Path::new(rel);
     if path.is_absolute() || has_parent_components(path) {
         return Err(anyhow!(

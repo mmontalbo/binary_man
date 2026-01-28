@@ -38,6 +38,10 @@ pub struct StatusArgs {
     #[arg(long)]
     pub json: bool,
 
+    /// Include full verification triage lists in JSON output
+    #[arg(long)]
+    pub full: bool,
+
     /// Ignore missing/stale lock.json (recorded in report)
     #[arg(long)]
     pub force: bool,

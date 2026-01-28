@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "usage": {
     "line_rules": [
       {
@@ -81,6 +81,52 @@
       }
     ],
     "variable_regex": "\\b[A-Z][A-Z0-9_]*_[A-Z0-9_]+\\b"
+  },
+  "verification": {
+    "accepted": [
+      {
+        "exit_code": 0,
+        "exit_signal": null,
+        "stdout_contains_all": [],
+        "stdout_contains_any": [],
+        "stdout_regex_all": [],
+        "stdout_regex_any": [],
+        "stderr_contains_all": [],
+        "stderr_contains_any": [],
+        "stderr_regex_all": [],
+        "stderr_regex_any": []
+      },
+      {
+        "exit_code": null,
+        "exit_signal": null,
+        "stdout_contains_all": [],
+        "stdout_contains_any": [],
+        "stdout_regex_all": [],
+        "stdout_regex_any": [],
+        "stderr_contains_all": [],
+        "stderr_contains_any": [],
+        "stderr_regex_all": [],
+        "stderr_regex_any": [
+          "(?i)requires an argument|missing.*argument"
+        ]
+      }
+    ],
+    "rejected": [
+      {
+        "exit_code": null,
+        "exit_signal": null,
+        "stdout_contains_all": [],
+        "stdout_contains_any": [],
+        "stdout_regex_all": [],
+        "stdout_regex_any": [],
+        "stderr_contains_all": [],
+        "stderr_contains_any": [],
+        "stderr_regex_all": [],
+        "stderr_regex_any": [
+          "(?i)unrecognized option|unknown option|illegal option|invalid option"
+        ]
+      }
+    ]
   },
   "requirements": {
     "synopsis_min_lines": 1

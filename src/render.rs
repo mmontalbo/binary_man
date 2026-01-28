@@ -688,10 +688,11 @@ fn parse_help_text(help_text: &str, compiled: &CompiledSemantics) -> HelpSection
             continue;
         }
 
-        if !seen_options {
-            if !is_usage_line(stripped, compiled) && !is_option_line(stripped, compiled) {
-                description_fallback.push(stripped.to_string());
-            }
+        if !seen_options
+            && !is_usage_line(stripped, compiled)
+            && !is_option_line(stripped, compiled)
+        {
+            description_fallback.push(stripped.to_string());
         }
     }
 

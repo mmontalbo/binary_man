@@ -7,9 +7,7 @@ use crate::render;
 use crate::scenarios;
 use crate::semantics;
 use crate::staging::publish_staging;
-use crate::status::{
-    build_status_summary, plan_status, planned_actions_from_requirements, PlanStatus,
-};
+use crate::status::{build_status_summary, plan_status, planned_actions_from_requirements};
 use crate::surface::{self, apply_surface_discovery};
 use crate::templates;
 use crate::util::resolve_flake_ref;
@@ -76,6 +74,7 @@ pub fn run_init(args: InitArgs) -> Result<()> {
     )?;
     install_agent_prompt(&paths, args.force)?;
     install_semantics(&paths, args.force)?;
+    ensure_empty_fixture(paths.root())?;
 
     let config = enrich::default_config();
     enrich::write_config(paths.root(), &config)?;
@@ -105,9 +104,11 @@ pub fn run_plan(args: PlanArgs) -> Result<()> {
 
     let (lock, lock_status, force_used) = ctx.lock_for_plan(args.force)?;
 
-    let plan_status = PlanStatus {
+    let plan_status = enrich::PlanStatus {
         present: true,
         stale: false,
+        inputs_hash: Some(lock.inputs_hash.clone()),
+        lock_inputs_hash: Some(lock.inputs_hash.clone()),
     };
     let summary = build_status_summary(
         ctx.paths.root(),
@@ -116,6 +117,7 @@ pub fn run_plan(args: PlanArgs) -> Result<()> {
         true,
         lock_status,
         plan_status,
+        false,
         force_used,
     )?;
     let planned_actions = planned_actions_from_requirements(&summary.requirements);
@@ -284,24 +286,29 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
         } else if wants_render {
             examples_report = load_examples_report_optional(&ctx.paths)?;
         }
+        examples_report = examples_report.and_then(scenarios::publishable_examples_report);
 
-        let lens_pack_root = if wants_render && staged_scenario_evidence_available(&staging_root) {
-            Some(prepare_lens_pack_root(&staging_root, &pack_root)?)
+        let scenarios_glob = if wants_render {
+            let scenarios_root = if staged_help_scenario_evidence_available(&staging_root) {
+                &staging_root
+            } else {
+                ctx.paths.root()
+            };
+            Some(scenarios_glob(scenarios_root))
         } else {
             None
         };
         let context = if wants_render {
-            let context = if let Some(duckdb_cwd) = lens_pack_root.as_deref() {
-                resolve_pack_context_with_cwd(
-                    &pack_root,
-                    ctx.paths.root(),
-                    &ctx.config,
-                    duckdb_cwd,
-                )?
-            } else {
-                resolve_pack_context(&pack_root, ctx.paths.root(), &ctx.config)?
-            };
-            Some(context)
+            let scenarios_glob = scenarios_glob
+                .as_deref()
+                .ok_or_else(|| anyhow!("scenarios_glob required for render"))?;
+            Some(resolve_pack_context_with_cwd(
+                &pack_root,
+                ctx.paths.root(),
+                &ctx.config,
+                &pack_root,
+                scenarios_glob,
+            )?)
         } else {
             None
         };
@@ -406,17 +413,6 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
             }
         }
 
-        if let Some(lens_root) = lens_pack_root.as_ref() {
-            if let Err(err) = fs::remove_dir_all(lens_root) {
-                if args.verbose {
-                    eprintln!(
-                        "warning: failed to clean lens root {}: {err}",
-                        lens_root.display()
-                    );
-                }
-            }
-        }
-
         let published_paths = publish_staging(&staging_root, ctx.paths.root())?;
         let outputs_hash = if !published_paths.is_empty() {
             Some(enrich::hash_paths(ctx.paths.root(), &published_paths)?)
@@ -485,6 +481,7 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
         true,
         lock_status,
         plan_status,
+        false,
         force_used,
     )?;
 
@@ -586,6 +583,7 @@ pub fn run_status(args: StatusArgs) -> Result<()> {
             &paths,
             binary_name.as_deref(),
             lock_status,
+            plan_status.clone(),
             code,
             message.clone(),
             force_used,
@@ -595,6 +593,7 @@ pub fn run_status(args: StatusArgs) -> Result<()> {
             &paths,
             binary_name.as_deref(),
             lock_status,
+            plan_status.clone(),
             code,
             message.clone(),
             force_used,
@@ -605,6 +604,7 @@ pub fn run_status(args: StatusArgs) -> Result<()> {
             binary_name.as_deref(),
             &config_state,
             lock_status,
+            plan_status.clone(),
             lock_parse_error,
             plan_parse_error,
             force_used,
@@ -618,6 +618,7 @@ pub fn run_status(args: StatusArgs) -> Result<()> {
                 config_exists,
                 lock_status,
                 plan_status,
+                args.full,
                 force_used,
             )?,
             ConfigState::Missing => {
@@ -629,6 +630,7 @@ pub fn run_status(args: StatusArgs) -> Result<()> {
                     false,
                     lock_status,
                     plan_status,
+                    args.full,
                     force_used,
                 )?
             }
@@ -725,7 +727,7 @@ fn load_scenario_plan_state(paths: &enrich::DocPackPaths) -> ScenarioPlanState {
             }
         }
     };
-    match scenarios::validate_plan(&plan) {
+    match scenarios::validate_plan(&plan, paths.root()) {
         Ok(()) => ScenarioPlanState::Valid,
         Err(err) => ScenarioPlanState::Invalid {
             code: "scenario_plan_invalid",
@@ -741,10 +743,20 @@ fn error_chain_message(err: &anyhow::Error) -> String {
         .join(": ")
 }
 
+fn ensure_empty_fixture(doc_pack_root: &Path) -> Result<()> {
+    let empty_dir = doc_pack_root.join("fixtures").join("empty");
+    if !empty_dir.is_dir() {
+        fs::create_dir_all(&empty_dir)
+            .with_context(|| format!("create empty fixture {}", empty_dir.display()))?;
+    }
+    Ok(())
+}
+
 fn build_invalid_config_summary(
     paths: &enrich::DocPackPaths,
     binary_name: Option<&str>,
     lock_status: enrich::LockStatus,
+    plan_status: enrich::PlanStatus,
     code: &'static str,
     message: String,
     force_used: bool,
@@ -762,6 +774,7 @@ fn build_invalid_config_summary(
         generated_at_epoch_ms: enrich::now_epoch_ms()?,
         binary_name: binary_name.map(|name| name.to_string()),
         lock: lock_status,
+        plan: plan_status,
         requirements: Vec::new(),
         missing_artifacts: Vec::new(),
         blockers: vec![blocker],
@@ -784,6 +797,7 @@ fn build_invalid_plan_summary(
     paths: &enrich::DocPackPaths,
     binary_name: Option<&str>,
     lock_status: enrich::LockStatus,
+    plan_status: enrich::PlanStatus,
     code: &'static str,
     message: String,
     force_used: bool,
@@ -801,6 +815,7 @@ fn build_invalid_plan_summary(
         generated_at_epoch_ms: enrich::now_epoch_ms()?,
         binary_name: binary_name.map(|name| name.to_string()),
         lock: lock_status,
+        plan: plan_status,
         requirements: Vec::new(),
         missing_artifacts: Vec::new(),
         blockers: vec![blocker],
@@ -824,6 +839,7 @@ fn build_parse_error_summary(
     binary_name: Option<&str>,
     config_state: &ConfigState,
     lock_status: enrich::LockStatus,
+    plan_status: enrich::PlanStatus,
     lock_parse_error: Option<String>,
     plan_parse_error: Option<String>,
     force_used: bool,
@@ -926,6 +942,7 @@ fn build_parse_error_summary(
         generated_at_epoch_ms: enrich::now_epoch_ms()?,
         binary_name: binary_name.map(|name| name.to_string()),
         lock: lock_status,
+        plan: plan_status,
         requirements: Vec::new(),
         missing_artifacts: Vec::new(),
         blockers,
@@ -1084,24 +1101,22 @@ fn load_examples_report_optional(
     Ok(Some(report))
 }
 
-fn resolve_pack_context(
-    pack_root: &Path,
-    doc_pack_root: &Path,
-    config: &enrich::EnrichConfig,
-) -> Result<pack::PackContext> {
-    resolve_pack_context_with_cwd(pack_root, doc_pack_root, config, pack_root)
-}
-
 fn resolve_pack_context_with_cwd(
     pack_root: &Path,
     doc_pack_root: &Path,
     config: &enrich::EnrichConfig,
     duckdb_cwd: &Path,
+    scenarios_glob: &str,
 ) -> Result<pack::PackContext> {
     let mut failures = Vec::new();
     for rel in &config.usage_lens_templates {
         let template = doc_pack_root.join(rel);
-        match pack::load_pack_context_with_template_at(pack_root, &template, duckdb_cwd) {
+        match pack::load_pack_context_with_template_at(
+            pack_root,
+            &template,
+            duckdb_cwd,
+            Some(scenarios_glob),
+        ) {
             Ok(mut context) => {
                 if !failures.is_empty() {
                     context.warnings.extend(
@@ -1121,90 +1136,35 @@ fn resolve_pack_context_with_cwd(
     ))
 }
 
-fn staged_scenario_evidence_available(staging_root: &Path) -> bool {
+fn staged_help_scenario_evidence_available(staging_root: &Path) -> bool {
     let scenarios_dir = staging_root.join("inventory").join("scenarios");
     let Ok(entries) = fs::read_dir(&scenarios_dir) else {
         return false;
     };
     entries.filter_map(Result::ok).any(|entry| {
         let path = entry.path();
-        path.is_file()
-            && path
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .map(|ext| ext.eq_ignore_ascii_case("json"))
-                .unwrap_or(false)
+        if !path.is_file() {
+            return false;
+        }
+        if path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| !ext.eq_ignore_ascii_case("json"))
+            .unwrap_or(true)
+        {
+            return false;
+        }
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name.starts_with("help--"))
+            .unwrap_or(false)
     })
 }
 
-fn prepare_lens_pack_root(staging_root: &Path, pack_root: &Path) -> Result<PathBuf> {
-    let lens_root = staging_root.join("binary.lens");
-    fs::create_dir_all(&lens_root)
-        .with_context(|| format!("create lens root {}", lens_root.display()))?;
-
-    link_or_copy_path(&pack_root.join("facts"), &lens_root.join("facts"))?;
-    link_or_copy_path(&pack_root.join("views"), &lens_root.join("views"))?;
-    link_or_copy_path(
-        &pack_root.join("manifest.json"),
-        &lens_root.join("manifest.json"),
-    )?;
-    let runs_src = pack_root.join("runs");
-    if runs_src.exists() {
-        link_or_copy_path(&runs_src, &lens_root.join("runs"))?;
-    }
-
-    Ok(lens_root)
-}
-
-fn link_or_copy_path(src: &Path, dest: &Path) -> Result<()> {
-    if dest.exists() {
-        return Ok(());
-    }
-
-    if try_symlink(src, dest).is_ok() {
-        return Ok(());
-    }
-
-    if src.is_dir() {
-        copy_dir_recursive(src, dest)?;
-    } else {
-        if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-        }
-        fs::copy(src, dest).with_context(|| format!("copy {}", src.display()))?;
-    }
-    Ok(())
-}
-
-fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
-    fs::create_dir_all(dest).with_context(|| format!("create {}", dest.display()))?;
-    for entry in fs::read_dir(src).with_context(|| format!("read {}", src.display()))? {
-        let entry = entry?;
-        let src_path = entry.path();
-        let dest_path = dest.join(entry.file_name());
-        let file_type = entry
-            .file_type()
-            .with_context(|| format!("inspect {}", src_path.display()))?;
-        if file_type.is_dir() {
-            copy_dir_recursive(&src_path, &dest_path)?;
-        } else {
-            fs::copy(&src_path, &dest_path)
-                .with_context(|| format!("copy {}", src_path.display()))?;
-        }
-    }
-    Ok(())
-}
-
-#[cfg(unix)]
-fn try_symlink(src: &Path, dest: &Path) -> Result<()> {
-    std::os::unix::fs::symlink(src, dest)
-        .with_context(|| format!("symlink {} -> {}", dest.display(), src.display()))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn try_symlink(_src: &Path, _dest: &Path) -> Result<()> {
-    Err(anyhow!("symlinks unavailable on this platform"))
+fn scenarios_glob(root: &Path) -> String {
+    let mut path = root.join("inventory").join("scenarios");
+    path.push("*.json");
+    path.to_string_lossy().to_string()
 }
 
 fn load_surface_for_render(
@@ -1228,12 +1188,6 @@ fn install_usage_lens_templates(paths: &enrich::DocPackPaths, force: bool) -> Re
         paths.root(),
         enrich::SCENARIO_USAGE_LENS_TEMPLATE_REL,
         templates::USAGE_FROM_SCENARIOS_SQL,
-        force,
-    )?;
-    write_usage_lens_template(
-        paths.root(),
-        enrich::SCOPED_USAGE_LENS_TEMPLATE_REL,
-        templates::USAGE_FROM_SCOPED_USAGE_FUNCTIONS_SQL,
         force,
     )?;
     write_usage_lens_template(

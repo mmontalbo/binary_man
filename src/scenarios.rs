@@ -16,7 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const DEFAULT_SNIPPET_MAX_BYTES: usize = 4096;
 const DEFAULT_SNIPPET_MAX_LINES: usize = 60;
 const MAX_SCENARIO_EVIDENCE_BYTES: usize = 64 * 1024;
-const SCENARIO_PLAN_SCHEMA_VERSION: u32 = 2;
+const SCENARIO_PLAN_SCHEMA_VERSION: u32 = 3;
 const SCENARIO_EVIDENCE_SCHEMA_VERSION: u32 = 3;
 const SCENARIO_INDEX_SCHEMA_VERSION: u32 = 1;
 const MAX_SEED_ENTRIES: usize = 128;
@@ -75,17 +75,23 @@ pub struct ScenarioSeedSpec {
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ScenarioDefaults {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env: BTreeMap<String, String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed_dir: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub net_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no_sandbox: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no_strace: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snippet_max_lines: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snippet_max_bytes: Option<usize>,
 }
 
@@ -102,7 +108,57 @@ pub struct ScenarioPlan {
     #[serde(default)]
     pub coverage: Option<CoverageNotes>,
     #[serde(default)]
+    pub verification: VerificationPlan,
+    #[serde(default)]
     pub scenarios: Vec<ScenarioSpec>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+#[serde(deny_unknown_fields)]
+pub struct VerificationPlan {
+    #[serde(default)]
+    pub queue: Vec<VerificationQueueEntry>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct VerificationQueueEntry {
+    pub surface_id: String,
+    pub intent: VerificationIntent,
+    #[serde(default)]
+    pub prereqs: Vec<VerificationPrereq>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance_invocation: Option<VerificationInvocation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VerificationIntent {
+    VerifyAccepted,
+    VerifyBehavior,
+    Exclude,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VerificationPrereq {
+    NeedsArgValue,
+    NeedsSeedFs,
+    NeedsRepo,
+    NeedsNetwork,
+    NeedsInteractive,
+    NeedsPrivilege,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct VerificationInvocation {
+    #[serde(default)]
+    pub scope: Vec<String>,
+    #[serde(default)]
+    pub argv: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -132,34 +188,45 @@ pub struct ScenarioSpec {
     pub kind: ScenarioKind,
     #[serde(default = "default_true")]
     pub publish: bool,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scope: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub argv: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env: BTreeMap<String, String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed_dir: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<ScenarioSeedSpec>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub net_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no_sandbox: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no_strace: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snippet_max_lines: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snippet_max_bytes: Option<usize>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_tier: Option<String>,
-    #[serde(default, alias = "covers_options")]
+    #[serde(
+        default,
+        alias = "covers_options",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub covers: Vec<String>,
     #[serde(default)]
     pub coverage_ignore: bool,
+    #[serde(default, skip_serializing_if = "ScenarioExpect::is_empty")]
     pub expect: ScenarioExpect,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ScenarioExpect {
     pub exit_code: Option<i32>,
@@ -180,6 +247,21 @@ pub struct ScenarioExpect {
     pub stderr_regex_all: Vec<String>,
     #[serde(default)]
     pub stderr_regex_any: Vec<String>,
+}
+
+impl ScenarioExpect {
+    fn is_empty(&self) -> bool {
+        self.exit_code.is_none()
+            && self.exit_signal.is_none()
+            && self.stdout_contains_all.is_empty()
+            && self.stdout_contains_any.is_empty()
+            && self.stdout_regex_all.is_empty()
+            && self.stdout_regex_any.is_empty()
+            && self.stderr_contains_all.is_empty()
+            && self.stderr_contains_any.is_empty()
+            && self.stderr_regex_all.is_empty()
+            && self.stderr_regex_any.is_empty()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -255,6 +337,31 @@ pub struct ScenarioOutcome {
     pub command_line: String,
     pub stdout_snippet: String,
     pub stderr_snippet: String,
+}
+
+pub fn publishable_examples_report(mut report: ExamplesReport) -> Option<ExamplesReport> {
+    let scenarios: Vec<ScenarioOutcome> = report
+        .scenarios
+        .into_iter()
+        .filter(|scenario| scenario.publish)
+        .collect();
+    if scenarios.is_empty() {
+        return None;
+    }
+    let pass_count = scenarios.iter().filter(|scenario| scenario.pass).count();
+    let fail_count = scenarios.len() - pass_count;
+    let mut run_id_set = BTreeSet::new();
+    for scenario in &scenarios {
+        if let Some(run_id) = scenario.run_id.as_ref() {
+            run_id_set.insert(run_id.clone());
+        }
+    }
+    report.scenario_count = scenarios.len();
+    report.pass_count = pass_count;
+    report.fail_count = fail_count;
+    report.run_ids = run_id_set.into_iter().collect();
+    report.scenarios = scenarios;
+    Some(report)
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -405,22 +512,25 @@ impl Drop for VerificationQueryRoot {
     }
 }
 
-pub fn load_plan(path: &Path) -> Result<ScenarioPlan> {
+pub fn load_plan(path: &Path, doc_pack_root: &Path) -> Result<ScenarioPlan> {
     let bytes =
         fs::read(path).with_context(|| format!("read scenarios plan {}", path.display()))?;
     let plan: ScenarioPlan = serde_json::from_slice(&bytes).context("parse scenarios plan JSON")?;
-    validate_plan(&plan)?;
+    validate_plan(&plan, doc_pack_root)?;
     Ok(plan)
 }
 
-pub(crate) fn load_plan_if_exists(path: &Path) -> Result<Option<ScenarioPlan>> {
+pub(crate) fn load_plan_if_exists(
+    path: &Path,
+    doc_pack_root: &Path,
+) -> Result<Option<ScenarioPlan>> {
     if !path.is_file() {
         return Ok(None);
     }
-    Ok(Some(load_plan(path)?))
+    Ok(Some(load_plan(path, doc_pack_root)?))
 }
 
-pub fn validate_plan(plan: &ScenarioPlan) -> Result<()> {
+pub fn validate_plan(plan: &ScenarioPlan, doc_pack_root: &Path) -> Result<()> {
     if plan.schema_version != SCENARIO_PLAN_SCHEMA_VERSION {
         return Err(anyhow!(
             "unsupported scenarios plan schema_version {}",
@@ -441,7 +551,23 @@ pub fn validate_plan(plan: &ScenarioPlan) -> Result<()> {
         }
     }
     if let Some(defaults) = plan.defaults.as_ref() {
-        validate_scenario_defaults(defaults).context("validate scenario defaults")?;
+        validate_scenario_defaults(defaults, doc_pack_root)
+            .context("validate scenario defaults")?;
+    }
+    for (idx, entry) in plan.verification.queue.iter().enumerate() {
+        if entry.surface_id.trim().is_empty() {
+            return Err(anyhow!(
+                "verification.queue[{idx}] surface_id must not be empty"
+            ));
+        }
+        if entry.intent == VerificationIntent::Exclude {
+            let reason = entry.reason.as_deref().unwrap_or("");
+            if reason.trim().is_empty() {
+                return Err(anyhow!(
+                    "verification.queue[{idx}] exclude intent requires reason"
+                ));
+            }
+        }
     }
     for scenario in &plan.scenarios {
         validate_scenario_spec(scenario)
@@ -471,7 +597,7 @@ pub fn run_scenarios(
     run_mode: ScenarioRunMode,
     verbose: bool,
 ) -> Result<ExamplesReport> {
-    let plan = load_plan(scenarios_path)?;
+    let plan = load_plan(scenarios_path, run_root)?;
     if let Some(plan_binary) = plan.binary.as_deref() {
         if plan_binary != binary_name {
             return Err(anyhow!(
@@ -521,19 +647,25 @@ pub fn run_scenarios(
 
     for scenario in scenarios {
         let run_config = effective_scenario_config(&plan, scenario)?;
+        let reportable = scenario.publish;
+        let has_index_entry = index_entries.contains_key(&scenario.id);
         let has_previous_outcome =
             cache_ready && previous_outcomes.outcomes.contains_key(&scenario.id);
-        // Skip only when we can reuse prior outcomes for a complete examples report.
+        let allow_index_cache = !reportable && has_index_entry;
+        // Skip when we can reuse prior outcomes for reportable scenarios, or when
+        // non-reportable scenarios already have indexed evidence.
         let should_run = should_run_scenario(
             run_mode,
             &run_config.scenario_digest,
             index_entries.get(&scenario.id),
-            has_previous_outcome,
+            has_previous_outcome || allow_index_cache,
         );
 
         if !should_run {
-            if let Some(outcome) = previous_outcomes.outcomes.remove(&scenario.id) {
-                outcomes.push(outcome);
+            if reportable {
+                if let Some(outcome) = previous_outcomes.outcomes.remove(&scenario.id) {
+                    outcomes.push(outcome);
+                }
             }
             continue;
         }
@@ -562,7 +694,7 @@ pub fn run_scenarios(
         let run_seed_dir = materialized_seed
             .as_ref()
             .map(|seed| seed.rel_path.as_str())
-            .or_else(|| run_config.seed_dir.as_deref());
+            .or(run_config.seed_dir.as_deref());
         let run_kv_args = build_run_kv_args(
             &run_argv0,
             run_seed_dir,
@@ -592,34 +724,36 @@ pub fn run_scenarios(
                 "binary_lens run failed with status {}",
                 exit_status_string(&status)
             )];
-            outcomes.push(ScenarioOutcome {
-                scenario_id: scenario.id.clone(),
-                publish: scenario.publish,
-                argv,
-                env: run_config.env.clone(),
-                seed_dir: run_config.seed_dir.clone(),
-                cwd: run_config.cwd.clone(),
-                timeout_seconds: run_config.timeout_seconds,
-                net_mode: run_config.net_mode.clone(),
-                no_sandbox: run_config.no_sandbox,
-                no_strace: run_config.no_strace,
-                snippet_max_lines: run_config.snippet_max_lines,
-                snippet_max_bytes: run_config.snippet_max_bytes,
-                run_argv0,
-                expected: scenario.expect.clone(),
-                run_id: None,
-                manifest_ref: None,
-                stdout_ref: None,
-                stderr_ref: None,
-                observed_exit_code: None,
-                observed_exit_signal: None,
-                observed_timed_out: false,
-                pass: false,
-                failures: failures.clone(),
-                command_line,
-                stdout_snippet: String::new(),
-                stderr_snippet: String::new(),
-            });
+            if reportable {
+                outcomes.push(ScenarioOutcome {
+                    scenario_id: scenario.id.clone(),
+                    publish: scenario.publish,
+                    argv,
+                    env: run_config.env.clone(),
+                    seed_dir: run_config.seed_dir.clone(),
+                    cwd: run_config.cwd.clone(),
+                    timeout_seconds: run_config.timeout_seconds,
+                    net_mode: run_config.net_mode.clone(),
+                    no_sandbox: run_config.no_sandbox,
+                    no_strace: run_config.no_strace,
+                    snippet_max_lines: run_config.snippet_max_lines,
+                    snippet_max_bytes: run_config.snippet_max_bytes,
+                    run_argv0,
+                    expected: scenario.expect.clone(),
+                    run_id: None,
+                    manifest_ref: None,
+                    stdout_ref: None,
+                    stderr_ref: None,
+                    observed_exit_code: None,
+                    observed_exit_signal: None,
+                    observed_timed_out: false,
+                    pass: false,
+                    failures: failures.clone(),
+                    command_line,
+                    stdout_snippet: String::new(),
+                    stderr_snippet: String::new(),
+                });
+            }
             index_entries.insert(
                 scenario.id.clone(),
                 ScenarioIndexEntry {
@@ -725,34 +859,36 @@ pub fn run_scenarios(
             eprintln!("scenario {} failed: {}", scenario.id, failures.join("; "));
         }
 
-        outcomes.push(ScenarioOutcome {
-            scenario_id: scenario.id.clone(),
-            publish: scenario.publish,
-            argv: scenario.argv.clone(),
-            env: run_config.env.clone(),
-            seed_dir: run_config.seed_dir.clone(),
-            cwd: run_config.cwd.clone(),
-            timeout_seconds: run_config.timeout_seconds,
-            net_mode: run_config.net_mode.clone(),
-            no_sandbox: run_config.no_sandbox,
-            no_strace: run_config.no_strace,
-            snippet_max_lines: run_config.snippet_max_lines,
-            snippet_max_bytes: run_config.snippet_max_bytes,
-            run_argv0,
-            expected: scenario.expect.clone(),
-            run_id: Some(run_id),
-            manifest_ref: Some(manifest_ref),
-            stdout_ref: Some(stdout_ref),
-            stderr_ref: Some(stderr_ref),
-            observed_exit_code,
-            observed_exit_signal,
-            observed_timed_out,
-            pass,
-            failures: failures.clone(),
-            command_line,
-            stdout_snippet,
-            stderr_snippet,
-        });
+        if reportable {
+            outcomes.push(ScenarioOutcome {
+                scenario_id: scenario.id.clone(),
+                publish: scenario.publish,
+                argv: scenario.argv.clone(),
+                env: run_config.env.clone(),
+                seed_dir: run_config.seed_dir.clone(),
+                cwd: run_config.cwd.clone(),
+                timeout_seconds: run_config.timeout_seconds,
+                net_mode: run_config.net_mode.clone(),
+                no_sandbox: run_config.no_sandbox,
+                no_strace: run_config.no_strace,
+                snippet_max_lines: run_config.snippet_max_lines,
+                snippet_max_bytes: run_config.snippet_max_bytes,
+                run_argv0,
+                expected: scenario.expect.clone(),
+                run_id: Some(run_id),
+                manifest_ref: Some(manifest_ref),
+                stdout_ref: Some(stdout_ref),
+                stderr_ref: Some(stderr_ref),
+                observed_exit_code,
+                observed_exit_signal,
+                observed_timed_out,
+                pass,
+                failures: failures.clone(),
+                command_line,
+                stdout_snippet,
+                stderr_snippet,
+            });
+        }
         index_entries.insert(
             scenario.id.clone(),
             ScenarioIndexEntry {
@@ -778,7 +914,7 @@ pub fn run_scenarios(
     let fail_count = outcomes.len() - pass_count;
     if verbose {
         eprintln!(
-            "scenario run summary: {} total, {} passed, {} failed",
+            "examples report summary: {} total, {} passed, {} failed",
             outcomes.len(),
             pass_count,
             fail_count
@@ -855,7 +991,7 @@ pub fn build_coverage_ledger(
     scenarios_path: &Path,
     display_root: Option<&Path>,
 ) -> Result<CoverageLedger> {
-    let plan = load_plan(scenarios_path)?;
+    let plan = load_plan(scenarios_path, doc_pack_root)?;
     if let Some(plan_binary) = plan.binary.as_deref() {
         if plan_binary != binary_name {
             return Err(anyhow!(
@@ -1227,14 +1363,22 @@ fn prepare_verification_root(
 
     let inventory_root = root.join("inventory");
     let scenarios_root = root.join("scenarios");
+    let enrich_root = root.join("enrich");
     fs::create_dir_all(inventory_root.join("scenarios"))
         .with_context(|| format!("create {}", inventory_root.display()))?;
     fs::create_dir_all(&scenarios_root)
         .with_context(|| format!("create {}", scenarios_root.display()))?;
+    fs::create_dir_all(&enrich_root)
+        .with_context(|| format!("create {}", enrich_root.display()))?;
 
     let plan_src = doc_pack_root.join("scenarios").join("plan.json");
     let plan_dest = scenarios_root.join("plan.json");
     fs::copy(&plan_src, &plan_dest).with_context(|| format!("copy {}", plan_src.display()))?;
+
+    let semantics_src = doc_pack_root.join("enrich").join("semantics.json");
+    let semantics_dest = enrich_root.join("semantics.json");
+    fs::copy(&semantics_src, &semantics_dest)
+        .with_context(|| format!("copy {}", semantics_src.display()))?;
 
     let staged_surface = staging_root
         .map(|root| root.join("inventory").join("surface.json"))
@@ -1926,10 +2070,9 @@ fn bounded_snippet(text: &str, max_lines: usize, max_bytes: usize) -> String {
     }
     let mut out = String::new();
     let mut truncated = false;
-    let mut lines = 0usize;
 
-    for chunk in text.split_inclusive('\n') {
-        if lines >= max_lines {
+    for (line_idx, chunk) in text.split_inclusive('\n').enumerate() {
+        if line_idx >= max_lines {
             truncated = true;
             break;
         }
@@ -1940,7 +2083,6 @@ fn bounded_snippet(text: &str, max_lines: usize, max_bytes: usize) -> String {
             break;
         }
         out.push_str(chunk);
-        lines += 1;
     }
 
     if !truncated && out.len() < text.len() {
@@ -1961,7 +2103,7 @@ fn bounded_snippet(text: &str, max_lines: usize, max_bytes: usize) -> String {
     out
 }
 
-fn validate_scenario_defaults(defaults: &ScenarioDefaults) -> Result<()> {
+fn validate_scenario_defaults(defaults: &ScenarioDefaults, doc_pack_root: &Path) -> Result<()> {
     if let Some(timeout_seconds) = defaults.timeout_seconds {
         if !timeout_seconds.is_finite() || timeout_seconds < 0.0 {
             return Err(anyhow!("defaults.timeout_seconds must be >= 0"));
@@ -1981,6 +2123,13 @@ fn validate_scenario_defaults(defaults: &ScenarioDefaults) -> Result<()> {
             .any(|component| matches!(component, std::path::Component::ParentDir))
         {
             return Err(anyhow!("defaults.seed_dir must not contain '..'"));
+        }
+        let resolved = doc_pack_root.join(trimmed);
+        if !resolved.is_dir() {
+            return Err(anyhow!(
+                "defaults.seed_dir does not exist at {}",
+                resolved.display()
+            ));
         }
     }
     if let Some(cwd) = defaults.cwd.as_deref() {
@@ -2111,11 +2260,11 @@ fn validate_scenario_spec(scenario: &ScenarioSpec) -> Result<()> {
             return Err(anyhow!("covers entries must not be empty"));
         }
     }
-    let tier = scenario.coverage_tier.as_deref().unwrap_or("acceptance");
-    if !scenario.coverage_ignore && !scenario.covers.is_empty() && tier != "rejection" {
-        if scenario.expect.exit_code != Some(0) {
+    if !scenario.coverage_ignore && !scenario.covers.is_empty() {
+        let has_argv = scenario.argv.iter().any(|token| !token.trim().is_empty());
+        if !has_argv {
             return Err(anyhow!(
-                "scenarios that cover items must set expect.exit_code=0 (coverage_tier {tier:?})"
+                "scenarios that cover items must include argv tokens"
             ));
         }
     }
@@ -2229,7 +2378,7 @@ fn materialize_inline_seed(
                     .as_ref()
                     .ok_or_else(|| anyhow!("seed file {:?} missing contents", rel_path))?;
                 total_bytes = total_bytes
-                    .checked_add(contents.as_bytes().len())
+                    .checked_add(contents.len())
                     .ok_or_else(|| anyhow!("seed size overflow"))?;
                 if total_bytes > MAX_SEED_TOTAL_BYTES {
                     return Err(anyhow!(
@@ -2254,7 +2403,7 @@ fn materialize_inline_seed(
                 let target_rel = normalize_seed_path(target)
                     .with_context(|| format!("symlink target {target:?}"))?;
                 total_bytes = total_bytes
-                    .checked_add(target_rel.as_bytes().len())
+                    .checked_add(target_rel.len())
                     .ok_or_else(|| anyhow!("seed size overflow"))?;
                 if total_bytes > MAX_SEED_TOTAL_BYTES {
                     return Err(anyhow!(
@@ -2308,7 +2457,7 @@ fn validate_seed_spec(seed: &ScenarioSeedSpec) -> Result<()> {
                     .as_ref()
                     .ok_or_else(|| anyhow!("seed file missing contents"))?;
                 total_bytes = total_bytes
-                    .checked_add(contents.as_bytes().len())
+                    .checked_add(contents.len())
                     .ok_or_else(|| anyhow!("seed size overflow"))?;
             }
             SeedEntryKind::Symlink => {
@@ -2326,7 +2475,7 @@ fn validate_seed_spec(seed: &ScenarioSeedSpec) -> Result<()> {
                 normalize_seed_path(target)
                     .with_context(|| format!("symlink target {target:?}"))?;
                 total_bytes = total_bytes
-                    .checked_add(target.as_bytes().len())
+                    .checked_add(target.len())
                     .ok_or_else(|| anyhow!("seed size overflow"))?;
             }
         }
@@ -2450,10 +2599,21 @@ fn shell_quote(arg: &str) -> String {
     if arg.is_empty() {
         return "''".to_string();
     }
-    let safe = arg.chars().all(|ch| match ch {
-        'a'..='z' | 'A'..='Z' | '0'..='9' => true,
-        '_' | '-' | '.' | '/' | ':' | '@' | '+' | '=' => true,
-        _ => false,
+    let safe = arg.chars().all(|ch| {
+        matches!(
+            ch,
+            'a'..='z'
+                | 'A'..='Z'
+                | '0'..='9'
+                | '_'
+                | '-'
+                | '.'
+                | '/'
+                | ':'
+                | '@'
+                | '+'
+                | '='
+        )
     });
     if safe {
         return arg.to_string();
@@ -2512,6 +2672,7 @@ mod tests {
             default_env: BTreeMap::new(),
             defaults,
             coverage: None,
+            verification: VerificationPlan::default(),
             scenarios,
         }
     }
@@ -2580,8 +2741,8 @@ mod tests {
         let scenario = base_scenario();
         let mut plan = plan_with(vec![scenario.clone()], None);
         let config = effective_scenario_config(&plan, &scenario).unwrap();
-        assert!(config.env.get("LC_ALL").is_none());
-        assert!(config.env.get("LANG").is_none());
+        assert!(!config.env.contains_key("LC_ALL"));
+        assert!(!config.env.contains_key("LANG"));
 
         plan.default_env
             .insert("LC_ALL".to_string(), "C".to_string());
@@ -2615,6 +2776,16 @@ mod tests {
             plan.default_env.get("GIT_PAGER").map(String::as_str),
             Some("cat")
         );
+        let defaults = plan.defaults.as_ref().expect("defaults");
+        assert_eq!(defaults.seed_dir.as_deref(), Some("fixtures/empty"));
+        assert_eq!(defaults.cwd.as_deref(), Some("."));
+        assert_eq!(defaults.timeout_seconds, Some(3.0));
+        assert_eq!(defaults.net_mode.as_deref(), Some("off"));
+        assert_eq!(defaults.no_sandbox, Some(false));
+        assert_eq!(defaults.no_strace, Some(true));
+        assert_eq!(defaults.snippet_max_lines, Some(12));
+        assert_eq!(defaults.snippet_max_bytes, Some(1024));
+        assert!(plan.verification.queue.is_empty());
 
         let expected = [
             ("help--help", "--help"),
@@ -2634,12 +2805,13 @@ mod tests {
             assert!(!scenario.publish);
             assert!(scenario.coverage_ignore);
             assert_eq!(scenario.argv, vec![(*expected_arg).to_string()]);
-            assert_eq!(scenario.timeout_seconds, Some(3.0));
-            assert_eq!(scenario.net_mode.as_deref(), Some("off"));
-            assert_eq!(scenario.no_sandbox, Some(false));
-            assert_eq!(scenario.no_strace, Some(true));
-            assert_eq!(scenario.snippet_max_lines, Some(12));
-            assert_eq!(scenario.snippet_max_bytes, Some(1024));
+            assert!(scenario.timeout_seconds.is_none());
+            assert!(scenario.net_mode.is_none());
+            assert!(scenario.no_sandbox.is_none());
+            assert!(scenario.no_strace.is_none());
+            assert!(scenario.snippet_max_lines.is_none());
+            assert!(scenario.snippet_max_bytes.is_none());
+            assert_eq!(scenario.expect, ScenarioExpect::default());
         }
     }
 

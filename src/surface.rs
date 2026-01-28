@@ -192,7 +192,7 @@ pub fn apply_surface_discovery(
     let plan_evidence = paths.evidence_from_path(&plan_path)?;
     let mut plan = None;
     let mut help_scenarios_present = false;
-    match scenarios::load_plan_if_exists(&plan_path) {
+    match scenarios::load_plan_if_exists(&plan_path, paths.root()) {
         Ok(Some(loaded)) => {
             discovery.push(SurfaceDiscovery {
                 code: "scenarios_plan".to_string(),

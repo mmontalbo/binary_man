@@ -7,11 +7,7 @@ use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-#[derive(Debug, Clone)]
-pub struct PlanStatus {
-    pub present: bool,
-    pub stale: bool,
-}
+const TRIAGE_PREVIEW_LIMIT: usize = 10;
 
 #[derive(Deserialize)]
 struct RunsIndex {
@@ -54,6 +50,13 @@ struct SemanticsLoadResult {
     error: Option<SemanticsLoadError>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum HelpUsageEvidenceState {
+    MissingRuns,
+    NoUsableHelp,
+    UsableHelp,
+}
+
 struct EvalResult {
     requirements: Vec<enrich::RequirementStatus>,
     missing_artifacts: Vec<String>,
@@ -63,6 +66,7 @@ struct EvalResult {
     coverage_next_action: Option<enrich::NextAction>,
     verification_next_action: Option<enrich::NextAction>,
     man_semantics_next_action: Option<enrich::NextAction>,
+    man_usage_next_action: Option<enrich::NextAction>,
 }
 
 pub fn build_status_summary(
@@ -71,11 +75,12 @@ pub fn build_status_summary(
     config: &enrich::EnrichConfig,
     config_exists: bool,
     lock_status: enrich::LockStatus,
-    plan_status: PlanStatus,
+    plan_status: enrich::PlanStatus,
+    include_full: bool,
     force_used: bool,
 ) -> Result<enrich::StatusSummary> {
     let paths = enrich::DocPackPaths::new(doc_pack_root.to_path_buf());
-    let mut eval = evaluate_requirements(&paths, binary_name, config, &lock_status)?;
+    let mut eval = evaluate_requirements(&paths, binary_name, config, &lock_status, include_full)?;
     let mut warnings = Vec::new();
     if !config_exists {
         let config_rel = paths.rel_path(&paths.config_path())?;
@@ -111,11 +116,12 @@ pub fn build_status_summary(
     );
     let scenario_failure_next_action =
         if gating_ok && first_unmet_is_scenarios && !scenario_failures.is_empty() {
-            let plan_content = scenarios::load_plan_if_exists(&paths.scenarios_plan_path())
-                .ok()
-                .flatten()
-                .and_then(|plan| serde_json::to_string_pretty(&plan).ok())
-                .unwrap_or_else(|| scenarios::plan_stub(binary_name));
+            let plan_content =
+                scenarios::load_plan_if_exists(&paths.scenarios_plan_path(), paths.root())
+                    .ok()
+                    .flatten()
+                    .and_then(|plan| serde_json::to_string_pretty(&plan).ok())
+                    .unwrap_or_else(|| scenarios::plan_stub(binary_name));
             Some(enrich::NextAction::Edit {
                 path: "scenarios/plan.json".to_string(),
                 content: plan_content,
@@ -128,6 +134,11 @@ pub fn build_status_summary(
         next_action_for_missing_inputs(&paths, binary_name)
     } else if config_exists && eval.man_semantics_next_action.is_some() {
         eval.man_semantics_next_action.clone().unwrap()
+    } else if gating_ok
+        && matches!(first_unmet.clone(), Some(enrich::RequirementId::ManPage))
+        && eval.man_usage_next_action.is_some()
+    {
+        eval.man_usage_next_action.clone().unwrap()
     } else if gating_ok
         && matches!(first_unmet.clone(), Some(enrich::RequirementId::Coverage))
         && eval.coverage_next_action.is_some()
@@ -165,6 +176,7 @@ pub fn build_status_summary(
         generated_at_epoch_ms: enrich::now_epoch_ms()?,
         binary_name: binary_name.map(|name| name.to_string()),
         lock: lock_status,
+        plan: plan_status.clone(),
         requirements: eval.requirements,
         missing_artifacts: eval.missing_artifacts,
         blockers: eval.blockers,
@@ -194,6 +206,68 @@ fn read_man_meta(paths: &enrich::DocPackPaths) -> Option<ManMeta> {
     }
     let bytes = std::fs::read(&meta_path).ok()?;
     serde_json::from_slice(&bytes).ok()
+}
+
+#[derive(Deserialize, Default)]
+struct HelpScenarioEvidence {
+    #[serde(default)]
+    scenario_id: String,
+    #[serde(default)]
+    argv: Vec<String>,
+    #[serde(default)]
+    timed_out: bool,
+    #[serde(default)]
+    stdout: String,
+}
+
+fn help_usage_evidence_state(paths: &enrich::DocPackPaths) -> HelpUsageEvidenceState {
+    let scenarios_dir = paths.inventory_scenarios_dir();
+    let Ok(entries) = std::fs::read_dir(&scenarios_dir) else {
+        return HelpUsageEvidenceState::MissingRuns;
+    };
+    let mut saw_any = false;
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        if path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| !ext.eq_ignore_ascii_case("json"))
+            .unwrap_or(true)
+        {
+            continue;
+        }
+        saw_any = true;
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
+        let Ok(evidence) = serde_json::from_slice::<HelpScenarioEvidence>(&bytes) else {
+            continue;
+        };
+        if !evidence.scenario_id.starts_with("help--") {
+            continue;
+        }
+        if evidence.timed_out || evidence.stdout.is_empty() {
+            continue;
+        }
+        let Some(last) = evidence.argv.last() else {
+            continue;
+        };
+        if last.eq_ignore_ascii_case("--help")
+            || last.eq_ignore_ascii_case("--usage")
+            || last.eq_ignore_ascii_case("-?")
+        {
+            return HelpUsageEvidenceState::UsableHelp;
+        }
+    }
+
+    if saw_any {
+        HelpUsageEvidenceState::NoUsableHelp
+    } else {
+        HelpUsageEvidenceState::MissingRuns
+    }
 }
 
 fn build_lens_summary(
@@ -327,6 +401,23 @@ fn normalize_lens_status(raw: &str) -> String {
     .to_string()
 }
 
+fn preview_ids(ids: &[String]) -> Vec<String> {
+    ids.iter().take(TRIAGE_PREVIEW_LIMIT).cloned().collect()
+}
+
+fn format_preview(count: usize, preview: &[String]) -> String {
+    if count == 0 {
+        return String::new();
+    }
+    if count <= preview.len() {
+        return preview.join(", ");
+    }
+    if preview.is_empty() {
+        return format!("{count} ids");
+    }
+    format!("{count} ids (preview: {})", preview.join(", "))
+}
+
 fn load_surface_inventory_state(
     paths: &enrich::DocPackPaths,
     missing_artifacts: &mut Vec<String>,
@@ -371,7 +462,7 @@ fn load_scenario_plan_state(
 ) -> Result<ScenarioPlanLoadResult> {
     let plan_path = paths.scenarios_plan_path();
     let evidence = paths.evidence_from_path(&plan_path)?;
-    match scenarios::load_plan_if_exists(&plan_path) {
+    match scenarios::load_plan_if_exists(&plan_path, paths.root()) {
         Ok(Some(plan)) => Ok(ScenarioPlanLoadResult {
             evidence,
             plan: Some(plan),
@@ -434,6 +525,7 @@ fn evaluate_requirements(
     binary_name: Option<&str>,
     config: &enrich::EnrichConfig,
     lock_status: &enrich::LockStatus,
+    include_full: bool,
 ) -> Result<EvalResult> {
     let mut requirements = Vec::new();
     let mut missing_artifacts = Vec::new();
@@ -441,6 +533,7 @@ fn evaluate_requirements(
     let mut coverage_next_action = None;
     let mut verification_next_action = None;
     let mut man_semantics_next_action = None;
+    let mut man_usage_next_action = None;
 
     for req in enrich::normalized_requirements(config) {
         match req {
@@ -455,6 +548,7 @@ fn evaluate_requirements(
                             reason: "surface inventory missing".to_string(),
                             unverified_ids: Vec::new(),
                             unverified_count: None,
+                            verification: None,
                             evidence: vec![evidence],
                             blockers: Vec::new(),
                         });
@@ -474,6 +568,7 @@ fn evaluate_requirements(
                             reason: "surface inventory parse error".to_string(),
                             unverified_ids: Vec::new(),
                             unverified_count: None,
+                            verification: None,
                             evidence: vec![evidence],
                             blockers: vec![blocker],
                         });
@@ -493,6 +588,7 @@ fn evaluate_requirements(
                             reason: "surface inventory schema invalid".to_string(),
                             unverified_ids: Vec::new(),
                             unverified_count: None,
+                            verification: None,
                             evidence: vec![evidence],
                             blockers: vec![blocker],
                         });
@@ -545,6 +641,7 @@ fn evaluate_requirements(
                     reason,
                     unverified_ids: Vec::new(),
                     unverified_count: None,
+                    verification: None,
                     evidence: vec![evidence],
                     blockers: req_blockers,
                 });
@@ -661,7 +758,7 @@ fn evaluate_requirements(
 
                     uncovered_ids.sort();
                     if !uncovered_ids.is_empty() {
-                        if let Some(content) = coverage_stub_from_plan(&plan, &uncovered_ids) {
+                        if let Some(content) = coverage_stub_from_plan(plan, &uncovered_ids) {
                             coverage_next_action = Some(enrich::NextAction::Edit {
                                 path: "scenarios/plan.json".to_string(),
                                 content,
@@ -707,6 +804,7 @@ fn evaluate_requirements(
                     reason,
                     unverified_ids: Vec::new(),
                     unverified_count: None,
+                    verification: None,
                     evidence,
                     blockers: local_blockers,
                 });
@@ -726,15 +824,19 @@ fn evaluate_requirements(
                     .root()
                     .join(enrich::VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL);
                 let template_evidence = paths.evidence_from_path(&template_path)?;
+                let semantics_path = paths.semantics_path();
+                let semantics_evidence = paths.evidence_from_path(&semantics_path)?;
 
                 let mut evidence = vec![
                     surface_evidence.clone(),
                     scenarios_evidence.clone(),
                     template_evidence.clone(),
+                    semantics_evidence.clone(),
                 ];
                 let mut local_blockers = Vec::new();
                 let mut missing = Vec::new();
                 let mut unverified_ids = Vec::new();
+                let mut triage_summary: Option<enrich::VerificationTriageSummary> = None;
                 let verification_tier = config.verification_tier.as_deref().unwrap_or("accepted");
                 let tier_label = if verification_tier == "behavior" {
                     "behavior"
@@ -795,9 +897,107 @@ fn evaluate_requirements(
                         enrich::VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL
                     ));
                 }
+                if !semantics_path.is_file() {
+                    missing_artifacts.push(semantics_evidence.path.clone());
+                    missing
+                        .push("verification semantics missing (enrich/semantics.json)".to_string());
+                }
 
                 if let (Some(surface), Some(plan)) = (surface.as_ref(), plan.as_ref()) {
-                    if template_path.is_file() {
+                    let mut surface_ids = BTreeSet::new();
+                    let mut surface_evidence_map: BTreeMap<String, Vec<enrich::EvidenceRef>> =
+                        BTreeMap::new();
+                    for item in surface.items.iter().filter(|item| {
+                        matches!(item.kind.as_str(), "option" | "command" | "subcommand")
+                    }) {
+                        let id = item.id.trim();
+                        if id.is_empty() {
+                            continue;
+                        }
+                        surface_ids.insert(id.to_string());
+                        surface_evidence_map
+                            .entry(id.to_string())
+                            .or_default()
+                            .extend(item.evidence.iter().cloned());
+                    }
+
+                    let mut queue_ids = BTreeSet::new();
+                    let mut triaged_ids = BTreeSet::new();
+                    let mut discovered_untriaged_ids = Vec::new();
+                    let mut triaged_unverified_ids = Vec::new();
+                    let mut excluded = Vec::new();
+
+                    for entry in &plan.verification.queue {
+                        let id = entry.surface_id.trim();
+                        if id.is_empty() {
+                            continue;
+                        }
+                        queue_ids.insert(id.to_string());
+                        if entry.intent == scenarios::VerificationIntent::Exclude {
+                            let reason = entry.reason.as_deref().unwrap_or("").trim();
+                            excluded.push(enrich::VerificationExclusion {
+                                surface_id: id.to_string(),
+                                reason: reason.to_string(),
+                            });
+                            triaged_ids.insert(id.to_string());
+                            continue;
+                        }
+                        if intent_matches_verification_tier(entry.intent, verification_tier) {
+                            triaged_ids.insert(id.to_string());
+                        }
+                    }
+
+                    for id in surface_ids.iter() {
+                        if !triaged_ids.contains(id) {
+                            discovered_untriaged_ids.push(id.clone());
+                            if let Some(item_evidence) = surface_evidence_map.get(id) {
+                                evidence.extend(item_evidence.iter().cloned());
+                            }
+                        }
+                    }
+                    discovered_untriaged_ids.sort();
+
+                    let mut missing_surface_ids = Vec::new();
+                    for id in queue_ids.iter() {
+                        if !surface_ids.contains(id) {
+                            missing_surface_ids.push(id.clone());
+                        }
+                    }
+                    if !missing_surface_ids.is_empty() {
+                        local_blockers.push(enrich::Blocker {
+                            code: "verification_surface_missing".to_string(),
+                            message: format!(
+                                "verification queue surface_id missing from inventory: {}",
+                                missing_surface_ids.join(", ")
+                            ),
+                            evidence: vec![surface_evidence.clone(), scenarios_evidence.clone()],
+                            next_action: Some("fix scenarios/plan.json".to_string()),
+                        });
+                    }
+
+                    if (plan.verification.queue.is_empty() || !discovered_untriaged_ids.is_empty())
+                        && verification_next_action.is_none()
+                    {
+                        let content = serde_json::to_string_pretty(plan)
+                            .unwrap_or_else(|_| scenarios::plan_stub(binary_name));
+                        let reason = if plan.verification.queue.is_empty() {
+                            "add verification triage in scenarios/plan.json".to_string()
+                        } else {
+                            format!(
+                                "add verification triage for {}",
+                                discovered_untriaged_ids[0]
+                            )
+                        };
+                        verification_next_action = Some(enrich::NextAction::Edit {
+                            path: "scenarios/plan.json".to_string(),
+                            content,
+                            reason,
+                        });
+                    }
+
+                    let mut ledger_entries: BTreeMap<String, scenarios::VerificationEntry> =
+                        BTreeMap::new();
+                    if template_path.is_file() && semantics_path.is_file() {
                         let verification_binary = binary_name
                             .map(|name| name.to_string())
                             .or_else(|| surface.binary_name.clone())
@@ -813,34 +1013,126 @@ fn evaluate_requirements(
                             Some(paths.root()),
                         ) {
                             Ok(ledger) => {
-                                unverified_ids = if verification_tier == "behavior" {
-                                    ledger.behavior_unverified_ids.clone()
-                                } else {
-                                    ledger.unverified_ids.clone()
-                                };
-                                for entry in ledger.entries.iter().filter(|entry| {
-                                    if verification_tier == "behavior" {
-                                        entry.behavior_status != "verified"
-                                    } else {
-                                        entry.status != "verified"
-                                    }
-                                }) {
-                                    evidence.extend(entry.evidence.iter().cloned());
+                                for entry in ledger.entries {
+                                    ledger_entries.insert(entry.surface_id.clone(), entry);
                                 }
-                                if !unverified_ids.is_empty() {
-                                    if let Some(content) = verification_stub_from_plan(
-                                        &plan,
-                                        &unverified_ids,
+
+                                let mut seen = BTreeSet::new();
+                                for entry in &plan.verification.queue {
+                                    let surface_id = entry.surface_id.trim();
+                                    if surface_id.is_empty() {
+                                        continue;
+                                    }
+                                    if entry.intent == scenarios::VerificationIntent::Exclude {
+                                        continue;
+                                    }
+                                    if !intent_matches_verification_tier(
+                                        entry.intent,
                                         verification_tier,
                                     ) {
-                                        verification_next_action = Some(enrich::NextAction::Edit {
-                                            path: "scenarios/plan.json".to_string(),
-                                            content,
-                                            reason: format!(
-                                                "add a {tier_label} scenario for {}",
-                                                unverified_ids[0]
-                                            ),
-                                        });
+                                        continue;
+                                    }
+                                    let (status, _, _) = verification_entry_state(
+                                        ledger_entries.get(surface_id),
+                                        entry.intent,
+                                    );
+                                    let is_verified = status == "verified";
+                                    if !is_verified && seen.insert(surface_id.to_string()) {
+                                        triaged_unverified_ids.push(surface_id.to_string());
+                                        unverified_ids.push(surface_id.to_string());
+                                        if let Some(entry) = ledger_entries.get(surface_id) {
+                                            evidence.extend(entry.evidence.iter().cloned());
+                                        }
+                                    }
+                                }
+
+                                if verification_next_action.is_none()
+                                    && !plan.verification.queue.is_empty()
+                                    && discovered_untriaged_ids.is_empty()
+                                    && local_blockers.is_empty()
+                                    && missing.is_empty()
+                                {
+                                    for (idx, entry) in plan.verification.queue.iter().enumerate() {
+                                        if entry.intent == scenarios::VerificationIntent::Exclude {
+                                            continue;
+                                        }
+                                        if !intent_matches_verification_tier(
+                                            entry.intent,
+                                            verification_tier,
+                                        ) {
+                                            continue;
+                                        }
+                                        let surface_id = entry.surface_id.trim();
+                                        if surface_id.is_empty() {
+                                            continue;
+                                        }
+                                        let (status, scenario_ids, scenario_paths) =
+                                            verification_entry_state(
+                                                ledger_entries.get(surface_id),
+                                                entry.intent,
+                                            );
+                                        if scenario_ids.is_empty() {
+                                            if queue_entry_has_invocation(entry) {
+                                                if let Some(content) =
+                                                    verification_stub_from_queue(plan, entry)
+                                                {
+                                                    verification_next_action =
+                                                        Some(enrich::NextAction::Edit {
+                                                            path: "scenarios/plan.json"
+                                                                .to_string(),
+                                                            content,
+                                                            reason: format!(
+                                                                "add a {} scenario for {surface_id}",
+                                                                intent_label(entry.intent)
+                                                            ),
+                                                        });
+                                                }
+                                            } else if let Some(content) =
+                                                verification_invocation_stub_from_queue(
+                                                    plan, idx, surface_id,
+                                                )
+                                            {
+                                                verification_next_action =
+                                                    Some(enrich::NextAction::Edit {
+                                                        path: "scenarios/plan.json".to_string(),
+                                                        content,
+                                                        reason: format!(
+                                                            "add acceptance_invocation for {surface_id}"
+                                                        ),
+                                                    });
+                                            }
+                                            break;
+                                        }
+                                        if scenario_paths.is_empty() {
+                                            let root = paths.root().display();
+                                            verification_next_action =
+                                                Some(enrich::NextAction::Command {
+                                                    command: format!(
+                                                        "bman validate --doc-pack {root} && bman plan --doc-pack {root} && bman apply --doc-pack {root}"
+                                                    ),
+                                                    reason: format!(
+                                                        "run {} verification for {surface_id}",
+                                                        intent_label(entry.intent)
+                                                    ),
+                                                });
+                                            break;
+                                        }
+                                        if status != "verified" {
+                                            let content = serde_json::to_string_pretty(plan)
+                                                .unwrap_or_else(|_| {
+                                                    scenarios::plan_stub(binary_name)
+                                                });
+                                            verification_next_action =
+                                                Some(enrich::NextAction::Edit {
+                                                    path: "scenarios/plan.json".to_string(),
+                                                    content,
+                                                    reason: format!(
+                                                        "fix {} scenario for {surface_id}",
+                                                        intent_label(entry.intent)
+                                                    ),
+                                                });
+                                            break;
+                                        }
                                     }
                                 }
                             }
@@ -858,6 +1150,26 @@ fn evaluate_requirements(
                             }
                         }
                     }
+
+                    let discovered_preview = preview_ids(&discovered_untriaged_ids);
+                    let triaged_preview = preview_ids(&triaged_unverified_ids);
+                    let summary = enrich::VerificationTriageSummary {
+                        discovered_untriaged_count: discovered_untriaged_ids.len(),
+                        discovered_untriaged_preview: discovered_preview,
+                        triaged_unverified_count: triaged_unverified_ids.len(),
+                        triaged_unverified_preview: triaged_preview,
+                        excluded_count: if excluded.is_empty() {
+                            None
+                        } else {
+                            Some(excluded.len())
+                        },
+                        excluded,
+                        discovered_untriaged_ids: include_full
+                            .then(|| discovered_untriaged_ids.clone()),
+                        triaged_unverified_ids: include_full
+                            .then(|| triaged_unverified_ids.clone()),
+                    };
+                    triage_summary = Some(summary);
                 }
 
                 enrich::dedupe_evidence_refs(&mut evidence);
@@ -871,14 +1183,40 @@ fn evaluate_requirements(
                         enrich::RequirementState::Unmet,
                         format!("verification inputs missing: {}", missing.join("; ")),
                     )
-                } else if !unverified_ids.is_empty() {
-                    (
-                        enrich::RequirementState::Unmet,
-                        format!(
-                            "unverified ids ({tier_label}): {}",
-                            unverified_ids.join(", ")
-                        ),
-                    )
+                } else if let Some(summary) = triage_summary.as_ref() {
+                    if plan
+                        .as_ref()
+                        .map(|plan| plan.verification.queue.is_empty())
+                        .unwrap_or(false)
+                    {
+                        (
+                            enrich::RequirementState::Unmet,
+                            "verification triage missing (queue empty)".to_string(),
+                        )
+                    } else if summary.discovered_untriaged_count > 0 {
+                        let preview = format_preview(
+                            summary.discovered_untriaged_count,
+                            &summary.discovered_untriaged_preview,
+                        );
+                        (
+                            enrich::RequirementState::Unmet,
+                            format!("triage missing for ids: {preview}"),
+                        )
+                    } else if !unverified_ids.is_empty() {
+                        let preview = format_preview(
+                            summary.triaged_unverified_count,
+                            &summary.triaged_unverified_preview,
+                        );
+                        (
+                            enrich::RequirementState::Unmet,
+                            format!("triaged ids unverified ({tier_label}): {preview}"),
+                        )
+                    } else {
+                        (
+                            enrich::RequirementState::Met,
+                            "verification complete".to_string(),
+                        )
+                    }
                 } else {
                     (
                         enrich::RequirementState::Met,
@@ -897,6 +1235,7 @@ fn evaluate_requirements(
                     } else {
                         Some(unverified_ids.len())
                     },
+                    verification: triage_summary,
                     evidence,
                     blockers: local_blockers,
                 });
@@ -972,6 +1311,7 @@ fn evaluate_requirements(
                     reason,
                     unverified_ids: Vec::new(),
                     unverified_count: None,
+                    verification: None,
                     evidence,
                     blockers: local_blockers,
                 });
@@ -1041,6 +1381,7 @@ fn evaluate_requirements(
                     reason,
                     unverified_ids: Vec::new(),
                     unverified_count: None,
+                    verification: None,
                     evidence,
                     blockers: local_blockers,
                 });
@@ -1064,6 +1405,7 @@ fn evaluate_requirements(
                             reason: "manifest missing".to_string(),
                             unverified_ids: Vec::new(),
                             unverified_count: None,
+                            verification: None,
                             evidence: vec![evidence],
                             blockers: vec![blocker],
                         });
@@ -1085,6 +1427,7 @@ fn evaluate_requirements(
                             reason: "semantics missing".to_string(),
                             unverified_ids: Vec::new(),
                             unverified_count: None,
+                            verification: None,
                             evidence: vec![semantics_evidence],
                             blockers: Vec::new(),
                         });
@@ -1102,6 +1445,7 @@ fn evaluate_requirements(
                             reason: "semantics invalid".to_string(),
                             unverified_ids: Vec::new(),
                             unverified_count: None,
+                            verification: None,
                             evidence: vec![semantics_evidence],
                             blockers: Vec::new(),
                         });
@@ -1129,6 +1473,24 @@ fn evaluate_requirements(
                 let evidence = paths.evidence_from_path(&man_path)?;
                 if !man_path.is_file() {
                     missing_artifacts.push(evidence.path.clone());
+                    if man_usage_next_action.is_none()
+                        && help_usage_evidence_state(paths) == HelpUsageEvidenceState::NoUsableHelp
+                    {
+                        let plan_content = scenarios::load_plan_if_exists(
+                            &paths.scenarios_plan_path(),
+                            paths.root(),
+                        )
+                        .ok()
+                        .flatten()
+                        .and_then(|plan| serde_json::to_string_pretty(&plan).ok())
+                        .unwrap_or_else(|| scenarios::plan_stub(Some(binary_name)));
+                        man_usage_next_action = Some(enrich::NextAction::Edit {
+                            path: "scenarios/plan.json".to_string(),
+                            content: plan_content,
+                            reason: "help scenarios produced no usable usage text; update help scenarios or semantics"
+                                .to_string(),
+                        });
+                    }
                     let mut evidence = vec![evidence];
                     if multi_command {
                         evidence.push(surface_evidence.clone());
@@ -1139,6 +1501,7 @@ fn evaluate_requirements(
                         reason: "man page missing".to_string(),
                         unverified_ids: Vec::new(),
                         unverified_count: None,
+                        verification: None,
                         evidence,
                         blockers: Vec::new(),
                     });
@@ -1190,6 +1553,7 @@ fn evaluate_requirements(
                                     reason: "man metadata parse error".to_string(),
                                     unverified_ids: Vec::new(),
                                     unverified_count: None,
+                                    verification: None,
                                     evidence: requirement_evidence,
                                     blockers: vec![blocker],
                                 });
@@ -1201,40 +1565,41 @@ fn evaluate_requirements(
                     };
 
                     let lock_fresh = lock_status.present && !lock_status.stale;
-                    let (mut status, mut reason, mut local_blockers) = if meta.is_none() {
-                        missing_artifacts.push(meta_evidence.path.clone());
-                        (
-                            enrich::RequirementState::Unmet,
-                            "man metadata missing".to_string(),
-                            Vec::new(),
-                        )
-                    } else if lock_fresh {
-                        let meta = meta.as_ref().expect("meta present");
-                        let lock_hash = lock_status.inputs_hash.as_deref();
-                        let stale = match (meta.inputs_hash.as_deref(), lock_hash) {
-                            (Some(meta_hash), Some(lock_hash)) => meta_hash != lock_hash,
-                            (None, Some(_)) => true,
-                            _ => false,
-                        };
-                        if stale {
+                    let (mut status, mut reason, mut local_blockers) = match meta.as_ref() {
+                        None => {
+                            missing_artifacts.push(meta_evidence.path.clone());
                             (
                                 enrich::RequirementState::Unmet,
-                                "man outputs stale relative to lock".to_string(),
-                                Vec::new(),
-                            )
-                        } else {
-                            (
-                                enrich::RequirementState::Met,
-                                "man page present".to_string(),
+                                "man metadata missing".to_string(),
                                 Vec::new(),
                             )
                         }
-                    } else {
-                        (
+                        Some(meta) if lock_fresh => {
+                            let lock_hash = lock_status.inputs_hash.as_deref();
+                            let stale = match (meta.inputs_hash.as_deref(), lock_hash) {
+                                (Some(meta_hash), Some(lock_hash)) => meta_hash != lock_hash,
+                                (None, Some(_)) => true,
+                                _ => false,
+                            };
+                            if stale {
+                                (
+                                    enrich::RequirementState::Unmet,
+                                    "man outputs stale relative to lock".to_string(),
+                                    Vec::new(),
+                                )
+                            } else {
+                                (
+                                    enrich::RequirementState::Met,
+                                    "man page present".to_string(),
+                                    Vec::new(),
+                                )
+                            }
+                        }
+                        Some(_) => (
                             enrich::RequirementState::Met,
                             "man page present".to_string(),
                             Vec::new(),
-                        )
+                        ),
                     };
 
                     if status == enrich::RequirementState::Met && lock_fresh {
@@ -1279,6 +1644,7 @@ fn evaluate_requirements(
                         reason,
                         unverified_ids: Vec::new(),
                         unverified_count: None,
+                        verification: None,
                         evidence: requirement_evidence,
                         blockers: local_blockers,
                     });
@@ -1317,6 +1683,7 @@ fn evaluate_requirements(
         coverage_next_action,
         verification_next_action,
         man_semantics_next_action,
+        man_usage_next_action,
     })
 }
 
@@ -1324,7 +1691,7 @@ fn load_scenario_failures(
     paths: &enrich::DocPackPaths,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<enrich::ScenarioFailure>> {
-    let plan = match scenarios::load_plan_if_exists(&paths.scenarios_plan_path()) {
+    let plan = match scenarios::load_plan_if_exists(&paths.scenarios_plan_path(), paths.root()) {
         Ok(Some(plan)) => plan,
         Ok(None) => return Ok(Vec::new()),
         Err(err) => {
@@ -1376,7 +1743,7 @@ fn determine_next_action(
     doc_pack_root: &Path,
     config_exists: bool,
     lock_status: &enrich::LockStatus,
-    plan_status: &PlanStatus,
+    plan_status: &enrich::PlanStatus,
     decision: &enrich::Decision,
     requirements: &[enrich::RequirementStatus],
 ) -> enrich::NextAction {
@@ -1485,7 +1852,7 @@ fn coverage_stub_from_plan(
         coverage_tier: Some("acceptance".to_string()),
         covers: vec![target_id],
         coverage_ignore: false,
-        expect: expect_exit_code(0),
+        expect: scenarios::ScenarioExpect::default(),
     });
     serde_json::to_string_pretty(&updated).ok()
 }
@@ -1509,20 +1876,106 @@ fn coverage_stub_id(plan: &scenarios::ScenarioPlan) -> String {
     }
 }
 
-fn verification_stub_from_plan(
+fn intent_matches_verification_tier(intent: scenarios::VerificationIntent, tier: &str) -> bool {
+    match tier {
+        "behavior" => intent == scenarios::VerificationIntent::VerifyBehavior,
+        _ => matches!(
+            intent,
+            scenarios::VerificationIntent::VerifyAccepted
+                | scenarios::VerificationIntent::VerifyBehavior
+        ),
+    }
+}
+
+fn intent_label(intent: scenarios::VerificationIntent) -> &'static str {
+    match intent {
+        scenarios::VerificationIntent::VerifyBehavior => "behavior",
+        scenarios::VerificationIntent::VerifyAccepted => "acceptance",
+        scenarios::VerificationIntent::Exclude => "exclude",
+    }
+}
+
+fn invocation_has_argv(invocation: &scenarios::VerificationInvocation) -> bool {
+    invocation.argv.iter().any(|token| !token.trim().is_empty())
+}
+
+fn queue_entry_has_invocation(entry: &scenarios::VerificationQueueEntry) -> bool {
+    entry
+        .acceptance_invocation
+        .as_ref()
+        .map(invocation_has_argv)
+        .unwrap_or(false)
+}
+
+fn verification_entry_state(
+    entry: Option<&scenarios::VerificationEntry>,
+    intent: scenarios::VerificationIntent,
+) -> (&str, &[String], &[String]) {
+    const EMPTY: &[String] = &[];
+    match (entry, intent) {
+        (Some(entry), scenarios::VerificationIntent::VerifyBehavior) => (
+            entry.behavior_status.as_str(),
+            entry.behavior_scenario_ids.as_slice(),
+            entry.behavior_scenario_paths.as_slice(),
+        ),
+        (Some(entry), scenarios::VerificationIntent::VerifyAccepted) => (
+            entry.status.as_str(),
+            entry.scenario_ids.as_slice(),
+            entry.scenario_paths.as_slice(),
+        ),
+        _ => ("unknown", EMPTY, EMPTY),
+    }
+}
+
+fn verification_invocation_stub_from_queue(
     plan: &scenarios::ScenarioPlan,
-    unverified_ids: &[String],
-    verification_tier: &str,
+    entry_index: usize,
+    surface_id: &str,
 ) -> Option<String> {
-    let target_id = unverified_ids.first()?.clone();
+    let mut updated = plan.clone();
+    let entry = updated.verification.queue.get_mut(entry_index)?;
+    let invocation =
+        entry
+            .acceptance_invocation
+            .get_or_insert_with(|| scenarios::VerificationInvocation {
+                scope: Vec::new(),
+                argv: Vec::new(),
+            });
+    if invocation.argv.iter().all(|token| token.trim().is_empty()) {
+        invocation.argv = vec![surface_id.to_string()];
+    }
+    serde_json::to_string_pretty(&updated).ok()
+}
+
+fn verification_stub_from_queue(
+    plan: &scenarios::ScenarioPlan,
+    entry: &scenarios::VerificationQueueEntry,
+) -> Option<String> {
+    let target_id = entry.surface_id.trim();
+    if target_id.is_empty() {
+        return None;
+    }
+    let invocation = entry.acceptance_invocation.as_ref()?;
+    if !invocation_has_argv(invocation) {
+        return None;
+    }
+    let coverage_tier = match entry.intent {
+        scenarios::VerificationIntent::VerifyBehavior => Some("behavior".to_string()),
+        scenarios::VerificationIntent::VerifyAccepted => Some("acceptance".to_string()),
+        scenarios::VerificationIntent::Exclude => return None,
+    };
+    let scope = invocation.scope.clone();
+    let argv: Vec<String> = invocation
+        .argv
+        .iter()
+        .filter(|token| !token.trim().is_empty())
+        .cloned()
+        .collect();
+    if argv.is_empty() {
+        return None;
+    }
     let mut updated = plan.clone();
     let stub_id = verification_stub_id(&updated);
-    let coverage_tier = if verification_tier == "behavior" {
-        Some("behavior".to_string())
-    } else {
-        Some("acceptance".to_string())
-    };
-    let (scope, argv) = stub_scope_and_argv(&target_id);
     updated.scenarios.push(scenarios::ScenarioSpec {
         id: stub_id,
         kind: scenarios::ScenarioKind::Behavior,
@@ -1540,9 +1993,9 @@ fn verification_stub_from_plan(
         snippet_max_lines: None,
         snippet_max_bytes: None,
         coverage_tier,
-        covers: vec![target_id],
+        covers: vec![target_id.to_string()],
         coverage_ignore: false,
-        expect: expect_exit_code(0),
+        expect: scenarios::ScenarioExpect::default(),
     });
     serde_json::to_string_pretty(&updated).ok()
 }
@@ -1564,27 +2017,6 @@ fn verification_stub_id(plan: &scenarios::ScenarioPlan) -> String {
         }
         idx += 1;
     }
-}
-
-fn empty_expect() -> scenarios::ScenarioExpect {
-    scenarios::ScenarioExpect {
-        exit_code: None,
-        exit_signal: None,
-        stdout_contains_all: Vec::new(),
-        stdout_contains_any: Vec::new(),
-        stdout_regex_all: Vec::new(),
-        stdout_regex_any: Vec::new(),
-        stderr_contains_all: Vec::new(),
-        stderr_contains_any: Vec::new(),
-        stderr_regex_all: Vec::new(),
-        stderr_regex_any: Vec::new(),
-    }
-}
-
-fn expect_exit_code(code: i32) -> scenarios::ScenarioExpect {
-    let mut expect = empty_expect();
-    expect.exit_code = Some(code);
-    expect
 }
 
 fn stub_scope_and_argv(surface_id: &str) -> (Vec<String>, Vec<String>) {
@@ -1611,20 +2043,25 @@ pub fn planned_actions_from_requirements(
 pub fn plan_status(
     lock: Option<&enrich::EnrichLock>,
     plan: Option<&enrich::EnrichPlan>,
-) -> PlanStatus {
+) -> enrich::PlanStatus {
+    let lock_inputs_hash = lock.map(|lock| lock.inputs_hash.clone());
     let Some(plan) = plan else {
-        return PlanStatus {
+        return enrich::PlanStatus {
             present: false,
             stale: false,
+            inputs_hash: None,
+            lock_inputs_hash,
         };
     };
     let stale = match lock {
         Some(lock) => plan.lock.inputs_hash != lock.inputs_hash,
         None => true,
     };
-    PlanStatus {
+    enrich::PlanStatus {
         present: true,
         stale,
+        inputs_hash: Some(plan.lock.inputs_hash.clone()),
+        lock_inputs_hash,
     }
 }
 
@@ -1640,7 +2077,8 @@ fn surface_is_multi_command(surface: &surface::SurfaceInventory) -> bool {
 }
 
 pub fn load_plan(doc_pack_root: &Path) -> Result<enrich::EnrichPlan> {
-    let path = enrich::plan_path(doc_pack_root);
+    let paths = enrich::DocPackPaths::new(doc_pack_root.to_path_buf());
+    let path = paths.plan_path();
     if !path.is_file() {
         return Err(anyhow!(
             "missing plan at {} (run `bman plan --doc-pack {}` first)",
@@ -1657,6 +2095,62 @@ pub fn load_plan(doc_pack_root: &Path) -> Result<enrich::EnrichPlan> {
         ));
     }
     Ok(plan)
+}
+
+pub fn write_plan(doc_pack_root: &Path, plan: &enrich::EnrichPlan) -> Result<()> {
+    let paths = enrich::DocPackPaths::new(doc_pack_root.to_path_buf());
+    let path = paths.plan_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).context("create enrich dir")?;
+    }
+    let text = serde_json::to_string_pretty(plan).context("serialize plan")?;
+    std::fs::write(&path, text.as_bytes()).with_context(|| format!("write {}", path.display()))?;
+    Ok(())
+}
+
+pub fn print_status(doc_pack_root: &Path, summary: &enrich::StatusSummary) {
+    println!("doc pack: {}", doc_pack_root.display());
+    if let Some(binary) = summary.binary_name.as_ref() {
+        println!("binary: {binary}");
+    }
+    let lock_state = if !summary.lock.present {
+        "missing"
+    } else if summary.lock.stale {
+        "stale"
+    } else {
+        "fresh"
+    };
+    println!("lock: {lock_state}");
+    println!("decision: {}", summary.decision);
+    if let Some(reason) = summary.decision_reason.as_ref() {
+        println!("decision detail: {reason}");
+    }
+    println!("requirements:");
+    for req in &summary.requirements {
+        println!("  - {}: {} ({})", req.id, req.status, req.reason);
+    }
+    if !summary.blockers.is_empty() {
+        println!("blockers:");
+        for blocker in &summary.blockers {
+            println!("  - {}: {}", blocker.code, blocker.message);
+        }
+    }
+    if !summary.missing_artifacts.is_empty() {
+        println!("missing: {}", summary.missing_artifacts.join(", "));
+    }
+    match &summary.next_action {
+        enrich::NextAction::Command { command, reason } => {
+            println!("next: {}", command);
+            println!("next detail: {reason}");
+        }
+        enrich::NextAction::Edit { path, reason, .. } => {
+            println!("next edit: {}", path);
+            println!("next detail: {reason}");
+        }
+    }
+    if !summary.warnings.is_empty() {
+        println!("warnings: {}", summary.warnings.join("; "));
+    }
 }
 
 #[cfg(test)]
@@ -1730,11 +2224,12 @@ mod tests {
             },
         };
         let plan = scenarios::ScenarioPlan {
-            schema_version: 2,
+            schema_version: 3,
             binary: None,
             default_env: BTreeMap::new(),
             defaults: None,
             coverage: None,
+            verification: scenarios::VerificationPlan::default(),
             scenarios: vec![scenario],
         };
         let plan_text = serde_json::to_string_pretty(&plan).unwrap();
@@ -1805,10 +2300,13 @@ mod tests {
                 stale: false,
                 inputs_hash: Some("hash".to_string()),
             },
-            PlanStatus {
+            enrich::PlanStatus {
                 present: true,
                 stale: false,
+                inputs_hash: Some("hash".to_string()),
+                lock_inputs_hash: Some("hash".to_string()),
             },
+            false,
             false,
         )
         .unwrap();
@@ -1828,60 +2326,5 @@ mod tests {
         assert_eq!(summary.decision, enrich::Decision::Complete);
 
         let _ = fs::remove_dir_all(&root);
-    }
-}
-
-pub fn write_plan(doc_pack_root: &Path, plan: &enrich::EnrichPlan) -> Result<()> {
-    let path = enrich::plan_path(doc_pack_root);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).context("create enrich dir")?;
-    }
-    let text = serde_json::to_string_pretty(plan).context("serialize plan")?;
-    std::fs::write(&path, text.as_bytes()).with_context(|| format!("write {}", path.display()))?;
-    Ok(())
-}
-
-pub fn print_status(doc_pack_root: &Path, summary: &enrich::StatusSummary) {
-    println!("doc pack: {}", doc_pack_root.display());
-    if let Some(binary) = summary.binary_name.as_ref() {
-        println!("binary: {binary}");
-    }
-    let lock_state = if !summary.lock.present {
-        "missing"
-    } else if summary.lock.stale {
-        "stale"
-    } else {
-        "fresh"
-    };
-    println!("lock: {lock_state}");
-    println!("decision: {}", summary.decision);
-    if let Some(reason) = summary.decision_reason.as_ref() {
-        println!("decision detail: {reason}");
-    }
-    println!("requirements:");
-    for req in &summary.requirements {
-        println!("  - {}: {} ({})", req.id, req.status, req.reason);
-    }
-    if !summary.blockers.is_empty() {
-        println!("blockers:");
-        for blocker in &summary.blockers {
-            println!("  - {}: {}", blocker.code, blocker.message);
-        }
-    }
-    if !summary.missing_artifacts.is_empty() {
-        println!("missing: {}", summary.missing_artifacts.join(", "));
-    }
-    match &summary.next_action {
-        enrich::NextAction::Command { command, reason } => {
-            println!("next: {}", command);
-            println!("next detail: {reason}");
-        }
-        enrich::NextAction::Edit { path, reason, .. } => {
-            println!("next edit: {}", path);
-            println!("next detail: {reason}");
-        }
-    }
-    if !summary.warnings.is_empty() {
-        println!("warnings: {}", summary.warnings.join("; "));
     }
 }
