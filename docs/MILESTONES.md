@@ -5,9 +5,9 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured “enrichment loop”
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M13 — Verification Triage + Verification By Default v1.
+Current focus: Side quest — Read-only doc-pack inspector TUI.
 
-## M13 — Verification Triage + Verification By Default v1 (in progress)
+## M13 — Verification Triage + Verification By Default v1 (done)
 
 Goal: Make verification the default gate for new packs, while keeping the loop
 safe and mechanically navigable for small LMs by requiring **explicit,
