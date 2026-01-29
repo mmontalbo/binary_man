@@ -1052,7 +1052,7 @@ fn evaluate_requirements(
                                     && local_blockers.is_empty()
                                     && missing.is_empty()
                                 {
-                                    for (idx, entry) in plan.verification.queue.iter().enumerate() {
+                                    for entry in plan.verification.queue.iter() {
                                         if entry.intent == scenarios::VerificationIntent::Exclude {
                                             continue;
                                         }
@@ -1072,32 +1072,16 @@ fn evaluate_requirements(
                                                 entry.intent,
                                             );
                                         if scenario_ids.is_empty() {
-                                            if queue_entry_has_invocation(entry) {
-                                                if let Some(content) =
-                                                    verification_stub_from_queue(plan, entry)
-                                                {
-                                                    verification_next_action =
-                                                        Some(enrich::NextAction::Edit {
-                                                            path: "scenarios/plan.json"
-                                                                .to_string(),
-                                                            content,
-                                                            reason: format!(
-                                                                "add a {} scenario for {surface_id}",
-                                                                intent_label(entry.intent)
-                                                            ),
-                                                        });
-                                                }
-                                            } else if let Some(content) =
-                                                verification_invocation_stub_from_queue(
-                                                    plan, idx, surface_id,
-                                                )
+                                            if let Some(content) =
+                                                verification_stub_from_queue(plan, entry)
                                             {
                                                 verification_next_action =
                                                     Some(enrich::NextAction::Edit {
                                                         path: "scenarios/plan.json".to_string(),
                                                         content,
                                                         reason: format!(
-                                                            "add acceptance_invocation for {surface_id}"
+                                                            "add a {} scenario for {surface_id}",
+                                                            intent_label(entry.intent)
                                                         ),
                                                     });
                                             }
@@ -1829,15 +1813,21 @@ fn coverage_stub_from_plan(
     plan: &scenarios::ScenarioPlan,
     uncovered_ids: &[String],
 ) -> Option<String> {
-    let target_id = uncovered_ids.first()?.clone();
+    let target_id = uncovered_ids.first()?.trim();
+    if target_id.is_empty() {
+        return None;
+    }
     let mut updated = plan.clone();
     let stub_id = coverage_stub_id(&updated);
-    let (scope, argv) = stub_scope_and_argv(&target_id);
+    let argv = if target_id.starts_with('-') {
+        vec![target_id.to_string()]
+    } else {
+        vec![target_id.to_string(), "--help".to_string()]
+    };
     updated.scenarios.push(scenarios::ScenarioSpec {
         id: stub_id,
         kind: scenarios::ScenarioKind::Behavior,
         publish: false,
-        scope,
         argv,
         env: BTreeMap::new(),
         seed_dir: None,
@@ -1850,7 +1840,7 @@ fn coverage_stub_from_plan(
         snippet_max_lines: None,
         snippet_max_bytes: None,
         coverage_tier: Some("acceptance".to_string()),
-        covers: vec![target_id],
+        covers: vec![target_id.to_string()],
         coverage_ignore: false,
         expect: scenarios::ScenarioExpect::default(),
     });
@@ -1895,18 +1885,6 @@ fn intent_label(intent: scenarios::VerificationIntent) -> &'static str {
     }
 }
 
-fn invocation_has_argv(invocation: &scenarios::VerificationInvocation) -> bool {
-    invocation.argv.iter().any(|token| !token.trim().is_empty())
-}
-
-fn queue_entry_has_invocation(entry: &scenarios::VerificationQueueEntry) -> bool {
-    entry
-        .acceptance_invocation
-        .as_ref()
-        .map(invocation_has_argv)
-        .unwrap_or(false)
-}
-
 fn verification_entry_state(
     entry: Option<&scenarios::VerificationEntry>,
     intent: scenarios::VerificationIntent,
@@ -1927,26 +1905,6 @@ fn verification_entry_state(
     }
 }
 
-fn verification_invocation_stub_from_queue(
-    plan: &scenarios::ScenarioPlan,
-    entry_index: usize,
-    surface_id: &str,
-) -> Option<String> {
-    let mut updated = plan.clone();
-    let entry = updated.verification.queue.get_mut(entry_index)?;
-    let invocation =
-        entry
-            .acceptance_invocation
-            .get_or_insert_with(|| scenarios::VerificationInvocation {
-                scope: Vec::new(),
-                argv: Vec::new(),
-            });
-    if invocation.argv.iter().all(|token| token.trim().is_empty()) {
-        invocation.argv = vec![surface_id.to_string()];
-    }
-    serde_json::to_string_pretty(&updated).ok()
-}
-
 fn verification_stub_from_queue(
     plan: &scenarios::ScenarioPlan,
     entry: &scenarios::VerificationQueueEntry,
@@ -1955,32 +1913,22 @@ fn verification_stub_from_queue(
     if target_id.is_empty() {
         return None;
     }
-    let invocation = entry.acceptance_invocation.as_ref()?;
-    if !invocation_has_argv(invocation) {
-        return None;
-    }
     let coverage_tier = match entry.intent {
         scenarios::VerificationIntent::VerifyBehavior => Some("behavior".to_string()),
         scenarios::VerificationIntent::VerifyAccepted => Some("acceptance".to_string()),
         scenarios::VerificationIntent::Exclude => return None,
     };
-    let scope = invocation.scope.clone();
-    let argv: Vec<String> = invocation
-        .argv
-        .iter()
-        .filter(|token| !token.trim().is_empty())
-        .cloned()
-        .collect();
-    if argv.is_empty() {
-        return None;
-    }
+    let argv = if target_id.starts_with('-') {
+        vec![target_id.to_string()]
+    } else {
+        vec![target_id.to_string(), "--help".to_string()]
+    };
     let mut updated = plan.clone();
-    let stub_id = verification_stub_id(&updated);
+    let stub_id = verification_stub_id(&updated, target_id);
     updated.scenarios.push(scenarios::ScenarioSpec {
         id: stub_id,
         kind: scenarios::ScenarioKind::Behavior,
         publish: false,
-        scope,
         argv,
         env: BTreeMap::new(),
         seed_dir: None,
@@ -2000,8 +1948,13 @@ fn verification_stub_from_queue(
     serde_json::to_string_pretty(&updated).ok()
 }
 
-fn verification_stub_id(plan: &scenarios::ScenarioPlan) -> String {
-    let base = "verification-todo";
+fn verification_stub_id(plan: &scenarios::ScenarioPlan, surface_id: &str) -> String {
+    let sanitized = sanitize_scenario_id(surface_id);
+    let base = format!("verify_{sanitized}");
+    unique_scenario_id(plan, &base)
+}
+
+fn unique_scenario_id(plan: &scenarios::ScenarioPlan, base: &str) -> String {
     if plan.scenarios.iter().all(|scenario| scenario.id != base) {
         return base.to_string();
     }
@@ -2019,12 +1972,22 @@ fn verification_stub_id(plan: &scenarios::ScenarioPlan) -> String {
     }
 }
 
-fn stub_scope_and_argv(surface_id: &str) -> (Vec<String>, Vec<String>) {
+fn sanitize_scenario_id(surface_id: &str) -> String {
     let trimmed = surface_id.trim();
-    if trimmed.is_empty() {
-        return (Vec::new(), Vec::new());
+    let mut out = String::with_capacity(trimmed.len());
+    for ch in trimmed.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
     }
-    (Vec::new(), vec![trimmed.to_string()])
+    let cleaned = out.trim_matches('_');
+    if cleaned.is_empty() {
+        "id".to_string()
+    } else {
+        cleaned.to_string()
+    }
 }
 
 pub fn planned_actions_from_requirements(
@@ -2195,7 +2158,6 @@ mod tests {
             id: "fail".to_string(),
             kind: scenarios::ScenarioKind::Behavior,
             publish: false,
-            scope: Vec::new(),
             argv: vec!["--help".to_string()],
             env: BTreeMap::new(),
             seed_dir: None,

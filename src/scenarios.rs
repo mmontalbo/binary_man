@@ -128,8 +128,6 @@ pub struct VerificationQueueEntry {
     #[serde(default)]
     pub prereqs: Vec<VerificationPrereq>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub acceptance_invocation: Option<VerificationInvocation>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
 }
 
@@ -150,15 +148,6 @@ pub enum VerificationPrereq {
     NeedsNetwork,
     NeedsInteractive,
     NeedsPrivilege,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-#[serde(deny_unknown_fields)]
-pub struct VerificationInvocation {
-    #[serde(default)]
-    pub scope: Vec<String>,
-    #[serde(default)]
-    pub argv: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -188,8 +177,6 @@ pub struct ScenarioSpec {
     pub kind: ScenarioKind,
     #[serde(default = "default_true")]
     pub publish: bool,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub scope: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub argv: Vec<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -460,6 +447,8 @@ pub struct VerificationLedger {
     pub behavior_verified_count: usize,
     pub behavior_unverified_count: usize,
     pub behavior_unverified_ids: Vec<String>,
+    pub excluded_count: usize,
+    pub excluded: Vec<VerificationExcludedEntry>,
     pub entries: Vec<VerificationEntry>,
     pub warnings: Vec<String>,
 }
@@ -479,6 +468,15 @@ pub struct VerificationEntry {
     pub behavior_scenario_paths: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<enrich::EvidenceRef>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct VerificationExcludedEntry {
+    pub surface_id: String,
+    #[serde(default)]
+    pub prereqs: Vec<VerificationPrereq>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1210,7 +1208,44 @@ pub fn build_verification_ledger(
 ) -> Result<VerificationLedger> {
     let template_sql = fs::read_to_string(template_path)
         .with_context(|| format!("read {}", template_path.display()))?;
+    let plan = load_plan(scenarios_path, doc_pack_root)?;
     let (query_root, rows) = run_verification_query(doc_pack_root, staging_root, &template_sql)?;
+
+    let mut excluded_by_id: BTreeMap<String, VerificationExcludedEntry> = BTreeMap::new();
+    for entry in &plan.verification.queue {
+        if entry.intent != VerificationIntent::Exclude {
+            continue;
+        }
+        let surface_id = entry.surface_id.trim();
+        if surface_id.is_empty() {
+            continue;
+        }
+        let excluded_entry = excluded_by_id
+            .entry(surface_id.to_string())
+            .or_insert_with(|| VerificationExcludedEntry {
+                surface_id: surface_id.to_string(),
+                prereqs: Vec::new(),
+                reason: None,
+            });
+        for prereq in &entry.prereqs {
+            if !excluded_entry.prereqs.contains(prereq) {
+                excluded_entry.prereqs.push(*prereq);
+            }
+        }
+        if excluded_entry.reason.is_none() {
+            if let Some(reason) = entry.reason.as_deref() {
+                let trimmed = reason.trim();
+                if !trimmed.is_empty() {
+                    excluded_entry.reason = Some(trimmed.to_string());
+                }
+            }
+        }
+    }
+    let excluded: Vec<VerificationExcludedEntry> = excluded_by_id.into_values().collect();
+    let excluded_ids: BTreeSet<String> = excluded
+        .iter()
+        .map(|entry| entry.surface_id.clone())
+        .collect();
 
     let mut surface_evidence_map: BTreeMap<String, Vec<enrich::EvidenceRef>> = BTreeMap::new();
     for item in surface
@@ -1250,12 +1285,12 @@ pub fn build_verification_ledger(
             .unwrap_or_else(|| "unknown".to_string());
         if status == "verified" {
             verified_count += 1;
-        } else {
+        } else if !excluded_ids.contains(&surface_id) {
             unverified_ids.push(surface_id.clone());
         }
         if behavior_status == "verified" {
             behavior_verified_count += 1;
-        } else {
+        } else if !excluded_ids.contains(&surface_id) {
             behavior_unverified_ids.push(surface_id.clone());
         }
 
@@ -1301,7 +1336,7 @@ pub fn build_verification_ledger(
         .as_millis();
 
     Ok(VerificationLedger {
-        schema_version: 2,
+        schema_version: 3,
         generated_at_epoch_ms,
         binary_name: binary_name.to_string(),
         scenarios_path: display_path(scenarios_path, display_root),
@@ -1316,6 +1351,8 @@ pub fn build_verification_ledger(
         behavior_verified_count,
         behavior_unverified_count: behavior_unverified_ids.len(),
         behavior_unverified_ids,
+        excluded_count: excluded.len(),
+        excluded,
         entries,
         warnings,
     })
@@ -1916,7 +1953,6 @@ struct ScenarioSeedSpecDigest {
 struct ScenarioDigestInput {
     argv: Vec<String>,
     expect: ScenarioExpect,
-    scope: Vec<String>,
     seed_dir: Option<String>,
     seed: Option<ScenarioSeedSpecDigest>,
     cwd: Option<String>,
@@ -2047,7 +2083,6 @@ fn scenario_digest(
     let payload = ScenarioDigestInput {
         argv: scenario.argv.clone(),
         expect: scenario.expect.clone(),
-        scope: scenario.scope.clone(),
         seed_dir: seed_dir.map(|value| value.to_string()),
         seed,
         cwd: cwd.map(|value| value.to_string()),
@@ -2176,14 +2211,8 @@ fn validate_scenario_spec(scenario: &ScenarioSpec) -> Result<()> {
     if id.contains('/') || id.contains('\\') {
         return Err(anyhow!("scenario id must not include path separators"));
     }
-    for scope in &scenario.scope {
-        let trimmed = scope.trim();
-        if trimmed.is_empty() {
-            return Err(anyhow!("scope entries must not be empty"));
-        }
-        if trimmed.contains('/') || trimmed.contains('\\') {
-            return Err(anyhow!("scope entries must not include path separators"));
-        }
+    if id.starts_with("help--") && scenario.kind != ScenarioKind::Help {
+        return Err(anyhow!("help-- scenario ids are reserved for kind=help"));
     }
     if scenario.seed_dir.is_some() && scenario.seed.is_some() {
         return Err(anyhow!("use only one of seed_dir or seed"));
@@ -2646,7 +2675,6 @@ mod tests {
             id: "scenario".to_string(),
             kind: ScenarioKind::Behavior,
             publish: false,
-            scope: Vec::new(),
             argv: vec!["--help".to_string()],
             env: BTreeMap::new(),
             seed_dir: None,
