@@ -90,9 +90,6 @@ Fixture-backed scenarios can declare:
 `scenarios/` directory), so doc packs can be moved without path fixes. Inline
 `seed` entries are materialized into an isolated per-run directory.
 
-Use `scope` on scenarios to record command paths for multi-command CLIs
-(e.g., `["commit"]` for `git commit`).
-
 Verification is enabled by default (opt-out by editing
 `enrich/config.json.requirements`). The workflow is triage-first:
 `scenarios/plan.json.verification.queue` must list each surface ID as

@@ -42,8 +42,6 @@ Deliverables:
     - `prereqs`: a small fixed enum list describing required setup, e.g.
       `needs_arg_value`, `needs_seed_fs`, `needs_repo`, `needs_network`,
       `needs_interactive`, `needs_privilege`.
-    - Optional `acceptance_invocation`: `{ "scope": [...], "argv": [...] }`
-      (presence makes the next acceptance scenario stub mechanically derivable).
   - `status --json` uses queue order to choose the next actionable item (no
     heuristic sorting), and produces a single deterministic next action:
     add triage → add scenario → rerun validate/plan/apply.
@@ -134,9 +132,9 @@ Deliverables:
   - Move runner env defaults (e.g. `LC_ALL`, `TERM`, `PAGER`) out of Rust and
     into pack-owned `scenarios/plan.json` defaults so the LM can see and edit
     them directly.
-  - Remove parsing conventions from Rust that encode CLI semantics (e.g. dotted
-    scope in `covers`, argv token heuristics) in favor of pack-owned structure
-    and/or pack-owned SQL interpretation.
+  - Remove parsing conventions from Rust that encode CLI semantics (e.g. argv
+    token heuristics) in favor of pack-owned structure and/or pack-owned SQL
+    interpretation.
 - Status diagnostics for small LMs:
   - Extend `status --json` to summarize which pack lenses/templates were used
     (used/empty/error + evidence refs) so the next edit target is mechanically
@@ -244,8 +242,6 @@ Design constraints (non-negotiable for this milestone):
 
 Deliverables:
 - Scenario plan extensions (strict schema; schema bump):
-  - Optional `scope` field on scenarios to support multi-command CLIs (e.g.
-    `["commit"]` for `git commit`).
   - Inline `seed` specification on scenarios so agents can define deterministic
     filesystem fixtures without authoring `fixtures/**` trees by hand. The tool
     materializes seeds into an isolated per-run directory.
@@ -271,9 +267,9 @@ Acceptance criteria:
 - `ls`: starting from help-derived surface, agents can mechanically add acceptance
   scenarios (with inline seeds where needed) until every surface ID is
   `verified` or explicitly `blocked` with evidence-linked reasons.
-- `git`: scoped IDs are supported so verification can target `commit.--amend`
-  style surface items without ambiguity (behavior verification may remain
-  blocked until multi-step scenarios are supported).
+- `git`: surface IDs like `commit.--amend` can be verified with explicit
+  scenarios; multi-step behaviors may remain blocked until multi-step scenarios
+  are supported.
 - No scoring; all verification decisions and blockers cite concrete evidence.
 
 ## M10 — Scenario-Only Evidence + Coverage v1 (done)

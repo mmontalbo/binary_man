@@ -28,6 +28,7 @@ Make `bman status --doc-pack . --json` report `decision: "complete"` by satisfyi
 ## What to trust (avoid wasted work)
 - Treat `bman status --doc-pack . --json` as the source of truth for what to do next.
 - `enrich/plan.out.json` is a snapshot; ignore it unless `status.plan.present=true` and `status.plan.stale=false`.
+- After editing `scenarios/plan.json` or `enrich/semantics.json`, the plan is stale until you rerun `validate → plan → apply`.
 - Ignore artifacts that are not required by `enrich/config.json.requirements`, even if they exist:
   - If `"verification"` is not required, ignore `verification_ledger.json`.
   - If `"coverage"` / `"coverage_ledger"` is not required, ignore `coverage_ledger.json`.
@@ -66,8 +67,9 @@ Default runner env lives in `scenarios/plan.json.default_env` (seeded by `bman i
   - `.render_summary.semantics_unmet` lists which extractions are missing according to `enrich/semantics.json`.
 - Read the evidence you are interpreting:
   - `inventory/scenarios/*.json` (help evidence lives here; especially help scenarios) for stdout/stderr.
-- Help scenarios (`scenario_id` starts with `help--`) are the only inputs for usage extraction and surface discovery; verification scenarios never drive usage or surface growth.
+- Help scenarios use the reserved `help--` id prefix; they are the only inputs for usage extraction and surface discovery, and verification scenarios never drive usage or surface growth.
 - There is no usage-lens fallback by default; if usage is missing, update help scenarios or semantics and rerun the loop.
+- `lens_summary` showing `options_from_scenarios.sql` as empty is normal for command-focused tools (e.g., git); it is not a failure if surface is met and decision is complete.
 - `man/examples_report.json` is only present when there are publishable examples; its absence is normal in fresh packs.
 - Fix by editing `enrich/semantics.json` (pack-owned semantics):
   - Prefer small changes: add/adjust a single regex/prefix rule, re-run the gated loop, then re-check status.
@@ -81,17 +83,18 @@ If `enrich/config.json.requirements` includes `"verification"` (default for new 
   - `surface_id` must match an id in `inventory/surface.json`.
   - `intent`: `verify_accepted | verify_behavior | exclude` (`exclude` requires `reason`).
   - `prereqs`: use only the allowed enums (e.g. `needs_arg_value`, `needs_seed_fs`, `needs_repo`, `needs_network`, `needs_interactive`, `needs_privilege`).
-  - Optional `acceptance_invocation` (`scope` + `argv`) seeds a scenario stub.
+- Status next actions will ask you to add a single scenario directly (no intermediate invocation step).
 - Do not exclude just because of `needs_seed_fs`; every scenario already runs with an empty fixture by default.
 - Follow `status --json` next_action deterministically: add triage → add scenario → rerun `validate → plan → apply`.
 - Status triage summaries are compact (counts + previews); the canonical surface list is `inventory/surface.json`.
 
 ### What counts as verifying an id
-- Scenario-to-surface mapping is explicit: every entry in `covers` must be the exact `surface_id` you are verifying (no argv/scope inference).
+- Scenario-to-surface mapping is explicit: every entry in `covers` must be the exact `surface_id` you are verifying (no argv inference).
 - Covers are ignored unless the scenario `argv` actually attempts the `surface_id` (token match rules are enforced by the verification SQL).
 - Always include an explicit token for the `surface_id` in `argv`; do not rely on short-flag clustering.
 - Use `coverage_tier` to declare intent (`"acceptance"` vs `"behavior"`); avoid `"rejection"` unless you are explicitly recording rejection evidence.
-- For existence verification, prefer `argv: ["<surface_id>"]` with `covers: ["<surface_id>"]`; do not force `expect.exit_code=0`.
+- For option existence, prefer `argv: ["<surface_id>"]` with `covers: ["<surface_id>"]`; do not force `expect.exit_code=0`.
+- For command/subcommand existence, prefer `argv: ["<surface_id>", "--help"]` before adding prereqs or excluding.
 - Classification is driven by `enrich/semantics.json.verification` rules (accepted vs rejected vs inconclusive); accepted existence can include missing-arg errors when semantics allow it.
 - Add stdout/stderr expectations only when they are clearly stable.
 
