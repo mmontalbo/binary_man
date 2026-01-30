@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "binary": null,
   "default_env": {
     "LC_ALL": "C",
@@ -21,7 +21,12 @@
   },
   "coverage": null,
   "verification": {
-    "queue": []
+    "queue": [],
+    "policy": {
+      "mode": "verify_all_options",
+      "max_new_runs_per_apply": 10,
+      "excludes": []
+    }
   },
   "scenarios": [
     {

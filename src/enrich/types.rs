@@ -201,6 +201,8 @@ pub struct PlanStatus {
 pub struct VerificationExclusion {
     pub surface_id: String,
     pub reason: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prereqs: Vec<String>,
 }
 
 /// Compact triage summary used in status output.
@@ -222,6 +224,16 @@ pub struct VerificationTriageSummary {
     pub discovered_untriaged_ids: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub triaged_unverified_ids: Option<Vec<String>>,
+}
+
+/// Verification plan snapshot summary emitted by `bman plan`.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct VerificationPlanSummary {
+    pub target_count: usize,
+    pub excluded_count: usize,
+    pub remaining_count: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remaining_preview: Vec<String>,
 }
 
 /// Requirement evaluation outcome, evidence, and blockers.
@@ -355,6 +367,8 @@ pub struct EnrichPlan {
     pub decision: Decision,
     pub decision_reason: Option<String>,
     pub force_used: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification_plan: Option<VerificationPlanSummary>,
 }
 
 /// Report emitted after `bman apply` completes.

@@ -29,6 +29,11 @@ pub(super) fn collect_verification_queue_state(
             excluded.push(enrich::VerificationExclusion {
                 surface_id: id.to_string(),
                 reason: reason.to_string(),
+                prereqs: entry
+                    .prereqs
+                    .iter()
+                    .map(|prereq| prereq.as_str().to_string())
+                    .collect(),
             });
             triaged_ids.insert(id.to_string());
             continue;

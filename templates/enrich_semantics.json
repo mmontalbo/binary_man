@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "usage": {
     "line_rules": [
       {
@@ -83,6 +83,8 @@
     "variable_regex": "\\b[A-Z][A-Z0-9_]*_[A-Z0-9_]+\\b"
   },
   "verification": {
+    "option_existence_argv_prefix": [],
+    "option_existence_argv_suffix": [],
     "accepted": [
       {
         "exit_code": 0,

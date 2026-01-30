@@ -72,6 +72,7 @@ with
   scenario_evidence as (
     select
       scenario_id,
+      argv,
       exit_code,
       exit_signal,
       timed_out,
@@ -94,6 +95,30 @@ with
       where scenario_id is not null
     )
     where rk = 1
+  ),
+  auto_scenarios_raw as (
+    select
+      scenario_id,
+      argv,
+      regexp_extract(scenario_id, '^auto_verify::(.*)$', 1) as surface_id
+    from latest_evidence
+    where scenario_id like 'auto_verify::%'
+  ),
+  auto_scenarios as (
+    select
+      scenario_id,
+      false as coverage_ignore,
+      list_value(surface_id) as covers,
+      argv,
+      'acceptance' as coverage_tier
+    from auto_scenarios_raw
+    where surface_id is not null
+      and surface_id <> ''
+  ),
+  combined_scenarios as (
+    select * from plan_scenarios
+    union all
+    select * from auto_scenarios
   ),
   rule_eval as (
     select
@@ -212,7 +237,7 @@ with
         ) then 'accepted'
         else 'inconclusive'
       end as acceptance_outcome
-    from plan_scenarios p
+    from combined_scenarios p
     left join latest_evidence e
       on e.scenario_id = p.scenario_id
   ),

@@ -1,4 +1,6 @@
+use crate::enrich;
 use crate::scenarios;
+use crate::surface;
 use std::collections::BTreeMap;
 
 pub(crate) fn intent_matches_verification_tier(
@@ -41,6 +43,79 @@ pub(crate) fn verification_entry_state(
         ),
         _ => ("unknown", EMPTY, EMPTY),
     }
+}
+
+pub(crate) struct AutoVerificationState {
+    pub(crate) targets: scenarios::AutoVerificationTargets,
+    pub(crate) remaining_ids: Vec<String>,
+    pub(crate) excluded: Vec<enrich::VerificationExclusion>,
+    pub(crate) excluded_count: usize,
+}
+
+pub(crate) fn auto_verification_plan_summary(
+    plan: &scenarios::ScenarioPlan,
+    surface: &surface::SurfaceInventory,
+    ledger_entries: Option<&BTreeMap<String, scenarios::VerificationEntry>>,
+    verification_tier: &str,
+) -> Option<enrich::VerificationPlanSummary> {
+    let state = auto_verification_state(plan, surface, ledger_entries, verification_tier)?;
+    let remaining_preview = preview_ids(&state.remaining_ids, 10);
+    Some(enrich::VerificationPlanSummary {
+        target_count: state.targets.target_ids.len(),
+        excluded_count: state.excluded_count,
+        remaining_count: state.remaining_ids.len(),
+        remaining_preview,
+    })
+}
+
+pub(crate) fn auto_verification_state(
+    plan: &scenarios::ScenarioPlan,
+    surface: &surface::SurfaceInventory,
+    ledger_entries: Option<&BTreeMap<String, scenarios::VerificationEntry>>,
+    verification_tier: &str,
+) -> Option<AutoVerificationState> {
+    let targets = scenarios::auto_verification_targets(plan, surface)?;
+    let mut remaining_ids = Vec::new();
+    for surface_id in &targets.target_ids {
+        let status = ledger_entries
+            .and_then(|entries| entries.get(surface_id))
+            .map(|entry| {
+                if verification_tier == "behavior" {
+                    entry.behavior_status.as_str()
+                } else {
+                    entry.status.as_str()
+                }
+            })
+            .unwrap_or("unknown");
+        if status != "verified" {
+            remaining_ids.push(surface_id.clone());
+        }
+    }
+
+    let excluded: Vec<enrich::VerificationExclusion> = targets
+        .excluded
+        .iter()
+        .map(|entry| enrich::VerificationExclusion {
+            surface_id: entry.surface_id.clone(),
+            reason: entry.reason.clone().unwrap_or_default(),
+            prereqs: entry
+                .prereqs
+                .iter()
+                .map(|prereq| prereq.as_str().to_string())
+                .collect(),
+        })
+        .collect();
+
+    Some(AutoVerificationState {
+        excluded_count: targets.excluded_ids.len(),
+        targets,
+        remaining_ids,
+        excluded,
+    })
+}
+
+fn preview_ids(ids: &[String], limit: usize) -> Vec<String> {
+    ids.iter().take(limit).cloned().collect()
 }
 
 pub(crate) fn verification_stub_from_queue(

@@ -210,7 +210,9 @@ fn merge_env(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scenarios::{plan_stub, ScenarioDefaults, ScenarioKind, VerificationPlan};
+    use crate::scenarios::{
+        plan_stub, ScenarioDefaults, ScenarioKind, VerificationPlan, VerificationPolicyMode,
+    };
     use std::collections::BTreeMap;
 
     fn base_expect() -> ScenarioExpect {
@@ -366,6 +368,10 @@ mod tests {
         assert_eq!(defaults.snippet_max_lines, Some(12));
         assert_eq!(defaults.snippet_max_bytes, Some(1024));
         assert!(plan.verification.queue.is_empty());
+        let policy = plan.verification.policy.as_ref().expect("policy");
+        assert_eq!(policy.mode, VerificationPolicyMode::VerifyAllOptions);
+        assert_eq!(policy.max_new_runs_per_apply, 10);
+        assert!(policy.excludes.is_empty());
     }
 
     fn assert_plan_stub_help_scenarios(plan: &ScenarioPlan) {

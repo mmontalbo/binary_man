@@ -9,6 +9,7 @@ use super::super::inputs::{
 };
 use super::{format_preview, preview_ids, EvalState};
 use crate::enrich;
+use crate::scenarios;
 use actions::{maybe_set_verification_action_from_ledger, VerificationActionArgs};
 use anyhow::Result;
 use ledger::{build_verification_ledger_entries, collect_unverified_from_ledger};
@@ -123,30 +124,6 @@ pub(super) fn eval_verification_requirement(
     }
 
     if let (Some(surface), Some(plan)) = (surface.as_ref(), plan.as_ref()) {
-        let (surface_ids, surface_evidence_map) = collect_surface_ids(surface);
-        let queue_state = collect_verification_queue_state(plan, verification_tier);
-        let discovered_untriaged_ids = collect_discovered_untriaged_ids(
-            &surface_ids,
-            &queue_state.triaged_ids,
-            &surface_evidence_map,
-            &mut evidence,
-        );
-
-        append_missing_queue_ids_blocker(
-            &surface_ids,
-            &queue_state.queue_ids,
-            &mut local_blockers,
-            &surface_evidence,
-            &scenarios_evidence,
-        );
-
-        maybe_set_verification_triage_next_action(
-            plan,
-            &discovered_untriaged_ids,
-            verification_next_action,
-            binary_name,
-        );
-
         let ledger_entries = if template_path.is_file() && semantics_path.is_file() {
             build_verification_ledger_entries(
                 binary_name,
@@ -161,66 +138,159 @@ pub(super) fn eval_verification_requirement(
             None
         };
 
-        let mut triaged_unverified_ids = Vec::new();
-        if let Some(ledger_entries) = ledger_entries.as_ref() {
-            let (triaged_ids, _unverified) = collect_unverified_from_ledger(
-                plan,
-                ledger_entries,
-                verification_tier,
+        if let Some(auto_state) = crate::status::verification::auto_verification_state(
+            plan,
+            surface,
+            ledger_entries.as_ref(),
+            verification_tier,
+        ) {
+            let remaining_ids = auto_state.remaining_ids;
+            if let Some(ledger_entries) = ledger_entries.as_ref() {
+                for surface_id in &remaining_ids {
+                    if let Some(entry) = ledger_entries.get(surface_id) {
+                        evidence.extend(entry.evidence.iter().cloned());
+                    }
+                }
+            }
+            let remaining_preview = preview_ids(&remaining_ids);
+            let summary = enrich::VerificationTriageSummary {
+                discovered_untriaged_count: 0,
+                discovered_untriaged_preview: Vec::new(),
+                triaged_unverified_count: remaining_ids.len(),
+                triaged_unverified_preview: remaining_preview,
+                excluded_count: if auto_state.excluded_count == 0 {
+                    None
+                } else {
+                    Some(auto_state.excluded_count)
+                },
+                excluded: auto_state.excluded,
+                discovered_untriaged_ids: include_full.then(Vec::new),
+                triaged_unverified_ids: include_full.then(|| remaining_ids.clone()),
+            };
+            let summary_preview = format!(
+                "auto verification: {} remaining ({})",
+                summary.triaged_unverified_count,
+                format_preview(
+                    summary.triaged_unverified_count,
+                    &summary.triaged_unverified_preview
+                )
+            );
+            triage_summary = Some(summary);
+            if triage_summary
+                .as_ref()
+                .is_some_and(|summary| summary.triaged_unverified_count > 0)
+            {
+                unverified_ids.clear();
+                unverified_ids.push(summary_preview);
+            }
+            if verification_next_action.is_none()
+                && !remaining_ids.is_empty()
+                && local_blockers.is_empty()
+                && missing.is_empty()
+            {
+                let root = paths.root().display();
+                *verification_next_action = Some(enrich::NextAction::Command {
+                    command: format!("bman apply --doc-pack {root}"),
+                    reason: "run auto verification batch".to_string(),
+                });
+            }
+        } else {
+            let (surface_ids, surface_evidence_map) = collect_surface_ids(surface);
+            let queue_state = collect_verification_queue_state(plan, verification_tier);
+            let discovered_untriaged_ids = collect_discovered_untriaged_ids(
+                &surface_ids,
+                &queue_state.triaged_ids,
+                &surface_evidence_map,
                 &mut evidence,
             );
-            triaged_unverified_ids = triaged_ids;
 
-            maybe_set_verification_action_from_ledger(VerificationActionArgs {
+            append_missing_queue_ids_blocker(
+                &surface_ids,
+                &queue_state.queue_ids,
+                &mut local_blockers,
+                &surface_evidence,
+                &scenarios_evidence,
+            );
+
+            maybe_set_verification_triage_next_action(
                 plan,
-                ledger_entries,
-                verification_tier,
+                &discovered_untriaged_ids,
                 verification_next_action,
-                paths,
                 binary_name,
-                discovered_untriaged_empty: discovered_untriaged_ids.is_empty(),
-                blockers_empty: local_blockers.is_empty(),
-                missing_empty: missing.is_empty(),
-            });
+            );
+
+            let mut triaged_unverified_ids = Vec::new();
+            if let Some(ledger_entries) = ledger_entries.as_ref() {
+                let (triaged_ids, _unverified) = collect_unverified_from_ledger(
+                    plan,
+                    ledger_entries,
+                    verification_tier,
+                    &mut evidence,
+                );
+                triaged_unverified_ids = triaged_ids;
+
+                maybe_set_verification_action_from_ledger(VerificationActionArgs {
+                    plan,
+                    ledger_entries,
+                    verification_tier,
+                    verification_next_action,
+                    paths,
+                    binary_name,
+                    discovered_untriaged_empty: discovered_untriaged_ids.is_empty(),
+                    blockers_empty: local_blockers.is_empty(),
+                    missing_empty: missing.is_empty(),
+                });
+            }
+
+            let discovered_preview = preview_ids(&discovered_untriaged_ids);
+            let triaged_preview = preview_ids(&triaged_unverified_ids);
+            let summary = enrich::VerificationTriageSummary {
+                discovered_untriaged_count: discovered_untriaged_ids.len(),
+                discovered_untriaged_preview: discovered_preview,
+                triaged_unverified_count: triaged_unverified_ids.len(),
+                triaged_unverified_preview: triaged_preview,
+                excluded_count: if queue_state.excluded.is_empty() {
+                    None
+                } else {
+                    Some(queue_state.excluded.len())
+                },
+                excluded: queue_state.excluded,
+                discovered_untriaged_ids: include_full.then(|| discovered_untriaged_ids.clone()),
+                triaged_unverified_ids: include_full.then(|| triaged_unverified_ids.clone()),
+            };
+            let summary_preview = format!(
+                "triage {}: {} untriaged ({}) ; {} unverified ({})",
+                tier_label,
+                summary.discovered_untriaged_count,
+                format_preview(
+                    summary.discovered_untriaged_count,
+                    &summary.discovered_untriaged_preview
+                ),
+                summary.triaged_unverified_count,
+                format_preview(
+                    summary.triaged_unverified_count,
+                    &summary.triaged_unverified_preview
+                )
+            );
+            triage_summary = Some(summary);
+
+            if triage_summary.as_ref().is_some_and(|summary| {
+                summary.discovered_untriaged_count > 0 || summary.triaged_unverified_count > 0
+            }) {
+                unverified_ids.clear();
+                unverified_ids.push(summary_preview);
+            }
         }
 
-        let discovered_preview = preview_ids(&discovered_untriaged_ids);
-        let triaged_preview = preview_ids(&triaged_unverified_ids);
-        let summary = enrich::VerificationTriageSummary {
-            discovered_untriaged_count: discovered_untriaged_ids.len(),
-            discovered_untriaged_preview: discovered_preview,
-            triaged_unverified_count: triaged_unverified_ids.len(),
-            triaged_unverified_preview: triaged_preview,
-            excluded_count: if queue_state.excluded.is_empty() {
-                None
-            } else {
-                Some(queue_state.excluded.len())
-            },
-            excluded: queue_state.excluded,
-            discovered_untriaged_ids: include_full.then(|| discovered_untriaged_ids.clone()),
-            triaged_unverified_ids: include_full.then(|| triaged_unverified_ids.clone()),
-        };
-        let summary_preview = format!(
-            "triage {}: {} untriaged ({}) ; {} unverified ({})",
-            tier_label,
-            summary.discovered_untriaged_count,
-            format_preview(
-                summary.discovered_untriaged_count,
-                &summary.discovered_untriaged_preview
-            ),
-            summary.triaged_unverified_count,
-            format_preview(
-                summary.triaged_unverified_count,
-                &summary.triaged_unverified_preview
-            )
-        );
-        triage_summary = Some(summary);
-
-        if triage_summary.as_ref().is_some_and(|summary| {
-            summary.discovered_untriaged_count > 0 || summary.triaged_unverified_count > 0
-        }) {
-            unverified_ids.clear();
-            unverified_ids.push(summary_preview);
+        if plan.verification.policy.is_none() {
+            missing.push("verification policy missing (scenarios/plan.json)".to_string());
+            let content = serde_json::to_string_pretty(plan)
+                .unwrap_or_else(|_| scenarios::plan_stub(binary_name));
+            *verification_next_action = Some(enrich::NextAction::Edit {
+                path: "scenarios/plan.json".to_string(),
+                content,
+                reason: "add verification policy in scenarios/plan.json".to_string(),
+            });
         }
     }
 

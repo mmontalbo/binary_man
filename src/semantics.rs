@@ -10,7 +10,7 @@ use std::fs;
 use std::path::Path;
 
 /// Current schema version for `enrich/semantics.json`.
-pub const SEMANTICS_SCHEMA_VERSION: u32 = 2;
+pub const SEMANTICS_SCHEMA_VERSION: u32 = 3;
 
 fn default_true() -> bool {
     true
@@ -151,6 +151,10 @@ pub struct VerificationSemantics {
     pub accepted: Vec<VerificationRule>,
     #[serde(default)]
     pub rejected: Vec<VerificationRule>,
+    #[serde(default)]
+    pub option_existence_argv_prefix: Vec<String>,
+    #[serde(default)]
+    pub option_existence_argv_suffix: Vec<String>,
 }
 
 /// Single verification rule for accepted/rejected classification.
@@ -352,6 +356,14 @@ pub fn validate_semantics(semantics: &Semantics) -> Result<()> {
     for (idx, rule) in semantics.verification.rejected.iter().enumerate() {
         validate_verification_rule(rule, &format!("verification.rejected[{idx}]"))?;
     }
+    validate_invocation_tokens(
+        &semantics.verification.option_existence_argv_prefix,
+        "verification.option_existence_argv_prefix",
+    )?;
+    validate_invocation_tokens(
+        &semantics.verification.option_existence_argv_suffix,
+        "verification.option_existence_argv_suffix",
+    )?;
 
     Ok(())
 }
@@ -418,6 +430,15 @@ fn validate_verification_rule(rule: &VerificationRule, label: &str) -> Result<()
     }
     for (idx, pattern) in rule.stderr_regex_any.iter().enumerate() {
         compile_regex(pattern, true, &format!("{label}.stderr_regex_any[{idx}]"))?;
+    }
+    Ok(())
+}
+
+fn validate_invocation_tokens(tokens: &[String], label: &str) -> Result<()> {
+    for (idx, token) in tokens.iter().enumerate() {
+        if token.trim().is_empty() {
+            return Err(anyhow!("{label}[{idx}] must not be empty"));
+        }
     }
     Ok(())
 }

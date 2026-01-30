@@ -110,6 +110,35 @@ pub struct ScenarioPlan {
 pub struct VerificationPlan {
     #[serde(default)]
     pub queue: Vec<VerificationQueueEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<VerificationPolicy>,
+}
+
+/// Auto-verification policy for discovered options.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct VerificationPolicy {
+    pub mode: VerificationPolicyMode,
+    pub max_new_runs_per_apply: usize,
+    #[serde(default)]
+    pub excludes: Vec<VerificationPolicyExclude>,
+}
+
+/// Supported auto-verification modes.
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VerificationPolicyMode {
+    VerifyAllOptions,
+}
+
+/// Exclusion entry for auto-verification policy.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct VerificationPolicyExclude {
+    pub surface_id: String,
+    #[serde(default)]
+    pub prereqs: Vec<VerificationPrereq>,
+    pub reason: String,
 }
 
 /// Queue entry describing a surface id to verify or exclude.
@@ -148,6 +177,19 @@ pub enum VerificationPrereq {
     Interactive,
     #[serde(rename = "needs_privilege")]
     Privilege,
+}
+
+impl VerificationPrereq {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            VerificationPrereq::ArgValue => "needs_arg_value",
+            VerificationPrereq::SeedFs => "needs_seed_fs",
+            VerificationPrereq::Repo => "needs_repo",
+            VerificationPrereq::Network => "needs_network",
+            VerificationPrereq::Interactive => "needs_interactive",
+            VerificationPrereq::Privilege => "needs_privilege",
+        }
+    }
 }
 
 /// Coverage notes for items that are blocked or intentionally skipped.

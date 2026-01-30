@@ -9,7 +9,7 @@ pub const BOOTSTRAP_SCHEMA_VERSION: u32 = 1;
 /// Current schema version for `enrich/lock.json`.
 pub const LOCK_SCHEMA_VERSION: u32 = 2;
 /// Current schema version for `enrich/plan.out.json`.
-pub const PLAN_SCHEMA_VERSION: u32 = 1;
+pub const PLAN_SCHEMA_VERSION: u32 = 2;
 /// Current schema version for `enrich/report.json`.
 pub const REPORT_SCHEMA_VERSION: u32 = 1;
 /// Current schema version for `enrich/history.jsonl`.

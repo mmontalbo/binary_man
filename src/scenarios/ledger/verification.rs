@@ -64,6 +64,33 @@ pub fn build_verification_ledger(
             }
         }
     }
+    if let Some(policy) = plan.verification.policy.as_ref() {
+        for entry in &policy.excludes {
+            let surface_id = entry.surface_id.trim();
+            if surface_id.is_empty() {
+                continue;
+            }
+            let excluded_entry =
+                excluded_by_id
+                    .entry(surface_id.to_string())
+                    .or_insert_with(|| VerificationExcludedEntry {
+                        surface_id: surface_id.to_string(),
+                        prereqs: Vec::new(),
+                        reason: None,
+                    });
+            for prereq in &entry.prereqs {
+                if !excluded_entry.prereqs.contains(prereq) {
+                    excluded_entry.prereqs.push(*prereq);
+                }
+            }
+            if excluded_entry.reason.is_none() {
+                let trimmed = entry.reason.trim();
+                if !trimmed.is_empty() {
+                    excluded_entry.reason = Some(trimmed.to_string());
+                }
+            }
+        }
+    }
     let excluded: Vec<VerificationExcludedEntry> = excluded_by_id.into_values().collect();
     let excluded_ids: BTreeSet<String> = excluded
         .iter()

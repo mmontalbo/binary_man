@@ -35,6 +35,8 @@ pub struct RunScenariosArgs<'a> {
     pub staging_root: Option<&'a Path>,
     pub kind_filter: Option<ScenarioKind>,
     pub run_mode: ScenarioRunMode,
+    pub extra_scenarios: Vec<ScenarioSpec>,
+    pub auto_run_limit: Option<usize>,
     pub verbose: bool,
 }
 
@@ -74,7 +76,13 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<ExamplesReport> {
         .join("inventory")
         .join("scenarios")
         .join("index.json");
-    let index_state = load_scenario_index_state(&scenarios_index_path, &plan, args.verbose);
+    let mut scenarios: Vec<ScenarioSpec> = plan.scenarios.clone();
+    scenarios.extend(args.extra_scenarios.iter().cloned());
+    let retain_ids: BTreeSet<String> = scenarios
+        .iter()
+        .map(|scenario| scenario.id.clone())
+        .collect();
+    let index_state = load_scenario_index_state(&scenarios_index_path, &retain_ids, args.verbose);
     let has_existing_index = index_state.existing.is_some();
     let mut index_entries = index_state.entries;
     let mut index_changed = index_state.changed;
@@ -98,13 +106,13 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<ExamplesReport> {
     }
     let mut outcomes = Vec::new();
 
-    let scenarios = plan
-        .scenarios
-        .iter()
-        .filter(|scenario| match args.kind_filter {
-            Some(kind) => scenario.kind == kind,
-            None => true,
-        });
+    let scenarios = scenarios.iter().filter(|scenario| match args.kind_filter {
+        Some(kind) => scenario.kind == kind,
+        None => true,
+    });
+
+    let mut auto_runs_used = 0usize;
+    let auto_run_limit = args.auto_run_limit.unwrap_or(usize::MAX);
 
     for scenario in scenarios {
         let run_config = effective_scenario_config(&plan, scenario)?;
@@ -128,6 +136,11 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<ExamplesReport> {
                     outcomes.push(outcome);
                 }
             }
+            continue;
+        }
+
+        let is_auto = scenario.id.starts_with(super::AUTO_VERIFY_SCENARIO_PREFIX);
+        if is_auto && auto_runs_used >= auto_run_limit {
             continue;
         }
 
@@ -203,6 +216,9 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<ExamplesReport> {
         }
         index_entries.insert(scenario.id.clone(), execution.index_entry);
         index_changed = true;
+        if is_auto {
+            auto_runs_used += 1;
+        }
     }
 
     write_scenario_index_if_needed(

@@ -220,7 +220,7 @@ pub(crate) struct ScenarioIndexState {
 
 pub(crate) fn load_scenario_index_state(
     scenarios_index_path: &Path,
-    plan: &super::ScenarioPlan,
+    retain_ids: &BTreeSet<String>,
     verbose: bool,
 ) -> ScenarioIndexState {
     let existing = match read_scenario_index(scenarios_index_path) {
@@ -241,9 +241,8 @@ pub(crate) fn load_scenario_index_state(
             entries.insert(entry.scenario_id.clone(), entry.clone());
         }
     }
-    let plan_ids: BTreeSet<String> = plan.scenarios.iter().map(|s| s.id.clone()).collect();
     let before_retain = entries.len();
-    entries.retain(|id, _| plan_ids.contains(id));
+    entries.retain(|id, _| retain_ids.contains(id));
     let changed = before_retain != entries.len();
     ScenarioIndexState {
         existing,

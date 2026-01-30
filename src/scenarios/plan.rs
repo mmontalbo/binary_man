@@ -69,6 +69,25 @@ pub fn validate_plan(plan: &ScenarioPlan, doc_pack_root: &Path) -> Result<()> {
             }
         }
     }
+    if let Some(policy) = plan.verification.policy.as_ref() {
+        if policy.max_new_runs_per_apply == 0 {
+            return Err(anyhow!(
+                "verification.policy.max_new_runs_per_apply must be > 0"
+            ));
+        }
+        for (idx, entry) in policy.excludes.iter().enumerate() {
+            if entry.surface_id.trim().is_empty() {
+                return Err(anyhow!(
+                    "verification.policy.excludes[{idx}] surface_id must not be empty"
+                ));
+            }
+            if entry.reason.trim().is_empty() {
+                return Err(anyhow!(
+                    "verification.policy.excludes[{idx}] reason must not be empty"
+                ));
+            }
+        }
+    }
     for scenario in &plan.scenarios {
         validate_scenario_spec(scenario)
             .with_context(|| format!("validate scenario {}", scenario.id))?;

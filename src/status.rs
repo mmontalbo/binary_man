@@ -16,6 +16,7 @@ mod plan;
 mod scenario_failures;
 mod verification;
 pub use plan::{load_plan, plan_status, planned_actions_from_requirements, write_plan};
+pub(crate) use verification::auto_verification_plan_summary;
 
 /// Inputs required to build a full status summary.
 pub struct BuildStatusSummaryArgs<'a> {
@@ -380,7 +381,7 @@ mod tests {
             },
         };
         let plan = scenarios::ScenarioPlan {
-            schema_version: 3,
+            schema_version: 4,
             binary: None,
             default_env: BTreeMap::new(),
             defaults: None,

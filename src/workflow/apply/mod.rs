@@ -13,7 +13,7 @@ use crate::scenarios;
 use crate::semantics;
 use crate::staging::publish_staging;
 use crate::status::{build_status_summary, plan_status};
-use crate::surface::apply_surface_discovery;
+use crate::surface::{self, apply_surface_discovery};
 use crate::util::resolve_flake_ref;
 use anyhow::{anyhow, Context, Result};
 use std::fs;
@@ -268,6 +268,15 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<(Vec<PathBuf>, Option<
         } else {
             scenarios::ScenarioRunMode::Default
         };
+        let mut extra_scenarios = Vec::new();
+        let mut auto_run_limit = None;
+        let plan = scenarios::load_plan(&scenarios_path, ctx.paths.root())?;
+        if let Some((auto_scenarios, max_new_runs)) =
+            auto_verification_scenarios(&plan, ctx.paths.root(), staging_root, args.verbose)?
+        {
+            extra_scenarios = auto_scenarios;
+            auto_run_limit = Some(max_new_runs);
+        }
         examples_report = Some(scenarios::run_scenarios(&scenarios::RunScenariosArgs {
             pack_root: &pack_root,
             run_root: ctx.paths.root(),
@@ -278,6 +287,8 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<(Vec<PathBuf>, Option<
             staging_root: Some(staging_root),
             kind_filter: None,
             run_mode,
+            extra_scenarios,
+            auto_run_limit,
             verbose: args.verbose,
         })?);
     } else if wants_render {
@@ -355,4 +366,55 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<(Vec<PathBuf>, Option<
         .transpose()?;
 
     Ok((published_paths, outputs_hash))
+}
+
+fn auto_verification_scenarios(
+    plan: &scenarios::ScenarioPlan,
+    doc_pack_root: &Path,
+    staging_root: &Path,
+    verbose: bool,
+) -> Result<Option<(Vec<scenarios::ScenarioSpec>, usize)>> {
+    let surface = match load_surface_for_auto(doc_pack_root, staging_root, verbose)? {
+        Some(surface) => surface,
+        None => return Ok(None),
+    };
+    let Some(targets) = scenarios::auto_verification_targets(plan, &surface) else {
+        return Ok(None);
+    };
+    let semantics = match semantics::load_semantics(doc_pack_root) {
+        Ok(semantics) => semantics,
+        Err(err) => {
+            if verbose {
+                eprintln!("warning: skipping auto verification (load semantics failed: {err})");
+            }
+            return Ok(None);
+        }
+    };
+    let scenarios = scenarios::auto_verification_scenarios(&targets, &semantics);
+    Ok(Some((scenarios, targets.max_new_runs_per_apply)))
+}
+
+fn load_surface_for_auto(
+    doc_pack_root: &Path,
+    staging_root: &Path,
+    verbose: bool,
+) -> Result<Option<surface::SurfaceInventory>> {
+    let staged_surface = staging_root.join("inventory").join("surface.json");
+    let surface_path = if staged_surface.is_file() {
+        staged_surface
+    } else {
+        doc_pack_root.join("inventory").join("surface.json")
+    };
+    if !surface_path.is_file() {
+        return Ok(None);
+    }
+    match surface::load_surface_inventory(&surface_path) {
+        Ok(surface) => Ok(Some(surface)),
+        Err(err) => {
+            if verbose {
+                eprintln!("warning: skipping auto verification (invalid surface inventory: {err})");
+            }
+            Ok(None)
+        }
+    }
 }
