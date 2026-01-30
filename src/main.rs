@@ -3,6 +3,7 @@
 mod cli;
 mod docpack;
 mod enrich;
+mod inspect;
 mod output;
 mod pack;
 mod render;
@@ -26,5 +27,6 @@ fn main() -> Result<()> {
         cli::Command::Plan(args) => workflow::run_plan(args),
         cli::Command::Apply(args) => workflow::run_apply(args),
         cli::Command::Status(args) => workflow::run_status(args),
+        cli::Command::Inspect(args) => inspect::run(args),
     }
 }

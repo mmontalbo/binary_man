@@ -9,7 +9,7 @@ pub const DEFAULT_LENS_FLAKE: &str = "../binary_lens#binary_lens";
     name = "bman",
     version,
     about = "Doc-pack enrichment workflow for binary man pages",
-    after_help = "Commands:\n  init --doc-pack <dir> --binary <bin>  Bootstrap a doc pack (pack + config)\n  validate --doc-pack <dir>            Validate inputs and write enrich/lock.json\n  plan --doc-pack <dir>                Evaluate requirements and write enrich/plan.out.json\n  apply --doc-pack <dir>               Apply plan transactionally (writes enrich/report.json)\n  status --doc-pack <dir>              Summarize requirements and next action\n\nExamples:\n  bman init --doc-pack /tmp/ls-docpack --binary ls\n  bman validate --doc-pack /tmp/ls-docpack\n  bman plan --doc-pack /tmp/ls-docpack\n  bman apply --doc-pack /tmp/ls-docpack\n  bman status --doc-pack /tmp/ls-docpack --json",
+    after_help = "Commands:\n  init --doc-pack <dir> --binary <bin>  Bootstrap a doc pack (pack + config)\n  validate --doc-pack <dir>            Validate inputs and write enrich/lock.json\n  plan --doc-pack <dir>                Evaluate requirements and write enrich/plan.out.json\n  apply --doc-pack <dir>               Apply plan transactionally (writes enrich/report.json)\n  status --doc-pack <dir>              Summarize requirements and next action\n  inspect --doc-pack <dir>             Read-only TUI inspector for doc packs\n\nExamples:\n  bman init --doc-pack /tmp/ls-docpack --binary ls\n  bman validate --doc-pack /tmp/ls-docpack\n  bman plan --doc-pack /tmp/ls-docpack\n  bman apply --doc-pack /tmp/ls-docpack\n  bman status --doc-pack /tmp/ls-docpack --json\n  bman inspect --doc-pack /tmp/ls-docpack",
     subcommand_required = true,
     arg_required_else_help = true
 )]
@@ -25,6 +25,7 @@ pub enum Command {
     Plan(PlanArgs),
     Apply(ApplyArgs),
     Status(StatusArgs),
+    Inspect(InspectArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -129,4 +130,12 @@ pub struct ApplyArgs {
     /// Nix flake reference for binary_lens
     #[arg(long, value_name = "REF", default_value = DEFAULT_LENS_FLAKE)]
     pub lens_flake: String,
+}
+
+#[derive(Parser, Debug)]
+#[command(about = "Inspect a doc pack in a read-only TUI")]
+pub struct InspectArgs {
+    /// Doc pack root containing pack, scenarios, fixtures, and outputs
+    #[arg(long, value_name = "DIR")]
+    pub doc_pack: PathBuf,
 }

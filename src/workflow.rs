@@ -549,8 +549,16 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
     Ok(())
 }
 
-pub fn run_status(args: StatusArgs) -> Result<()> {
-    let doc_pack_root = doc_pack_root_for_status(&args.doc_pack)?;
+pub struct StatusComputation {
+    pub summary: enrich::StatusSummary,
+    pub lock_inputs_hash: Option<String>,
+}
+
+pub fn status_summary_for_doc_pack(
+    doc_pack_root: PathBuf,
+    include_full: bool,
+    force: bool,
+) -> Result<StatusComputation> {
     let paths = enrich::DocPackPaths::new(doc_pack_root);
     let manifest = load_manifest_optional(&paths)?;
     let binary_name = manifest.as_ref().map(|m| m.binary_name.clone());
@@ -591,7 +599,7 @@ pub fn run_status(args: StatusArgs) -> Result<()> {
         (None, None)
     };
     let plan_status = plan_status(lock.as_ref(), plan.as_ref());
-    let force_used = args.force && (!lock_status.present || lock_status.stale);
+    let force_used = force && (!lock_status.present || lock_status.stale);
     let parse_errors_present = lock_parse_error.is_some() || plan_parse_error.is_some();
 
     let summary = if let ScenarioPlanState::Invalid { code, message } = &scenario_plan_state {
@@ -634,7 +642,7 @@ pub fn run_status(args: StatusArgs) -> Result<()> {
                 config_exists,
                 lock_status,
                 plan_status,
-                args.full,
+                include_full,
                 force_used,
             )?,
             ConfigState::Missing => {
@@ -646,13 +654,25 @@ pub fn run_status(args: StatusArgs) -> Result<()> {
                     false,
                     lock_status,
                     plan_status,
-                    args.full,
+                    include_full,
                     force_used,
                 )?
             }
             ConfigState::Invalid { .. } => unreachable!("config invalid handled above"),
         }
     };
+
+    Ok(StatusComputation {
+        summary,
+        lock_inputs_hash: lock.as_ref().map(|lock| lock.inputs_hash.clone()),
+    })
+}
+
+pub fn run_status(args: StatusArgs) -> Result<()> {
+    let doc_pack_root = doc_pack_root_for_status(&args.doc_pack)?;
+    let computation = status_summary_for_doc_pack(doc_pack_root.clone(), args.full, args.force)?;
+    let summary = computation.summary;
+    let paths = enrich::DocPackPaths::new(doc_pack_root);
 
     if args.json {
         let text = serde_json::to_string_pretty(&summary).context("serialize status summary")?;
@@ -661,18 +681,18 @@ pub fn run_status(args: StatusArgs) -> Result<()> {
         crate::status::print_status(paths.root(), &summary);
     }
 
-    if force_used {
+    if summary.force_used {
         let now = enrich::now_epoch_ms()?;
         let history_entry = enrich::EnrichHistoryEntry {
             schema_version: enrich::HISTORY_SCHEMA_VERSION,
             started_at_epoch_ms: now,
             finished_at_epoch_ms: now,
             step: "status".to_string(),
-            inputs_hash: lock.as_ref().map(|lock| lock.inputs_hash.clone()),
+            inputs_hash: computation.lock_inputs_hash,
             outputs_hash: None,
             success: true,
             message: Some("force used".to_string()),
-            force_used,
+            force_used: summary.force_used,
         };
         enrich::append_history(paths.root(), &history_entry)?;
     }
