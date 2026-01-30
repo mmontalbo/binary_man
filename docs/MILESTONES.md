@@ -5,7 +5,7 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured “enrichment loop”
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M14 — Batched Auto-Verification (Options Existence).
+Current focus: planning next milestone.
 
 ## Side Quest — Read-only Doc-Pack Inspector TUI v1 (done)
 
@@ -77,7 +77,7 @@ Acceptance criteria:
 - Users can jump to the relevant file(s) in `$EDITOR` and open the generated man
   page (`man -l`) from the inspector.
 
-## M14 — Batched Auto-Verification (Options Existence) (planned)
+## M14 — Batched Auto-Verification (Options Existence) (done)
 
 Goal: Make “verify existence for all discovered options” cheap and mechanical,
 without requiring an LM to author hundreds of near-identical scenarios. `apply`
