@@ -7,6 +7,76 @@ that supports iterative static + dynamic passes from portable doc packs.
 
 Current focus: Side quest — Read-only doc-pack inspector TUI.
 
+## Side Quest — Read-only Doc-Pack Inspector TUI v1 (planned)
+
+Goal: Make doc packs easy to inspect and navigate without memorizing artifact
+paths or workflow mechanics. The TUI is **read-only**: it helps users understand
+state and jump into external tools (editor/man), but does not replace the
+validate/plan/apply loop.
+
+Motivation:
+- Doc packs now have a stable mechanical workflow, but it is still hard to
+  quickly answer: “what’s the next action?”, “what changed?”, and “where is the
+  evidence?”.
+- A simple inspector reduces cognitive overhead and makes it practical to work
+  with larger, multi-command binaries (e.g. `git`).
+
+Design constraints (non-negotiable for this side quest):
+- Read-only: the inspector must not modify the doc pack.
+- Portability: runnable from any CWD; no repo-root dependencies.
+- Lock + plan freshness are global state:
+  - Always visible as a sticky header/status bar.
+  - Optionally exposed via a small “plan/lock details” popover (inputs hash,
+    etc).
+- Implementation: use `ratatui` (Rust) for a simple, keyboard-first TUI.
+- Minimize duplicate logic: the inspector should render the same core state as
+  `bman status --json` by calling the same internal evaluation code (not by
+  re-implementing decisions in the UI).
+- Accessibility:
+  - Do not rely on color alone for meaning (always show textual labels).
+  - If not running in a TTY, print a structured text summary instead of
+    attempting to draw the TUI.
+
+Deliverables:
+- New command: `bman inspect --doc-pack <dir>` (read-only `ratatui` TUI).
+- Sticky header/status bar always shows:
+  - doc pack path, binary name
+  - lock: `missing|stale|fresh`
+  - plan: `missing|stale|fresh`
+  - decision: `complete|incomplete|blocked`
+  - next action: the single deterministic recommendation from `status --json`
+- Primary views/tabs:
+  - **Intent**: list edit targets (`scenarios/plan.json`, `enrich/semantics.json`,
+    `enrich/config.json`, `binary_lens/export_plan.json`, `queries/*.sql`) with
+    “open in $EDITOR”.
+  - **Evidence**: scenario evidence inventory (`inventory/scenarios/*.json`) with
+    bounded stdout/stderr previews and links back to scenario ids.
+  - **Outputs**: surface + ledgers + rendered man outputs
+    (`inventory/surface.json`, `verification_ledger.json`, `man/<bin>.1`,
+    `man/meta.json`) including warnings.
+  - **History/Audit**: transactional/audit artifacts (`enrich/report.json`,
+    `enrich/history.jsonl`, last txn metadata).
+- Category coloring for scanability:
+  - Intent / Evidence / Outputs / Audit are distinct colors; gates use
+    traffic-light colors.
+- Navigation/ergonomics:
+  - `o`: open the selected file in `$EDITOR`.
+  - `m`: open the rendered man page via `man -l` (when present).
+  - `c`: copy the selected path or recommended command line.
+  - `r`: refresh/reload artifacts (no file watcher required for v1).
+  - Lists default to counts + previews; “show all” is explicit.
+
+Non-goals:
+- In-TUI editing of JSON or SQL.
+- Embedding a pager for large text; rely on external editor/man pager.
+- Running validate/plan/apply from inside the TUI (may be added later if needed).
+
+Acceptance criteria:
+- For fresh `ls` and `git` packs, `bman inspect` shows gate/decision state that
+  matches `bman status --json` and provides a clear next action.
+- Users can jump to the relevant file(s) in `$EDITOR` and open the generated man
+  page (`man -l`) from the inspector.
+
 ## M13 — Verification Triage + Verification By Default v1 (done)
 
 Goal: Make verification the default gate for new packs, while keeping the loop
