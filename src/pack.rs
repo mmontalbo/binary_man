@@ -1,15 +1,21 @@
+//! Pack generation and pack-context helpers.
+//!
+//! External pack extraction is isolated here so the rest of the workflow
+//! can remain deterministic and pack-owned.
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+/// Hashes recorded for the analyzed binary.
 #[derive(Deserialize, Clone)]
 pub struct BinaryHashes {
     pub sha256: String,
     pub md5: Option<String>,
 }
 
+/// Tool metadata emitted by binary_lens.
 #[derive(Deserialize, Clone)]
 pub struct ToolInfo {
     pub name: String,
@@ -17,6 +23,7 @@ pub struct ToolInfo {
     pub revision: Option<String>,
 }
 
+/// Manifest describing the exported pack.
 #[derive(Deserialize, Clone)]
 pub struct PackManifest {
     pub binary_hashes: BinaryHashes,
@@ -27,17 +34,20 @@ pub struct PackManifest {
     pub tool: ToolInfo,
 }
 
+/// Row emitted by the usage lens for help text extraction.
 #[derive(Deserialize)]
 pub struct UsageEvidenceRow {
     #[serde(default)]
     pub string_value: Option<String>,
 }
 
+/// Usage lens output plus the template that produced it.
 pub struct UsageLensOutput {
     pub rows: Vec<UsageEvidenceRow>,
     pub template_path: PathBuf,
 }
 
+/// Parsed pack context used for rendering and status evaluation.
 pub struct PackContext {
     pub manifest: PackManifest,
     pub help_text: String,
@@ -50,6 +60,7 @@ struct HelpExtraction {
     warnings: Vec<String>,
 }
 
+/// Generate a pack using binary_lens, optionally with a plan and an anchor pack.
 pub fn generate_pack_with_plan(
     binary: &str,
     out_dir: &Path,
@@ -69,30 +80,15 @@ pub fn generate_pack_with_plan(
         None => None,
     };
 
-    let primary_args = build_export_args(
+    let args = build_export_args(
         binary,
         &out_dir_str,
         plan_str.as_deref(),
         from_pack_str.as_deref(),
     );
-    let primary_output = run_binary_lens(lens_flake, &primary_args)?;
-    if !primary_output.status.success() {
-        if from_pack_str.is_some() {
-            let fallback_args = build_export_args(binary, &out_dir_str, plan_str.as_deref(), None);
-            let fallback_output = run_binary_lens(lens_flake, &fallback_args)?;
-            if !fallback_output.status.success() {
-                return Err(anyhow!(
-                    "binary_lens failed with --from-pack: {}; fallback failed: {}",
-                    stderr_trim(&primary_output),
-                    stderr_trim(&fallback_output)
-                ));
-            }
-        } else {
-            return Err(anyhow!(
-                "binary_lens failed: {}",
-                stderr_trim(&primary_output)
-            ));
-        }
+    let output = run_binary_lens(lens_flake, &args)?;
+    if !output.status.success() {
+        return Err(anyhow!("binary_lens failed: {}", stderr_trim(&output)));
     }
 
     let pack_root = out_dir.join("binary.lens");
@@ -147,6 +143,7 @@ fn stderr_trim(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).trim().to_string()
 }
 
+/// Load a pack context by running the usage lens at the provided template.
 pub fn load_pack_context_with_template_at(
     pack_root: &Path,
     template_path: &Path,
@@ -172,6 +169,7 @@ pub fn load_pack_context_with_template_at(
     })
 }
 
+/// Load the pack manifest from disk.
 pub fn load_manifest(pack_root: &Path) -> Result<PackManifest> {
     let manifest_path = pack_root.join("manifest.json");
     let manifest_bytes =

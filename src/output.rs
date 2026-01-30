@@ -1,3 +1,6 @@
+//! Rendering output staging for man pages and metadata.
+//!
+//! Outputs are staged to keep apply transactional and deterministic.
 use crate::enrich;
 use crate::pack;
 use crate::render;
@@ -42,29 +45,36 @@ struct ExamplesMeta {
     fail_count: usize,
 }
 
-pub fn write_outputs_staged(
-    staging_root: &Path,
-    doc_pack_root: &Path,
-    context: &pack::PackContext,
-    pack_root: &Path,
-    inputs_hash: Option<&str>,
-    man_page: Option<&str>,
-    render_summary: Option<&render::RenderSummary>,
-    examples_report: Option<&scenarios::ExamplesReport>,
-) -> Result<()> {
-    let paths = enrich::DocPackPaths::new(doc_pack_root.to_path_buf());
-    if let Some(man_page) = man_page {
-        let rel = format!("man/{}.1", context.manifest.binary_name);
-        write_staged_text(staging_root, &rel, man_page)?;
+/// Inputs required to stage rendered outputs.
+pub(crate) struct WriteOutputsArgs<'a> {
+    pub(crate) staging_root: &'a Path,
+    pub(crate) doc_pack_root: &'a Path,
+    pub(crate) context: &'a pack::PackContext,
+    pub(crate) pack_root: &'a Path,
+    pub(crate) inputs_hash: Option<&'a str>,
+    pub(crate) man_page: Option<&'a str>,
+    pub(crate) render_summary: Option<&'a render::RenderSummary>,
+    pub(crate) examples_report: Option<&'a scenarios::ExamplesReport>,
+}
+
+/// Stage render outputs and `man/meta.json` for transactional publish.
+pub fn write_outputs_staged(args: &WriteOutputsArgs<'_>) -> Result<()> {
+    let paths = enrich::DocPackPaths::new(args.doc_pack_root.to_path_buf());
+    if let Some(man_page) = args.man_page {
+        let rel = format!("man/{}.1", args.context.manifest.binary_name);
+        write_staged_text(args.staging_root, &rel, man_page)?;
     }
 
-    if let Some(report) = examples_report {
-        write_staged_json(staging_root, "man/examples_report.json", report)?;
+    if let Some(report) = args.examples_report {
+        write_staged_json(args.staging_root, "man/examples_report.json", report)?;
     }
 
-    let examples_meta = examples_report.map(|report| ExamplesMeta {
-        examples_report_path: display_path(&paths.examples_report_path(), Some(doc_pack_root)),
-        runs_index_path: display_path(&pack_root.join("runs/index.json"), Some(doc_pack_root)),
+    let examples_meta = args.examples_report.map(|report| ExamplesMeta {
+        examples_report_path: display_path(&paths.examples_report_path(), Some(args.doc_pack_root)),
+        runs_index_path: display_path(
+            &args.pack_root.join("runs/index.json"),
+            Some(args.doc_pack_root),
+        ),
         run_ids: report.run_ids.clone(),
         scenario_count: report.scenario_count,
         pass_count: report.pass_count,
@@ -79,28 +89,31 @@ pub fn write_outputs_staged(
     let meta = Meta {
         schema_version: 5,
         generated_at_epoch_ms,
-        binary_name: context.manifest.binary_name.clone(),
-        binary_path: context.manifest.binary_path.clone(),
-        binary_sha256: context.manifest.binary_hashes.sha256.clone(),
-        binary_md5: context.manifest.binary_hashes.md5.clone(),
-        pack_root: display_path(pack_root, Some(doc_pack_root)),
-        pack_manifest: display_path(&pack_root.join("manifest.json"), Some(doc_pack_root)),
-        binary_lens_version: context.manifest.binary_lens_version.clone(),
-        pack_format_version: context.manifest.format_version.clone(),
-        inputs_hash: inputs_hash.map(|hash| hash.to_string()),
-        tool_name: context.manifest.tool.name.clone(),
-        tool_version: context.manifest.tool.version.clone(),
-        tool_revision: context.manifest.tool.revision.clone(),
-        usage_lens_source_path: display_path(
-            &context.usage_lens.template_path,
-            Some(doc_pack_root),
+        binary_name: args.context.manifest.binary_name.clone(),
+        binary_path: args.context.manifest.binary_path.clone(),
+        binary_sha256: args.context.manifest.binary_hashes.sha256.clone(),
+        binary_md5: args.context.manifest.binary_hashes.md5.clone(),
+        pack_root: display_path(args.pack_root, Some(args.doc_pack_root)),
+        pack_manifest: display_path(
+            &args.pack_root.join("manifest.json"),
+            Some(args.doc_pack_root),
         ),
-        warnings: context.warnings.clone(),
-        render_summary: render_summary.cloned(),
+        binary_lens_version: args.context.manifest.binary_lens_version.clone(),
+        pack_format_version: args.context.manifest.format_version.clone(),
+        inputs_hash: args.inputs_hash.map(|hash| hash.to_string()),
+        tool_name: args.context.manifest.tool.name.clone(),
+        tool_version: args.context.manifest.tool.version.clone(),
+        tool_revision: args.context.manifest.tool.revision.clone(),
+        usage_lens_source_path: display_path(
+            &args.context.usage_lens.template_path,
+            Some(args.doc_pack_root),
+        ),
+        warnings: args.context.warnings.clone(),
+        render_summary: args.render_summary.cloned(),
         examples: examples_meta,
     };
 
-    write_staged_json(staging_root, "man/meta.json", &meta)?;
+    write_staged_json(args.staging_root, "man/meta.json", &meta)?;
 
     Ok(())
 }

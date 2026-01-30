@@ -1,3 +1,7 @@
+//! Pack-owned render and verification semantics.
+//!
+//! Semantics define how help text is interpreted and how verification evidence
+//! is classified, keeping the logic out of Rust and inside JSON.
 use crate::templates;
 use anyhow::{anyhow, Context, Result};
 use regex::RegexBuilder;
@@ -5,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
+/// Current schema version for `enrich/semantics.json`.
 pub const SEMANTICS_SCHEMA_VERSION: u32 = 2;
 
 fn default_true() -> bool {
@@ -15,6 +20,7 @@ fn default_synopsis_min_lines() -> usize {
     1
 }
 
+/// Root semantics schema for rendering and verification.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Semantics {
@@ -41,6 +47,7 @@ pub struct Semantics {
     pub verification: VerificationSemantics,
 }
 
+/// Rules for extracting usage/synopsis lines.
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub struct UsageSemantics {
@@ -50,6 +57,7 @@ pub struct UsageSemantics {
     pub prefer_rules: Vec<LineMatcher>,
 }
 
+/// Rules for extracting and selecting descriptions.
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub struct DescriptionSemantics {
@@ -61,6 +69,7 @@ pub struct DescriptionSemantics {
     pub fallback: DescriptionFallback,
 }
 
+/// Fallback behavior when description extraction is ambiguous.
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum DescriptionFallback {
@@ -70,6 +79,7 @@ pub enum DescriptionFallback {
     None,
 }
 
+/// Rules for parsing option sections.
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub struct OptionsSemantics {
@@ -83,6 +93,7 @@ pub struct OptionsSemantics {
     pub allow_continuation: bool,
 }
 
+/// Rules for parsing exit status sections.
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ExitStatusSemantics {
@@ -94,6 +105,7 @@ pub struct ExitStatusSemantics {
     pub stop_on_blank: bool,
 }
 
+/// Rules for parsing notes sections.
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub struct NotesSemantics {
@@ -103,6 +115,7 @@ pub struct NotesSemantics {
     pub capture_after_options: bool,
 }
 
+/// Boilerplate exclusion rules for synopsis/description parsing.
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub struct BoilerplateSemantics {
@@ -112,6 +125,7 @@ pub struct BoilerplateSemantics {
     pub exclude_binary_name: bool,
 }
 
+/// Rules for parsing "See Also" sections.
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub struct SeeAlsoSemantics {
@@ -119,6 +133,7 @@ pub struct SeeAlsoSemantics {
     pub rules: Vec<SeeAlsoRule>,
 }
 
+/// Rules for parsing environment variable sections.
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub struct EnvVarsSemantics {
@@ -128,6 +143,7 @@ pub struct EnvVarsSemantics {
     pub variable_regex: Option<String>,
 }
 
+/// Rules for classifying verification evidence.
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub struct VerificationSemantics {
@@ -137,6 +153,7 @@ pub struct VerificationSemantics {
     pub rejected: Vec<VerificationRule>,
 }
 
+/// Single verification rule for accepted/rejected classification.
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub struct VerificationRule {
@@ -162,6 +179,7 @@ pub struct VerificationRule {
     pub stderr_regex_any: Vec<String>,
 }
 
+/// Minimum render requirements used to decide if a man page is complete.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct RenderRequirements {
@@ -189,6 +207,7 @@ impl Default for RenderRequirements {
     }
 }
 
+/// A line matcher used to locate structured help text segments.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum LineMatcher {
@@ -214,6 +233,7 @@ pub enum LineMatcher {
     },
 }
 
+/// Rule capturing a line once matched.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct LineCapture {
@@ -224,6 +244,7 @@ pub struct LineCapture {
     pub case_sensitive: bool,
 }
 
+/// Rule describing how to parse a single option entry.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct OptionEntryRule {
@@ -236,6 +257,7 @@ pub struct OptionEntryRule {
     pub case_sensitive: bool,
 }
 
+/// Capture block used for structured description extraction.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct DescriptionCaptureBlock {
@@ -248,6 +270,7 @@ pub struct DescriptionCaptureBlock {
     pub include_end: bool,
 }
 
+/// Rule for emitting a See Also entry.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct SeeAlsoRule {
@@ -256,6 +279,7 @@ pub struct SeeAlsoRule {
     pub entries: Vec<String>,
 }
 
+/// Load semantics from `enrich/semantics.json`.
 pub fn load_semantics(doc_pack_root: &Path) -> Result<Semantics> {
     let path = doc_pack_root.join("enrich").join("semantics.json");
     let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
@@ -265,6 +289,7 @@ pub fn load_semantics(doc_pack_root: &Path) -> Result<Semantics> {
     Ok(semantics)
 }
 
+/// Validate semantics schema for render/verification rules.
 pub fn validate_semantics(semantics: &Semantics) -> Result<()> {
     if semantics.schema_version != SEMANTICS_SCHEMA_VERSION {
         return Err(anyhow!(
@@ -331,6 +356,7 @@ pub fn validate_semantics(semantics: &Semantics) -> Result<()> {
     Ok(())
 }
 
+/// Render a semantics stub for new packs or edit suggestions.
 pub fn semantics_stub(_binary_name: Option<&str>) -> String {
     templates::ENRICH_SEMANTICS_JSON.to_string()
 }

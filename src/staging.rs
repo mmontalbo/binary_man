@@ -1,7 +1,11 @@
+//! Staging helpers for transactional writes.
+//!
+//! Staging keeps apply operations atomic and reduces partial write risk.
 use anyhow::{anyhow, Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Write raw bytes into a staging directory.
 pub fn write_staged_bytes(staging_root: &Path, rel_path: &str, bytes: &[u8]) -> Result<()> {
     let staging_path = staging_root.join(rel_path);
     if let Some(parent) = staging_path.parent() {
@@ -11,11 +15,13 @@ pub fn write_staged_bytes(staging_root: &Path, rel_path: &str, bytes: &[u8]) -> 
     Ok(())
 }
 
+/// Write UTF-8 text into a staging directory.
 pub fn write_staged_text(staging_root: &Path, rel_path: &str, text: &str) -> Result<()> {
     write_staged_bytes(staging_root, rel_path, text.as_bytes())?;
     Ok(())
 }
 
+/// Serialize JSON into the staging directory with stable formatting.
 pub fn write_staged_json<T: serde::Serialize>(
     staging_root: &Path,
     rel_path: &str,
@@ -26,6 +32,7 @@ pub fn write_staged_json<T: serde::Serialize>(
     Ok(())
 }
 
+/// Publish staged files into the doc pack, returning the affected paths.
 pub fn publish_staging(staging_root: &Path, doc_pack_root: &Path) -> Result<Vec<PathBuf>> {
     if !staging_root.exists() {
         return Ok(Vec::new());
@@ -68,6 +75,7 @@ pub fn publish_staging(staging_root: &Path, doc_pack_root: &Path) -> Result<Vec<
     Ok(published)
 }
 
+/// Collect all files under a root recursively for copy/publish operations.
 pub fn collect_files_recursive(root: &Path) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     if !root.exists() {

@@ -1,9 +1,17 @@
+//! CLI argument parsing for the doc-pack workflow.
+//!
+//! The CLI is intentionally thin: it wires a deterministic loop without embedding
+//! policy or heuristics, so the same core logic can be reused elsewhere.
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
+/// Default nix flake ref for binary_lens so packs are reproducible by default.
 pub const DEFAULT_LENS_FLAKE: &str = "../binary_lens#binary_lens";
 
-/// CLI arguments for the doc-pack enrichment workflow.
+/// Root CLI entrypoint for the enrichment workflow.
+///
+/// Keeping a single `RootArgs` type makes command routing obvious and avoids
+/// hidden defaults in subcommand constructors.
 #[derive(Parser, Debug)]
 #[command(
     name = "bman",
@@ -18,6 +26,7 @@ pub struct RootArgs {
     pub command: Command,
 }
 
+/// Top-level workflow commands.
 #[derive(Subcommand, Debug)]
 pub enum Command {
     Init(InitArgs),
@@ -28,6 +37,7 @@ pub enum Command {
     Inspect(InspectArgs),
 }
 
+/// Status command inputs for a single doc pack.
 #[derive(Parser, Debug)]
 #[command(about = "Summarize doc-pack status and next action")]
 pub struct StatusArgs {
@@ -52,6 +62,7 @@ pub struct StatusArgs {
     pub verbose: bool,
 }
 
+/// Init command inputs for bootstrapping a pack.
 #[derive(Parser, Debug)]
 #[command(about = "Initialize a doc-pack (pack + enrichment config)")]
 pub struct InitArgs {
@@ -72,6 +83,7 @@ pub struct InitArgs {
     pub lens_flake: String,
 }
 
+/// Validate command inputs used to snapshot and lock current config.
 #[derive(Parser, Debug)]
 #[command(about = "Validate enrich config and write lock.json")]
 pub struct ValidateArgs {
@@ -84,6 +96,7 @@ pub struct ValidateArgs {
     pub verbose: bool,
 }
 
+/// Plan command inputs used to evaluate requirements deterministically.
 #[derive(Parser, Debug)]
 #[command(about = "Plan enrichment actions based on a lock snapshot")]
 pub struct PlanArgs {
@@ -100,6 +113,7 @@ pub struct PlanArgs {
     pub verbose: bool,
 }
 
+/// Apply command inputs used to execute a plan transactionally.
 #[derive(Parser, Debug)]
 #[command(about = "Apply an enrichment plan transactionally")]
 pub struct ApplyArgs {
@@ -132,6 +146,7 @@ pub struct ApplyArgs {
     pub lens_flake: String,
 }
 
+/// Inspect command inputs for the read-only TUI.
 #[derive(Parser, Debug)]
 #[command(about = "Inspect a doc pack in a read-only TUI")]
 pub struct InspectArgs {
