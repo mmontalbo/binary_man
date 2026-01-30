@@ -1,8 +1,10 @@
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
+use std::ffi::OsStr;
 use std::fmt;
 use std::fs;
 use std::io::Write;
@@ -740,6 +742,7 @@ pub fn build_lock(
     }
     inputs.push(paths.semantics_path());
     inputs.push(paths.surface_seed_path());
+    inputs.push(paths.binary_lens_export_plan_path());
     inputs.push(paths.pack_manifest_path());
     if let Some(fixtures_root) = selected_inputs.fixtures_root.as_ref() {
         inputs.push(doc_pack_root.join(fixtures_root));
@@ -870,10 +873,43 @@ fn hash_path(hasher: &mut Sha256, root: &Path, path: &Path) -> Result<()> {
         hasher.update(b"file:");
         hasher.update(rel.to_string_lossy().as_bytes());
         let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
+        if is_binary_lens_manifest_path(path) {
+            if let Some(stable_bytes) = stable_binary_lens_manifest_bytes(&bytes) {
+                hasher.update(b":stable_manifest:");
+                hasher.update(&stable_bytes);
+                return Ok(());
+            }
+        }
         hasher.update(&bytes);
         return Ok(());
     }
     Ok(())
+}
+
+fn is_binary_lens_manifest_path(path: &Path) -> bool {
+    path.file_name() == Some(OsStr::new("manifest.json"))
+        && path
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .is_some_and(|name| name == OsStr::new("binary.lens"))
+}
+
+fn stable_binary_lens_manifest_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
+    let mut manifest: Value = serde_json::from_slice(bytes).ok()?;
+    if let Some(digest) = manifest
+        .get("export_config_digest")
+        .and_then(|v| v.as_str())
+    {
+        return serde_json::to_vec(&serde_json::json!({ "export_config_digest": digest })).ok();
+    }
+
+    if let Some(obj) = manifest.as_object_mut() {
+        obj.remove("created_at");
+        obj.remove("created_at_epoch_seconds");
+        obj.remove("created_at_source");
+        obj.remove("coverage_summary");
+    }
+    serde_json::to_vec(&manifest).ok()
 }
 
 pub fn evidence_from_path(doc_pack_root: &Path, path: &Path) -> Result<EvidenceRef> {
