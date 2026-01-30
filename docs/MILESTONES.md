@@ -7,7 +7,7 @@ that supports iterative static + dynamic passes from portable doc packs.
 
 Current focus: Side quest — Read-only doc-pack inspector TUI.
 
-## Side Quest — Read-only Doc-Pack Inspector TUI v1 (planned)
+## Side Quest — Read-only Doc-Pack Inspector TUI v1 (done)
 
 Goal: Make doc packs easy to inspect and navigate without memorizing artifact
 paths or workflow mechanics. The TUI is **read-only**: it helps users understand
