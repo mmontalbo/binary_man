@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 4,
   "binary": "ls",
   "default_env": {
     "LC_ALL": "C",
@@ -30,6 +30,14 @@
         "details": "requires label preservation and host support"
       }
     ]
+  },
+  "verification": {
+    "queue": [],
+    "policy": {
+      "mode": "verify_all_options",
+      "max_new_runs_per_apply": 10,
+      "excludes": []
+    }
   },
   "scenarios": [
     {

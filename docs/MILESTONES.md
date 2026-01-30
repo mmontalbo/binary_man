@@ -5,7 +5,7 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured “enrichment loop”
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: Side quest — Read-only doc-pack inspector TUI.
+Current focus: M14 — Batched Auto-Verification (Options Existence).
 
 ## Side Quest — Read-only Doc-Pack Inspector TUI v1 (done)
 
@@ -76,6 +76,78 @@ Acceptance criteria:
   matches `bman status --json` and provides a clear next action.
 - Users can jump to the relevant file(s) in `$EDITOR` and open the generated man
   page (`man -l`) from the inspector.
+
+## M14 — Batched Auto-Verification (Options Existence) (planned)
+
+Goal: Make “verify existence for all discovered options” cheap and mechanical,
+without requiring an LM to author hundreds of near-identical scenarios. `apply`
+runs verification in bounded batches and `status --json` recommends “run apply
+again” until verification is met.
+
+Motivation:
+- We can discover option surface area from help evidence, but getting from
+  “discovered” to “verified accepted/rejected” is still too much manual work for
+  large CLIs.
+- The tool should execute mechanics; the pack (and LM) should own meaning
+  (invocation shape + evidence interpretation).
+
+Design constraints (non-negotiable for this milestone):
+- JSON-only structured artifacts in the doc pack (JSONL permitted for history).
+- Keep parsing semantics out of Rust: verification meaning stays pack-owned
+  (JSON + pack SQL), not hardcoded strings/patterns in code.
+- Evidence remains append-only; `apply` remains transactional (no partial publish
+  of ledgers/man outputs on failure).
+- Safety-first defaults remain enforced (bounded timeouts/outputs + sandboxing,
+  network off unless explicitly enabled by the plan).
+- Scope: options only (defer command/subcommand verification).
+
+Deliverables:
+1) **Compact verification policy (no per-flag scenarios)**
+- Extend `scenarios/plan.json` with a strict, schema-validated verification
+  policy that can express:
+  - “verify all discovered options”
+  - explicit exclusions by `surface_id` with objective `prereqs` + `reason`
+  - an explicit batch bound `max_new_runs_per_apply`
+- `bman status --json` recommends editing `scenarios/plan.json` when the policy
+  is missing/invalid.
+
+2) **Batched auto-verification runs**
+- During `apply`, expand the policy into implicit verification runs over
+  `inventory/surface.json` (deterministic ordering, stable synthetic IDs).
+- Run at most `max_new_runs_per_apply` new targets per `apply`; re-running
+  `apply` continues where it left off using the existing skip/index mechanism.
+- Evidence is still recorded as scenario evidence under
+  `inventory/scenarios/*.json` (append-only).
+
+3) **Pack-owned invocation shape**
+- Add pack-owned semantics fields in `enrich/semantics.json` to control how an
+  option existence verification argv is formed (e.g. prefix/suffix arrays).
+- Rust must not hardcode “append `--help`” or other CLI-specific conventions in
+  this milestone.
+
+4) **Plan transparency**
+- `bman plan` writes a verification plan summary into `enrich/plan.out.json`
+  (counts + a small preview list), so the user/LM can see what `apply` will run
+  before executing.
+
+5) **Status loop becomes “apply until done”**
+- When the policy is present and verification is unmet due to remaining targets,
+  `status --json` recommends `run: bman apply ...` (not “author N stub
+  scenarios”).
+- When targets are excluded, status reports excluded counts + prereq tags (no
+  heuristic scoring).
+
+Acceptance criteria:
+- Fresh `ls` pack: set policy to “verify all discovered options” and rerun
+  `apply` until verification is met (ledger unverified_count becomes 0).
+- Verification progress is bounded per apply and mechanically resumable.
+- No explosion of authored scenarios in `scenarios/plan.json`; the plan remains
+  compact and edits remain obvious from status.
+
+Out of scope:
+- Command/subcommand existence verification.
+- Behavior verification (expected side effects / fixtures beyond existence).
+- Auto-inference of exclusions or “smart” prioritization heuristics.
 
 ## M13 — Verification Triage + Verification By Default v1 (done)
 
