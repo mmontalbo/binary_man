@@ -1,0 +1,371 @@
+use super::super::data::{ArtifactEntry, EvidenceEntry};
+use super::super::format::{gate_label, next_action_summary, truncate_text};
+use super::super::Tab;
+use super::App;
+use crate::enrich;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Tabs, Wrap};
+use ratatui::Frame;
+use std::cmp::min;
+
+impl App {
+    pub(in crate::inspect) fn draw(&mut self, frame: &mut Frame) {
+        let area = frame.size();
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(2),
+                Constraint::Length(1),
+                Constraint::Min(2),
+                Constraint::Length(1),
+            ])
+            .split(area);
+
+        self.draw_header(frame, layout[0]);
+        self.draw_tabs(frame, layout[1]);
+        self.draw_main(frame, layout[2]);
+        self.draw_footer(frame, layout[3]);
+
+        if self.show_help {
+            self.draw_help(frame);
+        }
+    }
+
+    fn draw_header(&self, frame: &mut Frame, area: Rect) {
+        let binary = self
+            .summary
+            .binary_name
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
+        let lock_label = gate_label(self.summary.lock.present, self.summary.lock.stale);
+        let plan_label = gate_label(self.summary.plan.present, self.summary.plan.stale);
+        let decision_label = self.summary.decision.as_str();
+        let next_action = next_action_summary(&self.summary.next_action);
+        let next_action = truncate_text(&next_action, area.width.saturating_sub(12) as usize);
+
+        let reserved = "Doc pack: ".len() + " | Binary: ".len() + binary.len();
+        let max_doc_pack_width = (area.width as usize).saturating_sub(reserved);
+        let doc_pack_path = truncate_text(
+            &self.doc_pack_root.display().to_string(),
+            max_doc_pack_width,
+        );
+
+        let line1 = Line::from(vec![
+            Span::raw("Doc pack: "),
+            Span::styled(doc_pack_path, Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" | Binary: "),
+            Span::styled(binary, Style::default().add_modifier(Modifier::BOLD)),
+        ]);
+
+        let line2 = Line::from(vec![
+            Span::raw("Lock: "),
+            Span::styled(
+                lock_label,
+                gate_style(self.summary.lock.present, self.summary.lock.stale),
+            ),
+            Span::raw(" | Plan: "),
+            Span::styled(
+                plan_label,
+                gate_style(self.summary.plan.present, self.summary.plan.stale),
+            ),
+            Span::raw(" | Decision: "),
+            Span::styled(decision_label, decision_style(&self.summary.decision)),
+            Span::raw(" | Next: "),
+            Span::raw(next_action),
+        ]);
+
+        let paragraph = Paragraph::new(vec![line1, line2]).wrap(Wrap { trim: true });
+        frame.render_widget(paragraph, area);
+    }
+
+    fn draw_tabs(&self, frame: &mut Frame, area: Rect) {
+        let titles = Tab::ALL.iter().map(|tab| {
+            Span::styled(
+                tab.label(),
+                Style::default()
+                    .fg(tab_color(*tab))
+                    .add_modifier(Modifier::BOLD),
+            )
+        });
+        let tabs = Tabs::new(titles)
+            .select(self.tab.index())
+            .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+        frame.render_widget(tabs, area);
+    }
+
+    fn draw_main(&mut self, frame: &mut Frame, area: Rect) {
+        match self.tab {
+            Tab::Intent => self.draw_intent(frame, area),
+            Tab::Evidence => self.draw_evidence(frame, area),
+            Tab::Outputs => self.draw_outputs(frame, area),
+            Tab::History => self.draw_history(frame, area),
+        }
+    }
+
+    fn draw_intent(&mut self, frame: &mut Frame, area: Rect) {
+        let total = self.data.intent.len();
+        let visible = self.visible_items_len(self.tab);
+        let title = list_title("Intent", total, visible, self.show_all[self.tab.index()]);
+        let items = self
+            .data
+            .intent
+            .iter()
+            .take(visible)
+            .map(artifact_list_item)
+            .collect::<Vec<_>>();
+        let list = List::new(items)
+            .block(Block::default().borders(Borders::ALL).title(title))
+            .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+        let mut state = ListState::default();
+        state.select(Some(self.selection[self.tab.index()]));
+        frame.render_stateful_widget(list, area, &mut state);
+    }
+
+    fn draw_evidence(&mut self, frame: &mut Frame, area: Rect) {
+        let total = self.data.evidence.total_count;
+        let visible = self.visible_items_len(self.tab);
+        let title = list_title("Evidence", total, visible, self.show_all[self.tab.index()]);
+        let items = self
+            .data
+            .evidence
+            .entries
+            .iter()
+            .take(visible)
+            .map(evidence_list_item)
+            .collect::<Vec<_>>();
+        let list = List::new(items)
+            .block(Block::default().borders(Borders::ALL).title(title))
+            .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+        let mut state = ListState::default();
+        state.select(Some(self.selection[self.tab.index()]));
+        frame.render_stateful_widget(list, area, &mut state);
+    }
+
+    fn draw_outputs(&mut self, frame: &mut Frame, area: Rect) {
+        let has_warnings = !self.data.man_warnings.is_empty();
+        let list_area = if has_warnings {
+            let layout = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(min(self.data.man_warnings.len() as u16 + 1, 4)),
+                    Constraint::Min(2),
+                ])
+                .split(area);
+            let warnings = self
+                .data
+                .man_warnings
+                .iter()
+                .take(3)
+                .map(|warning| Line::from(format!("warning: {warning}")))
+                .collect::<Vec<_>>();
+            let paragraph = Paragraph::new(warnings)
+                .block(Block::default().borders(Borders::ALL).title("Man warnings"));
+            frame.render_widget(paragraph, layout[0]);
+            layout[1]
+        } else {
+            area
+        };
+
+        let total = self.data.outputs.len();
+        let visible = self.visible_items_len(self.tab);
+        let title = list_title("Outputs", total, visible, self.show_all[self.tab.index()]);
+        let items = self
+            .data
+            .outputs
+            .iter()
+            .take(visible)
+            .map(artifact_list_item)
+            .collect::<Vec<_>>();
+        let list = List::new(items)
+            .block(Block::default().borders(Borders::ALL).title(title))
+            .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+        let mut state = ListState::default();
+        state.select(Some(self.selection[self.tab.index()]));
+        frame.render_stateful_widget(list, list_area, &mut state);
+    }
+
+    fn draw_history(&mut self, frame: &mut Frame, area: Rect) {
+        let mut sections = Vec::new();
+        if self.data.last_history.is_some() || self.data.last_txn_id.is_some() {
+            sections.push(Constraint::Length(4));
+        }
+        sections.push(Constraint::Min(2));
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(sections)
+            .split(area);
+
+        if self.data.last_history.is_some() || self.data.last_txn_id.is_some() {
+            let mut lines = Vec::new();
+            if let Some(entry) = self.data.last_history.as_ref() {
+                lines.push(Line::from(format!(
+                    "last history: step={} success={} force_used={}",
+                    entry.step, entry.success, entry.force_used
+                )));
+            }
+            if let Some(txn_id) = self.data.last_txn_id.as_ref() {
+                lines.push(Line::from(format!("last txn: {txn_id}")));
+            }
+            let paragraph = Paragraph::new(lines)
+                .block(Block::default().borders(Borders::ALL).title("Last run"));
+            frame.render_widget(paragraph, layout[0]);
+        }
+
+        let total = self.data.history.len();
+        let visible = self.visible_items_len(self.tab);
+        let title = list_title(
+            "History/Audit",
+            total,
+            visible,
+            self.show_all[self.tab.index()],
+        );
+        let items = self
+            .data
+            .history
+            .iter()
+            .take(visible)
+            .map(artifact_list_item)
+            .collect::<Vec<_>>();
+        let list = List::new(items)
+            .block(Block::default().borders(Borders::ALL).title(title))
+            .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+        let mut state = ListState::default();
+        state.select(Some(self.selection[self.tab.index()]));
+        let list_area = if layout.len() == 1 {
+            layout[0]
+        } else {
+            layout[1]
+        };
+        frame.render_stateful_widget(list, list_area, &mut state);
+    }
+
+    fn draw_footer(&self, frame: &mut Frame, area: Rect) {
+        let message = self.message.clone().unwrap_or_else(|| {
+            "q quit | tab switch | enter view | o edit | m man | c copy | r refresh | ? help"
+                .to_string()
+        });
+        let message = truncate_text(&message, area.width as usize);
+        let paragraph =
+            Paragraph::new(message).style(Style::default().add_modifier(Modifier::REVERSED));
+        frame.render_widget(paragraph, area);
+    }
+
+    fn draw_help(&self, frame: &mut Frame) {
+        let area = centered_rect(70, 70, frame.size());
+        let lines = vec![
+            Line::from("Keys:"),
+            Line::from("  q / Esc: quit"),
+            Line::from("  Tab: next tab"),
+            Line::from("  Shift+Tab: previous tab"),
+            Line::from("  Up/Down: move selection"),
+            Line::from("  Enter: open in pager"),
+            Line::from("  o: open in editor"),
+            Line::from("  m: open man page"),
+            Line::from("  c: copy selected path or next action"),
+            Line::from("  r: refresh"),
+            Line::from("  a: toggle show all"),
+            Line::from("  ?: toggle help"),
+            Line::from(""),
+            Line::from("Non-goals:"),
+            Line::from("  no in-TUI editing, no validate/plan/apply, no embedded pager"),
+        ];
+        let paragraph = Paragraph::new(lines)
+            .block(Block::default().borders(Borders::ALL).title("Help"))
+            .wrap(Wrap { trim: true });
+        frame.render_widget(Clear, area);
+        frame.render_widget(paragraph, area);
+    }
+}
+
+fn list_title(label: &str, total: usize, visible: usize, show_all: bool) -> String {
+    if show_all || total <= visible {
+        format!("{label} ({total})")
+    } else {
+        format!("{label} (showing {visible} of {total}, press 'a' to show all)")
+    }
+}
+
+fn artifact_list_item(entry: &ArtifactEntry) -> ListItem<'static> {
+    let status = if entry.exists { "present" } else { "missing" };
+    let text = format!("{} ({status})", entry.rel_path);
+    ListItem::new(Line::from(text))
+}
+
+fn evidence_list_item(entry: &EvidenceEntry) -> ListItem<'static> {
+    let status = if let Some(err) = entry.error.as_ref() {
+        format!("error: {err}")
+    } else if !entry.exists {
+        "no evidence".to_string()
+    } else {
+        let exit = entry
+            .exit_code
+            .map_or("?".to_string(), |code| code.to_string());
+        let signal = entry
+            .exit_signal
+            .map_or("-".to_string(), |sig| sig.to_string());
+        let timeout = entry.timed_out.unwrap_or(false);
+        format!("exit={} signal={} timed_out={}", exit, signal, timeout)
+    };
+    let stdout = entry
+        .stdout_preview
+        .clone()
+        .unwrap_or_else(|| "<empty>".to_string());
+    let stderr = entry
+        .stderr_preview
+        .clone()
+        .unwrap_or_else(|| "<empty>".to_string());
+    let mut lines = Vec::new();
+    let label = format!("{} | {}", entry.scenario_id, status);
+    lines.push(Line::from(label));
+    lines.push(Line::from(format!("stdout: {stdout}")));
+    lines.push(Line::from(format!("stderr: {stderr}")));
+    ListItem::new(lines)
+}
+
+fn gate_style(present: bool, stale: bool) -> Style {
+    if !present {
+        Style::default().fg(Color::Red)
+    } else if stale {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::Green)
+    }
+}
+
+fn decision_style(decision: &enrich::Decision) -> Style {
+    match decision {
+        enrich::Decision::Complete => Style::default().fg(Color::Green),
+        enrich::Decision::Incomplete => Style::default().fg(Color::Yellow),
+        enrich::Decision::Blocked => Style::default().fg(Color::Red),
+    }
+}
+
+fn tab_color(tab: Tab) -> Color {
+    match tab {
+        Tab::Intent => Color::Cyan,
+        Tab::Evidence => Color::Yellow,
+        Tab::Outputs => Color::Green,
+        Tab::History => Color::Magenta,
+    }
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(area);
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
+}
