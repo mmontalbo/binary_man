@@ -67,7 +67,7 @@ Scenarios are defined under `<doc-pack>/scenarios/plan.json`. Scenario runs are
 appended to the pack under `<doc-pack>/binary.lens/runs/` and summarized in
 `<doc-pack>/man/examples_report.json` when planned and when publishable examples
 exist. Usage + discovery templates are installed under `<doc-pack>/queries/` and
-referenced by `enrich/config.json`.
+used directly by the tool.
 Enrichment control and state live under `<doc-pack>/enrich/`, including
 `bootstrap.json`, `config.json`, `lock.json`, and `plan.out.json`.
 Surface inventory lives under `<doc-pack>/inventory/surface.json` with scenario

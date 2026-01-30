@@ -44,10 +44,10 @@ cargo run --bin bman -- validate --doc-pack /tmp/<binary>-docpack
 ```
 
 2) Edit pack-local inputs as needed:
-- `queries/` (usage lens templates referenced by `enrich/config.json`)
+- `queries/` (usage/surface lens templates)
 - `scenarios/plan.json` (scenario plan for help/behavior coverage)
 - `fixtures/` (deterministic inputs)
-- `enrich/config.json` (requirements + input selection)
+- `enrich/config.json` (requirements)
 
 3) Plan, apply, and check status:
 

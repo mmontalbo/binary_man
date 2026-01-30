@@ -115,9 +115,8 @@ nix run <lens-flake> -- run=1 <doc-pack>/binary.lens --help
 
 ## DuckDB extraction (lens-based)
 
-Help/usage text is extracted via the lens templates referenced in
-`<doc-pack>/enrich/config.json`. By default, `bman init` installs the
-scenario-based usage lens under `<doc-pack>/queries/`:
+Help/usage text is extracted via the lens templates installed under
+`<doc-pack>/queries/`. `bman` uses the scenario-based usage lens by default:
 
 1. `queries/usage_from_scenarios.sql`
 

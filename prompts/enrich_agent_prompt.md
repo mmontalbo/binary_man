@@ -61,14 +61,14 @@ Default runner env lives in `scenarios/plan.json.default_env` (seeded by `bman i
 
 ## Man rendering + semantics (if man is unmet or low quality)
 - Check `bman status --doc-pack . --json` for `man_warnings`:
-  - If warnings mention usage lens failures or missing synopsis, fix `scenarios/plan.json` help scenarios or `enrich/semantics.json` (do not edit generated outputs).
+  - If warnings mention missing usage text or synopsis, fix `scenarios/plan.json` help scenarios or `enrich/semantics.json` (do not edit generated outputs).
 - Read `man/meta.json` (do not edit it):
   - `.usage_lens_source_path` shows which evidence source produced the help text used for rendering.
   - `.render_summary.semantics_unmet` lists which extractions are missing according to `enrich/semantics.json`.
 - Read the evidence you are interpreting:
   - `inventory/scenarios/*.json` (help evidence lives here; especially help scenarios) for stdout/stderr.
 - Help scenarios use the reserved `help--` id prefix; they are the only inputs for usage extraction and surface discovery, and verification scenarios never drive usage or surface growth.
-- There is no usage-lens fallback by default; if usage is missing, update help scenarios or semantics and rerun the loop.
+- There is no usage-lens fallback; if usage is missing, update help scenarios or semantics and rerun the loop.
 - `lens_summary` showing `options_from_scenarios.sql` as empty is normal for command-focused tools (e.g., git); it is not a failure if surface is met and decision is complete.
 - `man/examples_report.json` is only present when there are publishable examples; its absence is normal in fresh packs.
 - Fix by editing `enrich/semantics.json` (pack-owned semantics):

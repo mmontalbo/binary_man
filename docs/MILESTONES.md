@@ -183,11 +183,10 @@ Deliverables:
     can adjust based on evidence instead of relying on tool assumptions.
   - When no usable help output exists (stdout/stderr empty/only noise), `status
     --json` recommends editing `scenarios/plan.json` to add/adjust help scenarios.
-- Pack-configurable discovery lenses:
-  - Add an opt-in list in `enrich/config.json` (e.g. `surface_lens_templates`)
-    so surface discovery is driven by pack-owned SQL template selection and
-    ordering (not tool-owned constants).
-  - `bman validate` includes configured lens templates in `enrich/lock.json`
+- Pack-owned discovery lenses:
+  - Surface discovery is driven by the pack-local SQL templates under
+    `queries/` (no config selection).
+  - `bman validate` includes those lens templates in `enrich/lock.json`
     inputs.
 - Lean artifact policy:
   - Only write `coverage_ledger.json` / `verification_ledger.json` when required
