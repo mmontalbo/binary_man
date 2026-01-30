@@ -1,0 +1,29 @@
+{
+  "schema": { "name": "binary_lens_export_plan", "version": "v1" },
+  "config": {
+    "schema": { "name": "binary_lens_config", "version": "v1" },
+    "artifacts": {
+      "strings": true,
+      "callgraph": true,
+      "call_args": false,
+      "evidence_decomp": true
+    },
+    "budgets": {
+      "max_full_functions": 10,
+      "max_strings": 5000,
+      "max_call_edges": 20000,
+      "max_decomp_lines": 200
+    },
+    "timeouts": {
+      "decompile_seconds": 20
+    },
+    "advanced": {
+      "analysis_profile": "minimal"
+    }
+  },
+  "requests": {
+    "schema": { "name": "binary_lens_requests", "version": "v1" },
+    "evidence": {},
+    "call_args": {}
+  }
+}

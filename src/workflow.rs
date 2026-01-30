@@ -25,6 +25,7 @@ pub fn run_init(args: InitArgs) -> Result<()> {
             config_path.display()
         ));
     }
+    install_binary_lens_export_plan(&paths, args.force)?;
     let manifest_path = paths.pack_manifest_path();
     if !manifest_path.is_file() {
         let mut bootstrap = None;
@@ -62,7 +63,11 @@ pub fn run_init(args: InitArgs) -> Result<()> {
             .filter(|value| !value.is_empty())
             .unwrap_or(args.lens_flake.as_str());
         let lens_flake = resolve_flake_ref(lens_flake_input)?;
-        pack::generate_pack(binary, paths.root(), &lens_flake)?;
+        let export_plan_path = paths.binary_lens_export_plan_path();
+        let plan_path = export_plan_path
+            .is_file()
+            .then_some(export_plan_path.as_path());
+        pack::generate_pack_with_plan(binary, paths.root(), &lens_flake, plan_path, None)?;
     }
 
     install_usage_lens_templates(&paths, args.force)?;
@@ -195,7 +200,18 @@ pub fn run_apply(args: ApplyArgs) -> Result<()> {
             .as_ref()
             .map(|m| m.binary_path.as_str())
             .ok_or_else(|| anyhow!("manifest missing; cannot refresh pack"))?;
-        pack::generate_pack(binary_path, ctx.paths.root(), &lens_flake)?;
+        let export_plan_path = ctx.paths.binary_lens_export_plan_path();
+        let plan_path = export_plan_path
+            .is_file()
+            .then_some(export_plan_path.as_path());
+        let from_pack = plan_path.map(|_| ctx.paths.pack_root());
+        pack::generate_pack_with_plan(
+            binary_path,
+            ctx.paths.root(),
+            &lens_flake,
+            plan_path,
+            from_pack.as_deref(),
+        )?;
         manifest = load_manifest_optional(&ctx.paths)?;
     }
 
@@ -1250,6 +1266,19 @@ fn install_semantics(paths: &enrich::DocPackPaths, force: bool) -> Result<()> {
         fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
     fs::write(&path, templates::ENRICH_SEMANTICS_JSON.as_bytes())
+        .with_context(|| format!("write {}", path.display()))?;
+    Ok(())
+}
+
+fn install_binary_lens_export_plan(paths: &enrich::DocPackPaths, force: bool) -> Result<()> {
+    let path = paths.binary_lens_export_plan_path();
+    if path.is_file() && !force {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    fs::write(&path, templates::BINARY_LENS_EXPORT_PLAN_JSON.as_bytes())
         .with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }

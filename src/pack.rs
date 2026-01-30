@@ -2,7 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 
 #[derive(Deserialize, Clone)]
 pub struct BinaryHashes {
@@ -50,21 +50,49 @@ struct HelpExtraction {
     warnings: Vec<String>,
 }
 
-pub fn generate_pack(binary: &str, out_dir: &Path, lens_flake: &str) -> Result<PathBuf> {
+pub fn generate_pack_with_plan(
+    binary: &str,
+    out_dir: &Path,
+    lens_flake: &str,
+    plan_path: Option<&Path>,
+    from_pack: Option<&Path>,
+) -> Result<PathBuf> {
     fs::create_dir_all(out_dir).context("create pack output dir")?;
 
-    let out_dir_str = out_dir
-        .to_str()
-        .ok_or_else(|| anyhow!("pack output path is not valid UTF-8"))?;
+    let out_dir_str = path_to_string(out_dir, "pack output")?;
+    let plan_str = match plan_path {
+        Some(path) => Some(path_to_string(path, "export plan")?),
+        None => None,
+    };
+    let from_pack_str = match from_pack {
+        Some(path) => Some(path_to_string(path, "from-pack")?),
+        None => None,
+    };
 
-    let output = Command::new("nix")
-        .args(["run", lens_flake, "--", binary, "-o", out_dir_str])
-        .output()
-        .context("run binary_lens via nix")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("binary_lens failed: {}", stderr.trim()));
+    let primary_args = build_export_args(
+        binary,
+        &out_dir_str,
+        plan_str.as_deref(),
+        from_pack_str.as_deref(),
+    );
+    let primary_output = run_binary_lens(lens_flake, &primary_args)?;
+    if !primary_output.status.success() {
+        if from_pack_str.is_some() {
+            let fallback_args = build_export_args(binary, &out_dir_str, plan_str.as_deref(), None);
+            let fallback_output = run_binary_lens(lens_flake, &fallback_args)?;
+            if !fallback_output.status.success() {
+                return Err(anyhow!(
+                    "binary_lens failed with --from-pack: {}; fallback failed: {}",
+                    stderr_trim(&primary_output),
+                    stderr_trim(&fallback_output)
+                ));
+            }
+        } else {
+            return Err(anyhow!(
+                "binary_lens failed: {}",
+                stderr_trim(&primary_output)
+            ));
+        }
     }
 
     let pack_root = out_dir.join("binary.lens");
@@ -76,6 +104,47 @@ pub fn generate_pack(binary: &str, out_dir: &Path, lens_flake: &str) -> Result<P
     }
 
     Ok(pack_root)
+}
+
+fn build_export_args(
+    binary: &str,
+    out_dir: &str,
+    plan: Option<&str>,
+    from_pack: Option<&str>,
+) -> Vec<String> {
+    let mut args = Vec::new();
+    if let Some(from_pack) = from_pack {
+        args.push("--from-pack".to_string());
+        args.push(from_pack.to_string());
+        args.push("--in-place".to_string());
+    } else {
+        args.push(binary.to_string());
+    }
+    args.push("-o".to_string());
+    args.push(out_dir.to_string());
+    if let Some(plan) = plan {
+        args.push("--plan".to_string());
+        args.push(plan.to_string());
+    }
+    args
+}
+
+fn run_binary_lens(lens_flake: &str, args: &[String]) -> Result<Output> {
+    Command::new("nix")
+        .args(["run", lens_flake, "--"])
+        .args(args)
+        .output()
+        .context("run binary_lens via nix")
+}
+
+fn path_to_string(path: &Path, label: &str) -> Result<String> {
+    path.to_str()
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("{label} path is not valid UTF-8"))
+}
+
+fn stderr_trim(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stderr).trim().to_string()
 }
 
 pub fn load_pack_context_with_template_at(
