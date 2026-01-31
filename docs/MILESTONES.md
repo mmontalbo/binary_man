@@ -7,6 +7,79 @@ that supports iterative static + dynamic passes from portable doc packs.
 
 Current focus: planning next milestone.
 
+## M15 — Batched Auto-Verification (Subcommand Existence) v1 (done)
+
+Goal: Extend the M14 “apply until done” loop to **subcommands**, so multi-command
+CLIs (e.g. `git`) can reach “existence verified” without authoring per-subcommand
+scenarios.
+
+Motivation:
+- M14 verifies option existence, but command-centric tools may have few/no
+  options and a large subcommand surface.
+- We want the same mechanical, bounded loop for subcommands with pack-owned
+  invocation and interpretation (evidence > scores).
+
+Design constraints (non-negotiable for this milestone):
+- JSON-only structured artifacts in the doc pack (JSONL permitted for history).
+- Keep parsing semantics out of Rust: invocation shape + evidence interpretation
+  stay pack-owned (semantics JSON + pack SQL), not hardcoded strings.
+- Evidence remains append-only; `apply` remains transactional.
+- Safety-first execution remains enforced (bounded timeouts/outputs + sandboxing,
+  network off unless explicitly enabled by the plan).
+- Usage + surface discovery stay help-only: verification runs must not change man
+  rendering inputs or surface growth.
+
+Deliverables:
+1) **Verification policy becomes kind-driven (breaking change acceptable)**
+- Replace `scenarios/plan.json.verification.policy.mode` with an ordered list
+  `verification.policy.kinds`.
+- v1 supported kinds: `option`, `subcommand`.
+- Keep objective exclusions:
+  - explicit exclusions by `surface_id` with enum `prereqs` + `reason`
+  - explicit batch bound `max_new_runs_per_apply`
+
+2) **Pack-owned subcommand invocation shape**
+- Extend `enrich/semantics.json` with:
+  - `verification.subcommand_existence_argv_prefix`
+  - `verification.subcommand_existence_argv_suffix`
+- Default suffix is `["--help"]`; packs override when they require `-h`, `-?`, or
+  an alternate help affordance (e.g. `help <cmd>`-style CLIs).
+
+3) **Batched auto-verification runs for subcommands**
+- During `apply`, expand the policy into implicit verification runs over
+  `inventory/surface.json` items with `kind: "subcommand"` (deterministic
+  ordering, stable synthetic IDs).
+- Run at most `max_new_runs_per_apply` new subcommands per `apply`; re-running
+  `apply` continues where it left off using the existing skip/index mechanism.
+- Evidence is recorded as scenario evidence under `inventory/scenarios/*.json`
+  (append-only).
+
+4) **Verification lens/ledger/status support**
+- Extend `queries/verification_from_scenarios.sql` + `verification_ledger.json`
+  generation to include subcommand targets, with accepted/rejected classification
+  driven by `enrich/semantics.json` rules (no argv-token parsing assumptions in
+  Rust).
+- `bman plan` and `bman status --json` summarize remaining targets by kind and
+  recommend `run: bman apply ...` until remaining reaches 0.
+- When blocked (missing/invalid policy, unusable semantics), `status --json`
+  recommends editing a single concrete target (`scenarios/plan.json` or
+  `enrich/semantics.json`).
+
+Acceptance criteria:
+- Fresh `git` pack: enable `verification.policy.kinds` to include `subcommand`
+  and rerun `apply` until verification is met (`verification_ledger.json`
+  `unverified_count` becomes 0).
+- Verification runs do not change `inventory/surface.json` or man usage
+  extraction (help-only lenses remain the sole inputs to those).
+- The loop stays bounded and mechanically resumable, with `scenarios/plan.json`
+  remaining compact.
+
+Out of scope:
+- Multi-token/nested subcommands (space-separated command hierarchies).
+- Subcommand behavior verification (side effects) or argument synthesis beyond
+  help-style existence checks.
+- Auto-inference of safe invocation shapes or exclusion prereqs.
+
 ## Side Quest — Read-only Doc-Pack Inspector TUI v1 (done)
 
 Goal: Make doc packs easy to inspect and navigate without memorizing artifact
