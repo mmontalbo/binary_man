@@ -6,7 +6,7 @@
 const DEFAULT_SNIPPET_MAX_BYTES: usize = 4096;
 const DEFAULT_SNIPPET_MAX_LINES: usize = 60;
 const MAX_SCENARIO_EVIDENCE_BYTES: usize = 64 * 1024;
-const SCENARIO_PLAN_SCHEMA_VERSION: u32 = 4;
+const SCENARIO_PLAN_SCHEMA_VERSION: u32 = 5;
 pub(crate) const SCENARIO_EVIDENCE_SCHEMA_VERSION: u32 = 3;
 const SCENARIO_INDEX_SCHEMA_VERSION: u32 = 1;
 pub(crate) const AUTO_VERIFY_SCENARIO_PREFIX: &str = "auto_verify::";
@@ -34,5 +34,7 @@ pub use evidence::{
     publishable_examples_report, ExamplesReport, ScenarioIndex, ScenarioIndexEntry,
 };
 pub(crate) use evidence::{read_runs_index_bytes, read_scenario_index};
-pub use run::{run_scenarios, RunScenariosArgs};
+pub use run::{
+    run_scenarios, AutoVerificationKindProgress, AutoVerificationProgress, RunScenariosArgs,
+};
 pub use types::*;

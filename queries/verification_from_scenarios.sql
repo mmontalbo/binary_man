@@ -100,7 +100,8 @@ with
     select
       scenario_id,
       argv,
-      regexp_extract(scenario_id, '^auto_verify::(.*)$', 1) as surface_id
+      regexp_extract(scenario_id, '^auto_verify::(option|subcommand)::(.*)$', 1) as surface_kind,
+      regexp_extract(scenario_id, '^auto_verify::(option|subcommand)::(.*)$', 2) as surface_id
     from latest_evidence
     where scenario_id like 'auto_verify::%'
   ),
@@ -112,7 +113,8 @@ with
       argv,
       'acceptance' as coverage_tier
     from auto_scenarios_raw
-    where surface_id is not null
+    where surface_kind is not null
+      and surface_id is not null
       and surface_id <> ''
   ),
   combined_scenarios as (

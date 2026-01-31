@@ -114,21 +114,31 @@ pub struct VerificationPlan {
     pub policy: Option<VerificationPolicy>,
 }
 
-/// Auto-verification policy for discovered options.
+/// Auto-verification policy for discovered surface kinds.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct VerificationPolicy {
-    pub mode: VerificationPolicyMode,
+    pub kinds: Vec<VerificationTargetKind>,
     pub max_new_runs_per_apply: usize,
     #[serde(default)]
     pub excludes: Vec<VerificationPolicyExclude>,
 }
 
-/// Supported auto-verification modes.
+/// Supported auto-verification kinds.
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum VerificationPolicyMode {
-    VerifyAllOptions,
+pub enum VerificationTargetKind {
+    Option,
+    Subcommand,
+}
+
+impl VerificationTargetKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            VerificationTargetKind::Option => "option",
+            VerificationTargetKind::Subcommand => "subcommand",
+        }
+    }
 }
 
 /// Exclusion entry for auto-verification policy.

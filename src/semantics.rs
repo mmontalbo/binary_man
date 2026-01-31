@@ -10,7 +10,7 @@ use std::fs;
 use std::path::Path;
 
 /// Current schema version for `enrich/semantics.json`.
-pub const SEMANTICS_SCHEMA_VERSION: u32 = 3;
+pub const SEMANTICS_SCHEMA_VERSION: u32 = 4;
 
 fn default_true() -> bool {
     true
@@ -155,6 +155,10 @@ pub struct VerificationSemantics {
     pub option_existence_argv_prefix: Vec<String>,
     #[serde(default)]
     pub option_existence_argv_suffix: Vec<String>,
+    #[serde(default)]
+    pub subcommand_existence_argv_prefix: Vec<String>,
+    #[serde(default)]
+    pub subcommand_existence_argv_suffix: Vec<String>,
 }
 
 /// Single verification rule for accepted/rejected classification.
@@ -363,6 +367,14 @@ pub fn validate_semantics(semantics: &Semantics) -> Result<()> {
     validate_invocation_tokens(
         &semantics.verification.option_existence_argv_suffix,
         "verification.option_existence_argv_suffix",
+    )?;
+    validate_invocation_tokens(
+        &semantics.verification.subcommand_existence_argv_prefix,
+        "verification.subcommand_existence_argv_prefix",
+    )?;
+    validate_invocation_tokens(
+        &semantics.verification.subcommand_existence_argv_suffix,
+        "verification.subcommand_existence_argv_suffix",
     )?;
 
     Ok(())

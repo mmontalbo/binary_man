@@ -70,6 +70,20 @@ pub fn validate_plan(plan: &ScenarioPlan, doc_pack_root: &Path) -> Result<()> {
         }
     }
     if let Some(policy) = plan.verification.policy.as_ref() {
+        if policy.kinds.is_empty() {
+            return Err(anyhow!(
+                "verification.policy.kinds must include at least one kind"
+            ));
+        }
+        let mut seen_kinds = std::collections::BTreeSet::new();
+        for kind in &policy.kinds {
+            let kind_str = kind.as_str();
+            if !seen_kinds.insert(kind_str) {
+                return Err(anyhow!(
+                    "verification.policy.kinds contains duplicate kind {kind_str}"
+                ));
+            }
+        }
         if policy.max_new_runs_per_apply == 0 {
             return Err(anyhow!(
                 "verification.policy.max_new_runs_per_apply must be > 0"

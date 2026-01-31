@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "usage": {
     "line_rules": [
       {
@@ -85,6 +85,10 @@
   "verification": {
     "option_existence_argv_prefix": [],
     "option_existence_argv_suffix": [],
+    "subcommand_existence_argv_prefix": [],
+    "subcommand_existence_argv_suffix": [
+      "--help"
+    ],
     "accepted": [
       {
         "exit_code": 0,
