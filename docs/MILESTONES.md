@@ -5,7 +5,68 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured “enrichment loop”
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: planning next milestone.
+Current focus: M16 — behavior verification pilot.
+
+## M16 — Behavior Verification Pilot (ls options) (planned)
+
+Goal: Add an evidence-backed, mechanical loop for verifying **observable behavior**
+of a selected subset of `ls` option surface items (not just existence/recognition),
+using explicit scenarios with fixtures + expectations.
+
+Motivation:
+- M14/M15 make existence verification cheap and mechanical, but do not confirm
+  documented behavior.
+- We want a safe, pack-owned way to incrementally prove behavior from concrete
+  evidence, starting with a fixture-friendly binary (`ls`).
+
+Design constraints (non-negotiable for this milestone):
+- JSON-only structured artifacts in the doc pack (JSONL permitted for history).
+- No scores/percent truth: behavior verification is pass/fail over explicit
+  predicates with evidence refs.
+- Keep semantics out of Rust: expected behavior lives in pack-owned scenario
+  expectations + SQL, not hardcoded strings in code.
+- Evidence remains append-only; `apply` remains transactional.
+- Safety-first execution remains enforced (bounded timeouts/outputs + sandboxing,
+  network off unless explicitly enabled by the plan).
+- Usage + surface discovery stay help-only: behavior scenarios must not change man
+  rendering inputs or surface growth.
+
+Deliverables:
+1) **Behavior triage uses existing verification queue intents**
+- Use `scenarios/plan.json.verification.queue[]` entries with
+  `intent: "verify_behavior"` to define the set of behavior-required targets.
+- When `enrich/config.json` requires verification at `tier: "behavior"` and the
+  required set is empty, `bman status --json` is unmet with a deterministic next
+  action: edit `scenarios/plan.json` (add at least one behavior target).
+- Exclusions remain objective (`intent: "exclude"` + `prereqs` + `reason`) and are
+  enumerated in `verification_ledger.json` as excluded targets.
+
+2) **Behavior counting rule is mechanical and expectation-backed**
+- A `surface_id` is behavior-verified iff there exists a passing scenario run that:
+  - has `coverage_tier: "behavior"`
+  - lists the id in `covers`
+  - actually invokes it (argv token matching for that `surface_id`)
+  - asserts at least one observable stdout/stderr predicate (contains/regex)
+- Exit code alone does not count as behavior evidence.
+
+3) **Deterministic next_action loop + safe stub generation**
+- When behavior verification is required and unmet, status chooses the next
+  missing id in a stable order and emits exactly one next action:
+  edit `scenarios/plan.json`.
+- The emitted stub scenario uses the default empty fixture
+  (`fixtures/empty`), sets `covers: ["<surface_id>"]`, `argv: ["<surface_id>"]`,
+  `coverage_tier: "behavior"`, and `expect: {}` (valid but non-counting until the
+  LM adds predicates + any needed seed entries).
+- Reserved ids/prefixes remain enforced (`help--*`, `auto_verify::…`).
+
+Acceptance criteria:
+- Fresh `ls` pack: existence verification completes via the existing auto-verify
+  policy (no per-option authored scenarios).
+- With `verification_tier: "behavior"`, five queued behavior targets and five
+  passing behavior scenarios, `verification_ledger.json` shows the selected set
+  as behavior-verified and `bman status --json` returns `decision: complete`.
+- Behavior runs do not affect usage/surface discovery or man usage extraction
+  (help-only lenses remain the sole inputs to those).
 
 ## M15 — Batched Auto-Verification (Subcommand Existence) v1 (done)
 
