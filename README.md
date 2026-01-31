@@ -38,11 +38,13 @@ writes a lock snapshot, `bman plan` writes `plan.out.json`, and `bman apply`
 executes transactionally. `bman status` reports a decision of `complete`,
 `incomplete`, or `blocked` based on evidence-linked requirements and blockers.
 Verification is enabled by default (opt-out by removing `"verification"` from
-`enrich/config.json.requirements`). Option existence auto-verification is
-configured in `scenarios/plan.json.verification.policy` (mode
-`"verify_all_options"` with a bounded `max_new_runs_per_apply`). Follow the
+`enrich/config.json.requirements`). Auto-verification is configured in
+`scenarios/plan.json.verification.policy` with `kinds` (e.g. `["option"]` or
+`["option", "subcommand"]`) and a bounded `max_new_runs_per_apply`. Follow the
 deterministic `status --json` next action and rerun `apply` until verification
-is met; use `verification.queue` only for manual scenarios when needed.
+is met; use `verification.queue` only for manual scenarios when needed. The
+default tier (`accepted`) covers existence/recognition checks; behavior checks
+are only required when `verification_tier` is set to `"behavior"`.
 
 Flags:
 - `--doc-pack <dir>`: doc pack root for init/validate/plan/apply/status

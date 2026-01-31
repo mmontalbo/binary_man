@@ -1,12 +1,13 @@
 use super::data::load_state;
 use super::format::{gate_label, next_action_summary};
+use super::EvidenceFilter;
 use crate::enrich;
 use anyhow::Result;
 use std::path::Path;
 
 pub(super) fn run_text_summary(doc_pack_root: &Path) -> Result<()> {
     let show_all = [false; 4];
-    let (summary, data) = load_state(doc_pack_root, &show_all)?;
+    let (summary, data) = load_state(doc_pack_root, &show_all, EvidenceFilter::All)?;
     print_text_summary(doc_pack_root, &summary, &data)
 }
 

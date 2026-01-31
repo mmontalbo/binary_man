@@ -79,14 +79,17 @@ Default runner env lives in `scenarios/plan.json.default_env` (seeded by `bman i
 If `enrich/config.json.requirements` includes `"verification"` (default for new packs):
 - Verification is opt-out: remove `"verification"` from `requirements` to disable it.
 - Check `enrich/config.json.verification_tier` (default: `"accepted"`).
+- Accepted tier = existence/recognition checks (help/flag accepted); behavior tier = functional behavior checks and is only required when configured.
 - Auto verification is controlled by `scenarios/plan.json.verification.policy`:
-  - `mode`: `"verify_all_options"` (options existence only).
+  - `kinds`: ordered list of auto targets (`"option"`, `"subcommand"`).
   - `max_new_runs_per_apply`: batch size per apply.
   - `excludes`: `{ surface_id, prereqs[], reason }` for objective skips.
 - Run `validate → plan → apply` repeatedly; `status --json` will recommend `apply` again until verification is met.
 - Use `verification.queue` only when you need manual scenarios (commands/behavior); avoid per-flag scenarios for options.
 - Do not exclude just because of `needs_seed_fs`; every scenario already runs with an empty fixture by default.
 - Status triage summaries are compact (counts + previews); the canonical surface list is `inventory/surface.json`.
+- When summarizing verification progress, report both accepted and behavior counts (even if behavior is not required).
+- Auto-verify evidence is intentionally truncated to `snippet_max_*`; rerun a manual scenario if you need full output.
 
 ### What counts as verifying an id
 - Scenario-to-surface mapping is explicit: every entry in `covers` must be the exact `surface_id` you are verifying (no argv inference).
@@ -96,7 +99,9 @@ If `enrich/config.json.requirements` includes `"verification"` (default for new 
 - For option existence, prefer `argv: ["<surface_id>"]` with `covers: ["<surface_id>"]`; do not force `expect.exit_code=0`.
 - For command/subcommand existence, prefer `argv: ["<surface_id>", "--help"]` before adding prereqs or excluding.
 - Classification is driven by `enrich/semantics.json.verification` rules (accepted vs rejected vs inconclusive); accepted existence can include missing-arg errors when semantics allow it.
-- Auto verification argv is built from `enrich/semantics.json.verification.option_existence_argv_prefix` + `<surface_id>` + `option_existence_argv_suffix`; keep those arrays explicit.
+- Auto verification argv is built from pack semantics:
+  - Options: `verification.option_existence_argv_prefix` + `<surface_id>` + `option_existence_argv_suffix`.
+  - Subcommands: `verification.subcommand_existence_argv_prefix` + `<surface_id>` + `subcommand_existence_argv_suffix`.
 - Add stdout/stderr expectations only when they are clearly stable.
 
 ### Inline seed example (for behavior tests later)

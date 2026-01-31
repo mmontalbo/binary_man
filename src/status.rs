@@ -56,7 +56,6 @@ pub fn build_status_summary(args: BuildStatusSummaryArgs<'_>) -> Result<enrich::
         eval.missing_artifacts.push(plan_rel);
         warnings.push("scenarios/plan.json missing".to_string());
     }
-
     let scenario_failures = scenario_failures::load_scenario_failures(&paths, &mut warnings)?;
     let missing_inputs = config_exists && enrich::resolve_inputs(config, doc_pack_root).is_err();
     let gating_ok = config_exists
@@ -381,7 +380,7 @@ mod tests {
             },
         };
         let plan = scenarios::ScenarioPlan {
-            schema_version: 4,
+            schema_version: 5,
             binary: None,
             default_env: BTreeMap::new(),
             defaults: None,

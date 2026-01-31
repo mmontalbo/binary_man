@@ -1,6 +1,5 @@
 use super::super::data::{ArtifactEntry, EvidenceEntry, InspectData};
-use super::super::format::next_action_copy;
-use super::super::{Tab, PREVIEW_LIMIT};
+use super::super::{EvidenceFilter, Tab, PREVIEW_LIMIT};
 use super::App;
 use crate::enrich;
 use anyhow::Result;
@@ -12,12 +11,14 @@ impl App {
         doc_pack_root: PathBuf,
         summary: enrich::StatusSummary,
         data: InspectData,
+        evidence_filter: EvidenceFilter,
     ) -> Self {
         Self {
             doc_pack_root,
             summary,
             data,
             tab: Tab::Intent,
+            evidence_filter,
             selection: [0; 4],
             show_all: [false; 4],
             message: None,
@@ -26,7 +27,11 @@ impl App {
     }
 
     pub(in crate::inspect) fn refresh(&mut self) -> Result<()> {
-        let (summary, data) = super::super::data::load_state(&self.doc_pack_root, &self.show_all)?;
+        let (summary, data) = super::super::data::load_state(
+            &self.doc_pack_root,
+            &self.show_all,
+            self.evidence_filter,
+        )?;
         self.summary = summary;
         self.data = data;
         self.clamp_selection();
@@ -36,6 +41,11 @@ impl App {
     pub(in crate::inspect) fn toggle_show_all(&mut self) -> Result<()> {
         let idx = self.tab.index();
         self.show_all[idx] = !self.show_all[idx];
+        self.refresh()
+    }
+
+    pub(in crate::inspect) fn cycle_evidence_filter(&mut self) -> Result<()> {
+        self.evidence_filter = self.evidence_filter.next();
         self.refresh()
     }
 
@@ -104,6 +114,9 @@ impl App {
     }
 
     pub(super) fn selected_copy_target(&self) -> Option<String> {
+        if let enrich::NextAction::Command { command, .. } = &self.summary.next_action {
+            return Some(command.clone());
+        }
         if let Some(artifact) = self.selected_artifact() {
             return Some(artifact.path.display().to_string());
         }
@@ -112,7 +125,7 @@ impl App {
                 return Some(path.display().to_string());
             }
         }
-        Some(next_action_copy(&self.summary.next_action))
+        None
     }
 
     pub(super) fn visible_items_len(&self, tab: Tab) -> usize {

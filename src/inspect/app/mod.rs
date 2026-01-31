@@ -12,6 +12,7 @@ pub(super) struct App {
     summary: enrich::StatusSummary,
     data: InspectData,
     tab: Tab,
+    evidence_filter: super::EvidenceFilter,
     selection: [usize; 4],
     show_all: [bool; 4],
     message: Option<String>,

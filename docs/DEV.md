@@ -91,12 +91,15 @@ Fixture-backed scenarios can declare:
 `seed` entries are materialized into an isolated per-run directory.
 
 Verification is enabled by default (opt-out by editing
-`enrich/config.json.requirements`). Option existence auto-verification is
-configured in `scenarios/plan.json.verification.policy`:
-`mode: "verify_all_options"`, `max_new_runs_per_apply`, and explicit
-`excludes`. Run `validate → plan → apply` repeatedly; `status --json` will
-recommend `apply` again until verification is met. Use
-`verification.queue` only when you need manual scenarios (commands/behavior).
+`enrich/config.json.requirements`). Auto-verification is configured in
+`scenarios/plan.json.verification.policy` with `kinds` (e.g. `"option"`,
+`"subcommand"`), `max_new_runs_per_apply`, and explicit `excludes`. Run
+`validate → plan → apply` repeatedly; `status --json` will recommend `apply`
+again until verification is met. Use `verification.queue` only when you need
+manual scenarios (commands/behavior). The default tier (`accepted`) covers
+existence/recognition checks; behavior checks are only required when
+`verification_tier` is set to `"behavior"`. Auto-verify evidence is intentionally
+truncated to `snippet_max_*`; rerun a manual scenario if you need full output.
 
 For a principled approach to expanding scenario coverage (options vs behaviors
 vs doc claims) and curating `.SH EXAMPLES`, see `docs/COVERAGE.md`.

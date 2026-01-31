@@ -26,6 +26,57 @@ enum Tab {
     History,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum EvidenceFilter {
+    All,
+    Help,
+    Auto,
+    Manual,
+}
+
+impl EvidenceFilter {
+    const DISPLAY: [EvidenceFilter; 4] = [
+        EvidenceFilter::All,
+        EvidenceFilter::Help,
+        EvidenceFilter::Auto,
+        EvidenceFilter::Manual,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            EvidenceFilter::All => "All",
+            EvidenceFilter::Help => "Help",
+            EvidenceFilter::Auto => "Auto",
+            EvidenceFilter::Manual => "Manual",
+        }
+    }
+
+    fn from_scenario_id(scenario_id: &str) -> EvidenceFilter {
+        if scenario_id.starts_with("help--") {
+            EvidenceFilter::Help
+        } else if scenario_id.starts_with("auto_verify::") {
+            EvidenceFilter::Auto
+        } else {
+            EvidenceFilter::Manual
+        }
+    }
+
+    fn matches(self, scenario_id: &str) -> bool {
+        match self {
+            EvidenceFilter::All => true,
+            _ => EvidenceFilter::from_scenario_id(scenario_id) == self,
+        }
+    }
+
+    fn next(self) -> EvidenceFilter {
+        let idx = EvidenceFilter::DISPLAY
+            .iter()
+            .position(|candidate| *candidate == self)
+            .unwrap_or(0);
+        EvidenceFilter::DISPLAY[(idx + 1) % EvidenceFilter::DISPLAY.len()]
+    }
+}
+
 impl Tab {
     const ALL: [Tab; 4] = [Tab::Intent, Tab::Evidence, Tab::Outputs, Tab::History];
 

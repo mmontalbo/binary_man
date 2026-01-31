@@ -217,6 +217,8 @@ pub struct VerificationTriageSummary {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub triaged_unverified_preview: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remaining_by_kind: Vec<VerificationKindSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub excluded: Vec<VerificationExclusion>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub excluded_count: Option<usize>,
@@ -234,6 +236,20 @@ pub struct VerificationPlanSummary {
     pub remaining_count: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remaining_preview: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub by_kind: Vec<VerificationKindSummary>,
+}
+
+/// Summary for verification targets grouped by kind.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct VerificationKindSummary {
+    pub kind: String,
+    pub target_count: usize,
+    pub remaining_count: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remaining_preview: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remaining_ids: Option<Vec<String>>,
 }
 
 /// Requirement evaluation outcome, evidence, and blockers.
@@ -242,10 +258,18 @@ pub struct RequirementStatus {
     pub id: RequirementId,
     pub status: RequirementState,
     pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification_tier: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unverified_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unverified_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behavior_verified_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behavior_unverified_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verification: Option<VerificationTriageSummary>,
     pub evidence: Vec<EvidenceRef>,

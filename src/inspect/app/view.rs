@@ -1,6 +1,6 @@
-use super::super::data::{ArtifactEntry, EvidenceEntry};
+use super::super::data::{ArtifactEntry, EvidenceCounts, EvidenceEntry};
 use super::super::format::{gate_label, next_action_summary, truncate_text};
-use super::super::Tab;
+use super::super::{EvidenceFilter, Tab};
 use super::App;
 use crate::enrich;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -124,9 +124,20 @@ impl App {
     }
 
     fn draw_evidence(&mut self, frame: &mut Frame, area: Rect) {
+        let counts = self.data.evidence.counts;
         let total = self.data.evidence.total_count;
         let visible = self.visible_items_len(self.tab);
         let title = list_title("Evidence", total, visible, self.show_all[self.tab.index()]);
+
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(2)])
+            .split(area);
+
+        let filter_line = evidence_filter_line(counts, self.evidence_filter);
+        let filter_paragraph = Paragraph::new(vec![filter_line]).wrap(Wrap { trim: true });
+        frame.render_widget(filter_paragraph, layout[0]);
+
         let items = self
             .data
             .evidence
@@ -140,19 +151,33 @@ impl App {
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
         let mut state = ListState::default();
         state.select(Some(self.selection[self.tab.index()]));
-        frame.render_stateful_widget(list, area, &mut state);
+        frame.render_stateful_widget(list, layout[1], &mut state);
     }
 
     fn draw_outputs(&mut self, frame: &mut Frame, area: Rect) {
+        let verification_lines = self.verification_lines();
+        let verification_height = verification_lines.len().saturating_add(2) as u16;
         let has_warnings = !self.data.man_warnings.is_empty();
-        let list_area = if has_warnings {
-            let layout = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(min(self.data.man_warnings.len() as u16 + 1, 4)),
-                    Constraint::Min(2),
-                ])
-                .split(area);
+        let mut constraints = vec![Constraint::Length(verification_height)];
+        if has_warnings {
+            constraints.push(Constraint::Length(min(
+                self.data.man_warnings.len() as u16 + 1,
+                4,
+            )));
+        }
+        constraints.push(Constraint::Min(2));
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(constraints)
+            .split(area);
+
+        let verification = Paragraph::new(verification_lines)
+            .block(Block::default().borders(Borders::ALL).title("Verification"))
+            .wrap(Wrap { trim: true });
+        frame.render_widget(verification, layout[0]);
+
+        let mut offset = 1;
+        if has_warnings {
             let warnings = self
                 .data
                 .man_warnings
@@ -162,11 +187,9 @@ impl App {
                 .collect::<Vec<_>>();
             let paragraph = Paragraph::new(warnings)
                 .block(Block::default().borders(Borders::ALL).title("Man warnings"));
-            frame.render_widget(paragraph, layout[0]);
-            layout[1]
-        } else {
-            area
-        };
+            frame.render_widget(paragraph, layout[offset]);
+            offset += 1;
+        }
 
         let total = self.data.outputs.len();
         let visible = self.visible_items_len(self.tab);
@@ -183,7 +206,104 @@ impl App {
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
         let mut state = ListState::default();
         state.select(Some(self.selection[self.tab.index()]));
-        frame.render_stateful_widget(list, list_area, &mut state);
+        frame.render_stateful_widget(list, layout[offset], &mut state);
+    }
+
+    fn verification_lines(&self) -> Vec<Line<'static>> {
+        let Some(req) = self
+            .summary
+            .requirements
+            .iter()
+            .find(|req| req.id == enrich::RequirementId::Verification)
+        else {
+            return vec![Line::from("Verification: not required")];
+        };
+
+        let mut lines = Vec::new();
+        let status = req.status.as_str();
+        let tier = req.verification_tier.as_deref().unwrap_or("accepted");
+        let tier_label = if tier == "behavior" {
+            "behavior"
+        } else {
+            "existence"
+        };
+        lines.push(Line::from(format!(
+            "Required tier: {tier} ({tier_label}) | Status: {status}"
+        )));
+        if let (Some(verified), Some(unverified)) = (req.verified_count, req.unverified_count) {
+            let total = verified.saturating_add(unverified);
+            lines.push(Line::from(format!(
+                "Existence (accepted): {verified}/{total}"
+            )));
+        }
+        if let (Some(verified), Some(unverified)) =
+            (req.behavior_verified_count, req.behavior_unverified_count)
+        {
+            let total = verified.saturating_add(unverified);
+            lines.push(Line::from(format!("Behavior tier: {verified}/{total}")));
+        }
+        if let Some(summary) = req.verification.as_ref() {
+            if !summary.remaining_by_kind.is_empty() {
+                let total: usize = summary
+                    .remaining_by_kind
+                    .iter()
+                    .map(|group| group.target_count)
+                    .sum();
+                let remaining: usize = summary
+                    .remaining_by_kind
+                    .iter()
+                    .map(|group| group.remaining_count)
+                    .sum();
+                lines.push(Line::from(format!(
+                    "Remaining ({tier_label}): {remaining}/{total}"
+                )));
+                for group in &summary.remaining_by_kind {
+                    if req.status == enrich::RequirementState::Met {
+                        let group_verified =
+                            group.target_count.saturating_sub(group.remaining_count);
+                        lines.push(Line::from(format!(
+                            "{}: {group_verified}/{}",
+                            group.kind, group.target_count
+                        )));
+                    } else {
+                        let preview = preview_list(&group.remaining_preview);
+                        lines.push(Line::from(format!(
+                            "{}: remaining {} ({preview})",
+                            group.kind, group.remaining_count
+                        )));
+                    }
+                }
+            } else if req.status == enrich::RequirementState::Met {
+                lines.push(Line::from("Verification: met".to_string()));
+            } else {
+                let remaining = summary.triaged_unverified_count;
+                let preview = preview_list(&summary.triaged_unverified_preview);
+                lines.push(Line::from(format!("Remaining ({tier_label}): {remaining}")));
+                if remaining > 0 && !preview.is_empty() {
+                    lines.push(Line::from(format!("Remaining: {preview}")));
+                }
+            }
+        }
+
+        if let Some(policy) = self.data.verification_policy.as_ref() {
+            let kinds = if policy.kinds.is_empty() {
+                "none".to_string()
+            } else {
+                policy.kinds.join(", ")
+            };
+            lines.push(Line::from(format!(
+                "Batch: {} | Kinds: {} | Excludes: {}",
+                policy.max_new_runs_per_apply, kinds, policy.excludes_count
+            )));
+        }
+
+        let mut paths = vec!["scenarios/plan.json", "enrich/semantics.json"];
+        if self.data.verification_ledger_present {
+            paths.push("verification_ledger.json");
+        }
+        lines.push(Line::from(format!("Open: {}", paths.join(" | "))));
+
+        lines
     }
 
     fn draw_history(&mut self, frame: &mut Frame, area: Rect) {
@@ -243,7 +363,7 @@ impl App {
 
     fn draw_footer(&self, frame: &mut Frame, area: Rect) {
         let message = self.message.clone().unwrap_or_else(|| {
-            "q quit | tab switch | enter view | o edit | m man | c copy | r refresh | ? help"
+            "q quit | tab switch | enter view | o edit | m man | c copy | r refresh | f filter | ? help"
                 .to_string()
         });
         let message = truncate_text(&message, area.width as usize);
@@ -263,9 +383,10 @@ impl App {
             Line::from("  Enter: open in pager"),
             Line::from("  o: open in editor"),
             Line::from("  m: open man page"),
-            Line::from("  c: copy selected path or next action"),
+            Line::from("  c: copy next action command or selected path"),
             Line::from("  r: refresh"),
             Line::from("  a: toggle show all"),
+            Line::from("  f: cycle evidence filter"),
             Line::from("  ?: toggle help"),
             Line::from(""),
             Line::from("Non-goals:"),
@@ -284,6 +405,42 @@ fn list_title(label: &str, total: usize, visible: usize, show_all: bool) -> Stri
         format!("{label} ({total})")
     } else {
         format!("{label} (showing {visible} of {total}, press 'a' to show all)")
+    }
+}
+
+fn evidence_filter_line(counts: EvidenceCounts, selected: EvidenceFilter) -> Line<'static> {
+    let mut spans = vec![Span::raw("Filter: ")];
+    for (idx, filter) in EvidenceFilter::DISPLAY.iter().enumerate() {
+        if idx > 0 {
+            spans.push(Span::raw(" "));
+        }
+        spans.push(evidence_filter_span(*filter, counts, selected));
+    }
+    spans.push(Span::raw(" | f to cycle"));
+    Line::from(spans)
+}
+
+fn evidence_filter_span(
+    filter: EvidenceFilter,
+    counts: EvidenceCounts,
+    selected: EvidenceFilter,
+) -> Span<'static> {
+    let count = counts.count_for(filter);
+    let marker = if filter == selected { "*" } else { "" };
+    let label = format!("[{} {count}]{marker}", filter.label());
+    let style = if filter == selected {
+        Style::default().add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    };
+    Span::styled(label, style)
+}
+
+fn preview_list(preview: &[String]) -> String {
+    if preview.is_empty() {
+        "none".to_string()
+    } else {
+        preview.join(", ")
     }
 }
 

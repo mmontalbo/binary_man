@@ -23,13 +23,6 @@ pub(super) fn next_action_summary(action: &enrich::NextAction) -> String {
     }
 }
 
-pub(super) fn next_action_copy(action: &enrich::NextAction) -> String {
-    match action {
-        enrich::NextAction::Command { command, .. } => command.clone(),
-        enrich::NextAction::Edit { path, .. } => path.clone(),
-    }
-}
-
 pub(super) fn truncate_text(text: &str, max_len: usize) -> String {
     if text.len() <= max_len || max_len <= 3 {
         return text.to_string();

@@ -5,6 +5,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::status::verification::{intent_matches_verification_tier, verification_entry_state};
 
+pub(super) struct VerificationLedgerSnapshot {
+    pub(super) entries: BTreeMap<String, scenarios::VerificationEntry>,
+    pub(super) verified_count: usize,
+    pub(super) unverified_count: usize,
+    pub(super) behavior_verified_count: usize,
+    pub(super) behavior_unverified_count: usize,
+}
+
 pub(super) fn build_verification_ledger_entries(
     binary_name: Option<&str>,
     surface: &surface::SurfaceInventory,
@@ -13,7 +21,7 @@ pub(super) fn build_verification_ledger_entries(
     template_path: &std::path::Path,
     local_blockers: &mut Vec<enrich::Blocker>,
     template_evidence: &enrich::EvidenceRef,
-) -> Option<BTreeMap<String, scenarios::VerificationEntry>> {
+) -> Option<VerificationLedgerSnapshot> {
     let verification_binary = binary_name
         .map(|name| name.to_string())
         .or_else(|| surface.binary_name.clone())
@@ -33,7 +41,13 @@ pub(super) fn build_verification_ledger_entries(
             for entry in ledger.entries {
                 ledger_entries.insert(entry.surface_id.clone(), entry);
             }
-            Some(ledger_entries)
+            Some(VerificationLedgerSnapshot {
+                entries: ledger_entries,
+                verified_count: ledger.verified_count,
+                unverified_count: ledger.unverified_count,
+                behavior_verified_count: ledger.behavior_verified_count,
+                behavior_unverified_count: ledger.behavior_unverified_count,
+            })
         }
         Err(err) => {
             let blocker = enrich::Blocker {

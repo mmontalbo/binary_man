@@ -8,7 +8,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use super::format::preview_text;
-use super::{Tab, PREVIEW_LIMIT};
+use super::{EvidenceFilter, Tab, PREVIEW_LIMIT};
 
 #[derive(Debug, Clone)]
 pub(super) struct ArtifactEntry {
@@ -33,7 +33,34 @@ pub(super) struct EvidenceEntry {
 #[derive(Debug)]
 pub(super) struct EvidenceList {
     pub(super) total_count: usize,
+    pub(super) counts: EvidenceCounts,
     pub(super) entries: Vec<EvidenceEntry>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct EvidenceCounts {
+    pub(super) total: usize,
+    pub(super) help: usize,
+    pub(super) auto: usize,
+    pub(super) manual: usize,
+}
+
+impl EvidenceCounts {
+    pub(super) fn count_for(&self, filter: EvidenceFilter) -> usize {
+        match filter {
+            EvidenceFilter::All => self.total,
+            EvidenceFilter::Help => self.help,
+            EvidenceFilter::Auto => self.auto,
+            EvidenceFilter::Manual => self.manual,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct VerificationPolicySummary {
+    pub(super) max_new_runs_per_apply: usize,
+    pub(super) kinds: Vec<String>,
+    pub(super) excludes_count: usize,
 }
 
 #[derive(Debug)]
@@ -46,6 +73,8 @@ pub(super) struct InspectData {
     pub(super) last_history: Option<HistoryEntryPreview>,
     pub(super) last_txn_id: Option<String>,
     pub(super) man_page_path: Option<PathBuf>,
+    pub(super) verification_policy: Option<VerificationPolicySummary>,
+    pub(super) verification_ledger_present: bool,
 }
 
 impl InspectData {
@@ -53,15 +82,19 @@ impl InspectData {
         doc_pack_root: &Path,
         summary: &enrich::StatusSummary,
         show_all: &[bool; 4],
+        evidence_filter: EvidenceFilter,
     ) -> Result<Self> {
         let paths = DocPackPaths::new(doc_pack_root.to_path_buf());
         let intent = build_intent_entries(&paths)?;
-        let evidence = build_evidence_entries(&paths, show_all[Tab::Evidence.index()])?;
+        let evidence =
+            build_evidence_entries(&paths, evidence_filter, show_all[Tab::Evidence.index()])?;
         let man_page_path = resolve_man_page_path(&paths, summary.binary_name.as_deref());
         let outputs = build_output_entries(&paths, &man_page_path)?;
         let history = build_history_entries(&paths)?;
         let last_history = read_last_history_entry(&paths).unwrap_or(None);
         let last_txn_id = find_last_txn_id(&paths);
+        let verification_policy = load_verification_policy(&paths);
+        let verification_ledger_present = paths.root().join("verification_ledger.json").is_file();
         Ok(Self {
             intent,
             evidence,
@@ -71,6 +104,8 @@ impl InspectData {
             last_history,
             last_txn_id,
             man_page_path,
+            verification_policy,
+            verification_ledger_present,
         })
     }
 }
@@ -96,11 +131,12 @@ pub(super) struct HistoryEntryPreview {
 pub(super) fn load_state(
     doc_pack_root: &Path,
     show_all: &[bool; 4],
+    evidence_filter: EvidenceFilter,
 ) -> Result<(enrich::StatusSummary, InspectData)> {
     let computation =
         workflow::status_summary_for_doc_pack(doc_pack_root.to_path_buf(), false, false)?;
     let summary = computation.summary;
-    let data = InspectData::load(doc_pack_root, &summary, show_all)?;
+    let data = InspectData::load(doc_pack_root, &summary, show_all, evidence_filter)?;
     Ok((summary, data))
 }
 
@@ -203,7 +239,11 @@ fn resolve_man_page_path(paths: &DocPackPaths, binary_name: Option<&str>) -> Opt
     None
 }
 
-fn build_evidence_entries(paths: &DocPackPaths, show_all: bool) -> Result<EvidenceList> {
+fn build_evidence_entries(
+    paths: &DocPackPaths,
+    filter: EvidenceFilter,
+    show_all: bool,
+) -> Result<EvidenceList> {
     let index_path = paths.inventory_scenarios_dir().join("index.json");
     if index_path.is_file() {
         let bytes =
@@ -213,15 +253,24 @@ fn build_evidence_entries(paths: &DocPackPaths, show_all: bool) -> Result<Eviden
         index
             .scenarios
             .sort_by(|a, b| a.scenario_id.cmp(&b.scenario_id));
-        let total_count = index.scenarios.len();
+        let counts = evidence_counts_from_ids(
+            index
+                .scenarios
+                .iter()
+                .map(|entry| entry.scenario_id.as_str()),
+        );
+        let total_count = counts.count_for(filter);
+        let limit = if show_all { total_count } else { PREVIEW_LIMIT };
         let entries = index
             .scenarios
             .into_iter()
-            .take(if show_all { total_count } else { PREVIEW_LIMIT })
+            .filter(|entry| filter.matches(&entry.scenario_id))
+            .take(limit)
             .map(|entry| evidence_entry_from_index(paths, entry))
             .collect::<Vec<_>>();
         return Ok(EvidenceList {
             total_count,
+            counts,
             entries,
         });
     }
@@ -280,14 +329,22 @@ fn build_evidence_entries(paths: &DocPackPaths, show_all: bool) -> Result<Eviden
             map.entry(entry.scenario_id.clone()).or_insert((0, entry));
         }
     }
-    let total_count = map.len();
-    let entries = map
+    let mut entries = map
         .into_values()
         .map(|(_, entry)| entry)
-        .take(if show_all { total_count } else { PREVIEW_LIMIT })
+        .collect::<Vec<_>>();
+    entries.sort_by(|a, b| a.scenario_id.cmp(&b.scenario_id));
+    let counts = evidence_counts_from_ids(entries.iter().map(|entry| entry.scenario_id.as_str()));
+    let total_count = counts.count_for(filter);
+    let limit = if show_all { total_count } else { PREVIEW_LIMIT };
+    let entries = entries
+        .into_iter()
+        .filter(|entry| filter.matches(&entry.scenario_id))
+        .take(limit)
         .collect();
     Ok(EvidenceList {
         total_count,
+        counts,
         entries,
     })
 }
@@ -343,11 +400,52 @@ fn evidence_entry_from_preview(path: &Path, preview: EvidencePreview) -> Evidenc
     }
 }
 
+fn evidence_counts_from_ids<'a, I>(ids: I) -> EvidenceCounts
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let mut counts = EvidenceCounts {
+        total: 0,
+        help: 0,
+        auto: 0,
+        manual: 0,
+    };
+    for scenario_id in ids {
+        counts.total += 1;
+        match EvidenceFilter::from_scenario_id(scenario_id) {
+            EvidenceFilter::Help => counts.help += 1,
+            EvidenceFilter::Auto => counts.auto += 1,
+            EvidenceFilter::Manual => counts.manual += 1,
+            EvidenceFilter::All => {}
+        }
+    }
+    counts
+}
+
 fn read_evidence_preview(path: &Path) -> Result<EvidencePreview> {
     let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
     let preview: EvidencePreview =
         serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))?;
     Ok(preview)
+}
+
+fn load_verification_policy(paths: &DocPackPaths) -> Option<VerificationPolicySummary> {
+    let plan_path = paths.scenarios_plan_path();
+    let plan = match scenarios::load_plan_if_exists(&plan_path, paths.root()) {
+        Ok(Some(plan)) => plan,
+        _ => return None,
+    };
+    let policy = plan.verification.policy?;
+    let kinds = policy
+        .kinds
+        .iter()
+        .map(|kind| kind.as_str().to_string())
+        .collect();
+    Some(VerificationPolicySummary {
+        max_new_runs_per_apply: policy.max_new_runs_per_apply,
+        kinds,
+        excludes_count: policy.excludes.len(),
+    })
 }
 
 fn read_last_history_entry(paths: &DocPackPaths) -> Result<Option<HistoryEntryPreview>> {

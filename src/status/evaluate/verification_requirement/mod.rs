@@ -58,12 +58,14 @@ pub(super) fn eval_verification_requirement(
     let mut missing = Vec::new();
     let mut unverified_ids = Vec::new();
     let mut triage_summary: Option<enrich::VerificationTriageSummary> = None;
+    let mut ledger_snapshot = None;
     let verification_tier = config.verification_tier.as_deref().unwrap_or("accepted");
     let tier_label = if verification_tier == "behavior" {
         "behavior"
     } else {
-        "acceptance"
+        "existence"
     };
+    let tier_tag = format!("tier={verification_tier}");
 
     let surface = match error {
         Some(SurfaceLoadError::Missing) => {
@@ -124,7 +126,7 @@ pub(super) fn eval_verification_requirement(
     }
 
     if let (Some(surface), Some(plan)) = (surface.as_ref(), plan.as_ref()) {
-        let ledger_entries = if template_path.is_file() && semantics_path.is_file() {
+        ledger_snapshot = if template_path.is_file() && semantics_path.is_file() {
             build_verification_ledger_entries(
                 binary_name,
                 surface,
@@ -137,15 +139,23 @@ pub(super) fn eval_verification_requirement(
         } else {
             None
         };
+        let ledger_entries = ledger_snapshot.as_ref().map(|snapshot| &snapshot.entries);
 
         if let Some(auto_state) = crate::status::verification::auto_verification_state(
             plan,
             surface,
-            ledger_entries.as_ref(),
+            ledger_entries,
             verification_tier,
         ) {
-            let remaining_ids = auto_state.remaining_ids;
-            if let Some(ledger_entries) = ledger_entries.as_ref() {
+            let crate::status::verification::AutoVerificationState {
+                targets,
+                remaining_ids,
+                remaining_by_kind,
+                excluded,
+                excluded_count,
+                ..
+            } = auto_state;
+            if let Some(ledger_entries) = ledger_entries {
                 for surface_id in &remaining_ids {
                     if let Some(entry) = ledger_entries.get(surface_id) {
                         evidence.extend(entry.evidence.iter().cloned());
@@ -153,17 +163,28 @@ pub(super) fn eval_verification_requirement(
                 }
             }
             let remaining_preview = preview_ids(&remaining_ids);
+            let remaining_by_kind_summary = remaining_by_kind
+                .iter()
+                .map(|group| enrich::VerificationKindSummary {
+                    kind: group.kind.as_str().to_string(),
+                    target_count: group.target_count,
+                    remaining_count: group.remaining_ids.len(),
+                    remaining_preview: preview_ids(&group.remaining_ids),
+                    remaining_ids: include_full.then(|| group.remaining_ids.clone()),
+                })
+                .collect();
             let summary = enrich::VerificationTriageSummary {
                 discovered_untriaged_count: 0,
                 discovered_untriaged_preview: Vec::new(),
                 triaged_unverified_count: remaining_ids.len(),
                 triaged_unverified_preview: remaining_preview,
-                excluded_count: if auto_state.excluded_count == 0 {
+                remaining_by_kind: remaining_by_kind_summary,
+                excluded_count: if excluded_count == 0 {
                     None
                 } else {
-                    Some(auto_state.excluded_count)
+                    Some(excluded_count)
                 },
-                excluded: auto_state.excluded,
+                excluded,
                 discovered_untriaged_ids: include_full.then(Vec::new),
                 triaged_unverified_ids: include_full.then(|| remaining_ids.clone()),
             };
@@ -188,10 +209,27 @@ pub(super) fn eval_verification_requirement(
                 && local_blockers.is_empty()
                 && missing.is_empty()
             {
+                let remaining_total = remaining_ids.len();
+                let by_kind = remaining_by_kind
+                    .iter()
+                    .map(|group| format!("{} {}", group.kind.as_str(), group.remaining_ids.len()))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let mut reason = format!("auto verification remaining: {remaining_total}");
+                if !by_kind.is_empty() {
+                    reason.push_str(&format!(" ({by_kind})"));
+                }
+                reason.push_str(&format!(
+                    "; max_new_runs_per_apply={}",
+                    targets.max_new_runs_per_apply
+                ));
+                reason.push_str(&format!(
+                    "; set scenarios/plan.json.verification.policy.max_new_runs_per_apply >= {remaining_total} to finish in one apply"
+                ));
                 let root = paths.root().display();
                 *verification_next_action = Some(enrich::NextAction::Command {
                     command: format!("bman apply --doc-pack {root}"),
-                    reason: "run auto verification batch".to_string(),
+                    reason,
                 });
             }
         } else {
@@ -220,7 +258,7 @@ pub(super) fn eval_verification_requirement(
             );
 
             let mut triaged_unverified_ids = Vec::new();
-            if let Some(ledger_entries) = ledger_entries.as_ref() {
+            if let Some(ledger_entries) = ledger_entries {
                 let (triaged_ids, _unverified) = collect_unverified_from_ledger(
                     plan,
                     ledger_entries,
@@ -249,6 +287,7 @@ pub(super) fn eval_verification_requirement(
                 discovered_untriaged_preview: discovered_preview,
                 triaged_unverified_count: triaged_unverified_ids.len(),
                 triaged_unverified_preview: triaged_preview,
+                remaining_by_kind: Vec::new(),
                 excluded_count: if queue_state.excluded.is_empty() {
                     None
                 } else {
@@ -295,39 +334,70 @@ pub(super) fn eval_verification_requirement(
     }
 
     enrich::dedupe_evidence_refs(&mut evidence);
+    let (verified_count, unverified_count, behavior_verified_count, behavior_unverified_count) =
+        if let Some(snapshot) = ledger_snapshot.as_ref() {
+            (
+                Some(snapshot.verified_count),
+                Some(snapshot.unverified_count),
+                Some(snapshot.behavior_verified_count),
+                Some(snapshot.behavior_unverified_count),
+            )
+        } else {
+            (
+                None,
+                triage_summary
+                    .as_ref()
+                    .map(|summary| summary.triaged_unverified_count),
+                None,
+                None,
+            )
+        };
+    let behavior_remaining = if verification_tier != "behavior" {
+        behavior_unverified_count.filter(|count| *count > 0)
+    } else {
+        None
+    };
+
     let (status, reason) = if !local_blockers.is_empty() {
         (
             enrich::RequirementState::Blocked,
-            "verification inputs blocked".to_string(),
+            format!("verification inputs blocked ({tier_tag})"),
         )
     } else if !missing.is_empty() {
         (
             enrich::RequirementState::Unmet,
-            format!("verification inputs missing: {}", missing.join("; ")),
+            format!(
+                "verification inputs missing: {} ({tier_tag})",
+                missing.join("; ")
+            ),
         )
     } else if !unverified_ids.is_empty() {
         (
             enrich::RequirementState::Unmet,
-            format!("verification {tier_label} incomplete"),
+            format!("verification {tier_label} incomplete ({tier_tag})"),
         )
     } else {
+        let mut tag = tier_tag.clone();
+        if let Some(remaining) = behavior_remaining {
+            tag.push_str(&format!("; behavior_remaining={remaining} not required"));
+        }
         (
             enrich::RequirementState::Met,
-            format!("verification {tier_label} complete"),
+            format!("verification {tier_label} complete ({tag})"),
         )
     };
-
-    let unverified_count = triage_summary
-        .as_ref()
-        .map(|summary| summary.triaged_unverified_count);
 
     blockers.extend(local_blockers.clone());
     Ok(enrich::RequirementStatus {
         id: req,
         status,
         reason,
+        verification_tier: Some(verification_tier.to_string()),
+        verified_count,
         unverified_ids,
         unverified_count,
+        behavior_verified_count,
+        behavior_unverified_count,
         verification: triage_summary,
         evidence,
         blockers: local_blockers,

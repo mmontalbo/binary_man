@@ -1,7 +1,7 @@
 use super::app::App;
 use super::data::load_state;
 use super::external::TerminalGuard;
-use super::EVENT_POLL_MS;
+use super::{EvidenceFilter, EVENT_POLL_MS};
 use anyhow::{Context, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::backend::CrosstermBackend;
@@ -11,8 +11,9 @@ use std::time::Duration;
 
 pub(super) fn run_tui(doc_pack_root: PathBuf) -> Result<()> {
     let show_all = [false; 4];
-    let (summary, data) = load_state(&doc_pack_root, &show_all)?;
-    let mut app = App::new(doc_pack_root, summary, data);
+    let evidence_filter = EvidenceFilter::Help;
+    let (summary, data) = load_state(&doc_pack_root, &show_all, evidence_filter)?;
+    let mut app = App::new(doc_pack_root, summary, data, evidence_filter);
 
     let mut guard = TerminalGuard::enter()?;
     let mut terminal = {
@@ -49,6 +50,13 @@ pub(super) fn run_tui(doc_pack_root: PathBuf) -> Result<()> {
                         Action::ToggleShowAll => {
                             if let Err(err) = app.toggle_show_all() {
                                 app.set_message(format!("show all failed: {err}"));
+                            }
+                        }
+                        Action::CycleEvidenceFilter => {
+                            if let Err(err) = app.cycle_evidence_filter() {
+                                app.set_message(format!("filter change failed: {err}"));
+                            } else {
+                                app.set_message("evidence filter updated".to_string());
                             }
                         }
                         Action::OpenEditor => {
@@ -98,6 +106,7 @@ enum Action {
     Copy,
     ToggleHelp,
     ToggleShowAll,
+    CycleEvidenceFilter,
 }
 
 fn action_from_key(key: KeyEvent) -> Option<Action> {
@@ -114,6 +123,7 @@ fn action_from_key(key: KeyEvent) -> Option<Action> {
         KeyCode::Char('c') => Some(Action::Copy),
         KeyCode::Char('?') => Some(Action::ToggleHelp),
         KeyCode::Char('a') => Some(Action::ToggleShowAll),
+        KeyCode::Char('f') => Some(Action::CycleEvidenceFilter),
         _ => None,
     }
 }
@@ -131,5 +141,7 @@ mod tests {
         assert_eq!(action_from_key(key), Some(Action::OpenPager));
         let key = KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE);
         assert_eq!(action_from_key(key), Some(Action::OpenEditor));
+        let key = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE);
+        assert_eq!(action_from_key(key), Some(Action::CycleEvidenceFilter));
     }
 }
