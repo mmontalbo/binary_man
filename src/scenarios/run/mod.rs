@@ -37,7 +37,19 @@ pub struct RunScenariosArgs<'a> {
     pub run_mode: ScenarioRunMode,
     pub extra_scenarios: Vec<ScenarioSpec>,
     pub auto_run_limit: Option<usize>,
+    pub auto_progress: Option<AutoVerificationProgress>,
     pub verbose: bool,
+}
+
+pub struct AutoVerificationProgress {
+    pub remaining_total: Option<usize>,
+    pub remaining_by_kind: Vec<AutoVerificationKindProgress>,
+    pub max_new_runs_per_apply: usize,
+}
+
+pub struct AutoVerificationKindProgress {
+    pub kind: String,
+    pub remaining_count: usize,
 }
 
 pub(super) struct ScenarioRunContext<'a> {
@@ -78,6 +90,9 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<ExamplesReport> {
         .join("index.json");
     let mut scenarios: Vec<ScenarioSpec> = plan.scenarios.clone();
     scenarios.extend(args.extra_scenarios.iter().cloned());
+    let has_auto = scenarios
+        .iter()
+        .any(|scenario| scenario.id.starts_with(super::AUTO_VERIFY_SCENARIO_PREFIX));
     let retain_ids: BTreeSet<String> = scenarios
         .iter()
         .map(|scenario| scenario.id.clone())
@@ -106,12 +121,21 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<ExamplesReport> {
     }
     let mut outcomes = Vec::new();
 
+    if has_auto && args.auto_run_limit.is_some() {
+        if let Some(progress) = args.auto_progress.as_ref() {
+            emit_auto_progress_header(progress);
+        }
+    }
+
     let scenarios = scenarios.iter().filter(|scenario| match args.kind_filter {
         Some(kind) => scenario.kind == kind,
         None => true,
     });
 
     let mut auto_runs_used = 0usize;
+    let mut auto_total = 0usize;
+    let mut auto_skipped_cache = 0usize;
+    let mut auto_skipped_limit = 0usize;
     let auto_run_limit = args.auto_run_limit.unwrap_or(usize::MAX);
 
     for scenario in scenarios {
@@ -130,7 +154,14 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<ExamplesReport> {
             has_previous_outcome || allow_index_cache,
         );
 
+        let is_auto = scenario.id.starts_with(super::AUTO_VERIFY_SCENARIO_PREFIX);
+        if is_auto {
+            auto_total += 1;
+        }
         if !should_run {
+            if is_auto {
+                auto_skipped_cache += 1;
+            }
             if reportable {
                 if let Some(outcome) = previous_outcomes.outcomes.remove(&scenario.id) {
                     outcomes.push(outcome);
@@ -139,8 +170,8 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<ExamplesReport> {
             continue;
         }
 
-        let is_auto = scenario.id.starts_with(super::AUTO_VERIFY_SCENARIO_PREFIX);
         if is_auto && auto_runs_used >= auto_run_limit {
+            auto_skipped_limit += 1;
             continue;
         }
 
@@ -218,6 +249,9 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<ExamplesReport> {
         index_changed = true;
         if is_auto {
             auto_runs_used += 1;
+            if args.auto_run_limit.is_some() && auto_runs_used % 25 == 0 {
+                eprintln!("auto verification progress: {auto_runs_used} runs executed");
+            }
         }
     }
 
@@ -227,6 +261,17 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<ExamplesReport> {
         has_existing_index,
         index_changed,
     )?;
+
+    if has_auto && args.auto_run_limit.is_some() && auto_total > 0 {
+        let mut summary = format!("auto verification: ran {auto_runs_used}");
+        if auto_skipped_cache > 0 || auto_skipped_limit > 0 {
+            summary.push_str(&format!(
+                " (skipped {auto_skipped_cache} cached, {auto_skipped_limit} limit)"
+            ));
+        }
+        summary.push_str("; see verification_ledger.json or bman status --json");
+        eprintln!("{summary}");
+    }
 
     let pass_count = outcomes.iter().filter(|outcome| outcome.pass).count();
     let fail_count = outcomes.len() - pass_count;
@@ -262,4 +307,43 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<ExamplesReport> {
         run_ids,
         scenarios: outcomes,
     })
+}
+
+fn emit_auto_progress_header(progress: &AutoVerificationProgress) {
+    let by_kind = format_auto_remaining_by_kind(&progress.remaining_by_kind);
+    match progress.remaining_total {
+        Some(remaining_total) => {
+            if by_kind.is_empty() {
+                eprintln!("auto verification remaining: {remaining_total}");
+            } else {
+                eprintln!("auto verification remaining: {remaining_total} ({by_kind})");
+            }
+            eprintln!(
+                "auto verification batch: will run up to {} new scenarios this apply (max_new_runs_per_apply={})",
+                progress.max_new_runs_per_apply,
+                progress.max_new_runs_per_apply
+            );
+            if remaining_total > progress.max_new_runs_per_apply {
+                eprintln!(
+                    "hint: set scenarios/plan.json.verification.policy.max_new_runs_per_apply >= {remaining_total} to finish in one apply"
+                );
+            }
+        }
+        None => {
+            eprintln!("auto verification remaining: unknown (plan missing verification_plan)");
+            eprintln!(
+                "auto verification batch: will run up to {} new scenarios this apply (max_new_runs_per_apply={})",
+                progress.max_new_runs_per_apply,
+                progress.max_new_runs_per_apply
+            );
+        }
+    }
+}
+
+fn format_auto_remaining_by_kind(groups: &[AutoVerificationKindProgress]) -> String {
+    let parts: Vec<String> = groups
+        .iter()
+        .map(|group| format!("{} {}", group.kind, group.remaining_count))
+        .collect();
+    parts.join(", ")
 }

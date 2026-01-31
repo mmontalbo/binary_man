@@ -221,6 +221,7 @@ fn maybe_auto_run_help_scenarios(args: AutoRunHelpScenariosArgs<'_>) -> Result<b
                     run_mode: scenarios::ScenarioRunMode::Default,
                     extra_scenarios: Vec::new(),
                     auto_run_limit: None,
+                    auto_progress: None,
                     verbose,
                 })?;
                 state.discovery.push(SurfaceDiscovery {

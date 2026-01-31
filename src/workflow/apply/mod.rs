@@ -270,12 +270,20 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<(Vec<PathBuf>, Option<
         };
         let mut extra_scenarios = Vec::new();
         let mut auto_run_limit = None;
+        let mut auto_progress = None;
         let plan = scenarios::load_plan(&scenarios_path, ctx.paths.root())?;
-        if let Some((auto_scenarios, max_new_runs)) =
+        if let Some(batch) =
             auto_verification_scenarios(&plan, ctx.paths.root(), staging_root, args.verbose)?
         {
-            extra_scenarios = auto_scenarios;
-            auto_run_limit = Some(max_new_runs);
+            auto_run_limit = Some(batch.max_new_runs_per_apply);
+            auto_progress = Some(auto_verification_progress(
+                inputs.plan,
+                &plan,
+                &ctx.config,
+                &batch,
+                ctx.paths.root(),
+            ));
+            extra_scenarios = batch.scenarios;
         }
         examples_report = Some(scenarios::run_scenarios(&scenarios::RunScenariosArgs {
             pack_root: &pack_root,
@@ -289,6 +297,7 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<(Vec<PathBuf>, Option<
             run_mode,
             extra_scenarios,
             auto_run_limit,
+            auto_progress,
             verbose: args.verbose,
         })?);
     } else if wants_render {
@@ -368,12 +377,89 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<(Vec<PathBuf>, Option<
     Ok((published_paths, outputs_hash))
 }
 
+fn auto_verification_progress(
+    plan: &enrich::EnrichPlan,
+    scenario_plan: &scenarios::ScenarioPlan,
+    config: &enrich::EnrichConfig,
+    batch: &AutoVerificationBatch,
+    doc_pack_root: &Path,
+) -> scenarios::AutoVerificationProgress {
+    if let Some(summary) = plan.verification_plan.as_ref() {
+        return plan_summary_progress(summary, batch.targets.max_new_runs_per_apply);
+    }
+
+    let ledger_entries = load_verification_entries(doc_pack_root);
+    let verification_tier = config.verification_tier.as_deref().unwrap_or("accepted");
+    if let Some(summary) = crate::status::auto_verification_plan_summary(
+        scenario_plan,
+        &batch.surface,
+        ledger_entries.as_ref(),
+        verification_tier,
+    ) {
+        return plan_summary_progress(&summary, batch.targets.max_new_runs_per_apply);
+    }
+
+    let remaining_by_kind = batch
+        .targets
+        .targets
+        .iter()
+        .map(|(kind, ids)| scenarios::AutoVerificationKindProgress {
+            kind: kind.as_str().to_string(),
+            remaining_count: ids.len(),
+        })
+        .collect();
+    scenarios::AutoVerificationProgress {
+        remaining_total: Some(batch.targets.target_ids.len()),
+        remaining_by_kind,
+        max_new_runs_per_apply: batch.targets.max_new_runs_per_apply,
+    }
+}
+
+fn plan_summary_progress(
+    summary: &enrich::VerificationPlanSummary,
+    max_new_runs_per_apply: usize,
+) -> scenarios::AutoVerificationProgress {
+    let remaining_by_kind = summary
+        .by_kind
+        .iter()
+        .map(|group| scenarios::AutoVerificationKindProgress {
+            kind: group.kind.clone(),
+            remaining_count: group.remaining_count,
+        })
+        .collect();
+    scenarios::AutoVerificationProgress {
+        remaining_total: Some(summary.remaining_count),
+        remaining_by_kind,
+        max_new_runs_per_apply,
+    }
+}
+
+fn load_verification_entries(
+    doc_pack_root: &Path,
+) -> Option<std::collections::BTreeMap<String, scenarios::VerificationEntry>> {
+    let path = doc_pack_root.join("verification_ledger.json");
+    let bytes = std::fs::read(path).ok()?;
+    let ledger: scenarios::VerificationLedger = serde_json::from_slice(&bytes).ok()?;
+    let mut entries = std::collections::BTreeMap::new();
+    for entry in ledger.entries {
+        entries.insert(entry.surface_id.clone(), entry);
+    }
+    Some(entries)
+}
+
+struct AutoVerificationBatch {
+    scenarios: Vec<scenarios::ScenarioSpec>,
+    max_new_runs_per_apply: usize,
+    targets: scenarios::AutoVerificationTargets,
+    surface: surface::SurfaceInventory,
+}
+
 fn auto_verification_scenarios(
     plan: &scenarios::ScenarioPlan,
     doc_pack_root: &Path,
     staging_root: &Path,
     verbose: bool,
-) -> Result<Option<(Vec<scenarios::ScenarioSpec>, usize)>> {
+) -> Result<Option<AutoVerificationBatch>> {
     let surface = match load_surface_for_auto(doc_pack_root, staging_root, verbose)? {
         Some(surface) => surface,
         None => return Ok(None),
@@ -391,7 +477,12 @@ fn auto_verification_scenarios(
         }
     };
     let scenarios = scenarios::auto_verification_scenarios(&targets, &semantics);
-    Ok(Some((scenarios, targets.max_new_runs_per_apply)))
+    Ok(Some(AutoVerificationBatch {
+        scenarios,
+        max_new_runs_per_apply: targets.max_new_runs_per_apply,
+        targets,
+        surface,
+    }))
 }
 
 fn load_surface_for_auto(

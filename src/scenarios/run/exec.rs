@@ -110,6 +110,28 @@ pub(super) fn build_success_execution(
         argv_full.push(context.run_argv0.to_string());
         argv_full.extend(scenario.argv.iter().cloned());
         let generated_at_epoch_ms = enrich::now_epoch_ms()?;
+        let is_auto = scenario
+            .id
+            .starts_with(crate::scenarios::AUTO_VERIFY_SCENARIO_PREFIX);
+        let (stdout, stderr) = if is_auto {
+            (
+                bounded_snippet(
+                    stdout_text.as_ref(),
+                    run_config.snippet_max_lines,
+                    run_config.snippet_max_bytes,
+                ),
+                bounded_snippet(
+                    stderr_text.as_ref(),
+                    run_config.snippet_max_lines,
+                    run_config.snippet_max_bytes,
+                ),
+            )
+        } else {
+            (
+                truncate_bytes(&stdout_bytes, MAX_SCENARIO_EVIDENCE_BYTES),
+                truncate_bytes(&stderr_bytes, MAX_SCENARIO_EVIDENCE_BYTES),
+            )
+        };
         let evidence = ScenarioEvidence {
             schema_version: SCENARIO_EVIDENCE_SCHEMA_VERSION,
             generated_at_epoch_ms,
@@ -128,8 +150,8 @@ pub(super) fn build_success_execution(
             exit_signal: observed_exit_signal,
             timed_out: observed_timed_out,
             duration_ms: context.duration_ms,
-            stdout: truncate_bytes(&stdout_bytes, MAX_SCENARIO_EVIDENCE_BYTES),
-            stderr: truncate_bytes(&stderr_bytes, MAX_SCENARIO_EVIDENCE_BYTES),
+            stdout,
+            stderr,
         };
         let rel = stage_scenario_evidence(staging_root, &evidence)?;
         evidence_paths.push(rel);
