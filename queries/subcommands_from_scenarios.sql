@@ -2,7 +2,7 @@
 with
   scenarios as (
     select
-      filename as scenario_path,
+      regexp_extract(replace(filename, '\\', '/'), '(inventory/scenarios/.*)', 1) as scenario_path,
       stdout
     from read_json_auto('inventory/scenarios/*.json', filename=true)
     where coalesce(stdout, '') <> ''
@@ -49,6 +49,14 @@ select
   subcommand as id,
   subcommand as display,
   description,
+  to_json([]::VARCHAR[]) as forms,
+  to_json(struct_pack(
+    value_arity := 'unknown',
+    value_separator := 'unknown',
+    value_placeholder := null,
+    value_examples := []::VARCHAR[],
+    requires_argv := []::VARCHAR[]
+  )) as invocation,
   scenario_path,
   usage_hint.scenario_path is not null as multi_command_hint
 from dedup
@@ -56,10 +64,18 @@ left join usage_hint using (scenario_path)
 where rk = 1
 union all
 select
-  null as kind,
-  null as id,
-  null as display,
+  '' as kind,
+  '' as id,
+  '' as display,
   null as description,
+  to_json([]::VARCHAR[]) as forms,
+  to_json(struct_pack(
+    value_arity := 'unknown',
+    value_separator := 'unknown',
+    value_placeholder := null,
+    value_examples := []::VARCHAR[],
+    requires_argv := []::VARCHAR[]
+  )) as invocation,
   scenario_path,
   true as multi_command_hint
 from usage_hint;
