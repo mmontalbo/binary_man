@@ -5,9 +5,9 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured “enrichment loop”
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M16 — behavior verification pilot.
+Current focus: TBD.
 
-## M16 — Surface Definition v2 + Behavior Verification Suite (ls options) (planned)
+## M16 — Surface Definition v2 + Behavior Verification Suite (ls options) (done)
 
 Goal: Make behavior verification finishable and mechanically meaningful by first
 solidifying what “surface” means for `ls` options, then verifying a **representative
