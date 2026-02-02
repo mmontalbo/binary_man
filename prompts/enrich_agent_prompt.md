@@ -42,6 +42,9 @@ Prefer setting shared runner defaults once in `scenarios/plan.json` under `defau
 - `no_strace: true`
 - `snippet_max_lines` / `snippet_max_bytes` (if you want tighter output)
 - `cwd`, `env`, `seed_dir` when common across scenarios
+- `seed` when you want a shared inline fixture for many scenarios:
+  - Put the seed entries under `defaults.seed`.
+  - Omit per-scenario `seed` so baseline + variants inherit the same fixture.
 - Prefer **relative paths** only; avoid absolute paths.
 
 Default runner env lives in `scenarios/plan.json.default_env` (seeded by `bman init`):
@@ -80,12 +83,15 @@ If `enrich/config.json.requirements` includes `"verification"` (default for new 
 - Verification is opt-out: remove `"verification"` from `requirements` to disable it.
 - Check `enrich/config.json.verification_tier` (default: `"accepted"`).
 - Accepted tier = existence/recognition checks (help/flag accepted); behavior tier = functional behavior checks and is only required when configured.
+- When `verification_tier` is `"behavior"`, verification is **exhaustive within the model**: every in-scope `surface_id` must either be behavior-verified by passing scenarios with seed-grounded assertions, or be explicitly excluded with an objective reason/prereqs.
 - Auto verification is controlled by `scenarios/plan.json.verification.policy`:
   - `kinds`: ordered list of auto targets (`"option"`, `"subcommand"`).
   - `max_new_runs_per_apply`: batch size per apply.
-  - `excludes`: `{ surface_id, prereqs[], reason }` for objective skips.
+- Exclusions are controlled by `scenarios/plan.json.verification.queue[]` entries with `intent: "exclude"` + `prereqs[]` + `reason`.
 - Run `validate → plan → apply` repeatedly; `status --json` will recommend `apply` again until verification is met.
-- Use `verification.queue` only when you need manual scenarios (commands/behavior); avoid per-flag scenarios for options.
+- Avoid per-flag scenarios for option **existence** verification; use the auto-verification policy instead.
+- For **behavior** verification, author explicit `coverage_tier: "behavior"` scenarios with `baseline_scenario_id` + `assertions` + output expectations; `status --json` will drive this one target at a time.
+- Define a baseline scenario once (default id `baseline`) and reference it from each behavior scenario.
 - Do not exclude just because of `needs_seed_fs`; every scenario already runs with an empty fixture by default.
 - Status triage summaries are compact (counts + previews); the canonical surface list is `inventory/surface.json`.
 - When summarizing verification progress, report both accepted and behavior counts (even if behavior is not required).
@@ -96,6 +102,17 @@ If `enrich/config.json.requirements` includes `"verification"` (default for new 
 - Covers are ignored unless the scenario `argv` actually attempts the `surface_id` (token match rules are enforced by the verification SQL).
 - Always include an explicit token for the `surface_id` in `argv`; do not rely on short-flag clustering.
 - Use `coverage_tier` to declare intent (`"acceptance"` vs `"behavior"`); avoid `"rejection"` unless you are explicitly recording rejection evidence.
+- Behavior scenarios only count when they prove a **delta vs baseline** and include explicit semantics; `variant_stdout_contains_seed_path` alone is never sufficient.
+- Semantic predicate requirement (one is required):
+  - At least one stdout/stderr expect predicate (`*_contains_*` or `*_regex_*`), or
+  - a seed-grounded delta pair for the same `path` (adds or removes).
+- Delta proof must be either:
+  - `variant_stdout_differs_from_baseline`, or
+  - a matched pair for the same `path`:
+    - add: `baseline_stdout_not_contains_seed_path` + `variant_stdout_contains_seed_path`
+    - remove: `baseline_stdout_contains_seed_path` + `variant_stdout_not_contains_seed_path`
+- For seed-path assertions, the asserted `path` must be present in both the baseline and variant `seed.entries`, and the baseline/variant seeds should describe the same fixture.
+- Assertion kinds (v1): `baseline_stdout_not_contains_seed_path`, `baseline_stdout_contains_seed_path`, `variant_stdout_contains_seed_path`, `variant_stdout_not_contains_seed_path`, `variant_stdout_differs_from_baseline` (diff-only is insufficient).
 - For option existence, prefer `argv: ["<surface_id>"]` with `covers: ["<surface_id>"]`; do not force `expect.exit_code=0`.
 - For command/subcommand existence, prefer `argv: ["<surface_id>", "--help"]` before adding prereqs or excluding.
 - Classification is driven by `enrich/semantics.json.verification` rules (accepted vs rejected vs inconclusive); accepted existence can include missing-arg errors when semantics allow it.
@@ -104,12 +121,19 @@ If `enrich/config.json.requirements` includes `"verification"` (default for new 
   - Subcommands: `verification.subcommand_existence_argv_prefix` + `<surface_id>` + `subcommand_existence_argv_suffix`.
 - Add stdout/stderr expectations only when they are clearly stable.
 
-### Inline seed example (for behavior tests later)
+### Behavior expectation patterns
+- Prefer line-anchored regex with stable tokens (e.g., `(?m)^NAME\\b`); avoid column spacing or layout-sensitive matches.
+- Use seed-grounded delta pairs for explicit adds/removes semantics (see the delta pair rules above).
+
+### Inline seed example (for behavior assertions)
+Notes:
+- File entries may omit `contents` (defaults to `""`).
+- Symlink entries require `target`.
 ```json
 {
   "entries": [
     { "path": "work", "kind": "dir" },
-    { "path": "work/.keep", "kind": "file", "contents": "" }
+    { "path": "work/keep.txt", "kind": "file", "contents": "" }
   ]
 }
 ```

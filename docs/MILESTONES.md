@@ -7,66 +7,115 @@ that supports iterative static + dynamic passes from portable doc packs.
 
 Current focus: M16 — behavior verification pilot.
 
-## M16 — Behavior Verification Pilot (ls options) (planned)
+## M16 — Surface Definition v2 + Behavior Verification Suite (ls options) (planned)
 
-Goal: Add an evidence-backed, mechanical loop for verifying **observable behavior**
-of a selected subset of `ls` option surface items (not just existence/recognition),
-using explicit scenarios with fixtures + expectations.
+Goal: Make behavior verification finishable and mechanically meaningful by first
+solidifying what “surface” means for `ls` options, then verifying a **representative
+suite** of option behaviors using pack-owned, seed-grounded assertions evaluated in
+SQL (no Rust semantics, no heuristic scoring).
 
 Motivation:
-- M14/M15 make existence verification cheap and mechanical, but do not confirm
-  documented behavior.
-- We want a safe, pack-owned way to incrementally prove behavior from concrete
-  evidence, starting with a fixture-friendly binary (`ls`).
+- M14/M15 make existence/recognition verification cheap and mechanical, but do
+  not confirm documented behavior.
+- Behavior verification is only as good as the surface model: we need stable,
+  canonical option IDs and minimal structural shape so scenarios can be authored
+  mechanically and safely.
+- Small LMs should spend effort interpreting help evidence into testable claims,
+  not reverse-engineering tool heuristics or guessing invocation forms.
 
 Design constraints (non-negotiable for this milestone):
 - JSON-only structured artifacts in the doc pack (JSONL permitted for history).
-- No scores/percent truth: behavior verification is pass/fail over explicit
-  predicates with evidence refs.
-- Keep semantics out of Rust: expected behavior lives in pack-owned scenario
-  expectations + SQL, not hardcoded strings in code.
+- No scores/percent truth: verification is pass/fail over explicit assertions
+  with evidence refs + explicit reason codes for unmet status.
+- Keep semantics out of Rust: parsing/interpretation lives in pack SQL and
+  pack-owned JSON (semantics + overlays), not hardcoded strings in code.
 - Evidence remains append-only; `apply` remains transactional.
 - Safety-first execution remains enforced (bounded timeouts/outputs + sandboxing,
   network off unless explicitly enabled by the plan).
 - Usage + surface discovery stay help-only: behavior scenarios must not change man
   rendering inputs or surface growth.
+- Treat short/long forms as distinct targets for now (e.g. `-a` and `--all` are
+  verified independently; no alias linking in this milestone).
 
 Deliverables:
-1) **Behavior triage uses existing verification queue intents**
-- Use `scenarios/plan.json.verification.queue[]` entries with
-  `intent: "verify_behavior"` to define the set of behavior-required targets.
-- When `enrich/config.json` requires verification at `tier: "behavior"` and the
-  required set is empty, `bman status --json` is unmet with a deterministic next
-  action: edit `scenarios/plan.json` (add at least one behavior target).
-- Exclusions remain objective (`intent: "exclude"` + `prereqs` + `reason`) and are
-  enumerated in `verification_ledger.json` as excluded targets.
+1) **Surface v2 is canonical and structurally useful (help-only, evidence-linked)**
+- Extend `inventory/surface.json` to record (per item) the help-syntax forms and a
+  minimal invocation shape derived mechanically from help evidence:
+  - `forms[]` (raw forms seen in help; evidence-linked)
+  - `invocation.value_arity`: `none|optional|required|unknown`
+  - `invocation.value_separator`: `none|space|equals|either|unknown`
+  - `invocation.value_placeholder` (e.g. `WHEN`, `PATTERN`, `SIZE`) when available
+- Fix `queries/options_from_scenarios.sql` canonicalization so common patterns map
+  to stable IDs:
+  - `--color[=WHEN]` → `--color`
+  - `--hide=PATTERN` and `--hide PATTERN` → `--hide`
+  - `-w COLS` → `-w`
+- Surface completeness gate: if a behavior target is queued but missing from
+  `inventory/surface.json`, status must recommend fixing the surface lens or
+  adding a surface overlay before suggesting behavior scenarios.
 
-2) **Behavior counting rule is mechanical and expectation-backed**
-- A `surface_id` is behavior-verified iff there exists a passing scenario run that:
-  - has `coverage_tier: "behavior"`
-  - lists the id in `covers`
-  - actually invokes it (argv token matching for that `surface_id`)
-  - asserts at least one observable stdout/stderr predicate (contains/regex)
-- Exit code alone does not count as behavior evidence.
+2) **Surface overlay v2 (pack-owned hints, no behavior semantics)**
+- Extend `inventory/surface.seed.json` from “seed items” to also support
+  overlaying existing surface items keyed by `(kind,id)` (help-derived items are
+  still the source of truth; overlays only add missing structure).
+- Supported overlay fields (optional, evidence-linked if derived):
+  - `invocation.value_examples[]` (safe concrete examples for required/optional
+    values; prefer examples over “ranges”)
+  - `invocation.requires_argv[]` (explicit additional argv tokens needed to make
+    the option’s output meaningful, when discovered)
+- Overlays must not be required for existence verification; they exist only to
+  make behavior scenario authoring tractable and mechanical.
 
-3) **Deterministic next_action loop + safe stub generation**
-- When behavior verification is required and unmet, status chooses the next
-  missing id in a stable order and emits exactly one next action:
-  edit `scenarios/plan.json`.
-- The emitted stub scenario uses the default empty fixture
-  (`fixtures/empty`), sets `covers: ["<surface_id>"]`, `argv: ["<surface_id>"]`,
-  `coverage_tier: "behavior"`, and `expect: {}` (valid but non-counting until the
-  LM adds predicates + any needed seed entries).
-- Reserved ids/prefixes remain enforced (`help--*`, `auto_verify::…`).
+3) **Behavior scope becomes suite-driven (model-bounded)**
+- With `verification_tier: "behavior"`, the behavior-required set is defined by
+  explicit `scenarios/plan.json.verification.queue[]` entries with
+  `intent: "verify_behavior"`.
+- Objective skips remain supported via `intent: "exclude"` entries that must
+  include enum `prereqs[]` + `reason`, and must be enumerated in
+  `verification_ledger.json` as excluded targets.
+- Default behavior gating must not silently expand to “all options”; the suite is
+  explicit so the milestone is finishable and reproducible.
+
+4) **Behavior is defined by baseline+variant and seed-grounded assertions (SQL-evaluated)**
+- Behavior scenarios are `kind: "behavior"` and must declare:
+  - `baseline_scenario_id` (baseline run to compare against)
+  - `assertions[]` (typed vocabulary evaluated in SQL, not Rust)
+- Extend `enrich/semantics.json` to configure assertion normalization (ANSI
+  stripping and basic whitespace normalization) and any pack defaults.
+- Extend `queries/verification_from_scenarios.sql` to:
+  - join baseline + variant evidence via `baseline_scenario_id`
+  - normalize stdout/stderr using pack semantics
+  - evaluate `assertions[]` deterministically
+  - mark `behavior_status: "verified"` only when scenario runs pass and the
+    assertions pass, with explicit `behavior_unverified_reason_code` otherwise
+- Policy: diff-only checks may exist, but **must not** be sufficient on their own;
+  at least one assertion must be anchored to seeded facts (e.g., a seeded file
+  path) so expectations are grounded in pack-owned evidence.
+
+5) **Deterministic next_action loop + reason-code visibility**
+- When behavior verification is required and unmet, status chooses the next missing
+  suite id in a stable order and emits exactly one next action: edit
+  `scenarios/plan.json` (baseline stub first, then per-id behavior stub).
+- Status/plan must summarize “why unmet” using reason codes (counts + previews),
+  so “not feasible yet” is evidence-backed (missing baseline, missing scenario,
+  missing semantic predicate, outputs equal, excluded with prereqs, etc.).
 
 Acceptance criteria:
-- Fresh `ls` pack: existence verification completes via the existing auto-verify
-  policy (no per-option authored scenarios).
-- With `verification_tier: "behavior"`, five queued behavior targets and five
-  passing behavior scenarios, `verification_ledger.json` shows the selected set
-  as behavior-verified and `bman status --json` returns `decision: complete`.
+- Surface v2 canonicalization discovers previously-missed help forms (e.g.
+  bracketed `--color[=WHEN]`-style options) as stable IDs with structural shape.
+- Fresh `ls` pack: existence verification still completes via the existing
+  auto-verify policy (no authored per-option existence scenarios).
+- With `verification_tier: "behavior"`, `bman status --json` reaches `decision:
+  complete` when every suite target is behavior-verified by passing assertion
+  checks or explicitly excluded with objective prereqs/reason codes.
 - Behavior runs do not affect usage/surface discovery or man usage extraction
   (help-only lenses remain the sole inputs to those).
+
+Out of scope:
+- Alias linking/deduping (`-a` vs `--all`) or semantic grouping of options.
+- Auto-inference of value ranges, inter-option dependencies, or conflict graphs.
+- Behavior verification for all `ls` options by default (requires new fixture
+  primitives like timestamp control, SELinux support, and/or tty modeling).
 
 ## M15 — Batched Auto-Verification (Subcommand Existence) v1 (done)
 
@@ -313,8 +362,7 @@ Deliverables:
   - Add a `verification` section with an ordered `queue` of items to verify.
   - Each queue entry uses objective properties (no fuzzy labels), e.g.:
     - `surface_id`: the item being verified (matches `inventory/surface.json`).
-    - `intent`: `verify_accepted | verify_behavior | exclude` (exclude requires a
-      reason).
+    - `intent`: `verify_behavior | exclude` (exclude requires a reason).
     - `prereqs`: a small fixed enum list describing required setup, e.g.
       `needs_arg_value`, `needs_seed_fs`, `needs_repo`, `needs_network`,
       `needs_interactive`, `needs_privilege`.
@@ -331,7 +379,7 @@ Deliverables:
 - Clear status reporting (no scores):
   - `status --json` distinguishes:
     - discovered-but-not-triaged surface items
-    - triaged-but-unverified targets (accepted/behavior)
+    - triaged-but-unverified targets (behavior)
     - excluded targets (with reasons)
   - Next actions always point at one concrete edit target
     (`scenarios/plan.json`, a specific scenario id, or `enrich/semantics.json`).
@@ -348,7 +396,7 @@ Acceptance criteria:
 - A small LM can drive `decision: complete` by iterating only on pack-owned
   artifacts (`scenarios/plan.json`, scenarios, `enrich/semantics.json`) and
   following `status --json` next actions, producing evidence-linked accepted
-  verification for the queued surface targets.
+  verification for the policy-derived surface targets.
 
 ## M12 — Pack-Owned Semantics v1 (done)
 
