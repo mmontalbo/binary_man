@@ -180,7 +180,7 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<ExamplesReport> {
         }
 
         let run_argv0 = args.binary_name.to_string();
-        let materialized_seed = if let Some(seed) = scenario.seed.as_ref() {
+        let materialized_seed = if let Some(seed) = run_config.seed.as_ref() {
             let staging_root = args.staging_root.ok_or_else(|| {
                 anyhow!(
                     "inline seed requires a staging root for scenario {}",
@@ -249,7 +249,7 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<ExamplesReport> {
         index_changed = true;
         if is_auto {
             auto_runs_used += 1;
-            if args.auto_run_limit.is_some() && auto_runs_used % 25 == 0 {
+            if args.auto_run_limit.is_some() && auto_runs_used.is_multiple_of(25) {
                 eprintln!("auto verification progress: {auto_runs_used} runs executed");
             }
         }

@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "usage": {
     "line_rules": [
       {
@@ -133,6 +133,11 @@
         ]
       }
     ]
+  },
+  "behavior_assertions": {
+    "strip_ansi": true,
+    "trim_whitespace": true,
+    "collapse_internal_whitespace": false
   },
   "requirements": {
     "synopsis_min_lines": 1

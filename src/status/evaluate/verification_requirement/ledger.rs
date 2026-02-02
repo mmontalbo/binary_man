@@ -1,9 +1,7 @@
 use crate::enrich;
 use crate::scenarios;
 use crate::surface;
-use std::collections::{BTreeMap, BTreeSet};
-
-use crate::status::verification::{intent_matches_verification_tier, verification_entry_state};
+use std::collections::BTreeMap;
 
 pub(super) struct VerificationLedgerSnapshot {
     pub(super) entries: BTreeMap<String, scenarios::VerificationEntry>,
@@ -63,37 +61,4 @@ pub(super) fn build_verification_ledger_entries(
             None
         }
     }
-}
-
-pub(super) fn collect_unverified_from_ledger(
-    plan: &scenarios::ScenarioPlan,
-    ledger_entries: &BTreeMap<String, scenarios::VerificationEntry>,
-    verification_tier: &str,
-    evidence: &mut Vec<enrich::EvidenceRef>,
-) -> (Vec<String>, Vec<String>) {
-    let mut triaged_unverified_ids = Vec::new();
-    let mut unverified_ids = Vec::new();
-    let mut seen = BTreeSet::new();
-    for entry in &plan.verification.queue {
-        let surface_id = entry.surface_id.trim();
-        if surface_id.is_empty() {
-            continue;
-        }
-        if entry.intent == scenarios::VerificationIntent::Exclude {
-            continue;
-        }
-        if !intent_matches_verification_tier(entry.intent, verification_tier) {
-            continue;
-        }
-        let (status, _, _) = verification_entry_state(ledger_entries.get(surface_id), entry.intent);
-        let is_verified = status == "verified";
-        if !is_verified && seen.insert(surface_id.to_string()) {
-            triaged_unverified_ids.push(surface_id.to_string());
-            unverified_ids.push(surface_id.to_string());
-            if let Some(entry) = ledger_entries.get(surface_id) {
-                evidence.extend(entry.evidence.iter().cloned());
-            }
-        }
-    }
-    (triaged_unverified_ids, unverified_ids)
 }

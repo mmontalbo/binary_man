@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 
 pub(super) struct ScenarioRunConfig {
     pub(super) env: BTreeMap<String, String>,
+    pub(super) seed: Option<super::ScenarioSeedSpec>,
     pub(super) seed_dir: Option<String>,
     pub(super) cwd: Option<String>,
     pub(super) timeout_seconds: Option<f64>,
@@ -63,7 +64,14 @@ pub(super) fn effective_scenario_config(
     }
     env = merge_env(&env, &scenario.env);
 
-    let seed_dir = if scenario.seed.is_some() {
+    let seed = if scenario.seed.is_some() {
+        scenario.seed.clone()
+    } else if scenario.seed_dir.is_some() {
+        None
+    } else {
+        defaults.and_then(|value| value.seed.clone())
+    };
+    let seed_dir = if seed.is_some() {
         None
     } else {
         scenario
@@ -101,6 +109,7 @@ pub(super) fn effective_scenario_config(
     let scenario_digest = scenario_digest(&ScenarioDigestArgs {
         scenario,
         env: &env,
+        seed: seed.as_ref(),
         seed_dir: seed_dir.as_deref(),
         cwd: cwd.as_deref(),
         timeout_seconds,
@@ -113,6 +122,7 @@ pub(super) fn effective_scenario_config(
 
     Ok(ScenarioRunConfig {
         env,
+        seed,
         seed_dir,
         cwd,
         timeout_seconds,
@@ -128,6 +138,7 @@ pub(super) fn effective_scenario_config(
 struct ScenarioDigestArgs<'a> {
     scenario: &'a ScenarioSpec,
     env: &'a BTreeMap<String, String>,
+    seed: Option<&'a super::ScenarioSeedSpec>,
     seed_dir: Option<&'a str>,
     cwd: Option<&'a str>,
     timeout_seconds: Option<f64>,
@@ -141,6 +152,7 @@ struct ScenarioDigestArgs<'a> {
 fn scenario_digest(args: &ScenarioDigestArgs<'_>) -> Result<String> {
     let scenario = args.scenario;
     let env = args.env;
+    let seed = args.seed;
     let seed_dir = args.seed_dir;
     let cwd = args.cwd;
     let timeout_seconds = args.timeout_seconds;
@@ -149,7 +161,7 @@ fn scenario_digest(args: &ScenarioDigestArgs<'_>) -> Result<String> {
     let no_strace = args.no_strace;
     let snippet_max_lines = args.snippet_max_lines;
     let snippet_max_bytes = args.snippet_max_bytes;
-    let seed = if let Some(seed) = scenario.seed.as_ref() {
+    let seed = if let Some(seed) = seed {
         let mut entries: Vec<ScenarioSeedEntryDigest> = seed
             .entries
             .iter()
@@ -166,7 +178,12 @@ fn scenario_digest(args: &ScenarioDigestArgs<'_>) -> Result<String> {
                 Ok(ScenarioSeedEntryDigest {
                     path,
                     kind: entry.kind,
-                    contents: entry.contents.clone(),
+                    contents: match entry.kind {
+                        super::SeedEntryKind::File => {
+                            Some(entry.contents.clone().unwrap_or_default())
+                        }
+                        _ => entry.contents.clone(),
+                    },
                     target,
                     mode: entry.mode,
                 })
@@ -247,6 +264,8 @@ mod tests {
             snippet_max_lines: None,
             snippet_max_bytes: None,
             coverage_tier: None,
+            baseline_scenario_id: None,
+            assertions: Vec::new(),
             covers: Vec::new(),
             coverage_ignore: true,
             expect: base_expect(),
@@ -289,6 +308,7 @@ mod tests {
         defaults_env.insert("LANG".to_string(), "C.UTF-8".to_string());
         let defaults = ScenarioDefaults {
             env: defaults_env,
+            seed: None,
             seed_dir: Some("fixtures".to_string()),
             cwd: Some("work".to_string()),
             timeout_seconds: Some(3.0),
@@ -371,7 +391,6 @@ mod tests {
         let policy = plan.verification.policy.as_ref().expect("policy");
         assert_eq!(policy.kinds, vec![VerificationTargetKind::Option]);
         assert_eq!(policy.max_new_runs_per_apply, 10);
-        assert!(policy.excludes.is_empty());
     }
 
     fn assert_plan_stub_help_scenarios(plan: &ScenarioPlan) {

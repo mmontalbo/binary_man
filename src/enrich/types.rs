@@ -205,6 +205,15 @@ pub struct VerificationExclusion {
     pub prereqs: Vec<String>,
 }
 
+/// Summary of unverified targets grouped by reason code.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct VerificationReasonSummary {
+    pub reason_code: String,
+    pub count: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preview: Vec<String>,
+}
+
 /// Compact triage summary used in status output.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct VerificationTriageSummary {
@@ -222,6 +231,8 @@ pub struct VerificationTriageSummary {
     pub excluded: Vec<VerificationExclusion>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub excluded_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub behavior_unverified_reasons: Vec<VerificationReasonSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub discovered_untriaged_ids: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

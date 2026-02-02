@@ -435,16 +435,17 @@ fn load_verification_policy(paths: &DocPackPaths) -> Option<VerificationPolicySu
         Ok(Some(plan)) => plan,
         _ => return None,
     };
-    let policy = plan.verification.policy?;
+    let policy = plan.verification.policy.as_ref()?;
     let kinds = policy
         .kinds
         .iter()
         .map(|kind| kind.as_str().to_string())
         .collect();
+    let (_excluded_entries, excluded_ids) = plan.collect_queue_exclusions();
     Some(VerificationPolicySummary {
         max_new_runs_per_apply: policy.max_new_runs_per_apply,
         kinds,
-        excludes_count: policy.excludes.len(),
+        excludes_count: excluded_ids.len(),
     })
 }
 

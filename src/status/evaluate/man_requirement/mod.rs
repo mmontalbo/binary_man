@@ -174,7 +174,7 @@ pub(super) fn eval_man_page_requirement(
         paths.root(),
     ) {
         Ok(meta) => meta,
-        Err(status) => return Ok(status),
+        Err(status) => return Ok(*status),
     };
 
     let lock_fresh = lock_status.present && !lock_status.stale;

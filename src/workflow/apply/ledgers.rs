@@ -14,7 +14,7 @@ pub(super) struct LedgerArgs<'a> {
     pub(super) emit_verification: bool,
 }
 
-pub(super) fn write_ledgers(args: LedgerArgs<'_>) -> Result<()> {
+pub(super) fn write_ledgers(args: &LedgerArgs<'_>) -> Result<()> {
     let LedgerArgs {
         paths,
         staging_root,
@@ -22,7 +22,7 @@ pub(super) fn write_ledgers(args: LedgerArgs<'_>) -> Result<()> {
         scenarios_path,
         emit_coverage,
         emit_verification,
-    } = args;
+    } = *args;
 
     if (emit_coverage || emit_verification) && !scenarios_path.is_file() {
         return Err(anyhow!(

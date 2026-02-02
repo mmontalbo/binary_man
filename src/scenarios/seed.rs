@@ -58,10 +58,7 @@ pub(crate) fn materialize_inline_seed(
                 if entry.target.is_some() {
                     return Err(anyhow!("seed file {:?} must not include target", rel_path));
                 }
-                let contents = entry
-                    .contents
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("seed file {:?} missing contents", rel_path))?;
+                let contents = entry.contents.as_deref().unwrap_or("");
                 total_bytes = total_bytes
                     .checked_add(contents.len())
                     .ok_or_else(|| anyhow!("seed size overflow"))?;
@@ -137,12 +134,9 @@ pub(crate) fn validate_seed_spec(seed: &ScenarioSeedSpec) -> Result<()> {
                 if entry.target.is_some() {
                     return Err(anyhow!("seed file must not include target"));
                 }
-                let contents = entry
-                    .contents
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("seed file missing contents"))?;
+                let contents_len = entry.contents.as_deref().unwrap_or("").len();
                 total_bytes = total_bytes
-                    .checked_add(contents.len())
+                    .checked_add(contents_len)
                     .ok_or_else(|| anyhow!("seed size overflow"))?;
             }
             SeedEntryKind::Symlink => {

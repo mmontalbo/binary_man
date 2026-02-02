@@ -25,7 +25,7 @@ pub(super) fn load_meta(
     blockers: &mut Vec<enrich::Blocker>,
     requirement_evidence: &[enrich::EvidenceRef],
     root: &std::path::Path,
-) -> anyhow::Result<Option<ManMetaInputs>, enrich::RequirementStatus> {
+) -> Result<Option<ManMetaInputs>, Box<enrich::RequirementStatus>> {
     if !meta_path.is_file() {
         return Ok(None);
     }
@@ -39,7 +39,7 @@ pub(super) fn load_meta(
                 next_action: Some(format!("bman apply --doc-pack {}", root.display())),
             };
             blockers.push(blocker.clone());
-            return Err(enrich::RequirementStatus {
+            return Err(Box::new(enrich::RequirementStatus {
                 id: enrich::RequirementId::ManPage,
                 status: enrich::RequirementState::Blocked,
                 reason: "man metadata read error".to_string(),
@@ -52,7 +52,7 @@ pub(super) fn load_meta(
                 verification: None,
                 evidence: requirement_evidence.to_vec(),
                 blockers: vec![blocker],
-            });
+            }));
         }
     };
     match serde_json::from_slice::<ManMetaInputs>(&bytes) {
@@ -65,7 +65,7 @@ pub(super) fn load_meta(
                 next_action: Some(format!("bman apply --doc-pack {}", root.display())),
             };
             blockers.push(blocker.clone());
-            Err(enrich::RequirementStatus {
+            Err(Box::new(enrich::RequirementStatus {
                 id: enrich::RequirementId::ManPage,
                 status: enrich::RequirementState::Blocked,
                 reason: "man metadata parse error".to_string(),
@@ -78,7 +78,7 @@ pub(super) fn load_meta(
                 verification: None,
                 evidence: requirement_evidence.to_vec(),
                 blockers: vec![blocker],
-            })
+            }))
         }
     }
 }

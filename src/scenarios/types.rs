@@ -4,7 +4,7 @@
 //! a mechanical executor.
 use crate::enrich;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 fn default_true() -> bool {
     true
@@ -68,6 +68,8 @@ pub struct ScenarioDefaults {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<ScenarioSeedSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed_dir: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
@@ -104,6 +106,49 @@ pub struct ScenarioPlan {
     pub scenarios: Vec<ScenarioSpec>,
 }
 
+impl ScenarioPlan {
+    pub fn collect_queue_exclusions(&self) -> (Vec<VerificationExcludedEntry>, BTreeSet<String>) {
+        let mut excluded_by_id: BTreeMap<String, VerificationExcludedEntry> = BTreeMap::new();
+        for entry in &self.verification.queue {
+            if entry.intent != VerificationIntent::Exclude {
+                continue;
+            }
+            let surface_id = entry.surface_id.trim();
+            if surface_id.is_empty() {
+                continue;
+            }
+            let excluded_entry =
+                excluded_by_id
+                    .entry(surface_id.to_string())
+                    .or_insert_with(|| VerificationExcludedEntry {
+                        surface_id: surface_id.to_string(),
+                        prereqs: Vec::new(),
+                        reason: None,
+                    });
+            for prereq in &entry.prereqs {
+                if !excluded_entry.prereqs.contains(prereq) {
+                    excluded_entry.prereqs.push(*prereq);
+                }
+            }
+            if excluded_entry.reason.is_none() {
+                if let Some(reason) = entry.reason.as_deref() {
+                    let trimmed = reason.trim();
+                    if !trimmed.is_empty() {
+                        excluded_entry.reason = Some(trimmed.to_string());
+                    }
+                }
+            }
+        }
+        let mut excluded: Vec<VerificationExcludedEntry> = excluded_by_id.into_values().collect();
+        excluded.sort_by(|a, b| a.surface_id.cmp(&b.surface_id));
+        let excluded_ids = excluded
+            .iter()
+            .map(|entry| entry.surface_id.clone())
+            .collect();
+        (excluded, excluded_ids)
+    }
+}
+
 /// Verification plan portion of the scenario plan.
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
@@ -120,8 +165,6 @@ pub struct VerificationPlan {
 pub struct VerificationPolicy {
     pub kinds: Vec<VerificationTargetKind>,
     pub max_new_runs_per_apply: usize,
-    #[serde(default)]
-    pub excludes: Vec<VerificationPolicyExclude>,
 }
 
 /// Supported auto-verification kinds.
@@ -141,16 +184,6 @@ impl VerificationTargetKind {
     }
 }
 
-/// Exclusion entry for auto-verification policy.
-#[derive(Debug, Deserialize, Serialize, Clone)]
-#[serde(deny_unknown_fields)]
-pub struct VerificationPolicyExclude {
-    pub surface_id: String,
-    #[serde(default)]
-    pub prereqs: Vec<VerificationPrereq>,
-    pub reason: String,
-}
-
 /// Queue entry describing a surface id to verify or exclude.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(deny_unknown_fields)]
@@ -167,7 +200,6 @@ pub struct VerificationQueueEntry {
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum VerificationIntent {
-    VerifyAccepted,
     VerifyBehavior,
     Exclude,
 }
@@ -256,6 +288,10 @@ pub struct ScenarioSpec {
     pub snippet_max_bytes: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_tier: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline_scenario_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assertions: Vec<BehaviorAssertion>,
     #[serde(
         default,
         alias = "covers_options",
@@ -293,18 +329,32 @@ pub struct ScenarioExpect {
 }
 
 impl ScenarioExpect {
-    fn is_empty(&self) -> bool {
-        self.exit_code.is_none()
-            && self.exit_signal.is_none()
-            && self.stdout_contains_all.is_empty()
-            && self.stdout_contains_any.is_empty()
-            && self.stdout_regex_all.is_empty()
-            && self.stdout_regex_any.is_empty()
-            && self.stderr_contains_all.is_empty()
-            && self.stderr_contains_any.is_empty()
-            && self.stderr_regex_all.is_empty()
-            && self.stderr_regex_any.is_empty()
+    fn has_output_predicate(&self) -> bool {
+        !self.stdout_contains_all.is_empty()
+            || !self.stdout_contains_any.is_empty()
+            || !self.stdout_regex_all.is_empty()
+            || !self.stdout_regex_any.is_empty()
+            || !self.stderr_contains_all.is_empty()
+            || !self.stderr_contains_any.is_empty()
+            || !self.stderr_regex_all.is_empty()
+            || !self.stderr_regex_any.is_empty()
     }
+
+    fn is_empty(&self) -> bool {
+        self.exit_code.is_none() && self.exit_signal.is_none() && !self.has_output_predicate()
+    }
+}
+
+/// Assertion vocabulary for behavior scenarios.
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
+pub enum BehaviorAssertion {
+    BaselineStdoutNotContainsSeedPath { path: String },
+    BaselineStdoutContainsSeedPath { path: String },
+    VariantStdoutContainsSeedPath { path: String },
+    VariantStdoutNotContainsSeedPath { path: String },
+    VariantStdoutDiffersFromBaseline {},
 }
 
 /// Coverage ledger emitted after scenario runs.
@@ -370,16 +420,49 @@ pub struct VerificationEntry {
     pub surface_id: String,
     pub status: String,
     pub behavior_status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behavior_unverified_reason_code: Option<String>,
     #[serde(default)]
     pub scenario_ids: Vec<String>,
     #[serde(default)]
     pub scenario_paths: Vec<String>,
     #[serde(default)]
     pub behavior_scenario_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub behavior_assertion_scenario_ids: Vec<String>,
     #[serde(default)]
     pub behavior_scenario_paths: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<enrich::EvidenceRef>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ScenarioExpect;
+
+    #[test]
+    fn empty_expect_has_no_output_predicate() {
+        let expect = ScenarioExpect::default();
+        assert!(!expect.has_output_predicate());
+    }
+
+    #[test]
+    fn exit_only_expect_has_no_output_predicate() {
+        let expect = ScenarioExpect {
+            exit_code: Some(0),
+            ..Default::default()
+        };
+        assert!(!expect.has_output_predicate());
+    }
+
+    #[test]
+    fn stdout_predicate_counts_as_output_predicate() {
+        let expect = ScenarioExpect {
+            stdout_contains_any: vec!["total".to_string()],
+            ..Default::default()
+        };
+        assert!(expect.has_output_predicate());
+    }
 }
 
 /// Excluded verification entry recorded in the ledger.

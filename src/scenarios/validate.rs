@@ -3,7 +3,7 @@ use regex::Regex;
 use std::path::Path;
 
 use super::seed::validate_seed_spec;
-use super::{ScenarioDefaults, ScenarioExpect, ScenarioKind, ScenarioSpec};
+use super::{BehaviorAssertion, ScenarioDefaults, ScenarioExpect, ScenarioKind, ScenarioSpec};
 
 pub(crate) fn validate_scenario_defaults(
     defaults: &ScenarioDefaults,
@@ -14,7 +14,9 @@ pub(crate) fn validate_scenario_defaults(
             return Err(anyhow!("defaults.timeout_seconds must be >= 0"));
         }
     }
-    if let Some(seed_dir) = defaults.seed_dir.as_deref() {
+    if let Some(seed) = defaults.seed.as_ref() {
+        validate_seed_spec(seed).context("validate defaults.seed")?;
+    } else if let Some(seed_dir) = defaults.seed_dir.as_deref() {
         let trimmed = seed_dir.trim();
         if trimmed.is_empty() {
             return Err(anyhow!("defaults.seed_dir must not be empty"));
@@ -80,6 +82,11 @@ pub(crate) fn validate_scenario_spec(scenario: &ScenarioSpec) -> Result<()> {
     }
     if id.contains('/') || id.contains('\\') {
         return Err(anyhow!("scenario id must not include path separators"));
+    }
+    if scenario.kind == ScenarioKind::Help && !id.starts_with("help--") {
+        return Err(anyhow!(
+            "help scenarios must have ids starting with \"help--\""
+        ));
     }
     if id.starts_with("help--") && scenario.kind != ScenarioKind::Help {
         return Err(anyhow!("help-- scenario ids are reserved for kind=help"));
@@ -154,6 +161,31 @@ pub(crate) fn validate_scenario_spec(scenario: &ScenarioSpec) -> Result<()> {
             ));
         }
     }
+    if scenario.kind != ScenarioKind::Behavior {
+        if scenario.baseline_scenario_id.is_some() {
+            return Err(anyhow!(
+                "baseline_scenario_id is only valid for kind=behavior scenarios"
+            ));
+        }
+        if !scenario.assertions.is_empty() {
+            return Err(anyhow!(
+                "assertions are only valid for kind=behavior scenarios"
+            ));
+        }
+    }
+    if let Some(baseline_id) = scenario.baseline_scenario_id.as_deref() {
+        if baseline_id.trim().is_empty() {
+            return Err(anyhow!("baseline_scenario_id must not be empty"));
+        }
+    }
+    if !scenario.assertions.is_empty() {
+        if scenario.coverage_tier.as_deref() != Some("behavior") {
+            return Err(anyhow!("assertions require coverage_tier \"behavior\""));
+        }
+        for assertion in &scenario.assertions {
+            validate_behavior_assertion(assertion)?;
+        }
+    }
     for option_id in &scenario.covers {
         if option_id.trim().is_empty() {
             return Err(anyhow!("covers entries must not be empty"));
@@ -183,6 +215,21 @@ fn validate_regex_patterns(patterns: &[String], field: &str) -> Result<()> {
     for pattern in patterns {
         Regex::new(pattern)
             .with_context(|| format!("invalid {field} regex pattern {pattern:?}"))?;
+    }
+    Ok(())
+}
+
+fn validate_behavior_assertion(assertion: &BehaviorAssertion) -> Result<()> {
+    match assertion {
+        BehaviorAssertion::BaselineStdoutNotContainsSeedPath { path }
+        | BehaviorAssertion::BaselineStdoutContainsSeedPath { path }
+        | BehaviorAssertion::VariantStdoutContainsSeedPath { path }
+        | BehaviorAssertion::VariantStdoutNotContainsSeedPath { path } => {
+            if path.trim().is_empty() {
+                return Err(anyhow!("assertion path must not be empty"));
+            }
+        }
+        BehaviorAssertion::VariantStdoutDiffersFromBaseline {} => {}
     }
     Ok(())
 }

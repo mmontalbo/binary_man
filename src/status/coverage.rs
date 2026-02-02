@@ -32,6 +32,8 @@ pub(crate) fn coverage_stub_from_plan(
         snippet_max_lines: None,
         snippet_max_bytes: None,
         coverage_tier: Some("acceptance".to_string()),
+        baseline_scenario_id: None,
+        assertions: Vec::new(),
         covers: vec![target_id.to_string()],
         coverage_ignore: false,
         expect: scenarios::ScenarioExpect::default(),

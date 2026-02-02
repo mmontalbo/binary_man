@@ -364,6 +364,8 @@ mod tests {
             snippet_max_lines: None,
             snippet_max_bytes: None,
             coverage_tier: None,
+            baseline_scenario_id: None,
+            assertions: Vec::new(),
             covers: Vec::new(),
             coverage_ignore: true,
             expect: scenarios::ScenarioExpect {
@@ -380,7 +382,7 @@ mod tests {
             },
         };
         let plan = scenarios::ScenarioPlan {
-            schema_version: 5,
+            schema_version: 8,
             binary: None,
             default_env: BTreeMap::new(),
             defaults: None,

@@ -268,22 +268,29 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<(Vec<PathBuf>, Option<
         } else {
             scenarios::ScenarioRunMode::Default
         };
+        let verification_tier = ctx
+            .config
+            .verification_tier
+            .as_deref()
+            .unwrap_or("accepted");
         let mut extra_scenarios = Vec::new();
         let mut auto_run_limit = None;
         let mut auto_progress = None;
         let plan = scenarios::load_plan(&scenarios_path, ctx.paths.root())?;
-        if let Some(batch) =
-            auto_verification_scenarios(&plan, ctx.paths.root(), staging_root, args.verbose)?
-        {
-            auto_run_limit = Some(batch.max_new_runs_per_apply);
-            auto_progress = Some(auto_verification_progress(
-                inputs.plan,
-                &plan,
-                &ctx.config,
-                &batch,
-                ctx.paths.root(),
-            ));
-            extra_scenarios = batch.scenarios;
+        if verification_tier != "behavior" {
+            if let Some(batch) =
+                auto_verification_scenarios(&plan, ctx.paths.root(), staging_root, args.verbose)?
+            {
+                auto_run_limit = Some(batch.max_new_runs_per_apply);
+                auto_progress = Some(auto_verification_progress(
+                    inputs.plan,
+                    &plan,
+                    &ctx.config,
+                    &batch,
+                    ctx.paths.root(),
+                ));
+                extra_scenarios = batch.scenarios;
+            }
         }
         examples_report = Some(scenarios::run_scenarios(&scenarios::RunScenariosArgs {
             pack_root: &pack_root,
@@ -360,7 +367,7 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<(Vec<PathBuf>, Option<
         })?;
     }
 
-    write_ledgers(LedgerArgs {
+    write_ledgers(&LedgerArgs {
         paths: &ctx.paths,
         staging_root,
         binary_name,

@@ -6,15 +6,15 @@ use super::shared::is_surface_item_kind;
 use crate::enrich;
 use crate::pack;
 use crate::scenarios::{
-    load_plan, VerificationEntry, VerificationExcludedEntry, VerificationIntent,
-    VerificationLedger, SCENARIO_EVIDENCE_SCHEMA_VERSION,
+    load_plan, VerificationEntry, VerificationLedger, SCENARIO_EVIDENCE_SCHEMA_VERSION,
+    SCENARIO_INDEX_SCHEMA_VERSION,
 };
 use crate::staging::collect_files_recursive;
 use crate::surface;
 use crate::util::display_path;
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -34,68 +34,7 @@ pub fn build_verification_ledger(
     let plan = load_plan(scenarios_path, doc_pack_root)?;
     let (query_root, rows) = run_verification_query(doc_pack_root, staging_root, &template_sql)?;
 
-    let mut excluded_by_id: BTreeMap<String, VerificationExcludedEntry> = BTreeMap::new();
-    for entry in &plan.verification.queue {
-        if entry.intent != VerificationIntent::Exclude {
-            continue;
-        }
-        let surface_id = entry.surface_id.trim();
-        if surface_id.is_empty() {
-            continue;
-        }
-        let excluded_entry = excluded_by_id
-            .entry(surface_id.to_string())
-            .or_insert_with(|| VerificationExcludedEntry {
-                surface_id: surface_id.to_string(),
-                prereqs: Vec::new(),
-                reason: None,
-            });
-        for prereq in &entry.prereqs {
-            if !excluded_entry.prereqs.contains(prereq) {
-                excluded_entry.prereqs.push(*prereq);
-            }
-        }
-        if excluded_entry.reason.is_none() {
-            if let Some(reason) = entry.reason.as_deref() {
-                let trimmed = reason.trim();
-                if !trimmed.is_empty() {
-                    excluded_entry.reason = Some(trimmed.to_string());
-                }
-            }
-        }
-    }
-    if let Some(policy) = plan.verification.policy.as_ref() {
-        for entry in &policy.excludes {
-            let surface_id = entry.surface_id.trim();
-            if surface_id.is_empty() {
-                continue;
-            }
-            let excluded_entry =
-                excluded_by_id
-                    .entry(surface_id.to_string())
-                    .or_insert_with(|| VerificationExcludedEntry {
-                        surface_id: surface_id.to_string(),
-                        prereqs: Vec::new(),
-                        reason: None,
-                    });
-            for prereq in &entry.prereqs {
-                if !excluded_entry.prereqs.contains(prereq) {
-                    excluded_entry.prereqs.push(*prereq);
-                }
-            }
-            if excluded_entry.reason.is_none() {
-                let trimmed = entry.reason.trim();
-                if !trimmed.is_empty() {
-                    excluded_entry.reason = Some(trimmed.to_string());
-                }
-            }
-        }
-    }
-    let excluded: Vec<VerificationExcludedEntry> = excluded_by_id.into_values().collect();
-    let excluded_ids: BTreeSet<String> = excluded
-        .iter()
-        .map(|entry| entry.surface_id.clone())
-        .collect();
+    let (excluded, excluded_ids) = plan.collect_queue_exclusions();
 
     let mut surface_evidence_map: BTreeMap<String, Vec<enrich::EvidenceRef>> = BTreeMap::new();
     for item in surface
@@ -166,9 +105,11 @@ pub fn build_verification_ledger(
             surface_id,
             status,
             behavior_status,
+            behavior_unverified_reason_code: row.behavior_unverified_reason_code,
             scenario_ids: row.scenario_ids,
             scenario_paths: row.scenario_paths,
             behavior_scenario_ids: row.behavior_scenario_ids,
+            behavior_assertion_scenario_ids: row.behavior_assertion_scenario_ids,
             behavior_scenario_paths: row.behavior_scenario_paths,
             evidence,
         });
@@ -186,7 +127,7 @@ pub fn build_verification_ledger(
         .as_millis();
 
     Ok(VerificationLedger {
-        schema_version: 3,
+        schema_version: 6,
         generated_at_epoch_ms,
         binary_name: binary_name.to_string(),
         scenarios_path: display_path(scenarios_path, display_root),
@@ -315,6 +256,16 @@ fn prepare_verification_root(
     fs::write(&placeholder_path, placeholder.as_bytes())
         .with_context(|| format!("write placeholder {}", placeholder_path.display()))?;
 
+    let index_path = inventory_root.join("scenarios").join("index.json");
+    if !index_path.is_file() {
+        let placeholder = format!(
+            "{{\"schema_version\":{},\"scenarios\":[]}}",
+            SCENARIO_INDEX_SCHEMA_VERSION
+        );
+        fs::write(&index_path, placeholder.as_bytes())
+            .with_context(|| format!("write placeholder {}", index_path.display()))?;
+    }
+
     Ok(VerificationQueryRoot { root, cleanup })
 }
 
@@ -350,11 +301,15 @@ struct VerificationRow {
     #[serde(default)]
     behavior_status: Option<String>,
     #[serde(default)]
+    behavior_unverified_reason_code: Option<String>,
+    #[serde(default)]
     scenario_ids: Vec<String>,
     #[serde(default)]
     scenario_paths: Vec<String>,
     #[serde(default)]
     behavior_scenario_ids: Vec<String>,
+    #[serde(default)]
+    behavior_assertion_scenario_ids: Vec<String>,
     #[serde(default)]
     behavior_scenario_paths: Vec<String>,
 }

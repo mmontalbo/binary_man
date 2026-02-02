@@ -292,7 +292,7 @@ impl App {
                 policy.kinds.join(", ")
             };
             lines.push(Line::from(format!(
-                "Batch: {} | Kinds: {} | Excludes: {}",
+                "Batch: {} | Kinds: {} | Queue excludes: {}",
                 policy.max_new_runs_per_apply, kinds, policy.excludes_count
             )));
         }

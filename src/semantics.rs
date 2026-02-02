@@ -10,7 +10,7 @@ use std::fs;
 use std::path::Path;
 
 /// Current schema version for `enrich/semantics.json`.
-pub const SEMANTICS_SCHEMA_VERSION: u32 = 4;
+pub const SEMANTICS_SCHEMA_VERSION: u32 = 5;
 
 fn default_true() -> bool {
     true
@@ -45,6 +45,8 @@ pub struct Semantics {
     pub requirements: RenderRequirements,
     #[serde(default)]
     pub verification: VerificationSemantics,
+    #[serde(default)]
+    pub behavior_assertions: BehaviorAssertionSemantics,
 }
 
 /// Rules for extracting usage/synopsis lines.
@@ -159,6 +161,28 @@ pub struct VerificationSemantics {
     pub subcommand_existence_argv_prefix: Vec<String>,
     #[serde(default)]
     pub subcommand_existence_argv_suffix: Vec<String>,
+}
+
+/// Normalization rules applied to behavior assertion evaluation.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct BehaviorAssertionSemantics {
+    #[serde(default = "default_true")]
+    pub strip_ansi: bool,
+    #[serde(default = "default_true")]
+    pub trim_whitespace: bool,
+    #[serde(default)]
+    pub collapse_internal_whitespace: bool,
+}
+
+impl Default for BehaviorAssertionSemantics {
+    fn default() -> Self {
+        BehaviorAssertionSemantics {
+            strip_ansi: true,
+            trim_whitespace: true,
+            collapse_internal_whitespace: false,
+        }
+    }
 }
 
 /// Single verification rule for accepted/rejected classification.
