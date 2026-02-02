@@ -1,3 +1,4 @@
+use super::types::SurfaceInvocation;
 use super::{
     is_supported_surface_kind, merge_surface_item, SurfaceDiscovery, SurfaceItem, SurfaceState,
 };
@@ -9,18 +10,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SurfaceLensRow {
-    #[serde(default)]
-    kind: Option<String>,
-    #[serde(default)]
-    id: Option<String>,
-    #[serde(default)]
-    display: Option<String>,
+    kind: String,
+    id: String,
+    display: String,
     #[serde(default)]
     description: Option<String>,
-    #[serde(default)]
-    scenario_path: Option<String>,
-    #[serde(default)]
+    forms: Vec<String>,
+    invocation: SurfaceInvocation,
+    scenario_path: String,
     multi_command_hint: bool,
 }
 
@@ -102,19 +101,19 @@ pub(super) fn run_surface_lenses(
                     let mut query_errors = run.errors;
                     let mut found_any = false;
                     for (row, source_root) in run.hits {
-                        let evidence = match evidence_from_scenario_path(
-                            &source_root,
-                            row.scenario_path.as_ref(),
-                        ) {
-                            Ok(Some(evidence)) => evidence,
-                            Ok(None) => {
-                                if row.multi_command_hint {
-                                    query_errors.push(format!(
-                                        "lens row missing scenario_path (template {template_rel})"
-                                    ));
-                                }
-                                continue;
-                            }
+                        let scenario_path = row.scenario_path.trim();
+                        if scenario_path.is_empty()
+                            || !scenario_path.starts_with("inventory/scenarios/")
+                            || scenario_path.contains("..")
+                        {
+                            query_errors.push(format!(
+                                "lens row has invalid scenario_path {scenario_path:?} (template {template_rel})"
+                            ));
+                            continue;
+                        }
+                        let evidence = match enrich::evidence_from_rel(&source_root, scenario_path)
+                        {
+                            Ok(evidence) => evidence,
                             Err(err) => {
                                 query_errors.push(err.to_string());
                                 continue;
@@ -124,8 +123,8 @@ pub(super) fn run_surface_lenses(
                             state.subcommand_hint_evidence.push(evidence.clone());
                             found_any = true;
                         }
-                        let kind = row.kind.as_ref().map(|value| value.trim()).unwrap_or("");
-                        let id = row.id.as_ref().map(|value| value.trim()).unwrap_or("");
+                        let kind = row.kind.trim();
+                        let id = row.id.trim();
                         if kind.is_empty() || id.is_empty() {
                             continue;
                         }
@@ -135,23 +134,25 @@ pub(super) fn run_surface_lenses(
                             ));
                             continue;
                         }
-                        let display = row
-                            .display
-                            .as_ref()
-                            .map(|value| value.trim())
-                            .filter(|value| !value.is_empty())
-                            .unwrap_or(id)
-                            .to_string();
+                        let display_value = row.display.trim();
+                        let display = if display_value.is_empty() {
+                            id.to_string()
+                        } else {
+                            display_value.to_string()
+                        };
                         let description = row
                             .description
-                            .as_ref()
-                            .map(|desc| desc.trim().to_string())
-                            .filter(|desc| !desc.is_empty());
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|desc| !desc.is_empty())
+                            .map(|desc| desc.to_string());
                         let item = SurfaceItem {
                             kind: kind.to_string(),
                             id: id.to_string(),
                             display,
                             description,
+                            forms: row.forms.clone(),
+                            invocation: row.invocation.clone(),
                             evidence: vec![evidence],
                         };
                         merge_surface_item(&mut state.items, &mut state.seen, item);
@@ -239,31 +240,4 @@ fn run_surface_lens_query(
         .into_iter()
         .map(|row| (row, root.to_path_buf()))
         .collect())
-}
-
-fn evidence_from_scenario_path(
-    source_root: &Path,
-    raw_path: Option<&String>,
-) -> Result<Option<enrich::EvidenceRef>> {
-    let raw_path = match raw_path {
-        Some(path) => path,
-        None => return Ok(None),
-    };
-    let rel = match normalize_scenario_rel_path(raw_path) {
-        Some(rel) => rel,
-        None => return Ok(None),
-    };
-    Ok(Some(enrich::evidence_from_rel(source_root, &rel)?))
-}
-
-fn normalize_scenario_rel_path(raw: &str) -> Option<String> {
-    let normalized = raw.replace('\\', "/");
-    if let Some(idx) = normalized.rfind("inventory/scenarios/") {
-        return Some(normalized[idx..].to_string());
-    }
-    if Path::new(&normalized).is_absolute() {
-        return None;
-    }
-    let trimmed = normalized.strip_prefix("./").unwrap_or(normalized.as_str());
-    Some(trimmed.to_string())
 }

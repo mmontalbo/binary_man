@@ -4,6 +4,14 @@
 use crate::enrich;
 use serde::{Deserialize, Serialize};
 
+fn default_value_arity() -> String {
+    "unknown".to_string()
+}
+
+fn default_value_separator() -> String {
+    "unknown".to_string()
+}
+
 /// Inventory of discovered surface items.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct SurfaceInventory {
@@ -26,6 +34,33 @@ pub struct SurfaceDiscovery {
     pub message: Option<String>,
 }
 
+/// Invocation hints for a surface item.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct SurfaceInvocation {
+    #[serde(default = "default_value_arity")]
+    pub value_arity: String,
+    #[serde(default = "default_value_separator")]
+    pub value_separator: String,
+    #[serde(default)]
+    pub value_placeholder: Option<String>,
+    #[serde(default)]
+    pub value_examples: Vec<String>,
+    #[serde(default)]
+    pub requires_argv: Vec<String>,
+}
+
+impl Default for SurfaceInvocation {
+    fn default() -> Self {
+        Self {
+            value_arity: default_value_arity(),
+            value_separator: default_value_separator(),
+            value_placeholder: None,
+            value_examples: Vec::new(),
+            requires_argv: Vec::new(),
+        }
+    }
+}
+
 /// Single surface item (option, command, subcommand).
 #[derive(Serialize, Deserialize, Clone)]
 pub struct SurfaceItem {
@@ -34,5 +69,9 @@ pub struct SurfaceItem {
     pub display: String,
     #[serde(default)]
     pub description: Option<String>,
+    #[serde(default)]
+    pub forms: Vec<String>,
+    #[serde(default)]
+    pub invocation: SurfaceInvocation,
     pub evidence: Vec<enrich::EvidenceRef>,
 }

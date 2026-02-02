@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 
 pub use types::{SurfaceDiscovery, SurfaceInventory, SurfaceItem};
 
-const SURFACE_SCHEMA_VERSION: u32 = 1;
-const SURFACE_SEED_SCHEMA_VERSION: u32 = 1;
+const SURFACE_SCHEMA_VERSION: u32 = 2;
+const SURFACE_SEED_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Default)]
 pub(super) struct SurfaceState {
@@ -48,7 +48,6 @@ pub fn apply_surface_discovery(
     let paths = enrich::DocPackPaths::new(doc_pack_root.to_path_buf());
     let mut state = SurfaceState::default();
 
-    seed::apply_surface_seed(&paths, &mut state)?;
     let plan_state = load_plan_state(&paths, &mut state)?;
     if plan_state.plan_present && !plan_state.help_scenarios_present {
         state.blockers.push(enrich::Blocker {
@@ -84,6 +83,7 @@ pub fn apply_surface_discovery(
         &paths,
         &mut state,
     )?;
+    seed::apply_surface_seed(&paths, &mut state)?;
     lens::add_subcommand_missing_blocker(&mut state);
 
     let surface = SurfaceInventory {
@@ -316,8 +316,11 @@ fn merge_surface_item(
         {
             existing.description = Some(new_desc);
         }
+        merge_string_list(&mut existing.forms, &item.forms);
+        merge_invocation(&mut existing.invocation, &item.invocation);
         return;
     }
+    merge_string_list(&mut item.forms, &[]);
     seen.insert(key, items.len());
     items.push(item);
 }
@@ -332,6 +335,71 @@ fn merge_evidence(target: &mut Vec<enrich::EvidenceRef>, incoming: &[enrich::Evi
             target.push(entry.clone());
         }
     }
+}
+
+fn merge_string_list(target: &mut Vec<String>, incoming: &[String]) {
+    if incoming.is_empty() && target.is_empty() {
+        return;
+    }
+    let mut merged = BTreeSet::new();
+    for value in target.iter().chain(incoming.iter()) {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        merged.insert(trimmed.to_string());
+    }
+    *target = merged.into_iter().collect();
+}
+
+fn merge_invocation(target: &mut types::SurfaceInvocation, incoming: &types::SurfaceInvocation) {
+    if target.value_arity == "unknown" && incoming.value_arity != "unknown" {
+        target.value_arity = incoming.value_arity.clone();
+    } else if target.value_arity != incoming.value_arity && incoming.value_arity != "unknown" {
+        target.value_arity = "unknown".to_string();
+    }
+
+    target.value_separator =
+        merge_value_separator(&target.value_separator, &incoming.value_separator);
+
+    if target
+        .value_placeholder
+        .as_ref()
+        .map(|value| value.trim().is_empty())
+        .unwrap_or(true)
+    {
+        let incoming_value = incoming
+            .value_placeholder
+            .as_ref()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty());
+        if let Some(value) = incoming_value {
+            target.value_placeholder = Some(value.to_string());
+        }
+    }
+
+    merge_string_list(&mut target.value_examples, &incoming.value_examples);
+    merge_string_list(&mut target.requires_argv, &incoming.requires_argv);
+}
+
+fn merge_value_separator(current: &str, incoming: &str) -> String {
+    if current == incoming {
+        return current.to_string();
+    }
+    if current == "unknown" {
+        return incoming.to_string();
+    }
+    if incoming == "unknown" {
+        return current.to_string();
+    }
+    if current == "either" || incoming == "either" {
+        return "either".to_string();
+    }
+    if (current == "equals" && incoming == "space") || (current == "space" && incoming == "equals")
+    {
+        return "either".to_string();
+    }
+    "unknown".to_string()
 }
 
 fn surface_item_key(item: &SurfaceItem) -> String {
