@@ -5,7 +5,87 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured “enrichment loop”
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: TBD.
+Current focus: M17 — value-aware behavior verification (ls).
+
+## M17 — Value-Aware Surface + Behavior Suite Expansion (ls) (planned)
+
+Goal: Expand behavior verification beyond no-arg flags by making value-taking
+options mechanically testable. This milestone focuses on **forms completeness**
+and **value readiness gating** so small LMs can make deterministic progress on a
+bounded behavior suite without guessing argv/value tokens.
+
+Motivation:
+- M16’s baseline+assertion model works well for toggles, but many real options
+  take values. Without pack-owned examples, behavior runs often fail before they
+  can produce a meaningful baseline→variant delta.
+- Help syntax often encodes value shapes (`--color[=WHEN]`, `--hide=PATTERN`),
+  but we currently under-preserve those raw forms and don’t reliably surface
+  “what argv should I try” as a mechanical prerequisite.
+
+Design constraints (non-negotiable for this milestone):
+- JSON-only structured artifacts in the doc pack (JSONL permitted for history).
+- No scores/percent truth: behavior verification remains pass/fail over explicit
+  assertions with evidence refs + explicit reason codes for unmet status.
+- Keep semantics out of Rust: interpretation lives in pack SQL and pack-owned
+  JSON (semantics + overlays), not hardcoded strings in code.
+- Evidence remains append-only; `apply` remains transactional.
+- Safety-first execution remains enforced (bounded timeouts/outputs + sandboxing,
+  network off unless explicitly enabled by the plan).
+- Usage + surface discovery stay help-only: behavior scenarios must not change man
+  rendering inputs or surface growth.
+- Treat short/long forms as distinct targets for now (no alias linking).
+
+Deliverables:
+1) **Surface forms completeness (help-only, evidence-linked)**
+- For each discovered surface item `(kind,id)`, `inventory/surface.json` records
+  `forms[]` as all distinct raw help forms that canonicalize to that `id`
+  (within the lens’s option/subcommand classification domain).
+- Canonicalization keeps mapping common patterns to stable ids:
+  - `--color[=WHEN]` → `--color` (forms retain bracketed form)
+  - `--hide=PATTERN` and `--hide PATTERN` → `--hide`
+  - `-w COLS` → `-w`
+
+2) **Value readiness gating (overlay-first for value options)**
+- When `verification_tier: "behavior"` requires a surface id whose
+  `invocation.value_arity` is `required|optional`, status must recommend editing
+  `inventory/surface.seed.json` overlays to add `invocation.value_examples[]`
+  before suggesting any behavior scenario for that id.
+- Overlays remain pack-owned hints only (no behavior semantics): supported fields
+  stay limited to:
+  - `invocation.value_examples[]` (safe concrete argv tokens)
+  - `invocation.requires_argv[]` (explicit extra argv tokens needed for meaning)
+
+3) **Behavior suite expansion stays bounded and finishable**
+- The behavior-required set remains explicit via `scenarios/plan.json.verification.queue[]`
+  entries with `intent: "verify_behavior"`.
+- Expand the suite to include a small set of **value-taking** options whose
+  behavior can be expressed using seed-grounded add/remove assertions and a
+  baseline→variant delta, while explicitly deferring known hard classes
+  (tty/locale/time/format-width/numeric-format options).
+
+4) **Deterministic next_action order remains stable**
+- For behavior tier, status recommends next actions in this order:
+  1) add/repair baseline scenario
+  2) add missing value_examples overlay for the next required id
+  3) add per-id behavior scenario stub (baseline_scenario_id + assertions)
+- Status/plan summarize “why unmet” with reason codes (counts + previews),
+  including value-readiness reasons (e.g. missing_value_examples).
+
+Acceptance criteria:
+- Fresh `ls` pack: existence verification still completes via the existing
+  auto-verify policy (no authored per-option existence scenarios).
+- Surface forms completeness preserves bracketed/equals/space value forms in
+  `forms[]` for canonical ids (e.g. `--color`).
+- With `verification_tier: "behavior"`, a bounded suite including several
+  value-taking options reaches `decision: complete` when each target is behavior
+  verified or explicitly excluded with objective prereqs/reason codes.
+- Behavior runs do not affect usage/surface discovery or man usage extraction
+  (help-only lenses remain the sole inputs to those).
+
+Out of scope:
+- Alias linking/deduping (`-a` vs `--all`) or semantic grouping of options.
+- Auto-inference of value ranges, inter-option dependencies, or conflict graphs.
+- Making behavior verification exhaustive for all `ls` options by default.
 
 ## M16 — Surface Definition v2 + Behavior Verification Suite (ls options) (done)
 
