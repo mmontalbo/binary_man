@@ -4,6 +4,62 @@ You are operating inside a **binary_man doc pack**. Assume your current working 
 
 ## Goal
 Make `bman status --doc-pack . --json` report `decision: "complete"` by satisfying the current requirements in `enrich/config.json`.
+Keep `enrich/config.json.usage_lens_template` as a single relative path (default: `queries/usage_from_scenarios.sql`).
+
+## Operating model
+- `bman` runtime is binary-agnostic; do not assume command-specific behavior in Rust.
+- Semantic interpretation is pack-owned in `enrich/semantics.json`, `queries/*.sql`,
+  `scenarios/plan.json`, and optional `inventory/surface.overlays.json`.
+- Keep semantic adjustments in those pack files; never request Rust semantic hardcoding.
+
+## Small-LM Behavior Card (first screen, canonical)
+Use this checklist when `enrich/config.json.verification_tier` is `"behavior"`.
+
+1) Deterministic loop:
+   - run `bman status --doc-pack . --json`
+   - execute exactly one `.next_action`
+   - run `bman apply --doc-pack .`
+   - repeat until `decision: "complete"`
+2) Action handling:
+   - if `next_action.kind=="command"`: run `.command` exactly, then continue loop
+   - if `next_action.kind=="edit"`: edit only `.path`, starting from `.content`
+3) Edit strategy handling:
+   - `edit_strategy=="replace_file"`: replace target file with `.content` (then minimal edits)
+   - `edit_strategy=="merge_behavior_scenarios"`: apply merge contract below
+4) Merge contract for `merge_behavior_scenarios`:
+   - patch payload lives in `next_action.content` (not a full plan file)
+   - merge optional `defaults` into `scenarios/plan.json.defaults`
+   - upsert `upsert_scenarios[]` by `scenario.id`
+   - never replace the full `scenarios/plan.json` with the patch payload object
+5) Merge helper (preferred over manual JSON surgery):
+   - file mode: `bman merge-behavior-edit --doc-pack . --status-json /tmp/status.json`
+   - pipe mode: `bman status --doc-pack . --json | bman merge-behavior-edit --doc-pack . --from-stdin`
+6) Required fields for each behavior variant scenario:
+   - `coverage_tier: "behavior"`
+   - `covers` (must include exact `surface_id`)
+   - `baseline_scenario_id`
+   - non-empty `assertions[]`
+7) Assertion quick starters (at least one delta + one semantic predicate):
+   - add behavior: `baseline_stdout_not_contains_seed_path` + `variant_stdout_contains_seed_path`
+   - remove behavior: `baseline_stdout_contains_seed_path` + `variant_stdout_not_contains_seed_path`
+   - change behavior: `variant_stdout_differs_from_baseline` + stable `expect.stdout_*`/`expect.stderr_*`
+8) For short tokens (`.`, `..`, punctuation), prefer exact-line assertions:
+   - `*_stdout_has_line` / `*_stdout_not_has_line` with `stdout_token`
+9) Baseline auto-inclusion:
+   - baseline scenario is auto-included when missing; do not create separate baseline-only loop steps
+10) Surface overlays are optional refinement:
+   - `inventory/surface.overlays.json` helps argv examples (`invocation.value_examples`)
+   - overlays are not the first blocking step for behavior authoring
+11) Keep output mode distraction-free:
+   - default `status --json` is slim/actionability-first
+   - use `status --json --full` only for triage (scenario/assertion diagnostics, reason codes, fix hints)
+
+## Behavior quickstart (verification_tier: "behavior")
+1) Set `enrich/config.json.verification_tier` to `"behavior"`.
+2) Follow the **Small-LM Behavior Card** exactly.
+3) Existence auto-verification finishes first; behavior scenarios are added after that.
+4) Baseline auto-inclusion handles missing baseline setup; keep focus on variant assertions.
+5) `inventory/surface.overlays.json` is optional refinement for argv examples, not a first-pass blocker.
 
 ## Hard rules
 - Do NOT edit repository source code. Work only inside this doc pack.
@@ -11,7 +67,7 @@ Make `bman status --doc-pack . --json` report `decision: "complete"` by satisfyi
   - `enrich/config.json`
   - `enrich/semantics.json`
   - `scenarios/plan.json`
-  - `inventory/surface.seed.json` (optional; only if surface discovery is blocked)
+  - `inventory/surface.overlays.json` (optional refinement)
 - Only edit `queries/**` when `status --json` explicitly recommends it.
 - Do NOT edit tool outputs directly:
   - `inventory/surface.json`
@@ -22,17 +78,18 @@ Make `bman status --doc-pack . --json` report `decision: "complete"` by satisfyi
   - `enrich/lock.json`
   - `enrich/plan.out.json`
   - `enrich/report.json`
-- After every edit that “counts”, run the gated loop: `validate → plan → apply`.
+- After every edit that “counts”, run: `bman apply --doc-pack .`.
 - Never use `--force` unless explicitly instructed.
 
 ## What to trust (avoid wasted work)
 - Treat `bman status --doc-pack . --json` as the source of truth for what to do next.
 - `enrich/plan.out.json` is a snapshot; ignore it unless `status.plan.present=true` and `status.plan.stale=false`.
-- After editing `scenarios/plan.json` or `enrich/semantics.json`, the plan is stale until you rerun `validate → plan → apply`.
+- After editing `scenarios/plan.json` or `enrich/semantics.json`, the plan is stale until you rerun `bman apply --doc-pack .`.
 - Ignore artifacts that are not required by `enrich/config.json.requirements`, even if they exist:
   - If `"verification"` is not required, ignore `verification_ledger.json`.
   - If `"coverage"` / `"coverage_ledger"` is not required, ignore `coverage_ledger.json`.
-- Use `bman status --doc-pack . --json --full` only for human debugging (it expands full triage lists).
+- Default `bman status --doc-pack . --json` is actionability-first (slim payload).
+- Use `bman status --doc-pack . --json --full` for rich triage/evidence diagnostics (including exact behavior failure scenario/assertion context when available).
 
 ## Scenario defaults
 Prefer setting shared runner defaults once in `scenarios/plan.json` under `defaults`:
@@ -56,9 +113,8 @@ Default runner env lives in `scenarios/plan.json.default_env` (seeded by `bman i
    - If `kind=="command"`: run the command exactly; then go back to step 1.
    - If `kind=="edit"`: edit the file at `.path`.
      - Start from `.content` (the tool-provided stub) and make the smallest change.
+     - For `edit_strategy=="merge_behavior_scenarios"`, use `bman merge-behavior-edit` (preferred) or the merge contract in **Small-LM Behavior Card**.
 3) Run:
-   - `bman validate --doc-pack .`
-   - `bman plan --doc-pack .`
    - `bman apply --doc-pack .` (incremental; use `--rerun-all` or `--rerun-failed` when needed)
 4) Go back to step 1 until complete.
 
@@ -83,19 +139,31 @@ If `enrich/config.json.requirements` includes `"verification"` (default for new 
 - Verification is opt-out: remove `"verification"` from `requirements` to disable it.
 - Check `enrich/config.json.verification_tier` (default: `"accepted"`).
 - Accepted tier = existence/recognition checks (help/flag accepted); behavior tier = functional behavior checks and is only required when configured.
-- When `verification_tier` is `"behavior"`, verification is **exhaustive within the model**: every in-scope `surface_id` must either be behavior-verified by passing scenarios with seed-grounded assertions, or be explicitly excluded with an objective reason/prereqs.
+- Behavior tier is exhaustive for options: finish existence auto-verification, then author per-option behavior scenarios.
+- Missing `invocation.value_examples` does not block first-pass behavior authoring; surface overlays remain optional refinement.
+- Behavior tier uses a shared inline fixture under `scenarios/plan.json.defaults.seed` for baseline + variants.
 - Auto verification is controlled by `scenarios/plan.json.verification.policy`:
   - `kinds`: ordered list of auto targets (`"option"`, `"subcommand"`).
   - `max_new_runs_per_apply`: batch size per apply.
-- Exclusions are controlled by `scenarios/plan.json.verification.queue[]` entries with `intent: "exclude"` + `prereqs[]` + `reason`.
-- Run `validate → plan → apply` repeatedly; `status --json` will recommend `apply` again until verification is met.
+- Exclusions (accepted tier only) are `scenarios/plan.json.verification.queue[]` entries with `intent: "exclude"` + non-empty `prereqs[]` (enum tags: `needs_arg_value`, `needs_seed_fs`, `needs_repo`, `needs_network`, `needs_interactive`, `needs_privilege`) and an optional reason.
+- Exclusions are only for concrete blockers; if you do not want to verify something yet, leave it unqueued.
+- Run `bman apply` repeatedly; `status --json` will recommend `apply` again until verification is met.
 - Avoid per-flag scenarios for option **existence** verification; use the auto-verification policy instead.
-- For **behavior** verification, author explicit `coverage_tier: "behavior"` scenarios with `baseline_scenario_id` + `assertions` + output expectations; `status --json` will drive this one target at a time.
-- Define a baseline scenario once (default id `baseline`) and reference it from each behavior scenario.
+- For **behavior** verification, author explicit `coverage_tier: "behavior"` scenarios with `baseline_scenario_id` + `assertions` + output expectations; `status --json` provides a single-target scaffold.
+- For behavior edits with `edit_strategy: "merge_behavior_scenarios"`, use the merge contract in **Small-LM Behavior Card**.
+- Status stubs are skeletons; fill `assertions` (`assertions[]` must be non-empty).
+- Baseline auto-inclusion handles missing baseline setup; assertions belong on the variant behavior scenario.
 - Do not exclude just because of `needs_seed_fs`; every scenario already runs with an empty fixture by default.
 - Status triage summaries are compact (counts + previews); the canonical surface list is `inventory/surface.json`.
 - When summarizing verification progress, report both accepted and behavior counts (even if behavior is not required).
 - Auto-verify evidence is intentionally truncated to `snippet_max_*`; rerun a manual scenario if you need full output.
+
+### Behavior reason-code to quick fix
+- `missing_behavior_scenario`: merge the status stub into `scenarios/plan.json`, then fill assertions.
+- `missing_assertions` or `missing_semantic_predicate`: add non-empty `assertions[]` plus at least one stable stdout/stderr semantic predicate.
+- `missing_delta_assertion`: add a seed-grounded add/remove pair, or `variant_stdout_differs_from_baseline` plus semantic predicate.
+- `outputs_equal`: strengthen variant argv/fixture so output differs meaningfully from baseline, then rerun apply.
+- `scenario_failed`: fix argv/seed/expect so both baseline and variant runs pass before re-checking behavior.
 
 ### What counts as verifying an id
 - Scenario-to-surface mapping is explicit: every entry in `covers` must be the exact `surface_id` you are verifying (no argv inference).
@@ -105,14 +173,30 @@ If `enrich/config.json.requirements` includes `"verification"` (default for new 
 - Behavior scenarios only count when they prove a **delta vs baseline** and include explicit semantics; `variant_stdout_contains_seed_path` alone is never sufficient.
 - Semantic predicate requirement (one is required):
   - At least one stdout/stderr expect predicate (`*_contains_*` or `*_regex_*`), or
-  - a seed-grounded delta pair for the same `path` (adds or removes).
+  - a seed-grounded delta pair for the same `seed_path` (adds or removes).
 - Delta proof must be either:
   - `variant_stdout_differs_from_baseline`, or
-  - a matched pair for the same `path`:
+  - a matched pair for the same `seed_path`:
     - add: `baseline_stdout_not_contains_seed_path` + `variant_stdout_contains_seed_path`
     - remove: `baseline_stdout_contains_seed_path` + `variant_stdout_not_contains_seed_path`
-- For seed-path assertions, the asserted `path` must be present in both the baseline and variant `seed.entries`, and the baseline/variant seeds should describe the same fixture.
-- Assertion kinds (v1): `baseline_stdout_not_contains_seed_path`, `baseline_stdout_contains_seed_path`, `variant_stdout_contains_seed_path`, `variant_stdout_not_contains_seed_path`, `variant_stdout_differs_from_baseline` (diff-only is insufficient).
+- For seed-path assertions, `seed_path` must be a path in `seed.entries[].path` for both baseline and variant (fixture identity). If the program prints something else (basename, ".", etc.), use `stdout_token`.
+- `stdout_token` is an optional verbatim stdout/stderr match token; when omitted, matching uses `seed_path`. `*_stdout_has_line`/`*_stdout_not_has_line` treat it as an exact line token (not substring).
+- For short/ambiguous `stdout_token` values (<= 2 chars or mostly punctuation), prefer `*_stdout_has_line` / `*_stdout_not_has_line` to avoid substring matches.
+- Example (directory listing): `seed_path: "work/file.txt", stdout_token: "file.txt"`.
+- Assertion kinds: `baseline_stdout_not_contains_seed_path`, `baseline_stdout_contains_seed_path`, `variant_stdout_contains_seed_path`, `variant_stdout_not_contains_seed_path`, `baseline_stdout_has_line`, `baseline_stdout_not_has_line`, `variant_stdout_has_line`, `variant_stdout_not_has_line`, `variant_stdout_differs_from_baseline` (diff-only is insufficient).
+- Example (--all exact-line match for dot entries):
+```json
+{
+  "argv": ["--all", "work"],
+  "baseline_scenario_id": "baseline",
+  "assertions": [
+    { "kind": "baseline_stdout_not_has_line", "seed_path": "work/file1.txt", "stdout_token": "." },
+    { "kind": "variant_stdout_has_line", "seed_path": "work/file1.txt", "stdout_token": "." },
+    { "kind": "baseline_stdout_not_has_line", "seed_path": "work/file1.txt", "stdout_token": ".." },
+    { "kind": "variant_stdout_has_line", "seed_path": "work/file1.txt", "stdout_token": ".." }
+  ]
+}
+```
 - For option existence, prefer `argv: ["<surface_id>"]` with `covers: ["<surface_id>"]`; do not force `expect.exit_code=0`.
 - For command/subcommand existence, prefer `argv: ["<surface_id>", "--help"]` before adding prereqs or excluding.
 - Classification is driven by `enrich/semantics.json.verification` rules (accepted vs rejected vs inconclusive); accepted existence can include missing-arg errors when semantics allow it.

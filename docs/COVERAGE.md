@@ -20,8 +20,6 @@ Inputs to read:
 Main commands:
 
 ```
-cargo run --bin bman -- validate --doc-pack /tmp/<binary>-docpack
-cargo run --bin bman -- plan --doc-pack /tmp/<binary>-docpack
 cargo run --bin bman -- apply --doc-pack /tmp/<binary>-docpack
 ```
 
@@ -33,37 +31,25 @@ Outputs to inspect:
 
 ## Doc-Pack Enrichment Loop (tool-assisted)
 
-When working from a portable doc pack, you can iterate without touching repo
-paths:
+When working from a portable doc pack, iterate in the deterministic loop:
 
-1) Initialize and validate:
+1) `status --json` (source of truth)
+2) execute one `next_action`
+3) `apply`
+4) repeat
 
-```
-cargo run --bin bman -- init --doc-pack /tmp/<binary>-docpack --binary <binary>
-cargo run --bin bman -- validate --doc-pack /tmp/<binary>-docpack
-```
+Default `status --json` is slim/actionability-first; use `status --json --full`
+only for triage diagnostics/evidence.
 
-2) Edit pack-local inputs as needed:
-- `queries/` (usage/surface lens templates)
-- `scenarios/plan.json` (scenario plan for help/behavior coverage)
-- `fixtures/` (deterministic inputs)
-- `enrich/config.json` (requirements)
-
-3) Plan, apply, and check status:
+For canonical behavior-tier authoring details (merge contract, baseline
+auto-inclusion, required fields, assertion starters), follow
+`prompts/enrich_agent_prompt.md` (**Small-LM Behavior Card**). For
+`edit_strategy: "merge_behavior_scenarios"`, prefer:
 
 ```
-cargo run --bin bman -- plan --doc-pack /tmp/<binary>-docpack
-cargo run --bin bman -- apply --doc-pack /tmp/<binary>-docpack
-cargo run --bin bman -- status --doc-pack /tmp/<binary>-docpack --json
+bman status --doc-pack /tmp/<binary>-docpack --json | \
+  bman merge-behavior-edit --doc-pack /tmp/<binary>-docpack --from-stdin
 ```
-
-The tool writes `enrich/lock.json` (validated input snapshot),
-`enrich/plan.out.json` (planned actions + requirement eval),
-`enrich/report.json` (evidence-linked decision report), and
-`enrich/history.jsonl` (append-only provenance). Surface discovery is captured
-in `inventory/surface.json` with scenario evidence in `inventory/scenarios/*.json`.
-Decisions are `complete`, `incomplete`, or `blocked` depending on whether
-evidence-linked requirements are met and whether blockers are present.
 
 ## Definition Of Done (coverage pass)
 
@@ -306,9 +292,7 @@ Use this as a starting point for a coding agent:
 > - Update `<doc-pack>/scenarios/plan.json` with new scenarios:
 >   - acceptance scenarios for uncovered option IDs (prefer `publish:false`)
 >   - at least one fixture-backed behavior scenario if feasible
-> - Run `cargo run --bin bman -- validate --doc-pack /tmp/<binary>-docpack`,
->   `cargo run --bin bman -- plan --doc-pack /tmp/<binary>-docpack`, and
->   `cargo run --bin bman -- apply --doc-pack /tmp/<binary>-docpack`, then ensure
+> - Run `cargo run --bin bman -- apply --doc-pack /tmp/<binary>-docpack`, then ensure
 >   `<doc-pack>/man/examples_report.json` reflects the new coverage (when present).
 > - Curate `.SH EXAMPLES` so it stays readable (only publish high-value,
 >   deterministic scenarios).
