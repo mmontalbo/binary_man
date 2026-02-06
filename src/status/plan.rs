@@ -51,7 +51,7 @@ pub fn load_plan(doc_pack_root: &Path) -> Result<enrich::EnrichPlan> {
     let path = paths.plan_path();
     if !path.is_file() {
         return Err(anyhow!(
-            "missing plan at {} (run `bman plan --doc-pack {}` first)",
+            "missing plan at {} (run `bman apply --doc-pack {}` first)",
             path.display(),
             doc_pack_root.display()
         ));

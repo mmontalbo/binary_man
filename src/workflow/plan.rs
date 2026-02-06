@@ -45,6 +45,12 @@ pub fn run_plan(args: &PlanArgs) -> Result<()> {
     let verification_plan = build_verification_plan_summary(&ctx, &ctx.config);
 
     let lock_inputs_hash = lock.inputs_hash.clone();
+    let mut next_action = enrich::NextAction::Command {
+        command: format!("bman apply --doc-pack {}", ctx.paths.root().display()),
+        reason: "apply the planned actions".to_string(),
+        payload: None,
+    };
+    enrich::normalize_next_action(&mut next_action);
     let plan = enrich::EnrichPlan {
         schema_version: enrich::PLAN_SCHEMA_VERSION,
         generated_at_epoch_ms: enrich::now_epoch_ms()?,
@@ -52,10 +58,7 @@ pub fn run_plan(args: &PlanArgs) -> Result<()> {
         lock,
         requirements,
         planned_actions,
-        next_action: enrich::NextAction::Command {
-            command: format!("bman apply --doc-pack {}", ctx.paths.root().display()),
-            reason: "apply the planned actions".to_string(),
-        },
+        next_action,
         decision,
         decision_reason,
         force_used,
@@ -99,36 +102,7 @@ fn build_verification_plan_summary(
         return None;
     }
     let surface = surface::load_surface_inventory(&surface_path).ok()?;
-    let template_path = ctx
-        .paths
-        .root()
-        .join(enrich::VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL);
-    if !template_path.is_file() {
-        return None;
-    }
-    let verification_binary = ctx
-        .binary_name()
-        .map(|name| name.to_string())
-        .or_else(|| surface.binary_name.clone())
-        .or_else(|| plan.binary.clone())
-        .unwrap_or_else(|| "<binary>".to_string());
-    let ledger_entries = scenarios::build_verification_ledger(
-        &verification_binary,
-        &surface,
-        ctx.paths.root(),
-        &ctx.paths.scenarios_plan_path(),
-        &template_path,
-        None,
-        Some(ctx.paths.root()),
-    )
-    .ok()
-    .map(|ledger| {
-        let mut entries = std::collections::BTreeMap::new();
-        for entry in ledger.entries {
-            entries.insert(entry.surface_id.clone(), entry);
-        }
-        entries
-    });
+    let ledger_entries = scenarios::load_verification_entries(ctx.paths.root());
     let verification_tier = config.verification_tier.as_deref().unwrap_or("accepted");
     crate::status::auto_verification_plan_summary(
         &plan,

@@ -230,7 +230,9 @@ impl App {
         lines.push(Line::from(format!(
             "Required tier: {tier} ({tier_label}) | Status: {status}"
         )));
-        if let (Some(verified), Some(unverified)) = (req.verified_count, req.unverified_count) {
+        if let (Some(verified), Some(unverified)) =
+            (req.accepted_verified_count, req.accepted_unverified_count)
+        {
             let total = verified.saturating_add(unverified);
             lines.push(Line::from(format!(
                 "Existence (accepted): {verified}/{total}"
@@ -240,7 +242,7 @@ impl App {
             (req.behavior_verified_count, req.behavior_unverified_count)
         {
             let total = verified.saturating_add(unverified);
-            lines.push(Line::from(format!("Behavior tier: {verified}/{total}")));
+            lines.push(Line::from(format!("Behavior: {verified}/{total}")));
         }
         if let Some(summary) = req.verification.as_ref() {
             if !summary.remaining_by_kind.is_empty() {
@@ -273,6 +275,13 @@ impl App {
                         )));
                     }
                 }
+                if summary.behavior_excluded_count > 0 {
+                    let preview = preview_list(&summary.behavior_excluded_preview);
+                    lines.push(Line::from(format!(
+                        "Excluded (behavior): {} ({preview})",
+                        summary.behavior_excluded_count
+                    )));
+                }
             } else if req.status == enrich::RequirementState::Met {
                 lines.push(Line::from("Verification: met".to_string()));
             } else {
@@ -281,6 +290,60 @@ impl App {
                 lines.push(Line::from(format!("Remaining ({tier_label}): {remaining}")));
                 if remaining > 0 && !preview.is_empty() {
                     lines.push(Line::from(format!("Remaining: {preview}")));
+                }
+                if summary.behavior_excluded_count > 0 {
+                    let excluded_preview = preview_list(&summary.behavior_excluded_preview);
+                    lines.push(Line::from(format!(
+                        "Excluded (behavior): {} ({excluded_preview})",
+                        summary.behavior_excluded_count
+                    )));
+                }
+            }
+            if !summary.stub_blockers_preview.is_empty() {
+                lines.push(Line::from(format!(
+                    "Stub blockers preview: {}",
+                    summary.stub_blockers_preview.len()
+                )));
+                for blocker in &summary.stub_blockers_preview {
+                    let placeholder = blocker
+                        .surface
+                        .value_placeholder
+                        .as_deref()
+                        .unwrap_or("none");
+                    lines.push(Line::from(format!(
+                        "{} [{}]",
+                        blocker.surface_id, blocker.reason_code
+                    )));
+                    lines.push(Line::from(format!(
+                        "shape: kind={} forms={} arity={} sep={} placeholder={}",
+                        blocker.surface.kind,
+                        preview_list(&blocker.surface.forms),
+                        blocker.surface.value_arity,
+                        blocker.surface.value_separator,
+                        placeholder
+                    )));
+                    lines.push(Line::from(format!(
+                        "invocation: requires_argv={} value_examples={}",
+                        preview_list(&blocker.surface.requires_argv),
+                        preview_list(&blocker.surface.value_examples_preview)
+                    )));
+                    lines.push(Line::from(format!(
+                        "delta: outcome={} paths={}",
+                        blocker.delta.delta_outcome.as_deref().unwrap_or("unknown"),
+                        preview_list(&blocker.delta.delta_evidence_paths)
+                    )));
+                    let evidence_paths = blocker
+                        .evidence
+                        .iter()
+                        .map(|entry| entry.path.clone())
+                        .take(2)
+                        .collect::<Vec<_>>();
+                    if !evidence_paths.is_empty() {
+                        lines.push(Line::from(format!(
+                            "evidence: {}",
+                            evidence_paths.join(", ")
+                        )));
+                    }
                 }
             }
         }

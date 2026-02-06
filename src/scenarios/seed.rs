@@ -4,7 +4,16 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::{ScenarioSeedSpec, SeedEntryKind, MAX_SEED_ENTRIES, MAX_SEED_TOTAL_BYTES};
+use super::{
+    ScenarioSeedEntry, ScenarioSeedSpec, SeedEntryKind, MAX_SEED_ENTRIES, MAX_SEED_TOTAL_BYTES,
+};
+
+pub(crate) const DEFAULT_BEHAVIOR_SEED_DIR: &str = "work";
+const DEFAULT_BEHAVIOR_SEED_FILE1: &str = "work/file1.txt";
+const DEFAULT_BEHAVIOR_SEED_FILE2: &str = "work/file2";
+const DEFAULT_BEHAVIOR_SEED_SUBDIR: &str = "work/subdir";
+const DEFAULT_BEHAVIOR_SEED_NESTED: &str = "work/subdir/nested.txt";
+const DEFAULT_BEHAVIOR_SEED_LINK: &str = "work/link";
 
 pub(crate) struct MaterializedSeed {
     pub(crate) rel_path: String,
@@ -244,4 +253,56 @@ fn apply_seed_symlink(target: &str, path: &Path) -> Result<()> {
         let _ = path;
         Err(anyhow!("seed symlinks are unsupported on this platform"))
     }
+}
+
+/// Default inline seed skeleton for behavior scenarios and delta checks.
+pub(crate) fn default_behavior_seed() -> ScenarioSeedSpec {
+    let mut entries = vec![
+        ScenarioSeedEntry {
+            path: DEFAULT_BEHAVIOR_SEED_DIR.to_string(),
+            kind: SeedEntryKind::Dir,
+            contents: None,
+            target: None,
+            mode: None,
+        },
+        ScenarioSeedEntry {
+            path: DEFAULT_BEHAVIOR_SEED_FILE1.to_string(),
+            kind: SeedEntryKind::File,
+            contents: Some("a\n".to_string()),
+            target: None,
+            mode: None,
+        },
+        ScenarioSeedEntry {
+            path: DEFAULT_BEHAVIOR_SEED_FILE2.to_string(),
+            kind: SeedEntryKind::File,
+            contents: Some("b\n".to_string()),
+            target: None,
+            mode: None,
+        },
+        ScenarioSeedEntry {
+            path: DEFAULT_BEHAVIOR_SEED_SUBDIR.to_string(),
+            kind: SeedEntryKind::Dir,
+            contents: None,
+            target: None,
+            mode: None,
+        },
+        ScenarioSeedEntry {
+            path: DEFAULT_BEHAVIOR_SEED_NESTED.to_string(),
+            kind: SeedEntryKind::File,
+            contents: Some("c\n".to_string()),
+            target: None,
+            mode: None,
+        },
+    ];
+    #[cfg(unix)]
+    {
+        entries.push(ScenarioSeedEntry {
+            path: DEFAULT_BEHAVIOR_SEED_LINK.to_string(),
+            kind: SeedEntryKind::Symlink,
+            contents: None,
+            target: Some("file1.txt".to_string()),
+            mode: None,
+        });
+    }
+    ScenarioSeedSpec { entries }
 }

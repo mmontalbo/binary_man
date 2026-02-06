@@ -12,9 +12,10 @@ use crate::render;
 use crate::scenarios;
 use crate::semantics;
 use crate::staging::publish_staging;
-use crate::status::{build_status_summary, plan_status};
+use crate::status::{build_status_summary, plan_status, planned_actions_from_requirements};
 use crate::surface::{self, apply_surface_discovery};
 use crate::util::resolve_flake_ref;
+use crate::workflow::{run_plan, run_validate};
 use anyhow::{anyhow, Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -27,22 +28,100 @@ use rendering::{
     scenarios_glob, staged_help_scenario_evidence_available,
 };
 
+#[derive(Debug, Clone, Copy, Default)]
+struct ApplyPreflightResult {
+    ran_validate: bool,
+    ran_plan: bool,
+}
+
+fn run_apply_preflight<FRefresh, FValidate, FPlan>(
+    args: &ApplyArgs,
+    lock_status: &enrich::LockStatus,
+    plan_state: &enrich::PlanStatus,
+    mut refresh: FRefresh,
+    mut validate: FValidate,
+    mut plan: FPlan,
+) -> Result<ApplyPreflightResult>
+where
+    FRefresh: FnMut() -> Result<()>,
+    FValidate: FnMut() -> Result<()>,
+    FPlan: FnMut() -> Result<()>,
+{
+    let mut result = ApplyPreflightResult::default();
+    if args.refresh_pack {
+        refresh()?;
+    }
+    if args.refresh_pack || !lock_status.present || lock_status.stale {
+        validate()?;
+        result.ran_validate = true;
+    }
+    if result.ran_validate || !plan_state.present || plan_state.stale {
+        plan()?;
+        result.ran_plan = true;
+    }
+    Ok(result)
+}
+
 pub(crate) fn run_apply(args: &ApplyArgs) -> Result<()> {
     let lens_flake = resolve_flake_ref(&args.lens_flake)?;
     let doc_pack_root = ensure_doc_pack_root(&args.doc_pack, false)?;
-    let ctx = EnrichContext::load(doc_pack_root)?;
+    let mut ctx = EnrichContext::load(doc_pack_root)?;
     ctx.require_config()?;
     enrich::validate_config(&ctx.config)?;
     let mut manifest = ctx.manifest.clone();
+    let mut lock_status = ctx.lock_status.clone();
+    let plan_state = plan_status(ctx.lock.as_ref(), ctx.plan.as_ref());
+    let preflight = run_apply_preflight(
+        args,
+        &lock_status,
+        &plan_state,
+        || {
+            manifest = refresh_pack_if_needed(&ctx, manifest.as_ref(), &lens_flake)?;
+            Ok(())
+        },
+        || {
+            let validate_args = crate::cli::ValidateArgs {
+                doc_pack: ctx.paths.root().to_path_buf(),
+                verbose: args.verbose,
+            };
+            run_validate(&validate_args)
+        },
+        || {
+            let plan_args = crate::cli::PlanArgs {
+                doc_pack: ctx.paths.root().to_path_buf(),
+                force: false,
+                verbose: args.verbose,
+            };
+            run_plan(&plan_args)
+        },
+    )?;
 
-    let (lock, lock_status, mut force_used) = ctx.lock_for_apply(args.force)?;
-
-    let plan = ctx.require_plan()?;
-    force_used |= verify_plan_lock(&plan, lock.as_ref(), &ctx.paths, args.force)?;
-
-    if args.refresh_pack {
-        manifest = refresh_pack_if_needed(&ctx, manifest.as_ref(), &lens_flake)?;
+    if preflight.ran_validate || preflight.ran_plan {
+        ctx = EnrichContext::load(ctx.paths.root().to_path_buf())?;
+        lock_status = ctx.lock_status.clone();
     }
+
+    let lock = ctx
+        .lock
+        .clone()
+        .ok_or_else(|| anyhow!("missing lock at {}", ctx.paths.lock_path().display()))?;
+    let plan = ctx
+        .plan
+        .clone()
+        .ok_or_else(|| anyhow!("missing plan at {}", ctx.paths.plan_path().display()))?;
+    let force_used = false;
+    let initial_plan_state = plan_status(Some(&lock), Some(&plan));
+    let initial_summary = build_status_summary(crate::status::BuildStatusSummaryArgs {
+        doc_pack_root: ctx.paths.root(),
+        binary_name: ctx.binary_name(),
+        config: &ctx.config,
+        config_exists: true,
+        lock_status: lock_status.clone(),
+        plan_status: initial_plan_state,
+        include_full: false,
+        force_used,
+    })?;
+    let planned_actions = planned_actions_from_requirements(&initial_summary.requirements);
 
     let binary_name = manifest.as_ref().map(|m| m.binary_name.clone());
 
@@ -53,6 +132,7 @@ pub(crate) fn run_apply(args: &ApplyArgs) -> Result<()> {
 
     let apply_inputs = ApplyInputs {
         ctx: &ctx,
+        planned_actions: planned_actions.as_slice(),
         plan: &plan,
         manifest: manifest.as_ref(),
         lens_flake: &lens_flake,
@@ -63,7 +143,7 @@ pub(crate) fn run_apply(args: &ApplyArgs) -> Result<()> {
     let apply_result = apply_plan_actions(&apply_inputs);
 
     let finished_at_epoch_ms = enrich::now_epoch_ms()?;
-    let (_published_paths, outputs_hash) = match apply_result {
+    let (published_paths, outputs_hash) = match apply_result {
         Ok(result) => result,
         Err(err) => {
             let history_entry = enrich::EnrichHistoryEntry {
@@ -71,7 +151,7 @@ pub(crate) fn run_apply(args: &ApplyArgs) -> Result<()> {
                 started_at_epoch_ms,
                 finished_at_epoch_ms,
                 step: "apply".to_string(),
-                inputs_hash: lock.as_ref().map(|l| l.inputs_hash.clone()),
+                inputs_hash: Some(lock.inputs_hash),
                 outputs_hash: None,
                 success: false,
                 message: Some(err.to_string()),
@@ -84,24 +164,29 @@ pub(crate) fn run_apply(args: &ApplyArgs) -> Result<()> {
 
     cleanup_txn_dirs(&ctx.paths, &txn_id, args.verbose);
 
-    let plan_status = plan_status(lock.as_ref(), Some(&plan));
-    let summary = build_status_summary(crate::status::BuildStatusSummaryArgs {
-        doc_pack_root: ctx.paths.root(),
-        binary_name: binary_name.as_deref(),
-        config: &ctx.config,
-        config_exists: true,
-        lock_status,
-        plan_status,
-        include_full: false,
-        force_used,
-    })?;
+    let summary = if planned_actions.is_empty() && !args.refresh_pack && published_paths.is_empty()
+    {
+        initial_summary
+    } else {
+        let plan_state = plan_status(Some(&lock), Some(&plan));
+        build_status_summary(crate::status::BuildStatusSummaryArgs {
+            doc_pack_root: ctx.paths.root(),
+            binary_name: binary_name.as_deref(),
+            config: &ctx.config,
+            config_exists: true,
+            lock_status,
+            plan_status: plan_state,
+            include_full: false,
+            force_used,
+        })?
+    };
 
     let last_run = enrich::EnrichRunSummary {
         step: "apply".to_string(),
         started_at_epoch_ms,
         finished_at_epoch_ms,
         success: true,
-        inputs_hash: lock.as_ref().map(|l| l.inputs_hash.clone()),
+        inputs_hash: Some(lock.inputs_hash.clone()),
         outputs_hash,
         message: None,
     };
@@ -115,12 +200,14 @@ pub(crate) fn run_apply(args: &ApplyArgs) -> Result<()> {
         next_action,
         ..
     } = summary;
+    let mut next_action = next_action;
+    enrich::normalize_next_action(&mut next_action);
 
     let report = enrich::EnrichReport {
         schema_version: enrich::REPORT_SCHEMA_VERSION,
         generated_at_epoch_ms: finished_at_epoch_ms,
         binary_name: binary_name.clone(),
-        lock,
+        lock: Some(lock),
         requirements,
         blockers,
         missing_artifacts,
@@ -162,6 +249,7 @@ pub(crate) fn run_apply(args: &ApplyArgs) -> Result<()> {
 
 struct ApplyInputs<'a> {
     ctx: &'a EnrichContext,
+    planned_actions: &'a [enrich::PlannedAction],
     plan: &'a enrich::EnrichPlan,
     manifest: Option<&'a crate::pack::PackManifest>,
     lens_flake: &'a str,
@@ -170,35 +258,9 @@ struct ApplyInputs<'a> {
     args: &'a ApplyArgs,
 }
 
-fn verify_plan_lock(
-    plan: &enrich::EnrichPlan,
-    lock: Option<&enrich::EnrichLock>,
-    paths: &enrich::DocPackPaths,
-    force: bool,
-) -> Result<bool> {
-    if let Some(lock) = lock {
-        if plan.lock.inputs_hash != lock.inputs_hash {
-            if !force {
-                return Err(anyhow!(
-                    "plan does not match lock (run `bman plan --doc-pack {}` again or pass --force)",
-                    paths.root().display()
-                ));
-            }
-            return Ok(true);
-        }
-        return Ok(false);
-    }
-    if !force {
-        return Err(anyhow!(
-            "missing lock for plan verification (run `bman validate --doc-pack {}` or pass --force)",
-            paths.root().display()
-        ));
-    }
-    Ok(true)
-}
-
 fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<(Vec<PathBuf>, Option<String>)> {
     let ctx = inputs.ctx;
+    let actions = inputs.planned_actions;
     let plan = inputs.plan;
     let manifest = inputs.manifest;
     let lens_flake = inputs.lens_flake;
@@ -206,10 +268,12 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<(Vec<PathBuf>, Option<
     let staging_root = inputs.staging_root;
     let args = inputs.args;
 
-    let actions = plan.planned_actions.as_slice();
     let wants_surface = actions
         .iter()
         .any(|action| matches!(action, enrich::PlannedAction::SurfaceDiscovery));
+    let wants_coverage_ledger = actions
+        .iter()
+        .any(|action| matches!(action, enrich::PlannedAction::CoverageLedger));
     let wants_scenarios = actions
         .iter()
         .any(|action| matches!(action, enrich::PlannedAction::ScenarioRuns));
@@ -219,10 +283,12 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<(Vec<PathBuf>, Option<
     let requirements = enrich::normalized_requirements(&ctx.config);
     let emit_coverage_ledger = requirements
         .iter()
-        .any(|req| matches!(req, enrich::RequirementId::CoverageLedger));
+        .any(|req| matches!(req, enrich::RequirementId::CoverageLedger))
+        && (wants_coverage_ledger || wants_scenarios || wants_surface);
     let emit_verification_ledger = requirements
         .iter()
-        .any(|req| matches!(req, enrich::RequirementId::Verification));
+        .any(|req| matches!(req, enrich::RequirementId::Verification))
+        && (wants_scenarios || wants_surface);
 
     let pack_root = ctx.paths.pack_root();
     let pack_root_exists = pack_root.is_dir();
@@ -277,20 +343,22 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<(Vec<PathBuf>, Option<
         let mut auto_run_limit = None;
         let mut auto_progress = None;
         let plan = scenarios::load_plan(&scenarios_path, ctx.paths.root())?;
-        if verification_tier != "behavior" {
-            if let Some(batch) =
-                auto_verification_scenarios(&plan, ctx.paths.root(), staging_root, args.verbose)?
-            {
-                auto_run_limit = Some(batch.max_new_runs_per_apply);
-                auto_progress = Some(auto_verification_progress(
-                    inputs.plan,
-                    &plan,
-                    &ctx.config,
-                    &batch,
-                    ctx.paths.root(),
-                ));
-                extra_scenarios = batch.scenarios;
-            }
+        if let Some(batch) = auto_verification_scenarios(
+            &plan,
+            ctx.paths.root(),
+            staging_root,
+            args.verbose,
+            verification_tier,
+        )? {
+            auto_run_limit = Some(batch.max_new_runs_per_apply);
+            auto_progress = Some(auto_verification_progress(
+                inputs.plan,
+                &plan,
+                &ctx.config,
+                &batch,
+                ctx.paths.root(),
+            ));
+            extra_scenarios.extend(batch.scenarios);
         }
         examples_report = Some(scenarios::run_scenarios(&scenarios::RunScenariosArgs {
             pack_root: &pack_root,
@@ -328,6 +396,7 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<(Vec<PathBuf>, Option<
             &pack_root,
             ctx.paths.root(),
             &pack_root,
+            &ctx.config.usage_lens_template,
             scenarios_glob,
         )?)
     } else {
@@ -395,7 +464,7 @@ fn auto_verification_progress(
         return plan_summary_progress(summary, batch.targets.max_new_runs_per_apply);
     }
 
-    let ledger_entries = load_verification_entries(doc_pack_root);
+    let ledger_entries = scenarios::load_verification_entries(doc_pack_root);
     let verification_tier = config.verification_tier.as_deref().unwrap_or("accepted");
     if let Some(summary) = crate::status::auto_verification_plan_summary(
         scenario_plan,
@@ -441,19 +510,6 @@ fn plan_summary_progress(
     }
 }
 
-fn load_verification_entries(
-    doc_pack_root: &Path,
-) -> Option<std::collections::BTreeMap<String, scenarios::VerificationEntry>> {
-    let path = doc_pack_root.join("verification_ledger.json");
-    let bytes = std::fs::read(path).ok()?;
-    let ledger: scenarios::VerificationLedger = serde_json::from_slice(&bytes).ok()?;
-    let mut entries = std::collections::BTreeMap::new();
-    for entry in ledger.entries {
-        entries.insert(entry.surface_id.clone(), entry);
-    }
-    Some(entries)
-}
-
 struct AutoVerificationBatch {
     scenarios: Vec<scenarios::ScenarioSpec>,
     max_new_runs_per_apply: usize,
@@ -466,12 +522,17 @@ fn auto_verification_scenarios(
     doc_pack_root: &Path,
     staging_root: &Path,
     verbose: bool,
+    verification_tier: &str,
 ) -> Result<Option<AutoVerificationBatch>> {
     let surface = match load_surface_for_auto(doc_pack_root, staging_root, verbose)? {
         Some(surface) => surface,
         None => return Ok(None),
     };
-    let Some(targets) = scenarios::auto_verification_targets(plan, &surface) else {
+    let Some(targets) = (if verification_tier == "behavior" {
+        scenarios::auto_verification_targets_for_behavior(plan, &surface)
+    } else {
+        scenarios::auto_verification_targets(plan, &surface)
+    }) else {
         return Ok(None);
     };
     let semantics = match semantics::load_semantics(doc_pack_root) {
@@ -514,5 +575,89 @@ fn load_surface_for_auto(
             }
             Ok(None)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    fn apply_args(refresh_pack: bool) -> ApplyArgs {
+        ApplyArgs {
+            doc_pack: std::path::PathBuf::from("/tmp/doc-pack"),
+            refresh_pack,
+            verbose: false,
+            rerun_all: false,
+            rerun_failed: false,
+            lens_flake: "unused".to_string(),
+        }
+    }
+
+    #[test]
+    fn refresh_pack_runs_before_validate_and_plan_derivation() {
+        let args = apply_args(true);
+        let lock_status = enrich::LockStatus {
+            present: true,
+            stale: false,
+            inputs_hash: Some("stale".to_string()),
+        };
+        let plan_state = enrich::PlanStatus {
+            present: true,
+            stale: false,
+            inputs_hash: Some("stale".to_string()),
+            lock_inputs_hash: Some("stale".to_string()),
+        };
+        let call_order = Rc::new(RefCell::new(Vec::new()));
+        let input_state = Rc::new(RefCell::new("pre_refresh".to_string()));
+        let plan_input_state = Rc::new(RefCell::new(None::<String>));
+
+        let preflight = run_apply_preflight(
+            &args,
+            &lock_status,
+            &plan_state,
+            {
+                let call_order = Rc::clone(&call_order);
+                let input_state = Rc::clone(&input_state);
+                move || {
+                    call_order.borrow_mut().push("refresh");
+                    *input_state.borrow_mut() = "post_refresh".to_string();
+                    Ok(())
+                }
+            },
+            {
+                let call_order = Rc::clone(&call_order);
+                let input_state = Rc::clone(&input_state);
+                move || {
+                    call_order.borrow_mut().push("validate");
+                    assert_eq!(input_state.borrow().as_str(), "post_refresh");
+                    Ok(())
+                }
+            },
+            {
+                let call_order = Rc::clone(&call_order);
+                let input_state = Rc::clone(&input_state);
+                let plan_input_state = Rc::clone(&plan_input_state);
+                move || {
+                    call_order.borrow_mut().push("plan");
+                    *plan_input_state.borrow_mut() = Some(input_state.borrow().clone());
+                    Ok(())
+                }
+            },
+        )
+        .expect("preflight should succeed");
+
+        assert!(preflight.ran_validate);
+        assert!(preflight.ran_plan);
+        assert_eq!(
+            call_order.borrow().as_slice(),
+            &["refresh", "validate", "plan"]
+        );
+        assert_eq!(
+            plan_input_state.borrow().as_deref(),
+            Some("post_refresh"),
+            "plan derivation must run against refreshed inputs"
+        );
     }
 }

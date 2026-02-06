@@ -8,7 +8,6 @@ use crate::enrich;
 use crate::scenarios;
 use crate::status::{build_status_summary, plan_status};
 use anyhow::{anyhow, Context, Result};
-use std::fs;
 use std::path::PathBuf;
 
 /// Status summary plus lock hash metadata for history recording.
@@ -138,10 +137,13 @@ pub fn status_summary_for_doc_pack(
 pub fn run_status(args: &StatusArgs) -> Result<()> {
     let doc_pack_root = doc_pack_root_for_status(&args.doc_pack)?;
     let computation = status_summary_for_doc_pack(doc_pack_root.clone(), args.full, args.force)?;
-    let summary = computation.summary;
+    let mut summary = computation.summary;
     let paths = enrich::DocPackPaths::new(doc_pack_root);
 
     if args.json {
+        if !args.full {
+            slim_status_for_actionability(&mut summary);
+        }
         let text = serde_json::to_string_pretty(&summary).context("serialize status summary")?;
         println!("{text}");
     } else {
@@ -166,13 +168,81 @@ pub fn run_status(args: &StatusArgs) -> Result<()> {
 
     if !args.json && (!summary.lock.present || summary.lock.stale) && !args.force {
         return Err(anyhow!(
-            "missing or stale lock at {} (run `bman validate --doc-pack {}` or pass --force)",
+            "missing or stale lock at {} (run `bman apply --doc-pack {}` or pass --force)",
             paths.lock_path().display(),
             paths.root().display()
         ));
     }
 
     Ok(())
+}
+
+fn slim_status_for_actionability(summary: &mut enrich::StatusSummary) {
+    for requirement in &mut summary.requirements {
+        requirement.evidence.clear();
+        for blocker in &mut requirement.blockers {
+            blocker.evidence.clear();
+        }
+        if let Some(verification) = requirement.verification.as_mut() {
+            verification.remaining_by_kind.clear();
+            verification.excluded.clear();
+            verification.behavior_excluded_reasons.clear();
+            verification.behavior_unverified_diagnostics.clear();
+            verification.stub_blockers_preview.clear();
+            if verification.triaged_unverified_preview.len() > 5 {
+                verification.triaged_unverified_preview.truncate(5);
+            }
+            if verification.behavior_unverified_preview.len() > 5 {
+                verification.behavior_unverified_preview.truncate(5);
+            }
+        }
+    }
+    for blocker in &mut summary.blockers {
+        blocker.evidence.clear();
+    }
+    for failure in &mut summary.scenario_failures {
+        failure.evidence.clear();
+    }
+    for lens in &mut summary.lens_summary {
+        lens.evidence.clear();
+    }
+    match &mut summary.next_action {
+        enrich::NextAction::Command { payload, .. } => slim_behavior_next_action_payload(payload),
+        enrich::NextAction::Edit { payload, .. } => slim_behavior_next_action_payload(payload),
+    }
+}
+
+fn slim_behavior_next_action_payload(payload: &mut Option<enrich::BehaviorNextActionPayload>) {
+    let Some(value) = payload.as_mut() else {
+        return;
+    };
+    if value.target_ids.len() > 5 {
+        value.target_ids.truncate(5);
+    }
+    if value.suggested_overlay_keys.len() > 3 {
+        value.suggested_overlay_keys.truncate(3);
+    }
+    if value.assertion_starters.len() > 2 {
+        value.assertion_starters.truncate(2);
+    }
+    if let Some(suggested) = value.suggested_exclusion_payload.as_mut() {
+        if suggested
+            .behavior_exclusion
+            .evidence
+            .attempted_workarounds
+            .len()
+            > 1
+        {
+            suggested
+                .behavior_exclusion
+                .evidence
+                .attempted_workarounds
+                .truncate(1);
+        }
+    }
+    if value.is_empty() {
+        *payload = None;
+    }
 }
 
 enum ConfigState {
@@ -212,26 +282,8 @@ fn load_scenario_plan_state(paths: &enrich::DocPackPaths) -> ScenarioPlanState {
     if !plan_path.is_file() {
         return ScenarioPlanState::Missing;
     }
-    let bytes = match fs::read(&plan_path) {
-        Ok(bytes) => bytes,
-        Err(err) => {
-            return ScenarioPlanState::Invalid {
-                code: "scenario_plan_read_error",
-                message: err.to_string(),
-            }
-        }
-    };
-    let plan: scenarios::ScenarioPlan = match serde_json::from_slice(&bytes) {
-        Ok(plan) => plan,
-        Err(err) => {
-            return ScenarioPlanState::Invalid {
-                code: "scenario_plan_parse_error",
-                message: err.to_string(),
-            }
-        }
-    };
-    match scenarios::validate_plan(&plan, paths.root()) {
-        Ok(()) => ScenarioPlanState::Valid,
+    match scenarios::load_plan(&plan_path, paths.root()) {
+        Ok(_) => ScenarioPlanState::Valid,
         Err(err) => ScenarioPlanState::Invalid {
             code: "scenario_plan_invalid",
             message: error_chain_message(&err),
@@ -280,6 +332,8 @@ fn build_invalid_config_summary(
             path: "enrich/config.json".to_string(),
             content: stub,
             reason: "enrich/config.json invalid; replace with a minimal stub".to_string(),
+            edit_strategy: enrich::default_edit_strategy(),
+            payload: None,
         },
         warnings: Vec::new(),
         man_warnings: Vec::new(),
@@ -321,6 +375,8 @@ fn build_invalid_plan_summary(
             path: "scenarios/plan.json".to_string(),
             content: stub,
             reason: "scenarios/plan.json invalid; replace with a minimal stub".to_string(),
+            edit_strategy: enrich::default_edit_strategy(),
+            payload: None,
         },
         warnings: Vec::new(),
         man_warnings: Vec::new(),
@@ -376,21 +432,20 @@ fn build_parse_error_summary(args: ParseErrorSummaryArgs<'_>) -> Result<enrich::
 
     let mut next_action = match config_state {
         ConfigState::Missing => {
-            let bootstrap_ok = enrich::load_bootstrap_optional(paths.root())
-                .ok()
-                .flatten()
-                .is_some();
-            if paths.pack_manifest_path().is_file() || bootstrap_ok {
+            if paths.pack_manifest_path().is_file() {
                 Some(enrich::NextAction::Command {
                     command: format!("bman init --doc-pack {}", paths.root().display()),
                     reason: "enrich/config.json missing".to_string(),
+                    payload: None,
                 })
             } else {
-                Some(enrich::NextAction::Edit {
-                    path: "enrich/bootstrap.json".to_string(),
-                    content: enrich::bootstrap_stub(),
-                    reason: "pack missing; init requires binary; set enrich/bootstrap.json"
-                        .to_string(),
+                Some(enrich::NextAction::Command {
+                    command: format!(
+                        "bman init --doc-pack {} --binary <binary>",
+                        paths.root().display()
+                    ),
+                    reason: "pack missing; init requires explicit --binary".to_string(),
+                    payload: None,
                 })
             }
         }
@@ -403,35 +458,33 @@ fn build_parse_error_summary(args: ParseErrorSummaryArgs<'_>) -> Result<enrich::
             path: "enrich/config.json".to_string(),
             content: enrich::config_stub(),
             reason: "enrich/config.json invalid; replace with a minimal stub".to_string(),
+            edit_strategy: enrich::default_edit_strategy(),
+            payload: None,
         }),
     };
 
     if next_action.is_none() {
         if lock_parse_error_present {
             next_action = Some(enrich::NextAction::Command {
-                command: format!("bman validate --doc-pack {}", paths.root().display()),
-                reason: "lock parse error; regenerate via validate".to_string(),
+                command: format!("bman apply --doc-pack {}", paths.root().display()),
+                reason: "lock parse error; apply will refresh".to_string(),
+                payload: None,
             });
         } else if plan_parse_error_present {
-            let (command, reason) = if lock_status.present && !lock_status.stale {
-                (
-                    format!("bman plan --doc-pack {}", paths.root().display()),
-                    "plan parse error; regenerate via plan".to_string(),
-                )
-            } else {
-                (
-                    format!("bman validate --doc-pack {}", paths.root().display()),
-                    "plan parse error; lock missing or stale".to_string(),
-                )
-            };
-            next_action = Some(enrich::NextAction::Command { command, reason });
+            next_action = Some(enrich::NextAction::Command {
+                command: format!("bman apply --doc-pack {}", paths.root().display()),
+                reason: "plan parse error; apply will refresh".to_string(),
+                payload: None,
+            });
         }
     }
 
-    let next_action = next_action.unwrap_or_else(|| enrich::NextAction::Command {
+    let mut next_action = next_action.unwrap_or_else(|| enrich::NextAction::Command {
         command: format!("bman status --doc-pack {}", paths.root().display()),
         reason: "status blocked; recheck when needed".to_string(),
+        payload: None,
     });
+    enrich::normalize_next_action(&mut next_action);
     let codes: Vec<String> = blockers
         .iter()
         .map(|blocker| blocker.code.clone())
@@ -455,4 +508,91 @@ fn build_parse_error_summary(args: ParseErrorSummaryArgs<'_>) -> Result<enrich::
         man_warnings: Vec::new(),
         force_used,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::slim_status_for_actionability;
+    use crate::enrich;
+
+    #[test]
+    fn slim_status_drops_rich_behavior_diagnostics() {
+        let mut summary = enrich::StatusSummary {
+            schema_version: 1,
+            generated_at_epoch_ms: 0,
+            binary_name: Some("bin".to_string()),
+            lock: enrich::LockStatus {
+                present: true,
+                stale: false,
+                inputs_hash: None,
+            },
+            plan: enrich::PlanStatus {
+                present: true,
+                stale: false,
+                inputs_hash: None,
+                lock_inputs_hash: None,
+            },
+            requirements: vec![enrich::RequirementStatus {
+                id: enrich::RequirementId::Verification,
+                status: enrich::RequirementState::Unmet,
+                reason: "verification behavior incomplete".to_string(),
+                verification_tier: Some("behavior".to_string()),
+                accepted_verified_count: Some(0),
+                unverified_ids: Vec::new(),
+                accepted_unverified_count: Some(1),
+                behavior_verified_count: Some(0),
+                behavior_unverified_count: Some(1),
+                verification: Some(enrich::VerificationTriageSummary {
+                    triaged_unverified_count: 1,
+                    triaged_unverified_preview: vec!["--color".to_string()],
+                    remaining_by_kind: Vec::new(),
+                    excluded: Vec::new(),
+                    excluded_count: None,
+                    behavior_excluded_count: 0,
+                    behavior_excluded_preview: Vec::new(),
+                    behavior_excluded_reasons: Vec::new(),
+                    behavior_unverified_reasons: Vec::new(),
+                    behavior_unverified_preview: vec![enrich::BehaviorUnverifiedPreview {
+                        surface_id: "--color".to_string(),
+                        reason_code: "assertion_failed".to_string(),
+                    }],
+                    behavior_unverified_diagnostics: vec![enrich::BehaviorUnverifiedDiagnostic {
+                        surface_id: "--color".to_string(),
+                        reason_code: "assertion_failed".to_string(),
+                        fix_hint: "fix assertion failure".to_string(),
+                        scenario_id: Some("verify_color".to_string()),
+                        assertion_kind: Some("variant_stdout_has_line".to_string()),
+                        assertion_seed_path: Some("work/file.txt".to_string()),
+                        assertion_token: Some("file.txt".to_string()),
+                    }],
+                    stub_blockers_preview: Vec::new(),
+                }),
+                evidence: Vec::new(),
+                blockers: Vec::new(),
+            }],
+            missing_artifacts: Vec::new(),
+            blockers: Vec::new(),
+            scenario_failures: Vec::new(),
+            lens_summary: Vec::new(),
+            decision: enrich::Decision::Incomplete,
+            decision_reason: None,
+            next_action: enrich::NextAction::Command {
+                command: "bman apply --doc-pack .".to_string(),
+                reason: "verification pending".to_string(),
+                payload: None,
+            },
+            warnings: Vec::new(),
+            man_warnings: Vec::new(),
+            force_used: false,
+        };
+
+        slim_status_for_actionability(&mut summary);
+
+        let verification = summary.requirements[0]
+            .verification
+            .as_ref()
+            .expect("verification summary");
+        assert!(verification.behavior_unverified_diagnostics.is_empty());
+        assert_eq!(verification.behavior_unverified_preview.len(), 1);
+    }
 }

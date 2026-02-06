@@ -1,5 +1,5 @@
 {
-  "schema_version": 8,
+  "schema_version": 11,
   "binary": null,
   "default_env": {
     "LC_ALL": "C",
@@ -26,7 +26,7 @@
       "kinds": [
         "option"
       ],
-      "max_new_runs_per_apply": 10
+      "max_new_runs_per_apply": 50
     }
   },
   "scenarios": [

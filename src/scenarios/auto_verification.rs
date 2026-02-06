@@ -51,6 +51,26 @@ pub fn auto_verification_targets(
     })
 }
 
+/// Collect ids eligible for auto-verification in behavior tier (options only).
+pub fn auto_verification_targets_for_behavior(
+    plan: &ScenarioPlan,
+    surface: &SurfaceInventory,
+) -> Option<AutoVerificationTargets> {
+    let policy = plan.verification.policy.as_ref()?;
+    let ids = collect_surface_ids(surface, &VerificationTargetKind::Option);
+    let filtered_ids: Vec<String> = ids.into_iter().collect();
+    let target_ids = filtered_ids.clone();
+    let targets = vec![(VerificationTargetKind::Option, filtered_ids)];
+
+    Some(AutoVerificationTargets {
+        max_new_runs_per_apply: policy.max_new_runs_per_apply,
+        target_ids,
+        targets,
+        excluded: Vec::new(),
+        excluded_ids: BTreeSet::new(),
+    })
+}
+
 /// Build synthetic scenarios for existence verification.
 pub fn auto_verification_scenarios(
     targets: &AutoVerificationTargets,
@@ -132,4 +152,118 @@ fn existence_argv(
     argv.push(surface_id.to_string());
     argv.extend(suffix.iter().cloned());
     argv
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scenarios::{VerificationPlan, VerificationPolicy};
+
+    fn surface_with_option_and_subcommand() -> SurfaceInventory {
+        SurfaceInventory {
+            schema_version: 2,
+            generated_at_epoch_ms: 0,
+            binary_name: Some("bin".to_string()),
+            inputs_hash: None,
+            discovery: Vec::new(),
+            items: vec![
+                crate::surface::SurfaceItem {
+                    kind: "option".to_string(),
+                    id: "--color".to_string(),
+                    display: "--color".to_string(),
+                    description: None,
+                    forms: vec!["--color[=WHEN]".to_string()],
+                    invocation: crate::surface::SurfaceInvocation::default(),
+                    evidence: Vec::new(),
+                },
+                crate::surface::SurfaceItem {
+                    kind: "subcommand".to_string(),
+                    id: "show".to_string(),
+                    display: "show".to_string(),
+                    description: None,
+                    forms: vec!["show".to_string()],
+                    invocation: crate::surface::SurfaceInvocation::default(),
+                    evidence: Vec::new(),
+                },
+            ],
+            blockers: Vec::new(),
+        }
+    }
+
+    fn plan_with_policy() -> ScenarioPlan {
+        ScenarioPlan {
+            schema_version: crate::scenarios::SCENARIO_PLAN_SCHEMA_VERSION,
+            binary: Some("bin".to_string()),
+            default_env: BTreeMap::new(),
+            defaults: None,
+            coverage: None,
+            verification: VerificationPlan {
+                queue: Vec::new(),
+                policy: Some(VerificationPolicy {
+                    kinds: vec![
+                        VerificationTargetKind::Option,
+                        VerificationTargetKind::Subcommand,
+                    ],
+                    max_new_runs_per_apply: 3,
+                }),
+            },
+            scenarios: Vec::new(),
+        }
+    }
+
+    fn scenario_argv_for_id(scenarios: &[ScenarioSpec], id: &str) -> Vec<String> {
+        scenarios
+            .iter()
+            .find(|scenario| scenario.id == id)
+            .map(|scenario| scenario.argv.clone())
+            .unwrap()
+    }
+
+    #[test]
+    fn auto_verification_argv_is_semantics_driven() {
+        let plan = plan_with_policy();
+        let surface = surface_with_option_and_subcommand();
+        let targets = auto_verification_targets(&plan, &surface).unwrap();
+
+        let mut semantics_a: Semantics =
+            serde_json::from_str(crate::templates::ENRICH_SEMANTICS_JSON).unwrap();
+        semantics_a.verification.option_existence_argv_prefix = vec!["probe".to_string()];
+        semantics_a.verification.option_existence_argv_suffix = vec!["--usage".to_string()];
+        semantics_a.verification.subcommand_existence_argv_prefix = vec!["help".to_string()];
+        semantics_a.verification.subcommand_existence_argv_suffix = vec!["--json".to_string()];
+
+        let mut semantics_b = semantics_a.clone();
+        semantics_b.verification.option_existence_argv_prefix = vec!["inspect".to_string()];
+        semantics_b.verification.option_existence_argv_suffix = vec!["--help".to_string()];
+        semantics_b.verification.subcommand_existence_argv_prefix = Vec::new();
+        semantics_b.verification.subcommand_existence_argv_suffix = vec!["--help".to_string()];
+
+        let scenarios_a = auto_verification_scenarios(&targets, &semantics_a);
+        let scenarios_b = auto_verification_scenarios(&targets, &semantics_b);
+
+        assert_eq!(
+            scenario_argv_for_id(&scenarios_a, "auto_verify::option::--color"),
+            vec![
+                "probe".to_string(),
+                "--color".to_string(),
+                "--usage".to_string()
+            ]
+        );
+        assert_eq!(
+            scenario_argv_for_id(&scenarios_b, "auto_verify::option::--color"),
+            vec![
+                "inspect".to_string(),
+                "--color".to_string(),
+                "--help".to_string()
+            ]
+        );
+        assert_eq!(
+            scenario_argv_for_id(&scenarios_a, "auto_verify::subcommand::show"),
+            vec!["help".to_string(), "show".to_string(), "--json".to_string()]
+        );
+        assert_eq!(
+            scenario_argv_for_id(&scenarios_b, "auto_verify::subcommand::show"),
+            vec!["show".to_string(), "--help".to_string()]
+        );
+    }
 }

@@ -14,7 +14,7 @@ use crate::surface;
 use crate::util::display_path;
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -31,10 +31,11 @@ pub fn build_verification_ledger(
 ) -> Result<VerificationLedger> {
     let template_sql = fs::read_to_string(template_path)
         .with_context(|| format!("read {}", template_path.display()))?;
-    let plan = load_plan(scenarios_path, doc_pack_root)?;
+    let _plan = load_plan(scenarios_path, doc_pack_root)?;
     let (query_root, rows) = run_verification_query(doc_pack_root, staging_root, &template_sql)?;
-
-    let (excluded, excluded_ids) = plan.collect_queue_exclusions();
+    let behavior_exclusions = load_behavior_exclusions(doc_pack_root)?;
+    let excluded_map = behavior_exclusion_map(surface, &rows, &behavior_exclusions)?;
+    let excluded = excluded_entries_from_map(&excluded_map);
 
     let mut surface_evidence_map: BTreeMap<String, Vec<enrich::EvidenceRef>> = BTreeMap::new();
     for item in surface
@@ -68,18 +69,36 @@ pub fn build_verification_ledger(
             continue;
         };
         let status = row.status.clone().unwrap_or_else(|| "unknown".to_string());
-        let behavior_status = row
-            .behavior_status
-            .clone()
-            .unwrap_or_else(|| "unknown".to_string());
+        let excluded_entry = excluded_map.get(&surface_id);
+        let (
+            behavior_status,
+            behavior_unverified_reason_code,
+            behavior_unverified_scenario_id,
+            behavior_unverified_assertion_kind,
+            behavior_unverified_assertion_seed_path,
+            behavior_unverified_assertion_token,
+        ) = if excluded_entry.is_some() {
+            ("excluded".to_string(), None, None, None, None, None)
+        } else {
+            (
+                row.behavior_status
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_string()),
+                row.behavior_unverified_reason_code.clone(),
+                row.behavior_unverified_scenario_id.clone(),
+                row.behavior_unverified_assertion_kind.clone(),
+                row.behavior_unverified_assertion_seed_path.clone(),
+                row.behavior_unverified_assertion_token.clone(),
+            )
+        };
         if status == "verified" {
             verified_count += 1;
-        } else if !excluded_ids.contains(&surface_id) {
+        } else {
             unverified_ids.push(surface_id.clone());
         }
         if behavior_status == "verified" {
             behavior_verified_count += 1;
-        } else if !excluded_ids.contains(&surface_id) {
+        } else if behavior_status != "excluded" {
             behavior_unverified_ids.push(surface_id.clone());
         }
 
@@ -105,12 +124,20 @@ pub fn build_verification_ledger(
             surface_id,
             status,
             behavior_status,
-            behavior_unverified_reason_code: row.behavior_unverified_reason_code,
+            behavior_exclusion_reason_code: excluded_entry
+                .map(|entry| entry.exclusion.reason_code.as_str().to_string()),
+            behavior_unverified_reason_code,
+            behavior_unverified_scenario_id,
+            behavior_unverified_assertion_kind,
+            behavior_unverified_assertion_seed_path,
+            behavior_unverified_assertion_token,
             scenario_ids: row.scenario_ids,
             scenario_paths: row.scenario_paths,
             behavior_scenario_ids: row.behavior_scenario_ids,
             behavior_assertion_scenario_ids: row.behavior_assertion_scenario_ids,
             behavior_scenario_paths: row.behavior_scenario_paths,
+            delta_outcome: row.delta_outcome,
+            delta_evidence_paths: row.delta_evidence_paths,
             evidence,
         });
     }
@@ -127,7 +154,7 @@ pub fn build_verification_ledger(
         .as_millis();
 
     Ok(VerificationLedger {
-        schema_version: 6,
+        schema_version: 9,
         generated_at_epoch_ms,
         binary_name: binary_name.to_string(),
         scenarios_path: display_path(scenarios_path, display_root),
@@ -147,6 +174,70 @@ pub fn build_verification_ledger(
         entries,
         warnings,
     })
+}
+
+fn load_behavior_exclusions(
+    doc_pack_root: &Path,
+) -> Result<Vec<surface::SurfaceBehaviorExclusion>> {
+    let overlays_path = doc_pack_root
+        .join("inventory")
+        .join("surface.overlays.json");
+    Ok(surface::load_surface_overlays_if_exists(&overlays_path)?
+        .map(|overlays| surface::collect_behavior_exclusions(&overlays))
+        .unwrap_or_default())
+}
+
+fn behavior_exclusion_map(
+    surface: &surface::SurfaceInventory,
+    rows: &[VerificationRow],
+    exclusions: &[surface::SurfaceBehaviorExclusion],
+) -> Result<BTreeMap<String, surface::SurfaceBehaviorExclusion>> {
+    let option_ids: BTreeSet<String> = surface
+        .items
+        .iter()
+        .filter(|item| item.kind == "option")
+        .map(|item| item.id.trim())
+        .filter(|id| !id.is_empty())
+        .map(|id| id.to_string())
+        .collect();
+    let mut row_by_surface_id = BTreeMap::new();
+    for row in rows {
+        let Some(surface_id) = row.surface_id.as_ref() else {
+            continue;
+        };
+        row_by_surface_id.insert(
+            surface_id.clone(),
+            surface::BehaviorExclusionLedgerEntry {
+                delta_outcome: row.delta_outcome.clone(),
+                delta_evidence_paths: row.delta_evidence_paths.clone(),
+            },
+        );
+    }
+    surface::validate_behavior_exclusions(
+        exclusions,
+        &option_ids,
+        &row_by_surface_id,
+        "missing from verification rows",
+        "requires delta_outcome evidence",
+    )
+}
+
+fn excluded_entries_from_map(
+    excluded_map: &BTreeMap<String, surface::SurfaceBehaviorExclusion>,
+) -> Vec<crate::scenarios::VerificationExcludedEntry> {
+    excluded_map
+        .values()
+        .map(|entry| {
+            let reason_code = entry.exclusion.reason_code.as_str().to_string();
+            crate::scenarios::VerificationExcludedEntry {
+                surface_id: entry.surface_id.clone(),
+                reason_code: Some(reason_code.clone()),
+                note: entry.exclusion.note.clone(),
+                prereqs: Vec::new(),
+                reason: Some(reason_code),
+            }
+        })
+        .collect()
 }
 
 fn run_verification_query(
@@ -269,11 +360,10 @@ fn prepare_verification_root(
     Ok(VerificationQueryRoot { root, cleanup })
 }
 
-fn copy_scenario_evidence(src_root: &Path, dest_root: &Path) -> Result<usize> {
+fn copy_scenario_evidence(src_root: &Path, dest_root: &Path) -> Result<()> {
     if !src_root.is_dir() {
-        return Ok(0);
+        return Ok(());
     }
-    let mut copied = 0usize;
     for file in collect_files_recursive(src_root)? {
         if file.extension().and_then(|ext| ext.to_str()) != Some("json") {
             continue;
@@ -287,9 +377,8 @@ fn copy_scenario_evidence(src_root: &Path, dest_root: &Path) -> Result<usize> {
         }
         fs::copy(&file, &dest)
             .with_context(|| format!("copy {} to {}", file.display(), dest.display()))?;
-        copied += 1;
     }
-    Ok(copied)
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -303,6 +392,14 @@ struct VerificationRow {
     #[serde(default)]
     behavior_unverified_reason_code: Option<String>,
     #[serde(default)]
+    behavior_unverified_scenario_id: Option<String>,
+    #[serde(default)]
+    behavior_unverified_assertion_kind: Option<String>,
+    #[serde(default)]
+    behavior_unverified_assertion_seed_path: Option<String>,
+    #[serde(default)]
+    behavior_unverified_assertion_token: Option<String>,
+    #[serde(default)]
     scenario_ids: Vec<String>,
     #[serde(default)]
     scenario_paths: Vec<String>,
@@ -312,6 +409,10 @@ struct VerificationRow {
     behavior_assertion_scenario_ids: Vec<String>,
     #[serde(default)]
     behavior_scenario_paths: Vec<String>,
+    #[serde(default)]
+    delta_outcome: Option<String>,
+    #[serde(default)]
+    delta_evidence_paths: Vec<String>,
 }
 
 struct VerificationQueryRoot {
@@ -324,5 +425,247 @@ impl Drop for VerificationQueryRoot {
         if self.cleanup {
             let _ = fs::remove_dir_all(&self.root);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_doc_pack_root(name: &str) -> std::path::PathBuf {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock before epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("{name}-{}-{now}", std::process::id()));
+        std::fs::create_dir_all(root.join("inventory")).expect("create inventory dir");
+        root
+    }
+
+    fn write_minimal_pack_inputs(root: &std::path::Path, surface: &surface::SurfaceInventory) {
+        std::fs::create_dir_all(root.join("scenarios")).expect("create scenarios dir");
+        std::fs::create_dir_all(root.join("enrich")).expect("create enrich dir");
+        std::fs::create_dir_all(root.join("fixtures").join("empty"))
+            .expect("create default fixtures dir");
+        std::fs::write(
+            root.join("scenarios").join("plan.json"),
+            crate::scenarios::plan_stub(Some("bin")),
+        )
+        .expect("write plan");
+        std::fs::write(
+            root.join("enrich").join("semantics.json"),
+            crate::templates::ENRICH_SEMANTICS_JSON,
+        )
+        .expect("write semantics");
+        std::fs::write(
+            root.join("inventory").join("surface.json"),
+            serde_json::to_vec_pretty(surface).expect("serialize surface"),
+        )
+        .expect("write surface");
+    }
+
+    fn write_verification_query(
+        path: &std::path::Path,
+        behavior_status: &str,
+        reason_code: Option<&str>,
+        scenario_id: Option<&str>,
+        assertion_kind: Option<&str>,
+    ) {
+        let reason_sql = reason_code
+            .map(|value| format!("'{value}'"))
+            .unwrap_or_else(|| "null".to_string());
+        let scenario_sql = scenario_id
+            .map(|value| format!("'{value}'"))
+            .unwrap_or_else(|| "null".to_string());
+        let assertion_kind_sql = assertion_kind
+            .map(|value| format!("'{value}'"))
+            .unwrap_or_else(|| "null".to_string());
+        let sql = format!(
+            "select
+  item.id as surface_id,
+  'recognized' as status,
+  '{behavior_status}' as behavior_status,
+  {reason_sql} as behavior_unverified_reason_code,
+  {scenario_sql} as behavior_unverified_scenario_id,
+  {assertion_kind_sql} as behavior_unverified_assertion_kind,
+  'work/file.txt' as behavior_unverified_assertion_seed_path,
+  'file.txt' as behavior_unverified_assertion_token,
+  to_json([]::VARCHAR[]) as scenario_ids,
+  to_json([]::VARCHAR[]) as scenario_paths,
+  to_json([]::VARCHAR[]) as behavior_scenario_ids,
+  to_json([]::VARCHAR[]) as behavior_assertion_scenario_ids,
+  to_json([]::VARCHAR[]) as behavior_scenario_paths,
+  null as delta_outcome,
+  to_json([]::VARCHAR[]) as delta_evidence_paths
+from read_json_auto('inventory/surface.json') as inv,
+  unnest(inv.items) as t(item)
+where item.kind = 'option';"
+        );
+        std::fs::write(path, sql).expect("write query");
+    }
+
+    #[test]
+    fn ledger_adapter_rejects_duplicate_behavior_exclusions() {
+        let root = temp_doc_pack_root("bman-ledger-dup");
+
+        let overlays = serde_json::json!({
+            "schema_version": 3,
+            "items": [],
+            "overlays": [
+                {
+                    "kind": "option",
+                    "id": "--color",
+                    "invocation": {},
+                    "behavior_exclusion": {
+                        "reason_code": "assertion_gap",
+                        "note": "first",
+                        "evidence": {
+                            "delta_variant_path": "inventory/scenarios/color-after-1.json"
+                        }
+                    }
+                },
+                {
+                    "kind": "option",
+                    "id": "--color",
+                    "invocation": {},
+                    "behavior_exclusion": {
+                        "reason_code": "assertion_gap",
+                        "note": "second",
+                        "evidence": {
+                            "delta_variant_path": "inventory/scenarios/color-after-2.json"
+                        }
+                    }
+                }
+            ]
+        });
+        std::fs::write(
+            root.join("inventory").join("surface.overlays.json"),
+            serde_json::to_vec_pretty(&overlays).expect("serialize overlays"),
+        )
+        .expect("write overlays");
+
+        let exclusions = load_behavior_exclusions(&root).expect("load exclusions");
+        let rows = vec![VerificationRow {
+            surface_id: Some("--color".to_string()),
+            status: Some("verified".to_string()),
+            behavior_status: Some("verified".to_string()),
+            behavior_unverified_reason_code: None,
+            behavior_unverified_scenario_id: None,
+            behavior_unverified_assertion_kind: None,
+            behavior_unverified_assertion_seed_path: None,
+            behavior_unverified_assertion_token: None,
+            scenario_ids: Vec::new(),
+            scenario_paths: Vec::new(),
+            behavior_scenario_ids: Vec::new(),
+            behavior_assertion_scenario_ids: Vec::new(),
+            behavior_scenario_paths: Vec::new(),
+            delta_outcome: Some("not_applicable".to_string()),
+            delta_evidence_paths: Vec::new(),
+        }];
+        let surface = surface::SurfaceInventory {
+            schema_version: 2,
+            generated_at_epoch_ms: 0,
+            binary_name: Some("ls".to_string()),
+            inputs_hash: None,
+            discovery: Vec::new(),
+            items: vec![surface::SurfaceItem {
+                kind: "option".to_string(),
+                id: "--color".to_string(),
+                display: "--color".to_string(),
+                description: None,
+                forms: Vec::new(),
+                invocation: surface::SurfaceInvocation::default(),
+                evidence: Vec::new(),
+            }],
+            blockers: Vec::new(),
+        };
+
+        let err = behavior_exclusion_map(&surface, &rows, &exclusions)
+            .expect_err("ledger adapter should reject duplicates");
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert!(err
+            .to_string()
+            .contains("duplicate behavior_exclusion entries for surface_id --color"));
+    }
+
+    #[test]
+    fn verification_ledger_changes_when_query_template_changes() {
+        let root = temp_doc_pack_root("bman-ledger-sql-edit");
+        let surface = surface::SurfaceInventory {
+            schema_version: 2,
+            generated_at_epoch_ms: 0,
+            binary_name: Some("bin".to_string()),
+            inputs_hash: None,
+            discovery: Vec::new(),
+            items: vec![surface::SurfaceItem {
+                kind: "option".to_string(),
+                id: "--color".to_string(),
+                display: "--color".to_string(),
+                description: None,
+                forms: vec!["--color[=WHEN]".to_string()],
+                invocation: surface::SurfaceInvocation::default(),
+                evidence: Vec::new(),
+            }],
+            blockers: Vec::new(),
+        };
+        write_minimal_pack_inputs(&root, &surface);
+        let query_a = root.join("query-a.sql");
+        let query_b = root.join("query-b.sql");
+        write_verification_query(&query_a, "verified", None, None, None);
+        write_verification_query(
+            &query_b,
+            "rejected",
+            Some("assertion_failed"),
+            Some("verify_color"),
+            Some("variant_stdout_has_line"),
+        );
+
+        let ledger_a = build_verification_ledger(
+            "bin",
+            &surface,
+            &root,
+            &root.join("scenarios").join("plan.json"),
+            &query_a,
+            None,
+            Some(&root),
+        )
+        .expect("build ledger from query-a");
+        let ledger_b = build_verification_ledger(
+            "bin",
+            &surface,
+            &root,
+            &root.join("scenarios").join("plan.json"),
+            &query_b,
+            None,
+            Some(&root),
+        )
+        .expect("build ledger from query-b");
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert_eq!(ledger_a.entries.len(), 1);
+        assert_eq!(ledger_b.entries.len(), 1);
+        assert_eq!(ledger_a.entries[0].behavior_status, "verified");
+        assert_eq!(ledger_a.entries[0].behavior_unverified_reason_code, None);
+        assert_eq!(ledger_b.entries[0].behavior_status, "rejected");
+        assert_eq!(
+            ledger_b.entries[0]
+                .behavior_unverified_reason_code
+                .as_deref(),
+            Some("assertion_failed")
+        );
+        assert_eq!(
+            ledger_b.entries[0]
+                .behavior_unverified_scenario_id
+                .as_deref(),
+            Some("verify_color")
+        );
+        assert_eq!(
+            ledger_b.entries[0]
+                .behavior_unverified_assertion_kind
+                .as_deref(),
+            Some("variant_stdout_has_line")
+        );
     }
 }

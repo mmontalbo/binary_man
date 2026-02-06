@@ -45,11 +45,11 @@ pub enum SeedEntryKind {
 pub struct ScenarioSeedEntry {
     pub path: String,
     pub kind: SeedEntryKind,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contents: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<u32>,
 }
 
@@ -122,6 +122,8 @@ impl ScenarioPlan {
                     .entry(surface_id.to_string())
                     .or_insert_with(|| VerificationExcludedEntry {
                         surface_id: surface_id.to_string(),
+                        reason_code: None,
+                        note: None,
                         prereqs: Vec::new(),
                         reason: None,
                     });
@@ -350,10 +352,46 @@ impl ScenarioExpect {
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
 pub enum BehaviorAssertion {
-    BaselineStdoutNotContainsSeedPath { path: String },
-    BaselineStdoutContainsSeedPath { path: String },
-    VariantStdoutContainsSeedPath { path: String },
-    VariantStdoutNotContainsSeedPath { path: String },
+    BaselineStdoutNotContainsSeedPath {
+        seed_path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stdout_token: Option<String>,
+    },
+    BaselineStdoutContainsSeedPath {
+        seed_path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stdout_token: Option<String>,
+    },
+    VariantStdoutContainsSeedPath {
+        seed_path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stdout_token: Option<String>,
+    },
+    VariantStdoutNotContainsSeedPath {
+        seed_path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stdout_token: Option<String>,
+    },
+    BaselineStdoutHasLine {
+        seed_path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stdout_token: Option<String>,
+    },
+    BaselineStdoutNotHasLine {
+        seed_path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stdout_token: Option<String>,
+    },
+    VariantStdoutHasLine {
+        seed_path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stdout_token: Option<String>,
+    },
+    VariantStdoutNotHasLine {
+        seed_path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stdout_token: Option<String>,
+    },
     VariantStdoutDiffersFromBaseline {},
 }
 
@@ -421,7 +459,17 @@ pub struct VerificationEntry {
     pub status: String,
     pub behavior_status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behavior_exclusion_reason_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub behavior_unverified_reason_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behavior_unverified_scenario_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behavior_unverified_assertion_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behavior_unverified_assertion_seed_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behavior_unverified_assertion_token: Option<String>,
     #[serde(default)]
     pub scenario_ids: Vec<String>,
     #[serde(default)]
@@ -432,6 +480,10 @@ pub struct VerificationEntry {
     pub behavior_assertion_scenario_ids: Vec<String>,
     #[serde(default)]
     pub behavior_scenario_paths: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delta_outcome: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub delta_evidence_paths: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<enrich::EvidenceRef>,
 }
@@ -469,6 +521,10 @@ mod tests {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct VerificationExcludedEntry {
     pub surface_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
     #[serde(default)]
     pub prereqs: Vec<VerificationPrereq>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

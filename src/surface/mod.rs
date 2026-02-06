@@ -2,8 +2,9 @@
 //!
 //! Surface items are derived from SQL lenses over scenario evidence to keep
 //! semantics pack-owned and deterministic.
+mod behavior_exclusion;
 mod lens;
-mod seed;
+mod overlays;
 mod types;
 
 use crate::enrich;
@@ -15,10 +16,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub use types::{SurfaceDiscovery, SurfaceInventory, SurfaceItem};
+pub(crate) use behavior_exclusion::{validate_behavior_exclusions, BehaviorExclusionLedgerEntry};
+pub(crate) use overlays::{
+    collect_behavior_exclusions, load_surface_overlays_if_exists, SurfaceBehaviorExclusion,
+};
+pub use types::{SurfaceDiscovery, SurfaceInventory, SurfaceInvocation, SurfaceItem};
 
 const SURFACE_SCHEMA_VERSION: u32 = 2;
-const SURFACE_SEED_SCHEMA_VERSION: u32 = 2;
+const SURFACE_OVERLAYS_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Default)]
 pub(super) struct SurfaceState {
@@ -83,7 +88,7 @@ pub fn apply_surface_discovery(
         &paths,
         &mut state,
     )?;
-    seed::apply_surface_seed(&paths, &mut state)?;
+    overlays::apply_surface_overlays(&paths, &mut state)?;
     lens::add_subcommand_missing_blocker(&mut state);
 
     let surface = SurfaceInventory {
@@ -280,6 +285,29 @@ pub fn meaningful_surface_items(surface: &SurfaceInventory) -> usize {
         .filter(|item| is_supported_surface_kind(item.kind.as_str()))
         .filter(|item| !item.id.trim().is_empty())
         .count()
+}
+
+/// Return the preferred surface item for a given id.
+///
+/// If multiple items share an id, option entries win because verification stubs
+/// and overlays are option-centric.
+pub(crate) fn primary_surface_item_by_id<'a>(
+    surface: &'a SurfaceInventory,
+    surface_id: &str,
+) -> Option<&'a SurfaceItem> {
+    let mut fallback = None;
+    for item in &surface.items {
+        if item.id.trim() != surface_id {
+            continue;
+        }
+        if item.kind == "option" {
+            return Some(item);
+        }
+        if fallback.is_none() {
+            fallback = Some(item);
+        }
+    }
+    fallback
 }
 
 fn has_scenario_files(root: &Path) -> Result<bool> {

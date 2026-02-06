@@ -8,7 +8,8 @@ use std::fs;
 use std::path::Path;
 
 use super::validate::{validate_scenario_defaults, validate_scenario_spec};
-use super::{ScenarioPlan, VerificationIntent, SCENARIO_PLAN_SCHEMA_VERSION};
+use super::SCENARIO_PLAN_SCHEMA_VERSION;
+use super::{BehaviorAssertion, ScenarioPlan, ScenarioSpec, VerificationIntent};
 
 /// Load and validate a scenario plan from disk.
 pub fn load_plan(path: &Path, doc_pack_root: &Path) -> Result<ScenarioPlan> {
@@ -61,6 +62,11 @@ pub fn validate_plan(plan: &ScenarioPlan, doc_pack_root: &Path) -> Result<()> {
             ));
         }
         if entry.intent == VerificationIntent::Exclude {
+            if entry.prereqs.is_empty() {
+                return Err(anyhow!(
+                    "verification.queue[{idx}] exclude intent requires prereqs"
+                ));
+            }
             let reason = entry.reason.as_deref().unwrap_or("");
             if reason.trim().is_empty() {
                 return Err(anyhow!(
@@ -94,7 +100,19 @@ pub fn validate_plan(plan: &ScenarioPlan, doc_pack_root: &Path) -> Result<()> {
     for scenario in &plan.scenarios {
         validate_scenario_spec(scenario)
             .with_context(|| format!("validate scenario {}", scenario.id))?;
-        scenario_ids.insert(scenario.id.clone());
+        if !scenario_ids.insert(scenario.id.clone()) {
+            return Err(anyhow!(
+                "duplicate scenario.id {} in scenarios/plan.json",
+                scenario.id
+            ));
+        }
+    }
+    let mut seed_paths_by_scenario: std::collections::BTreeMap<
+        String,
+        std::collections::BTreeSet<String>,
+    > = std::collections::BTreeMap::new();
+    for scenario in &plan.scenarios {
+        seed_paths_by_scenario.insert(scenario.id.clone(), effective_seed_paths(plan, scenario));
     }
     for scenario in &plan.scenarios {
         if scenario.kind != super::ScenarioKind::Behavior || scenario.assertions.is_empty() {
@@ -114,8 +132,73 @@ pub fn validate_plan(plan: &ScenarioPlan, doc_pack_root: &Path) -> Result<()> {
                 baseline_id
             ));
         }
+        let scenario_seed_paths = seed_paths_by_scenario
+            .get(&scenario.id)
+            .cloned()
+            .unwrap_or_default();
+        let baseline_seed_paths = seed_paths_by_scenario
+            .get(baseline_id)
+            .cloned()
+            .unwrap_or_default();
+        let mut invalid_paths = std::collections::BTreeSet::new();
+        for assertion in &scenario.assertions {
+            let Some(seed_path) = assertion_seed_path(assertion) else {
+                continue;
+            };
+            if !scenario_seed_paths.contains(seed_path) || !baseline_seed_paths.contains(seed_path)
+            {
+                invalid_paths.insert(seed_path.to_string());
+            }
+        }
+        if !invalid_paths.is_empty() {
+            let invalid_list = invalid_paths.into_iter().collect::<Vec<_>>().join(", ");
+            return Err(anyhow!(
+                "scenario {} baseline_scenario_id {} has assertion seed_path(s) not present in both baseline and variant seed entries: {}. seed_path must match a seeded entry path; use stdout_token for printed token",
+                scenario.id,
+                baseline_id,
+                invalid_list
+            ));
+        }
     }
     Ok(())
+}
+
+fn effective_seed_paths(
+    plan: &ScenarioPlan,
+    scenario: &ScenarioSpec,
+) -> std::collections::BTreeSet<String> {
+    let defaults = plan.defaults.as_ref();
+    let seed = if scenario.seed.is_some() {
+        scenario.seed.as_ref()
+    } else if scenario.seed_dir.is_some() {
+        None
+    } else {
+        defaults.and_then(|value| value.seed.as_ref())
+    };
+    let mut paths = std::collections::BTreeSet::new();
+    if let Some(seed) = seed {
+        for entry in &seed.entries {
+            if entry.path.trim().is_empty() {
+                continue;
+            }
+            paths.insert(entry.path.clone());
+        }
+    }
+    paths
+}
+
+fn assertion_seed_path(assertion: &BehaviorAssertion) -> Option<&str> {
+    match assertion {
+        BehaviorAssertion::BaselineStdoutNotContainsSeedPath { seed_path, .. }
+        | BehaviorAssertion::BaselineStdoutContainsSeedPath { seed_path, .. }
+        | BehaviorAssertion::VariantStdoutContainsSeedPath { seed_path, .. }
+        | BehaviorAssertion::VariantStdoutNotContainsSeedPath { seed_path, .. }
+        | BehaviorAssertion::BaselineStdoutHasLine { seed_path, .. }
+        | BehaviorAssertion::BaselineStdoutNotHasLine { seed_path, .. }
+        | BehaviorAssertion::VariantStdoutHasLine { seed_path, .. }
+        | BehaviorAssertion::VariantStdoutNotHasLine { seed_path, .. } => Some(seed_path.as_str()),
+        BehaviorAssertion::VariantStdoutDiffersFromBaseline {} => None,
+    }
 }
 
 /// Render a minimal scenario plan stub for edit suggestions.
@@ -142,7 +225,7 @@ mod tests {
             id: "baseline".to_string(),
             kind: ScenarioKind::Behavior,
             publish: false,
-            argv: vec![".".to_string()],
+            argv: vec!["work".to_string()],
             env: BTreeMap::new(),
             seed_dir: None,
             seed: None,
@@ -165,7 +248,7 @@ mod tests {
         }
     }
 
-    fn behavior_scenario(baseline_id: Option<&str>) -> ScenarioSpec {
+    fn behavior_scenario(baseline_id: Option<&str>, seed_path: &str) -> ScenarioSpec {
         ScenarioSpec {
             id: "verify".to_string(),
             kind: ScenarioKind::Behavior,
@@ -184,11 +267,27 @@ mod tests {
             coverage_tier: Some("behavior".to_string()),
             baseline_scenario_id: baseline_id.map(|value| value.to_string()),
             assertions: vec![BehaviorAssertion::VariantStdoutContainsSeedPath {
-                path: "seed.txt".to_string(),
+                seed_path: seed_path.to_string(),
+                stdout_token: None,
             }],
             covers: vec!["-a".to_string()],
             coverage_ignore: false,
             expect: ScenarioExpect::default(),
+        }
+    }
+
+    fn defaults_with_seed() -> crate::scenarios::ScenarioDefaults {
+        crate::scenarios::ScenarioDefaults {
+            seed: Some(crate::scenarios::ScenarioSeedSpec {
+                entries: vec![crate::scenarios::ScenarioSeedEntry {
+                    path: "seed.txt".to_string(),
+                    kind: crate::scenarios::SeedEntryKind::File,
+                    contents: Some("seed\n".to_string()),
+                    target: None,
+                    mode: None,
+                }],
+            }),
+            ..Default::default()
         }
     }
 
@@ -197,7 +296,7 @@ mod tests {
             schema_version: SCENARIO_PLAN_SCHEMA_VERSION,
             binary: None,
             default_env: BTreeMap::new(),
-            defaults: None,
+            defaults: Some(defaults_with_seed()),
             coverage: None,
             verification: VerificationPlan::default(),
             scenarios,
@@ -206,7 +305,7 @@ mod tests {
 
     #[test]
     fn behavior_assertions_require_baseline_reference() {
-        let plan = plan_with(vec![behavior_scenario(None)]);
+        let plan = plan_with(vec![behavior_scenario(None, "seed.txt")]);
         let err = validate_plan(&plan, Path::new(".")).expect_err("missing baseline");
         assert!(err.to_string().contains("baseline_scenario_id"));
     }
@@ -215,8 +314,37 @@ mod tests {
     fn behavior_assertions_accept_existing_baseline() {
         let plan = plan_with(vec![
             baseline_scenario(),
-            behavior_scenario(Some("baseline")),
+            behavior_scenario(Some("baseline"), "seed.txt"),
         ]);
         validate_plan(&plan, Path::new(".")).expect("baseline referenced");
+    }
+
+    #[test]
+    fn behavior_assertions_reject_unseeded_path() {
+        let plan = plan_with(vec![
+            baseline_scenario(),
+            behavior_scenario(Some("baseline"), "."),
+        ]);
+        let err = validate_plan(&plan, Path::new(".")).expect_err("unseeded seed_path");
+        let message = err.to_string();
+        assert!(message.contains("scenario verify"));
+        assert!(message.contains("baseline_scenario_id baseline"));
+        assert!(message.contains("seed_path"));
+        assert!(message.contains("stdout_token"));
+    }
+
+    #[test]
+    fn rejects_duplicate_scenario_ids() {
+        let plan = plan_with(vec![
+            baseline_scenario(),
+            ScenarioSpec {
+                id: "baseline".to_string(),
+                ..behavior_scenario(Some("baseline"), "seed.txt")
+            },
+        ]);
+        let err = validate_plan(&plan, Path::new(".")).expect_err("duplicate scenario id");
+        assert!(err
+            .to_string()
+            .contains("duplicate scenario.id baseline in scenarios/plan.json"));
     }
 }

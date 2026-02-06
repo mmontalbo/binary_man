@@ -390,7 +390,7 @@ mod tests {
         assert!(plan.verification.queue.is_empty());
         let policy = plan.verification.policy.as_ref().expect("policy");
         assert_eq!(policy.kinds, vec![VerificationTargetKind::Option]);
-        assert_eq!(policy.max_new_runs_per_apply, 10);
+        assert_eq!(policy.max_new_runs_per_apply, 50);
     }
 
     fn assert_plan_stub_help_scenarios(plan: &ScenarioPlan) {

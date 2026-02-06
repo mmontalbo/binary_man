@@ -33,11 +33,6 @@ impl DocPackPaths {
         self.enrich_dir().join("config.json")
     }
 
-    /// Return the `enrich/bootstrap.json` path.
-    pub fn bootstrap_path(&self) -> PathBuf {
-        self.enrich_dir().join("bootstrap.json")
-    }
-
     /// Return the `enrich/agent_prompt.md` path.
     pub fn agent_prompt_path(&self) -> PathBuf {
         self.root.join(ENRICH_AGENT_PROMPT_REL)
@@ -128,9 +123,9 @@ impl DocPackPaths {
         self.inventory_dir().join("surface.json")
     }
 
-    /// Return the `inventory/surface.seed.json` path.
-    pub fn surface_seed_path(&self) -> PathBuf {
-        self.inventory_dir().join("surface.seed.json")
+    /// Return the `inventory/surface.overlays.json` path.
+    pub fn surface_overlays_path(&self) -> PathBuf {
+        self.inventory_dir().join("surface.overlays.json")
     }
 
     /// Return the `man/` directory path.

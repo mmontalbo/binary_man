@@ -1,8 +1,12 @@
 use crate::scenarios;
+use crate::semantics;
+use crate::surface;
 use std::collections::BTreeMap;
 
 pub(crate) fn coverage_stub_from_plan(
     plan: &scenarios::ScenarioPlan,
+    surface: &surface::SurfaceInventory,
+    semantics: Option<&semantics::Semantics>,
     uncovered_ids: &[String],
 ) -> Option<String> {
     let target_id = uncovered_ids.first()?.trim();
@@ -11,11 +15,10 @@ pub(crate) fn coverage_stub_from_plan(
     }
     let mut updated = plan.clone();
     let stub_id = coverage_stub_id(&updated);
-    let argv = if target_id.starts_with('-') {
-        vec![target_id.to_string()]
-    } else {
-        vec![target_id.to_string(), "--help".to_string()]
-    };
+    let target_kind = surface::primary_surface_item_by_id(surface, target_id)
+        .map(|item| item.kind.as_str())
+        .unwrap_or("option");
+    let argv = coverage_stub_argv(target_id, target_kind, semantics);
     updated.scenarios.push(scenarios::ScenarioSpec {
         id: stub_id,
         kind: scenarios::ScenarioKind::Behavior,
@@ -39,6 +42,32 @@ pub(crate) fn coverage_stub_from_plan(
         expect: scenarios::ScenarioExpect::default(),
     });
     serde_json::to_string_pretty(&updated).ok()
+}
+
+fn coverage_stub_argv(
+    target_id: &str,
+    target_kind: &str,
+    semantics: Option<&semantics::Semantics>,
+) -> Vec<String> {
+    let mut argv = Vec::new();
+    if let Some(semantics) = semantics {
+        let (prefix, suffix) = if target_kind == "option" {
+            (
+                &semantics.verification.option_existence_argv_prefix,
+                &semantics.verification.option_existence_argv_suffix,
+            )
+        } else {
+            (
+                &semantics.verification.subcommand_existence_argv_prefix,
+                &semantics.verification.subcommand_existence_argv_suffix,
+            )
+        };
+        argv.extend(prefix.iter().cloned());
+        argv.push(target_id.to_string());
+        argv.extend(suffix.iter().cloned());
+        return argv;
+    }
+    vec![target_id.to_string()]
 }
 
 fn coverage_stub_id(plan: &scenarios::ScenarioPlan) -> String {

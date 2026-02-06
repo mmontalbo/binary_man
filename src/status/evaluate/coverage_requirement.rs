@@ -6,6 +6,7 @@ use super::super::inputs::{
 use super::EvalState;
 use crate::enrich;
 use crate::scenarios;
+use crate::semantics;
 use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -81,6 +82,7 @@ pub(super) fn eval_coverage_requirement(
     };
 
     if let (Some(surface), Some(plan)) = (surface.as_ref(), plan.as_ref()) {
+        let loaded_semantics = semantics::load_semantics(paths.root()).ok();
         let mut covered = BTreeSet::new();
         for scenario in &plan.scenarios {
             if scenario.coverage_ignore || scenario.covers.is_empty() {
@@ -130,7 +132,9 @@ pub(super) fn eval_coverage_requirement(
 
         uncovered_ids.sort();
         if !uncovered_ids.is_empty() {
-            if let Some(content) = coverage_stub_from_plan(plan, &uncovered_ids) {
+            if let Some(content) =
+                coverage_stub_from_plan(plan, surface, loaded_semantics.as_ref(), &uncovered_ids)
+            {
                 *coverage_next_action = Some(enrich::NextAction::Edit {
                     path: "scenarios/plan.json".to_string(),
                     content,
@@ -139,6 +143,8 @@ pub(super) fn eval_coverage_requirement(
                         uncovered_ids.len(),
                         uncovered_ids[0]
                     ),
+                    edit_strategy: enrich::default_edit_strategy(),
+                    payload: None,
                 });
             }
         }
@@ -175,9 +181,9 @@ pub(super) fn eval_coverage_requirement(
         status,
         reason,
         verification_tier: None,
-        verified_count: None,
+        accepted_verified_count: None,
         unverified_ids: Vec::new(),
-        unverified_count: None,
+        accepted_unverified_count: None,
         behavior_verified_count: None,
         behavior_unverified_count: None,
         verification: None,

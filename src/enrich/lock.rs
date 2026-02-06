@@ -4,10 +4,7 @@
 //! staleness without guessing.
 use super::config::{resolve_inputs, validate_config};
 use super::paths::rel_path;
-use super::{
-    DocPackPaths, EnrichConfig, EnrichLock, LockStatus, LOCK_SCHEMA_VERSION,
-    VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL,
-};
+use super::{DocPackPaths, EnrichConfig, EnrichLock, LockStatus, LOCK_SCHEMA_VERSION};
 use anyhow::{Context, Result};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -51,15 +48,10 @@ pub fn build_lock(
     let paths = DocPackPaths::new(doc_pack_root.to_path_buf());
     inputs.push(paths.config_path());
     inputs.push(paths.semantics_path());
-    inputs.push(paths.surface_seed_path());
-    inputs.push(paths.binary_lens_export_plan_path());
+    inputs.push(paths.surface_overlays_path());
     inputs.push(paths.pack_manifest_path());
     if doc_pack_root.join("fixtures").is_dir() {
         inputs.push(doc_pack_root.join("fixtures"));
-    }
-    let verification_template = doc_pack_root.join(VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL);
-    if verification_template.exists() {
-        inputs.push(verification_template);
     }
     inputs.sort();
     inputs.dedup();

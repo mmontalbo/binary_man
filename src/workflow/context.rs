@@ -77,7 +77,7 @@ impl EnrichContext {
             None => {
                 if !force {
                     return Err(anyhow!(
-                        "missing lock at {} (run `bman validate --doc-pack {}` or pass --force)",
+                        "missing lock at {} (run `bman apply --doc-pack {}` or pass --force)",
                         self.paths.lock_path().display(),
                         self.paths.root().display()
                     ));
@@ -90,7 +90,7 @@ impl EnrichContext {
         let lock_status = enrich::lock_status(self.paths.root(), Some(&lock))?;
         if lock_status.stale && !force {
             return Err(anyhow!(
-                "stale lock at {} (run `bman validate --doc-pack {}` or pass --force)",
+                "stale lock at {} (run `bman apply --doc-pack {}` or pass --force)",
                 self.paths.lock_path().display(),
                 self.paths.root().display()
             ));
@@ -99,32 +99,6 @@ impl EnrichContext {
             force_used = true;
         }
         Ok((lock, lock_status, force_used))
-    }
-
-    pub(crate) fn lock_for_apply(
-        &self,
-        force: bool,
-    ) -> Result<(Option<enrich::EnrichLock>, enrich::LockStatus, bool)> {
-        let lock_status = self.lock_status.clone();
-        let force_used = force && (!lock_status.present || lock_status.stale);
-        if (!lock_status.present || lock_status.stale) && !force {
-            return Err(anyhow!(
-                "missing or stale lock at {} (run `bman validate --doc-pack {}` or pass --force)",
-                self.paths.lock_path().display(),
-                self.paths.root().display()
-            ));
-        }
-        Ok((self.lock.clone(), lock_status, force_used))
-    }
-
-    pub(crate) fn require_plan(&self) -> Result<enrich::EnrichPlan> {
-        self.plan.clone().ok_or_else(|| {
-            anyhow!(
-                "missing plan at {} (run `bman plan --doc-pack {}` first)",
-                self.paths.plan_path().display(),
-                self.paths.root().display()
-            )
-        })
     }
 }
 

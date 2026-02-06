@@ -23,6 +23,7 @@ pub(crate) fn read_man_meta(paths: &enrich::DocPackPaths) -> Option<ManMeta> {
 
 pub(crate) fn build_lens_summary(
     paths: &enrich::DocPackPaths,
+    config: &enrich::EnrichConfig,
     warnings: &mut Vec<String>,
     man_meta: Option<&ManMeta>,
 ) -> Vec<enrich::LensSummary> {
@@ -30,7 +31,7 @@ pub(crate) fn build_lens_summary(
     let used_template = man_meta.and_then(|meta| meta.usage_lens_source_path.as_deref());
     let usage_present = man_meta.is_some();
 
-    let rel = enrich::SCENARIO_USAGE_LENS_TEMPLATE_REL;
+    let rel = config.usage_lens_template.as_str();
     let template_path = paths.root().join(rel);
     let evidence = lens_evidence(paths, &template_path, warnings);
     let status = if !template_path.is_file() {

@@ -25,63 +25,50 @@ pub fn run_init(args: &InitArgs) -> Result<()> {
             config_path.display()
         ));
     }
-    install_binary_lens_export_plan(&paths, args.force)?;
+    write_doc_pack_file(
+        &paths.binary_lens_export_plan_path(),
+        templates::BINARY_LENS_EXPORT_PLAN_JSON,
+        args.force,
+    )?;
     let manifest_path = paths.pack_manifest_path();
     if !manifest_path.is_file() {
-        let mut bootstrap = None;
-        let mut binary = args.binary.clone();
-        if binary.is_none() {
-            match enrich::load_bootstrap_optional(paths.root()) {
-                Ok(Some(loaded)) => {
-                    binary = Some(loaded.binary.clone());
-                    bootstrap = Some(loaded);
-                }
-                Ok(None) => {
-                    return Err(anyhow!(
-                        "pack missing; provide --binary or create enrich/bootstrap.json"
-                    ));
-                }
-                Err(err) => {
-                    return Err(anyhow!(
-                        "pack missing; provide --binary or create enrich/bootstrap.json ({})",
-                        err
-                    ));
-                }
-            }
-        }
-        let binary = binary
+        let binary = args
+            .binary
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .ok_or_else(|| {
-                anyhow!("pack missing; provide --binary or create enrich/bootstrap.json")
-            })?;
-        let lens_flake_input = bootstrap
-            .as_ref()
-            .and_then(|loaded| loaded.lens_flake.as_deref())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or(args.lens_flake.as_str());
-        let lens_flake = resolve_flake_ref(lens_flake_input)?;
+            .ok_or_else(|| anyhow!("pack missing; provide --binary"))?;
+        let lens_flake = resolve_flake_ref(args.lens_flake.as_str())?;
         let export_plan_path = paths.binary_lens_export_plan_path();
-        let plan_path = export_plan_path
-            .is_file()
-            .then_some(export_plan_path.as_path());
-        pack::generate_pack_with_plan(binary, paths.root(), &lens_flake, plan_path, None)?;
+        pack::generate_pack_with_plan(
+            binary,
+            paths.root(),
+            &lens_flake,
+            Some(export_plan_path.as_path()),
+            None,
+        )?;
     }
 
-    install_query_templates(&paths, args.force)?;
+    let config = enrich::default_config();
+    install_query_templates(&paths, config.usage_lens_template.as_str(), args.force)?;
     let manifest = load_manifest_optional(&paths)?;
     install_scenario_plan(
         &paths,
         args.force,
         manifest.as_ref().map(|m| m.binary_name.as_str()),
     )?;
-    install_agent_prompt(&paths, args.force)?;
-    install_semantics(&paths, args.force)?;
+    write_doc_pack_file(
+        &paths.agent_prompt_path(),
+        templates::ENRICH_AGENT_PROMPT_MD,
+        args.force,
+    )?;
+    write_doc_pack_file(
+        &paths.semantics_path(),
+        templates::ENRICH_SEMANTICS_JSON,
+        args.force,
+    )?;
     ensure_empty_fixture(paths.root())?;
 
-    let config = enrich::default_config();
     enrich::write_config(paths.root(), &config)?;
     println!("wrote {}", config_path.display());
     Ok(())
@@ -96,28 +83,34 @@ fn ensure_empty_fixture(doc_pack_root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn install_query_templates(paths: &enrich::DocPackPaths, force: bool) -> Result<()> {
-    write_query_template(
-        paths.root(),
-        enrich::SCENARIO_USAGE_LENS_TEMPLATE_REL,
+fn install_query_templates(
+    paths: &enrich::DocPackPaths,
+    usage_lens_template: &str,
+    force: bool,
+) -> Result<()> {
+    write_doc_pack_file(
+        &paths.root().join(usage_lens_template),
         templates::USAGE_FROM_SCENARIOS_SQL,
         force,
     )?;
-    write_query_template(
-        paths.root(),
-        enrich::SUBCOMMANDS_FROM_SCENARIOS_TEMPLATE_REL,
+    write_doc_pack_file(
+        &paths
+            .root()
+            .join(enrich::SUBCOMMANDS_FROM_SCENARIOS_TEMPLATE_REL),
         templates::SUBCOMMANDS_FROM_SCENARIOS_SQL,
         force,
     )?;
-    write_query_template(
-        paths.root(),
-        enrich::OPTIONS_FROM_SCENARIOS_TEMPLATE_REL,
+    write_doc_pack_file(
+        &paths
+            .root()
+            .join(enrich::OPTIONS_FROM_SCENARIOS_TEMPLATE_REL),
         templates::OPTIONS_FROM_SCENARIOS_SQL,
         force,
     )?;
-    write_query_template(
-        paths.root(),
-        enrich::VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL,
+    write_doc_pack_file(
+        &paths
+            .root()
+            .join(enrich::VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL),
         templates::VERIFICATION_FROM_SCENARIOS_SQL,
         force,
     )?;
@@ -141,58 +134,13 @@ fn install_scenario_plan(
     Ok(())
 }
 
-fn install_agent_prompt(paths: &enrich::DocPackPaths, force: bool) -> Result<()> {
-    let path = paths.agent_prompt_path();
+fn write_doc_pack_file(path: &Path, contents: &str, force: bool) -> Result<()> {
     if path.is_file() && !force {
         return Ok(());
     }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
-    fs::write(&path, templates::ENRICH_AGENT_PROMPT_MD.as_bytes())
-        .with_context(|| format!("write {}", path.display()))?;
-    Ok(())
-}
-
-fn install_semantics(paths: &enrich::DocPackPaths, force: bool) -> Result<()> {
-    let path = paths.semantics_path();
-    if path.is_file() && !force {
-        return Ok(());
-    }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-    }
-    fs::write(&path, templates::ENRICH_SEMANTICS_JSON.as_bytes())
-        .with_context(|| format!("write {}", path.display()))?;
-    Ok(())
-}
-
-fn install_binary_lens_export_plan(paths: &enrich::DocPackPaths, force: bool) -> Result<()> {
-    let path = paths.binary_lens_export_plan_path();
-    if path.is_file() && !force {
-        return Ok(());
-    }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-    }
-    fs::write(&path, templates::BINARY_LENS_EXPORT_PLAN_JSON.as_bytes())
-        .with_context(|| format!("write {}", path.display()))?;
-    Ok(())
-}
-
-fn write_query_template(
-    doc_pack_root: &Path,
-    rel_path: &str,
-    contents: &str,
-    force: bool,
-) -> Result<()> {
-    let path = doc_pack_root.join(rel_path);
-    if path.is_file() && !force {
-        return Ok(());
-    }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-    }
-    fs::write(&path, contents.as_bytes()).with_context(|| format!("write {}", path.display()))?;
+    fs::write(path, contents.as_bytes()).with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }

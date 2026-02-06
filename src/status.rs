@@ -15,6 +15,7 @@ mod lens;
 mod plan;
 mod scenario_failures;
 mod verification;
+mod verification_policy;
 pub use plan::{load_plan, plan_status, planned_actions_from_requirements, write_plan};
 pub(crate) use verification::auto_verification_plan_summary;
 
@@ -89,9 +90,11 @@ pub fn build_status_summary(args: BuildStatusSummaryArgs<'_>) -> Result<enrich::
                 path: "scenarios/plan.json".to_string(),
                 content: plan_content,
                 reason: format!("edit scenario {}", scenario_failures[0].scenario_id),
+                edit_strategy: enrich::default_edit_strategy(),
+                payload: None,
             }
         });
-    let next_action = if missing_inputs {
+    let mut next_action = if missing_inputs {
         next_action_for_missing_inputs(&paths, binary_name)
     } else if config_exists && eval.man_semantics_next_action.is_some() {
         eval.man_semantics_next_action.clone().unwrap()
@@ -136,12 +139,13 @@ pub fn build_status_summary(args: BuildStatusSummaryArgs<'_>) -> Result<enrich::
             &eval.requirements,
         )
     };
+    enrich::normalize_next_action(&mut next_action);
     let man_meta = lens::read_man_meta(&paths);
     let man_warnings = man_meta
         .as_ref()
         .map(|meta| meta.warnings.clone())
         .unwrap_or_default();
-    let lens_summary = lens::build_lens_summary(&paths, &mut warnings, man_meta.as_ref());
+    let lens_summary = lens::build_lens_summary(&paths, config, &mut warnings, man_meta.as_ref());
 
     Ok(enrich::StatusSummary {
         schema_version: 1,
@@ -177,34 +181,30 @@ fn determine_next_action(
             return enrich::NextAction::Command {
                 command: format!("bman init --doc-pack {}", doc_pack_root.display()),
                 reason: "enrich/config.json missing".to_string(),
+                payload: None,
             };
         }
-        let bootstrap_ok = enrich::load_bootstrap_optional(doc_pack_root)
-            .ok()
-            .and_then(|bootstrap| bootstrap)
-            .is_some();
-        if bootstrap_ok {
-            return enrich::NextAction::Command {
-                command: format!("bman init --doc-pack {}", doc_pack_root.display()),
-                reason: "enrich/config.json missing".to_string(),
-            };
-        }
-        return enrich::NextAction::Edit {
-            path: "enrich/bootstrap.json".to_string(),
-            content: enrich::bootstrap_stub(),
-            reason: "pack missing; init requires binary; set enrich/bootstrap.json".to_string(),
+        return enrich::NextAction::Command {
+            command: format!(
+                "bman init --doc-pack {} --binary <binary>",
+                doc_pack_root.display()
+            ),
+            reason: "pack missing; init requires explicit --binary".to_string(),
+            payload: None,
         };
     }
     if !lock_status.present || lock_status.stale {
         return enrich::NextAction::Command {
-            command: format!("bman validate --doc-pack {}", doc_pack_root.display()),
-            reason: "lock missing or stale".to_string(),
+            command: format!("bman apply --doc-pack {}", doc_pack_root.display()),
+            reason: "lock missing or stale; apply will refresh".to_string(),
+            payload: None,
         };
     }
     if !plan_status.present || plan_status.stale {
         return enrich::NextAction::Command {
-            command: format!("bman plan --doc-pack {}", doc_pack_root.display()),
-            reason: "plan missing or stale".to_string(),
+            command: format!("bman apply --doc-pack {}", doc_pack_root.display()),
+            reason: "plan missing or stale; apply will refresh".to_string(),
+            payload: None,
         };
     }
     if *decision != enrich::Decision::Complete {
@@ -216,11 +216,13 @@ fn determine_next_action(
         return enrich::NextAction::Command {
             command: format!("bman apply --doc-pack {}", doc_pack_root.display()),
             reason,
+            payload: None,
         };
     }
     enrich::NextAction::Command {
         command: format!("bman status --doc-pack {}", doc_pack_root.display()),
         reason: "requirements met; recheck when needed".to_string(),
+        payload: None,
     }
 }
 
@@ -233,19 +235,26 @@ pub(crate) fn next_action_for_missing_inputs(
             path: "scenarios/plan.json".to_string(),
             content: scenarios::plan_stub(binary_name),
             reason: "scenarios/plan.json missing; create a minimal stub".to_string(),
+            edit_strategy: enrich::default_edit_strategy(),
+            payload: None,
         };
     }
     if !paths.pack_manifest_path().is_file() {
-        return enrich::NextAction::Edit {
-            path: "enrich/bootstrap.json".to_string(),
-            content: enrich::bootstrap_stub(),
-            reason: "pack missing; init requires binary; set enrich/bootstrap.json".to_string(),
+        return enrich::NextAction::Command {
+            command: format!(
+                "bman init --doc-pack {} --binary <binary>",
+                paths.root().display()
+            ),
+            reason: "pack missing; init requires explicit --binary".to_string(),
+            payload: None,
         };
     }
     enrich::NextAction::Edit {
         path: "enrich/config.json".to_string(),
         content: enrich::config_stub(),
         reason: "config inputs missing; replace with a minimal stub".to_string(),
+        edit_strategy: enrich::default_edit_strategy(),
+        payload: None,
     }
 }
 
@@ -281,7 +290,9 @@ pub fn print_status(doc_pack_root: &Path, summary: &enrich::StatusSummary) {
         println!("missing: {}", summary.missing_artifacts.join(", "));
     }
     match &summary.next_action {
-        enrich::NextAction::Command { command, reason } => {
+        enrich::NextAction::Command {
+            command, reason, ..
+        } => {
             println!("next: {}", command);
             println!("next detail: {reason}");
         }
@@ -323,6 +334,7 @@ mod tests {
         fs::create_dir_all(root.join("scenarios")).unwrap();
         fs::create_dir_all(root.join("inventory").join("scenarios")).unwrap();
         fs::create_dir_all(root.join("binary.lens").join("runs")).unwrap();
+        fs::create_dir_all(root.join("binary_lens")).unwrap();
         fs::create_dir_all(root.join("queries")).unwrap();
         fs::write(
             root.join("queries").join("usage_from_scenarios.sql"),
@@ -339,10 +351,20 @@ mod tests {
             "-- test\n".as_bytes(),
         )
         .unwrap();
+        fs::write(
+            root.join("queries").join("verification_from_scenarios.sql"),
+            "-- test\n".as_bytes(),
+        )
+        .unwrap();
+        fs::write(
+            root.join("binary_lens").join("export_plan.json"),
+            "{}".as_bytes(),
+        )
+        .unwrap();
 
         let config = enrich::EnrichConfig {
             schema_version: enrich::CONFIG_SCHEMA_VERSION,
-            scenario_catalogs: Vec::new(),
+            usage_lens_template: enrich::SCENARIO_USAGE_LENS_TEMPLATE_REL.to_string(),
             requirements: vec![enrich::RequirementId::ExamplesReport],
             verification_tier: None,
         };
@@ -382,7 +404,7 @@ mod tests {
             },
         };
         let plan = scenarios::ScenarioPlan {
-            schema_version: 8,
+            schema_version: 11,
             binary: None,
             default_env: BTreeMap::new(),
             defaults: None,

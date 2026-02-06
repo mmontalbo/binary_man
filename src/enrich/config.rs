@@ -3,8 +3,9 @@
 //! This module loads, validates, and normalizes the pack-owned config so the
 //! workflow can remain deterministic and schema-driven.
 use super::{
-    DocPackPaths, EnrichBootstrap, EnrichConfig, RequirementId, BOOTSTRAP_SCHEMA_VERSION,
-    CONFIG_SCHEMA_VERSION, SCENARIO_USAGE_LENS_TEMPLATE_REL, SURFACE_LENS_TEMPLATE_RELS,
+    DocPackPaths, EnrichConfig, RequirementId, CONFIG_SCHEMA_VERSION,
+    SCENARIO_USAGE_LENS_TEMPLATE_REL, SURFACE_LENS_TEMPLATE_RELS,
+    VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL,
 };
 use anyhow::{anyhow, Context, Result};
 use std::fs;
@@ -18,13 +19,16 @@ fn default_requirements() -> Vec<RequirementId> {
     ]
 }
 
+const SCENARIOS_PLAN_REL: &str = "scenarios/plan.json";
+const BINARY_LENS_EXPORT_PLAN_REL: &str = "binary_lens/export_plan.json";
+
 /// Build the default config used when a pack is first initialized.
 ///
 /// Defaults favor deterministic, scenario-only evidence to avoid hidden inputs.
 pub fn default_config() -> EnrichConfig {
     EnrichConfig {
         schema_version: CONFIG_SCHEMA_VERSION,
-        scenario_catalogs: Vec::new(),
+        usage_lens_template: SCENARIO_USAGE_LENS_TEMPLATE_REL.to_string(),
         requirements: default_requirements(),
         verification_tier: Some("accepted".to_string()),
     }
@@ -36,16 +40,6 @@ pub fn config_stub() -> String {
     serde_json::to_string_pretty(&config).expect("serialize config stub")
 }
 
-/// Render a bootstrap stub to capture the binary when config is missing.
-pub fn bootstrap_stub() -> String {
-    let stub = EnrichBootstrap {
-        schema_version: BOOTSTRAP_SCHEMA_VERSION,
-        binary: "REPLACE_ME".to_string(),
-        lens_flake: None,
-    };
-    serde_json::to_string_pretty(&stub).expect("serialize bootstrap stub")
-}
-
 /// Load the pack-owned config from `enrich/config.json`.
 pub fn load_config(doc_pack_root: &Path) -> Result<EnrichConfig> {
     let paths = DocPackPaths::new(doc_pack_root.to_path_buf());
@@ -54,33 +48,6 @@ pub fn load_config(doc_pack_root: &Path) -> Result<EnrichConfig> {
     let config: EnrichConfig =
         serde_json::from_slice(&bytes).context("parse enrich config JSON")?;
     Ok(config)
-}
-
-/// Load `enrich/bootstrap.json` if present, validating schema and content.
-pub fn load_bootstrap_optional(doc_pack_root: &Path) -> Result<Option<EnrichBootstrap>> {
-    let paths = DocPackPaths::new(doc_pack_root.to_path_buf());
-    let path = paths.bootstrap_path();
-    if !path.is_file() {
-        return Ok(None);
-    }
-    let bytes = fs::read(&path).with_context(|| format!("read bootstrap {}", path.display()))?;
-    let bootstrap: EnrichBootstrap =
-        serde_json::from_slice(&bytes).context("parse enrich bootstrap JSON")?;
-    validate_bootstrap(&bootstrap)?;
-    Ok(Some(bootstrap))
-}
-
-fn validate_bootstrap(bootstrap: &EnrichBootstrap) -> Result<()> {
-    if bootstrap.schema_version != BOOTSTRAP_SCHEMA_VERSION {
-        return Err(anyhow!(
-            "unsupported bootstrap schema_version {}",
-            bootstrap.schema_version
-        ));
-    }
-    if bootstrap.binary.trim().is_empty() {
-        return Err(anyhow!("bootstrap binary must be non-empty"));
-    }
-    Ok(())
 }
 
 /// Persist a config to disk in a stable JSON format.
@@ -111,11 +78,8 @@ pub fn validate_config(config: &EnrichConfig) -> Result<()> {
             config.schema_version
         ));
     }
-    if config.scenario_catalogs.len() > 1 {
-        return Err(anyhow!(
-            "only a single scenario catalog is supported (got {})",
-            config.scenario_catalogs.len()
-        ));
+    if config.usage_lens_template.trim().is_empty() {
+        return Err(anyhow!("usage_lens_template must be non-empty"));
     }
     if let Some(tier) = config.verification_tier.as_deref() {
         if tier != "accepted" && tier != "behavior" {
@@ -124,7 +88,7 @@ pub fn validate_config(config: &EnrichConfig) -> Result<()> {
             ));
         }
     }
-    validate_relative_list(&config.scenario_catalogs, "scenario_catalogs")?;
+    validate_relative_path(&config.usage_lens_template, "usage_lens_template")?;
     Ok(())
 }
 
@@ -132,15 +96,14 @@ pub fn validate_config(config: &EnrichConfig) -> Result<()> {
 ///
 /// This keeps lock + plan staleness detection tied to actual pack-owned inputs.
 pub fn resolve_inputs(config: &EnrichConfig, doc_pack_root: &Path) -> Result<Vec<PathBuf>> {
-    let scenario_catalogs = config.scenario_catalogs.clone();
-    let scenario_plan = "scenarios/plan.json".to_string();
     let mut required_inputs = Vec::new();
-    required_inputs.push(SCENARIO_USAGE_LENS_TEMPLATE_REL.to_string());
+    required_inputs.push(config.usage_lens_template.clone());
     for rel in SURFACE_LENS_TEMPLATE_RELS {
         required_inputs.push(rel.to_string());
     }
-    required_inputs.push(scenario_plan);
-    required_inputs.extend(scenario_catalogs);
+    required_inputs.push(VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL.to_string());
+    required_inputs.push(SCENARIOS_PLAN_REL.to_string());
+    required_inputs.push(BINARY_LENS_EXPORT_PLAN_REL.to_string());
     let mut inputs = Vec::new();
     for rel in required_inputs {
         validate_relative_path(&rel, "input")?;
@@ -159,13 +122,6 @@ fn validate_relative_path(rel: &str, label: &str) -> Result<()> {
         return Err(anyhow!(
             "{label} entries must be relative paths without '..' (got {rel:?})"
         ));
-    }
-    Ok(())
-}
-
-fn validate_relative_list(entries: &[String], label: &str) -> Result<()> {
-    for rel in entries {
-        validate_relative_path(rel, label)?;
     }
     Ok(())
 }

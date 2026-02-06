@@ -14,7 +14,9 @@ pub(super) fn gate_label(present: bool, stale: bool) -> &'static str {
 
 pub(super) fn next_action_summary(action: &enrich::NextAction) -> String {
     match action {
-        enrich::NextAction::Command { command, reason } => {
+        enrich::NextAction::Command {
+            command, reason, ..
+        } => {
             format!("command: {command} ({reason})")
         }
         enrich::NextAction::Edit { path, reason, .. } => {

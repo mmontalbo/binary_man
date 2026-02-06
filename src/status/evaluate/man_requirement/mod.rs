@@ -42,9 +42,9 @@ pub(super) fn eval_man_page_requirement(
                 status: enrich::RequirementState::Blocked,
                 reason: "manifest missing".to_string(),
                 verification_tier: None,
-                verified_count: None,
+                accepted_verified_count: None,
                 unverified_ids: Vec::new(),
-                unverified_count: None,
+                accepted_unverified_count: None,
                 behavior_verified_count: None,
                 behavior_unverified_count: None,
                 verification: None,
@@ -61,15 +61,17 @@ pub(super) fn eval_man_page_requirement(
                 path: "enrich/semantics.json".to_string(),
                 content: semantics::semantics_stub(Some(binary_name)),
                 reason: "semantics missing; add render rules".to_string(),
+                edit_strategy: enrich::default_edit_strategy(),
+                payload: None,
             });
             return Ok(enrich::RequirementStatus {
                 id: req,
                 status: enrich::RequirementState::Unmet,
                 reason: "semantics missing".to_string(),
                 verification_tier: None,
-                verified_count: None,
+                accepted_verified_count: None,
                 unverified_ids: Vec::new(),
-                unverified_count: None,
+                accepted_unverified_count: None,
                 behavior_verified_count: None,
                 behavior_unverified_count: None,
                 verification: None,
@@ -82,15 +84,17 @@ pub(super) fn eval_man_page_requirement(
                 path: "enrich/semantics.json".to_string(),
                 content: semantics::semantics_stub(Some(binary_name)),
                 reason: format!("fix semantics: {message}"),
+                edit_strategy: enrich::default_edit_strategy(),
+                payload: None,
             });
             return Ok(enrich::RequirementStatus {
                 id: req,
                 status: enrich::RequirementState::Unmet,
                 reason: "semantics invalid".to_string(),
                 verification_tier: None,
-                verified_count: None,
+                accepted_verified_count: None,
                 unverified_ids: Vec::new(),
-                unverified_count: None,
+                accepted_unverified_count: None,
                 behavior_verified_count: None,
                 behavior_unverified_count: None,
                 verification: None,
@@ -137,6 +141,8 @@ pub(super) fn eval_man_page_requirement(
                 reason:
                     "help scenarios produced no usable usage text; update help scenarios or semantics"
                         .to_string(),
+                edit_strategy: enrich::default_edit_strategy(),
+                payload: None,
             });
         }
         let mut evidence = vec![evidence];
@@ -148,9 +154,9 @@ pub(super) fn eval_man_page_requirement(
             status: enrich::RequirementState::Unmet,
             reason: "man page missing".to_string(),
             verification_tier: None,
-            verified_count: None,
+            accepted_verified_count: None,
             unverified_ids: Vec::new(),
-            unverified_count: None,
+            accepted_unverified_count: None,
             behavior_verified_count: None,
             behavior_unverified_count: None,
             verification: None,
@@ -229,6 +235,8 @@ pub(super) fn eval_man_page_requirement(
                         "update semantics (missing extractions: {})",
                         summary.semantics_unmet.join(", ")
                     ),
+                    edit_strategy: enrich::default_edit_strategy(),
+                    payload: None,
                 });
             }
             if let Some((new_status, new_reason, blockers)) =
@@ -250,9 +258,9 @@ pub(super) fn eval_man_page_requirement(
         status,
         reason,
         verification_tier: None,
-        verified_count: None,
+        accepted_verified_count: None,
         unverified_ids: Vec::new(),
-        unverified_count: None,
+        accepted_unverified_count: None,
         behavior_verified_count: None,
         behavior_unverified_count: None,
         verification: None,

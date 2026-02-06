@@ -147,22 +147,11 @@ impl fmt::Display for Decision {
 #[serde(deny_unknown_fields)]
 pub struct EnrichConfig {
     pub schema_version: u32,
-    #[serde(default)]
-    pub scenario_catalogs: Vec<String>,
+    pub usage_lens_template: String,
     #[serde(default)]
     pub requirements: Vec<RequirementId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verification_tier: Option<String>,
-}
-
-/// Bootstrap stub used when a pack exists without a config.
-#[derive(Debug, Deserialize, Serialize, Clone)]
-#[serde(deny_unknown_fields)]
-pub struct EnrichBootstrap {
-    pub schema_version: u32,
-    pub binary: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lens_flake: Option<String>,
 }
 
 /// Lock snapshot tying plan/apply to a stable set of inputs.
@@ -212,15 +201,71 @@ pub struct VerificationReasonSummary {
     pub count: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub preview: Vec<String>,
+    pub recommended_fix: String,
+}
+
+/// Preview of a single behavior-unverified surface id with reason code.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct BehaviorUnverifiedPreview {
+    pub surface_id: String,
+    pub reason_code: String,
+}
+
+/// Rich behavior diagnostic for a single unverified surface id.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct BehaviorUnverifiedDiagnostic {
+    pub surface_id: String,
+    pub reason_code: String,
+    pub fix_hint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scenario_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assertion_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assertion_seed_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assertion_token: Option<String>,
+}
+
+/// Compact surface snapshot for behavior stub blockers.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct VerificationStubSurfacePreview {
+    pub kind: String,
+    #[serde(default)]
+    pub forms: Vec<String>,
+    pub value_arity: String,
+    pub value_separator: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_placeholder: Option<String>,
+    #[serde(default)]
+    pub requires_argv: Vec<String>,
+    #[serde(default)]
+    pub value_examples_preview: Vec<String>,
+}
+
+/// Compact delta snapshot for behavior stub blockers.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct VerificationStubDeltaPreview {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delta_outcome: Option<String>,
+    #[serde(default)]
+    pub delta_evidence_paths: Vec<String>,
+}
+
+/// Compact, evidence-linked blocker preview for behavior stub authoring.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct VerificationStubBlockerPreview {
+    pub surface_id: String,
+    pub reason_code: String,
+    pub surface: VerificationStubSurfacePreview,
+    pub delta: VerificationStubDeltaPreview,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<EvidenceRef>,
 }
 
 /// Compact triage summary used in status output.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct VerificationTriageSummary {
-    #[serde(default)]
-    pub discovered_untriaged_count: usize,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub discovered_untriaged_preview: Vec<String>,
     #[serde(default)]
     pub triaged_unverified_count: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -231,12 +276,20 @@ pub struct VerificationTriageSummary {
     pub excluded: Vec<VerificationExclusion>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub excluded_count: Option<usize>,
+    #[serde(default)]
+    pub behavior_excluded_count: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub behavior_excluded_preview: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub behavior_excluded_reasons: Vec<VerificationReasonSummary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub behavior_unverified_reasons: Vec<VerificationReasonSummary>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub discovered_untriaged_ids: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub triaged_unverified_ids: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub behavior_unverified_preview: Vec<BehaviorUnverifiedPreview>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub behavior_unverified_diagnostics: Vec<BehaviorUnverifiedDiagnostic>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stub_blockers_preview: Vec<VerificationStubBlockerPreview>,
 }
 
 /// Verification plan snapshot summary emitted by `bman plan`.
@@ -259,8 +312,6 @@ pub struct VerificationKindSummary {
     pub remaining_count: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remaining_preview: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub remaining_ids: Option<Vec<String>>,
 }
 
 /// Requirement evaluation outcome, evidence, and blockers.
@@ -272,11 +323,11 @@ pub struct RequirementStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verification_tier: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub verified_count: Option<usize>,
+    pub accepted_verified_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unverified_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub unverified_count: Option<usize>,
+    pub accepted_unverified_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub behavior_verified_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -325,6 +376,80 @@ pub struct Blocker {
     pub next_action: Option<String>,
 }
 
+pub fn default_edit_strategy() -> String {
+    "replace_file".to_string()
+}
+
+/// Structured actionability metadata for behavior verification next actions.
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct BehaviorNextActionPayload {
+    #[serde(default)]
+    pub target_ids: Vec<String>,
+    #[serde(default)]
+    pub reason_code: Option<String>,
+    #[serde(default)]
+    pub retry_count: Option<usize>,
+    #[serde(default)]
+    pub latest_delta_path: Option<String>,
+    #[serde(default)]
+    pub suggested_overlay_keys: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assertion_starters: Vec<BehaviorAssertionStarter>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_exclusion_payload: Option<SuggestedBehaviorExclusionPayload>,
+}
+
+impl BehaviorNextActionPayload {
+    pub fn is_empty(&self) -> bool {
+        self.target_ids.is_empty()
+            && self.reason_code.is_none()
+            && self.retry_count.is_none()
+            && self.latest_delta_path.is_none()
+            && self.suggested_overlay_keys.is_empty()
+            && self.assertion_starters.is_empty()
+            && self.suggested_exclusion_payload.is_none()
+    }
+}
+
+/// Concrete starter assertion snippet for behavior scenario authoring.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct BehaviorAssertionStarter {
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stdout_token: Option<String>,
+}
+
+/// Suggested exclusion overlay entry for cap-hit behavior triage.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct SuggestedBehaviorExclusionPayload {
+    pub kind: String,
+    pub id: String,
+    pub behavior_exclusion: SuggestedBehaviorExclusion,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct SuggestedBehaviorExclusion {
+    pub reason_code: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    pub evidence: SuggestedBehaviorExclusionEvidence,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct SuggestedBehaviorExclusionEvidence {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attempted_workarounds: Vec<SuggestedBehaviorExclusionWorkaround>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct SuggestedBehaviorExclusionWorkaround {
+    pub kind: String,
+    pub ref_path: String,
+    pub delta_variant_path_after: String,
+}
+
 /// Deterministic next action used by both humans and agents.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -332,12 +457,26 @@ pub enum NextAction {
     Command {
         command: String,
         reason: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        payload: Option<BehaviorNextActionPayload>,
     },
     Edit {
         path: String,
         content: String,
         reason: String,
+        #[serde(default = "default_edit_strategy")]
+        edit_strategy: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        payload: Option<BehaviorNextActionPayload>,
     },
+}
+
+pub fn normalize_next_action(next_action: &mut NextAction) {
+    if let NextAction::Edit { edit_strategy, .. } = next_action {
+        if edit_strategy.trim().is_empty() {
+            *edit_strategy = default_edit_strategy();
+        }
+    }
 }
 
 /// Canonical status summary emitted by `bman status --json`.
@@ -421,4 +560,46 @@ pub struct EnrichReport {
     pub next_action: NextAction,
     pub last_run: Option<EnrichRunSummary>,
     pub force_used: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn next_action_edit_deserialize_defaults_edit_strategy() {
+        let value = serde_json::json!({
+            "kind": "edit",
+            "path": "scenarios/plan.json",
+            "content": "{}",
+            "reason": "replace"
+        });
+        let action: NextAction = serde_json::from_value(value).expect("deserialize next action");
+        match action {
+            NextAction::Edit { edit_strategy, .. } => {
+                assert_eq!(edit_strategy, "replace_file");
+            }
+            _ => panic!("expected edit next action"),
+        }
+    }
+
+    #[test]
+    fn normalize_next_action_fills_missing_edit_strategy() {
+        let mut action = NextAction::Edit {
+            path: "enrich/config.json".to_string(),
+            content: "{}".to_string(),
+            reason: "replace".to_string(),
+            edit_strategy: String::new(),
+            payload: None,
+        };
+        normalize_next_action(&mut action);
+        let serialized =
+            serde_json::to_value(action).expect("serialize normalized next action as value");
+        assert_eq!(
+            serialized
+                .get("edit_strategy")
+                .and_then(serde_json::Value::as_str),
+            Some("replace_file")
+        );
+    }
 }

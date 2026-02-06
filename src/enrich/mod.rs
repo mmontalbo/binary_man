@@ -3,9 +3,7 @@
 //! The enrich module centralizes schema versions, path handling, and typed JSON
 //! structures so the workflow stays deterministic and pack-owned.
 /// Current schema version for `enrich/config.json`.
-pub const CONFIG_SCHEMA_VERSION: u32 = 2;
-/// Current schema version for `enrich/bootstrap.json`.
-pub const BOOTSTRAP_SCHEMA_VERSION: u32 = 1;
+pub const CONFIG_SCHEMA_VERSION: u32 = 3;
 /// Current schema version for `enrich/lock.json`.
 pub const LOCK_SCHEMA_VERSION: u32 = 2;
 /// Current schema version for `enrich/plan.out.json`.
@@ -40,8 +38,8 @@ mod paths;
 mod types;
 
 pub use config::{
-    bootstrap_stub, config_stub, default_config, load_bootstrap_optional, load_config,
-    normalized_requirements, resolve_inputs, validate_config, write_config,
+    config_stub, default_config, load_config, normalized_requirements, resolve_inputs,
+    validate_config, write_config,
 };
 pub use evidence::{dedupe_evidence_refs, evidence_from_path, evidence_from_rel};
 pub use history::{append_history, write_report};

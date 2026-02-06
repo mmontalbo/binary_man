@@ -23,9 +23,10 @@ pub(super) fn resolve_pack_context_with_cwd(
     pack_root: &Path,
     doc_pack_root: &Path,
     duckdb_cwd: &Path,
+    usage_lens_template: &str,
     scenarios_glob: &str,
 ) -> Result<pack::PackContext> {
-    let template = doc_pack_root.join(enrich::SCENARIO_USAGE_LENS_TEMPLATE_REL);
+    let template = doc_pack_root.join(usage_lens_template);
     pack::load_pack_context_with_template_at(pack_root, &template, duckdb_cwd, Some(scenarios_glob))
 }
 
