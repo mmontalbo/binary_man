@@ -1,4 +1,3 @@
-
 use super::*;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -123,6 +122,49 @@ from read_json_auto('inventory/surface.json') as inv,
 where item.kind = 'option';"
     );
     std::fs::write(path, sql).expect("write query");
+}
+
+#[test]
+fn verification_query_template_supports_include_sections() {
+    let root = temp_doc_pack_root("bman-ledger-query-include");
+    let sections_dir = root.join("sections");
+    std::fs::create_dir_all(&sections_dir).expect("create sections dir");
+    std::fs::write(
+        root.join("query.sql"),
+        "-- @include sections/00-base.sql\n-- @include sections/10-tail.sql\n",
+    )
+    .expect("write top-level query");
+    std::fs::write(
+        sections_dir.join("00-base.sql"),
+        "with base as (select 1 as value),\n",
+    )
+    .expect("write base section");
+    std::fs::write(
+        sections_dir.join("10-tail.sql"),
+        "tail as (select value from base)\nselect * from tail;\n",
+    )
+    .expect("write tail section");
+
+    let rendered =
+        load_verification_query_template(&root.join("query.sql")).expect("render included query");
+    let _ = std::fs::remove_dir_all(&root);
+
+    assert!(rendered.starts_with("with base as"));
+    assert!(rendered.contains("tail as"));
+    assert!(rendered.contains("select * from tail;"));
+}
+
+#[test]
+fn verification_query_template_rejects_include_cycles() {
+    let root = temp_doc_pack_root("bman-ledger-query-cycle");
+    std::fs::write(root.join("a.sql"), "-- @include b.sql\n").expect("write a.sql");
+    std::fs::write(root.join("b.sql"), "-- @include a.sql\n").expect("write b.sql");
+
+    let err = load_verification_query_template(&root.join("a.sql"))
+        .expect_err("include cycle should fail");
+    let _ = std::fs::remove_dir_all(&root);
+
+    assert!(err.to_string().contains("include cycle"));
 }
 
 #[test]

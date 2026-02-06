@@ -32,8 +32,7 @@ pub fn build_verification_ledger(
     staging_root: Option<&Path>,
     display_root: Option<&Path>,
 ) -> Result<VerificationLedger> {
-    let template_sql = fs::read_to_string(template_path)
-        .with_context(|| format!("read {}", template_path.display()))?;
+    let template_sql = load_verification_query_template(template_path)?;
     let _plan = load_plan(scenarios_path, doc_pack_root)?;
     let (query_root, rows) = run_verification_query(doc_pack_root, staging_root, &template_sql)?;
     let behavior_exclusions = load_behavior_exclusions(doc_pack_root)?;
@@ -179,6 +178,62 @@ pub fn build_verification_ledger(
         entries,
         warnings,
     })
+}
+
+fn load_verification_query_template(template_path: &Path) -> Result<String> {
+    let mut include_stack = Vec::new();
+    load_verification_query_template_inner(template_path, &mut include_stack)
+}
+
+fn load_verification_query_template_inner(
+    template_path: &Path,
+    include_stack: &mut Vec<PathBuf>,
+) -> Result<String> {
+    let stack_path =
+        fs::canonicalize(template_path).unwrap_or_else(|_| template_path.to_path_buf());
+    if include_stack.iter().any(|existing| existing == &stack_path) {
+        let cycle = include_stack
+            .iter()
+            .chain(std::iter::once(&stack_path))
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(" -> ");
+        return Err(anyhow!(
+            "verification query template include cycle: {cycle}"
+        ));
+    }
+    include_stack.push(stack_path);
+
+    let rendered = (|| -> Result<String> {
+        let source = fs::read_to_string(template_path)
+            .with_context(|| format!("read {}", template_path.display()))?;
+        let base_dir = template_path.parent().unwrap_or_else(|| Path::new("."));
+        let mut output = String::new();
+        for line in source.lines() {
+            if let Some(include_path) = verification_query_include_path(line) {
+                let include_abs = base_dir.join(include_path);
+                let included = load_verification_query_template_inner(&include_abs, include_stack)?;
+                output.push_str(&included);
+                if !included.ends_with('\n') {
+                    output.push('\n');
+                }
+                continue;
+            }
+            output.push_str(line);
+            output.push('\n');
+        }
+        Ok(output)
+    })();
+
+    include_stack.pop();
+    rendered
+}
+
+fn verification_query_include_path(line: &str) -> Option<&str> {
+    line.trim()
+        .strip_prefix("-- @include ")
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
 }
 
 fn load_behavior_exclusions(

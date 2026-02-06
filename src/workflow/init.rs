@@ -114,6 +114,34 @@ fn install_query_templates(
         templates::VERIFICATION_FROM_SCENARIOS_SQL,
         force,
     )?;
+    write_doc_pack_file(
+        &paths
+            .root()
+            .join(enrich::VERIFICATION_FROM_SCENARIOS_SECTION_TEMPLATE_RELS[0]),
+        templates::VERIFICATION_FROM_SCENARIOS_00_INPUTS_NORMALIZATION_SQL,
+        force,
+    )?;
+    write_doc_pack_file(
+        &paths
+            .root()
+            .join(enrich::VERIFICATION_FROM_SCENARIOS_SECTION_TEMPLATE_RELS[1]),
+        templates::VERIFICATION_FROM_SCENARIOS_10_BEHAVIOR_ASSERTION_EVAL_SQL,
+        force,
+    )?;
+    write_doc_pack_file(
+        &paths
+            .root()
+            .join(enrich::VERIFICATION_FROM_SCENARIOS_SECTION_TEMPLATE_RELS[2]),
+        templates::VERIFICATION_FROM_SCENARIOS_20_COVERAGE_REASONING_SQL,
+        force,
+    )?;
+    write_doc_pack_file(
+        &paths
+            .root()
+            .join(enrich::VERIFICATION_FROM_SCENARIOS_SECTION_TEMPLATE_RELS[3]),
+        templates::VERIFICATION_FROM_SCENARIOS_30_ROLLUPS_OUTPUT_SQL,
+        force,
+    )?;
     Ok(())
 }
 
@@ -144,3 +172,7 @@ fn write_doc_pack_file(path: &Path, contents: &str, force: bool) -> Result<()> {
     fs::write(path, contents.as_bytes()).with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "init_tests.rs"]
+mod tests;

@@ -22,6 +22,13 @@ pub const OPTIONS_FROM_SCENARIOS_TEMPLATE_REL: &str = "queries/options_from_scen
 /// Default verification lens for scenario-only evidence.
 pub const VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL: &str =
     "queries/verification_from_scenarios.sql";
+/// Included verification section templates used by the top-level verification lens.
+pub const VERIFICATION_FROM_SCENARIOS_SECTION_TEMPLATE_RELS: [&str; 4] = [
+    "queries/verification_from_scenarios/00_inputs_normalization.sql",
+    "queries/verification_from_scenarios/10_behavior_assertion_eval.sql",
+    "queries/verification_from_scenarios/20_coverage_reasoning.sql",
+    "queries/verification_from_scenarios/30_rollups_output.sql",
+];
 /// Default surface lenses (options + subcommands) for scenario-only evidence.
 pub const SURFACE_LENS_TEMPLATE_RELS: [&str; 2] = [
     OPTIONS_FROM_SCENARIOS_TEMPLATE_REL,
