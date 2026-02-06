@@ -204,42 +204,18 @@ fn merge_defaults_patch(
         return Ok(false);
     }
 
-    let parsed_defaults: scenarios::ScenarioDefaults =
+    let _validated_patch: scenarios::ScenarioDefaults =
         serde_json::from_value(defaults_patch.clone()).context("parse merge payload defaults")?;
-    let defaults = plan
-        .defaults
-        .get_or_insert_with(scenarios::ScenarioDefaults::default);
-
-    if defaults_map.contains_key("env") {
-        defaults.env = parsed_defaults.env;
+    let mut merged_defaults = serde_json::to_value(plan.defaults.clone().unwrap_or_default())
+        .context("serialize existing scenario defaults")?;
+    let merged_map = merged_defaults
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("existing defaults must serialize as a JSON object"))?;
+    for (key, value) in defaults_map {
+        merged_map.insert(key.clone(), value.clone());
     }
-    if defaults_map.contains_key("seed") {
-        defaults.seed = parsed_defaults.seed;
-    }
-    if defaults_map.contains_key("seed_dir") {
-        defaults.seed_dir = parsed_defaults.seed_dir;
-    }
-    if defaults_map.contains_key("cwd") {
-        defaults.cwd = parsed_defaults.cwd;
-    }
-    if defaults_map.contains_key("timeout_seconds") {
-        defaults.timeout_seconds = parsed_defaults.timeout_seconds;
-    }
-    if defaults_map.contains_key("net_mode") {
-        defaults.net_mode = parsed_defaults.net_mode;
-    }
-    if defaults_map.contains_key("no_sandbox") {
-        defaults.no_sandbox = parsed_defaults.no_sandbox;
-    }
-    if defaults_map.contains_key("no_strace") {
-        defaults.no_strace = parsed_defaults.no_strace;
-    }
-    if defaults_map.contains_key("snippet_max_lines") {
-        defaults.snippet_max_lines = parsed_defaults.snippet_max_lines;
-    }
-    if defaults_map.contains_key("snippet_max_bytes") {
-        defaults.snippet_max_bytes = parsed_defaults.snippet_max_bytes;
-    }
+    plan.defaults =
+        Some(serde_json::from_value(merged_defaults).context("parse merged scenario defaults")?);
 
     Ok(true)
 }

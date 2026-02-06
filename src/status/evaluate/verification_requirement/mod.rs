@@ -584,6 +584,42 @@ fn suggested_exclusion_only_next_action(
     }
 }
 
+fn partition_cap_hit(
+    surface_ids: Vec<String>,
+    retry_counts: &std::collections::BTreeMap<String, usize>,
+) -> (Vec<String>, Vec<String>) {
+    surface_ids.into_iter().partition(|surface_id| {
+        retry_counts.get(surface_id).copied().unwrap_or(0) >= BEHAVIOR_RERUN_CAP
+    })
+}
+
+fn set_outputs_equal_cap_hit_next_action(
+    ctx: &mut QueueVerificationContext<'_>,
+    summary: &mut enrich::VerificationTriageSummary,
+    cap_hit: &[String],
+    retry_counts: &std::collections::BTreeMap<String, usize>,
+    ledger_entries: &LedgerEntries,
+) -> bool {
+    if cap_hit.is_empty() {
+        return false;
+    }
+    summary.stub_blockers_preview = build_stub_blockers_preview(
+        ctx,
+        cap_hit,
+        ledger_entries,
+        STUB_REASON_OUTPUTS_EQUAL_AFTER_WORKAROUND,
+        true,
+    );
+    *ctx.verification_next_action = Some(suggested_exclusion_only_next_action(
+        ctx,
+        cap_hit,
+        "outputs_equal",
+        retry_counts,
+        ledger_entries,
+    ));
+    true
+}
+
 #[allow(clippy::cognitive_complexity, clippy::too_many_lines)]
 fn eval_behavior_verification(ctx: &mut QueueVerificationContext<'_>) -> VerificationEvalOutput {
     let Some(targets) = scenarios::auto_verification_targets_for_behavior(ctx.plan, ctx.surface)
@@ -744,28 +780,16 @@ fn eval_behavior_verification(ctx: &mut QueueVerificationContext<'_>) -> Verific
                 payload,
             });
         } else if !outputs_equal_with_workaround_needs_rerun.is_empty() {
-            let (cap_hit, needs_rerun): (Vec<_>, Vec<_>) =
-                outputs_equal_with_workaround_needs_rerun
-                    .into_iter()
-                    .partition(|surface_id| {
-                        retry_counts.get(surface_id).copied().unwrap_or(0) >= BEHAVIOR_RERUN_CAP
-                    });
-            if !cap_hit.is_empty() {
-                summary.stub_blockers_preview = build_stub_blockers_preview(
-                    ctx,
-                    &cap_hit,
-                    ledger_entries,
-                    STUB_REASON_OUTPUTS_EQUAL_AFTER_WORKAROUND,
-                    true,
-                );
-                *ctx.verification_next_action = Some(suggested_exclusion_only_next_action(
-                    ctx,
-                    &cap_hit,
-                    "outputs_equal",
-                    &retry_counts,
-                    ledger_entries,
-                ));
-            } else if !needs_rerun.is_empty() {
+            let (cap_hit, needs_rerun) =
+                partition_cap_hit(outputs_equal_with_workaround_needs_rerun, &retry_counts);
+            if !set_outputs_equal_cap_hit_next_action(
+                ctx,
+                &mut summary,
+                &cap_hit,
+                &retry_counts,
+                ledger_entries,
+            ) && !needs_rerun.is_empty()
+            {
                 summary.stub_blockers_preview = build_stub_blockers_preview(
                     ctx,
                     &needs_rerun,
@@ -794,28 +818,18 @@ fn eval_behavior_verification(ctx: &mut QueueVerificationContext<'_>) -> Verific
                 });
             }
         } else if !outputs_equal_with_workaround_ready_for_exclusion.is_empty() {
-            let (cap_hit, ready_for_exclusion): (Vec<_>, Vec<_>) =
-                outputs_equal_with_workaround_ready_for_exclusion
-                    .into_iter()
-                    .partition(|surface_id| {
-                        retry_counts.get(surface_id).copied().unwrap_or(0) >= BEHAVIOR_RERUN_CAP
-                    });
-            if !cap_hit.is_empty() {
-                summary.stub_blockers_preview = build_stub_blockers_preview(
-                    ctx,
-                    &cap_hit,
-                    ledger_entries,
-                    STUB_REASON_OUTPUTS_EQUAL_AFTER_WORKAROUND,
-                    true,
-                );
-                *ctx.verification_next_action = Some(suggested_exclusion_only_next_action(
-                    ctx,
-                    &cap_hit,
-                    "outputs_equal",
-                    &retry_counts,
-                    ledger_entries,
-                ));
-            } else if !ready_for_exclusion.is_empty() {
+            let (cap_hit, ready_for_exclusion) = partition_cap_hit(
+                outputs_equal_with_workaround_ready_for_exclusion,
+                &retry_counts,
+            );
+            if !set_outputs_equal_cap_hit_next_action(
+                ctx,
+                &mut summary,
+                &cap_hit,
+                &retry_counts,
+                ledger_entries,
+            ) && !ready_for_exclusion.is_empty()
+            {
                 let content = surface_overlays_behavior_exclusion_stub_batch(
                     ctx.paths,
                     ctx.surface,
