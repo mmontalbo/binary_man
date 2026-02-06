@@ -17,7 +17,7 @@ pub const DEFAULT_LENS_FLAKE: &str = "../binary_lens#binary_lens";
     name = "bman",
     version,
     about = "Doc-pack enrichment workflow for binary man pages",
-    after_help = "Commands:\n  init --doc-pack <dir> --binary <bin>  Bootstrap a doc pack (pack + config)\n  validate --doc-pack <dir>            Validate inputs and write enrich/lock.json\n  plan --doc-pack <dir>                Evaluate requirements and write enrich/plan.out.json\n  apply --doc-pack <dir>               Apply plan transactionally (writes enrich/report.json)\n  status --doc-pack <dir>              Summarize requirements and next action\n  inspect --doc-pack <dir>             Read-only TUI inspector for doc packs\n\nExamples:\n  bman init --doc-pack /tmp/ls-docpack --binary ls\n  bman validate --doc-pack /tmp/ls-docpack\n  bman plan --doc-pack /tmp/ls-docpack\n  bman apply --doc-pack /tmp/ls-docpack\n  bman status --doc-pack /tmp/ls-docpack --json\n  bman inspect --doc-pack /tmp/ls-docpack",
+    after_help = "Primary workflow:\n  init --doc-pack <dir> --binary <bin>  Bootstrap a doc pack (pack + config)\n  apply --doc-pack <dir>                Apply transactionally (auto-runs validate/plan; writes enrich/report.json)\n  status --doc-pack <dir>               Summarize requirements and deterministic next action\n\nAdvanced/debug commands:\n  validate --doc-pack <dir>             Validate inputs and write enrich/lock.json\n  plan --doc-pack <dir>                 Evaluate requirements and write enrich/plan.out.json\n  merge-behavior-edit --doc-pack <dir>  Apply merge_behavior_scenarios status patch into scenarios/plan.json\n  inspect --doc-pack <dir>              Read-only TUI inspector for doc packs\n\nExamples:\n  bman init --doc-pack /tmp/ls-docpack --binary ls\n  bman apply --doc-pack /tmp/ls-docpack\n  bman status --doc-pack /tmp/ls-docpack --json\n  bman inspect --doc-pack /tmp/ls-docpack",
     subcommand_required = true,
     arg_required_else_help = true
 )]
@@ -34,6 +34,7 @@ pub enum Command {
     Plan(PlanArgs),
     Apply(ApplyArgs),
     Status(StatusArgs),
+    MergeBehaviorEdit(MergeBehaviorEditArgs),
     Inspect(InspectArgs),
 }
 
@@ -62,6 +63,28 @@ pub struct StatusArgs {
     pub verbose: bool,
 }
 
+/// Apply a status-provided behavior merge edit to scenarios/plan.json.
+#[derive(Parser, Debug)]
+#[command(about = "Apply next_action merge_behavior_scenarios edit to scenarios/plan.json")]
+#[command(group(
+    clap::ArgGroup::new("status_input")
+        .required(true)
+        .args(["status_json", "from_stdin"])
+))]
+pub struct MergeBehaviorEditArgs {
+    /// Doc pack root containing scenarios/plan.json
+    #[arg(long, value_name = "DIR")]
+    pub doc_pack: PathBuf,
+
+    /// Path to `bman status --json` output file
+    #[arg(long, value_name = "FILE", conflicts_with = "from_stdin")]
+    pub status_json: Option<PathBuf>,
+
+    /// Read `bman status --json` payload from stdin
+    #[arg(long)]
+    pub from_stdin: bool,
+}
+
 /// Init command inputs for bootstrapping a pack.
 #[derive(Parser, Debug)]
 #[command(about = "Initialize a doc-pack (pack + enrichment config)")]
@@ -85,7 +108,7 @@ pub struct InitArgs {
 
 /// Validate command inputs used to snapshot and lock current config.
 #[derive(Parser, Debug)]
-#[command(about = "Validate enrich config and write lock.json")]
+#[command(about = "Advanced/debug: validate enrich config and write lock.json")]
 pub struct ValidateArgs {
     /// Doc pack root containing pack, scenarios, fixtures, and outputs
     #[arg(long, value_name = "DIR")]
@@ -98,7 +121,7 @@ pub struct ValidateArgs {
 
 /// Plan command inputs used to evaluate requirements deterministically.
 #[derive(Parser, Debug)]
-#[command(about = "Plan enrichment actions based on a lock snapshot")]
+#[command(about = "Advanced/debug: plan enrichment actions from a lock snapshot")]
 pub struct PlanArgs {
     /// Doc pack root containing pack, scenarios, fixtures, and outputs
     #[arg(long, value_name = "DIR")]
@@ -120,10 +143,6 @@ pub struct ApplyArgs {
     /// Doc pack root containing pack, scenarios, fixtures, and outputs
     #[arg(long, value_name = "DIR")]
     pub doc_pack: PathBuf,
-
-    /// Ignore missing/stale lock.json (recorded in report)
-    #[arg(long)]
-    pub force: bool,
 
     /// Force regeneration of the pack before static extraction
     #[arg(long)]

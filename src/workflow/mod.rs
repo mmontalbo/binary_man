@@ -5,6 +5,7 @@
 mod apply;
 mod context;
 mod init;
+mod merge_behavior_edit;
 mod plan;
 mod status;
 mod validate;
@@ -12,6 +13,7 @@ mod validate;
 pub(crate) use apply::run_apply;
 pub(crate) use context::{load_manifest_optional, EnrichContext};
 pub use init::run_init;
+pub use merge_behavior_edit::run_merge_behavior_edit;
 pub use plan::run_plan;
 pub use status::{run_status, status_summary_for_doc_pack};
 pub use validate::run_validate;

@@ -1,8 +1,9 @@
 //! Doc-pack enrichment workflow entrypoint.
 //!
-//! The binary keeps orchestration thin: the core loop (init → validate → plan → apply → status)
-//! is deterministic and driven by pack-owned artifacts (JSON + SQL). This makes the CLI a small
-//! dispatch layer so other consumers (e.g., the inspector) can reuse the same internal logic.
+//! The binary keeps orchestration thin: the core loop (init → apply → status, with validate/plan
+//! auto-run by apply) is deterministic and driven by pack-owned artifacts (JSON + SQL). This
+//! makes the CLI a small dispatch layer so other consumers (e.g., the inspector) can reuse the
+//! same internal logic.
 #![warn(
     clippy::too_many_lines,
     clippy::cognitive_complexity,
@@ -43,6 +44,7 @@ fn main() -> Result<()> {
         cli::Command::Plan(args) => workflow::run_plan(&args),
         cli::Command::Apply(args) => workflow::run_apply(&args),
         cli::Command::Status(args) => workflow::run_status(&args),
+        cli::Command::MergeBehaviorEdit(args) => workflow::run_merge_behavior_edit(&args),
         cli::Command::Inspect(args) => inspect::run(&args),
     }
 }
