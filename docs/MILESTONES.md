@@ -5,9 +5,23 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured “enrichment loop”
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M17 — value-aware behavior verification (ls).
+Current focus: M17 — behavior authoring ergonomics simplification (small-LM workflow).
 
-## M17 — Value-Aware Surface + Behavior Suite Expansion (ls) (planned)
+## M17 — Behavior Authoring Ergonomics Simplification (current)
+
+Current behavior snapshot:
+- Behavior `next_action.kind: "edit"` payloads for `scenarios/plan.json` are
+  scoped and patch-like when `edit_strategy: "merge_behavior_scenarios"`:
+  merge `defaults` + `upsert_scenarios` by `scenario.id` instead of replacing the
+  whole file.
+- Baseline behavior scaffolding is auto-included when missing; there is no
+  separate user-facing “add baseline scenario” step.
+- Missing `invocation.value_examples` is non-blocking for first-pass behavior
+  scaffolding/assertion authoring (overlays remain optional refinement).
+- Default `status --json` is slim/actionability-first; `status --json --full`
+  retains rich triage/evidence detail.
+
+### Historical notes (pre-simplification M17 draft)
 
 Goal: Expand behavior verification beyond no-arg flags by making value-taking
 options mechanically testable. This milestone focuses on **forms completeness**
@@ -47,8 +61,8 @@ Deliverables:
 
 2) **Value readiness gating (overlay-first for value options)**
 - When `verification_tier: "behavior"` requires a surface id whose
-  `invocation.value_arity` is `required|optional`, status must recommend editing
-  `inventory/surface.seed.json` overlays to add `invocation.value_examples[]`
+  `invocation.value_arity` is `required`, status must recommend editing
+  `inventory/surface.overlays.json` overlays to add `invocation.value_examples[]`
   before suggesting any behavior scenario for that id.
 - Overlays remain pack-owned hints only (no behavior semantics): supported fields
   stay limited to:
@@ -56,20 +70,56 @@ Deliverables:
   - `invocation.requires_argv[]` (explicit extra argv tokens needed for meaning)
 
 3) **Behavior suite expansion stays bounded and finishable**
-- The behavior-required set remains explicit via `scenarios/plan.json.verification.queue[]`
-  entries with `intent: "verify_behavior"`.
-- Expand the suite to include a small set of **value-taking** options whose
-  behavior can be expressed using seed-grounded add/remove assertions and a
-  baseline→variant delta, while explicitly deferring known hard classes
-  (tty/locale/time/format-width/numeric-format options).
+- Behavior tier requires all option surface ids (minus explicit exclusions).
+- Expand behavior coverage iteratively, focusing on value-taking options with
+  seed-grounded add/remove assertions and clear baseline→variant deltas, while
+  explicitly deferring known hard classes (tty/locale/time/format-width/
+  numeric-format options) via exclusions.
 
 4) **Deterministic next_action order remains stable**
 - For behavior tier, status recommends next actions in this order:
-  1) add/repair baseline scenario
-  2) add missing value_examples overlay for the next required id
-  3) add per-id behavior scenario stub (baseline_scenario_id + assertions)
+  1) run `apply` until existence auto-verification is complete
+  2) add missing surface inventory entry (if applicable)
+  3) add missing value_examples overlay for required-value options
+  4) add/repair baseline scenario
+  5) add per-id behavior scenario stub (baseline_scenario_id + assertions)
+  6) resolve behavior reason codes (edit scenarios)
+  7) run `apply` when scenarios exist but have not run
 - Status/plan summarize “why unmet” with reason codes (counts + previews),
   including value-readiness reasons (e.g. missing_value_examples).
+
+Historical functionality snapshot (before ergonomics simplification):
+- Help-only surface discovery populates `inventory/surface.json` with `forms[]` and
+  `invocation.*` (value arity/separator/placeholder) derived mechanically from
+  `help--*` scenario evidence.
+- Behavior tier is opt-in: set `enrich/config.json` `"verification_tier": "behavior"`.
+- `apply` runs existence auto-verification first (accepted tier) and writes
+  append-only evidence under `inventory/scenarios/auto_verify::option::*`, bounded
+  per apply by `verification.policy.max_new_runs_per_apply`.
+- After existence is complete, behavior verification is gated work: the pack must
+  supply a baseline scenario and (typically) one per-option behavior scenario with
+  assertions; `status --json` drives this one edit/run step at a time.
+
+Historical example (before ergonomics simplification):
+- E2E `ls` pack (Haiku) — behavior tier, exhaustive options
+  - Setup:
+    - `./target/debug/bman init --doc-pack /tmp/bman-haiku-ls-behavior-e2e --binary ls --force`
+    - edit `/tmp/bman-haiku-ls-behavior-e2e/enrich/config.json` → `"verification_tier": "behavior"`
+    - edit `/tmp/bman-haiku-ls-behavior-e2e/scenarios/plan.json` → `verification.policy.max_new_runs_per_apply: 200`
+  - Loop (repeat until `decision: complete` or blocked):
+    - `./target/debug/bman apply --doc-pack /tmp/bman-haiku-ls-behavior-e2e`
+    - `./target/debug/bman status --doc-pack /tmp/bman-haiku-ls-behavior-e2e --json`
+  - What `status --json` drove:
+    - Existence completed mechanically first (`accepted_verified_count: 84`, `accepted_unverified_count: 0`), writing append-only evidence under
+      `/tmp/bman-haiku-ls-behavior-e2e/inventory/scenarios/auto_verify::option::*`.
+    - Behavior then gated on “all options minus exclusions” (`behavior_verified_count: 0`, `behavior_unverified_count: 78`, `excluded_count: 6`).
+    - Next actions alternated between:
+      - edit `/tmp/bman-haiku-ls-behavior-e2e/inventory/surface.overlays.json` to add `invocation.value_examples[]` overlays (required-value options), and
+      - edit `/tmp/bman-haiku-ls-behavior-e2e/scenarios/plan.json` to add a baseline scenario (once) and then add one per-option behavior scenario (baseline+assertions),
+      - then rerun `apply` to execute the newly-authored behavior scenario.
+    - When exclusions were necessary, they were recorded as `verification.queue[]` entries (`intent: "exclude"`, non-empty `prereqs[]`, and a short `reason`).
+    - End state (this run): `decision: "incomplete"` with `next_action.kind: "edit"` for `scenarios/plan.json` (“add behavior scenario for --dereference”); existence was complete but
+      no option behaviors were yet verified.
 
 Acceptance criteria:
 - Fresh `ls` pack: existence verification still completes via the existing
@@ -85,7 +135,8 @@ Acceptance criteria:
 Out of scope:
 - Alias linking/deduping (`-a` vs `--all`) or semantic grouping of options.
 - Auto-inference of value ranges, inter-option dependencies, or conflict graphs.
-- Making behavior verification exhaustive for all `ls` options by default.
+- Making behavior verification exhaustive for all `ls` options without explicit
+  exclusions.
 
 ## M16 — Surface Definition v2 + Behavior Verification Suite (ls options) (done)
 
@@ -135,7 +186,7 @@ Deliverables:
   adding a surface overlay before suggesting behavior scenarios.
 
 2) **Surface overlay v2 (pack-owned hints, no behavior semantics)**
-- Extend `inventory/surface.seed.json` from “seed items” to also support
+- Extend `inventory/surface.overlays.json` from “seed items” to also support
   overlaying existing surface items keyed by `(kind,id)` (help-derived items are
   still the source of truth; overlays only add missing structure).
 - Supported overlay fields (optional, evidence-linked if derived):
@@ -146,15 +197,12 @@ Deliverables:
 - Overlays must not be required for existence verification; they exist only to
   make behavior scenario authoring tractable and mechanical.
 
-3) **Behavior scope becomes suite-driven (model-bounded)**
-- With `verification_tier: "behavior"`, the behavior-required set is defined by
-  explicit `scenarios/plan.json.verification.queue[]` entries with
-  `intent: "verify_behavior"`.
-- Objective skips remain supported via `intent: "exclude"` entries that must
-  include enum `prereqs[]` + `reason`, and must be enumerated in
-  `verification_ledger.json` as excluded targets.
-- Default behavior gating must not silently expand to “all options”; the suite is
-  explicit so the milestone is finishable and reproducible.
+3) **Behavior scope becomes option-exhaustive (minus explicit exclusions)**
+- With `verification_tier: "behavior"`, the behavior-required set is all option
+  surface ids (minus explicit exclusions).
+- Objective skips are expressed as `scenarios/plan.json.verification.queue[]`
+  entries with `intent: "exclude"` that must include enum `prereqs[]` + `reason`,
+  and are enumerated in `verification_ledger.json` as excluded targets.
 
 4) **Behavior is defined by baseline+variant and seed-grounded assertions (SQL-evaluated)**
 - Behavior scenarios are `kind: "behavior"` and must declare:
@@ -438,17 +486,17 @@ Deliverables:
 - Verification enabled by default (opt-out, not opt-in):
   - Fresh `bman init` writes `enrich/config.json` with verification required at a
     default tier (`accepted`), and documents a simple opt-out (edit config).
-- Pack-owned verification triage (schema bump in `scenarios/plan.json`):
-  - Add a `verification` section with an ordered `queue` of items to verify.
+- Pack-owned verification exclusions (schema bump in `scenarios/plan.json`):
+  - Add a `verification` section with a `queue` of explicit exclusions.
   - Each queue entry uses objective properties (no fuzzy labels), e.g.:
     - `surface_id`: the item being verified (matches `inventory/surface.json`).
-    - `intent`: `verify_behavior | exclude` (exclude requires a reason).
+    - `intent`: `exclude` (requires non-empty `prereqs[]` and a short `reason`).
     - `prereqs`: a small fixed enum list describing required setup, e.g.
       `needs_arg_value`, `needs_seed_fs`, `needs_repo`, `needs_network`,
       `needs_interactive`, `needs_privilege`.
-  - `status --json` uses queue order to choose the next actionable item (no
-    heuristic sorting), and produces a single deterministic next action:
-    add triage → add scenario → rerun validate/plan/apply.
+  - `status --json` reports excluded targets and otherwise uses deterministic
+    policy/ledger-driven next actions (not queue ordering) to recommend edits
+    or commands.
 - Pack-owned semantics for “accepted” verification:
   - Extend `enrich/semantics.json` with matchers/rules used to classify scenario
     outputs as accepted vs rejected vs inconclusive, so localization/format
@@ -664,7 +712,7 @@ Deliverables:
 - Mechanical gating and deterministic next actions:
   - When verification is enabled as a requirement, `status --json` drives the
     smallest next action to reduce unverified IDs (edit/add a single scenario,
-    then `validate → plan → apply`).
+    then `apply`).
 
 Acceptance criteria:
 - `ls`: starting from help-derived surface, agents can mechanically add acceptance
@@ -689,7 +737,7 @@ Motivation:
 
 Design constraints (non-negotiable for this milestone):
 - JSON-only structured artifacts in the doc pack (JSONL permitted for history).
-- Mechanical gating remains: edits don’t count until `validate` refreshes `lock.json`.
+- Mechanical gating remains: edits don’t count until `apply` refreshes `lock.json`.
 - Portability: everything runs from the doc pack, from any CWD.
 - Keep it lean: do not add debug/provenance artifacts unless they’re needed as
   evidence inputs or hard requirements.
@@ -731,9 +779,9 @@ Out of scope:
 ## M9 — Enrich v1 (JSON-only + Validate/Lock + Evidence-First Plan/Apply) (done)
 
 Goal: Make doc-pack enrichment a **mechanically enforced** workflow with a
-`init → validate → plan → apply` loop, where all structured artifacts are JSON
-(JSONL permitted for history) and decisions are driven by evidence-linked
-requirements (not heuristic scores).
+`init → apply` loop (apply auto-runs validate + plan), where all structured
+artifacts are JSON (JSONL permitted for history) and decisions are driven by
+evidence-linked requirements (not heuristic scores).
 
 Motivation:
 - Agents can currently edit files and “progress” without a disciplined loop.
@@ -743,15 +791,16 @@ Motivation:
 
 Design constraints (non-negotiable for this milestone):
 - JSON-only structured artifacts in the doc pack (JSONL permitted for history).
-- Clean break from `bman enrich`: bootstrap with `init`, then iterate with `validate/plan/apply/status`.
-- Edits “don’t count” until `validate` produces a fresh `lock.json`.
+- Clean break from `bman enrich`: bootstrap with `init`, then iterate with `apply/status`
+  (validate/plan remain optional debug steps).
+- Edits “don’t count” until `apply` produces a fresh `lock.json`.
 - Decisions are evidence-linked: every unmet requirement and blocker points to concrete artifacts.
 
 Artifacts (doc pack):
 - Agent-edited inputs (locked by `validate`):
   - `<doc-pack>/enrich/config.json` (desired state; strict schema; invalid rejected)
   - `<doc-pack>/scenarios/plan.json` (scenario plan; strict schema; agent-editable)
-  - optional: `<doc-pack>/inventory/surface.seed.json` (agent-provided surface seed; stable IDs)
+  - optional: `<doc-pack>/inventory/surface.overlays.json` (agent-provided surface overlays; stable IDs)
   - `<doc-pack>/queries/`, `<doc-pack>/binary.lens/views/queries/`, `<doc-pack>/scenarios/`, `<doc-pack>/fixtures/`
 - Tool-written evidence (append-only / evidence-first):
   - `<doc-pack>/inventory/scenarios/*.json` (mechanical scenario outputs, captured as structured evidence)
@@ -769,17 +818,17 @@ Artifacts (doc pack):
   - `<doc-pack>/coverage_ledger.json` (derived convenience view; never a progress gate)
 
 Commands (clean break):
-- `bman init --doc-pack <dir> [--binary <bin>]` writes a schema-valid starter `<doc-pack>/enrich/config.json` (and generates the pack if missing; uses `enrich/bootstrap.json` if `--binary` is omitted).
-- `bman validate --doc-pack <dir>` validates inputs and writes `<doc-pack>/enrich/lock.json`.
-- `bman plan --doc-pack <dir>` writes `<doc-pack>/enrich/plan.out.json`.
-- `bman apply --doc-pack <dir>` applies transactionally and writes `<doc-pack>/enrich/report.json`.
+- `bman init --doc-pack <dir> [--binary <bin>]` writes a schema-valid starter `<doc-pack>/enrich/config.json` (and generates the pack if missing; `--binary` is required when creating a new pack).
+- `bman validate --doc-pack <dir>` validates inputs and writes `<doc-pack>/enrich/lock.json` (optional).
+- `bman plan --doc-pack <dir>` writes `<doc-pack>/enrich/plan.out.json` (optional).
+- `bman apply --doc-pack <dir>` applies transactionally (auto-runs validate/plan) and writes `<doc-pack>/enrich/report.json`.
 - `bman status --doc-pack <dir> [--json]` reports issues and the deterministic next action (stable machine-readable contract in `--json` mode).
-- `bman enrich` is removed; use `init/validate/plan/apply/status`.
+- `bman enrich` is removed; use `init/apply/status` (validate/plan optional).
 
 Mechanical gating:
-- `plan/apply` refuse if `lock.json` is missing or stale (unless `--force`, recorded in `history.jsonl` and `report.json`).
+- `apply` refreshes `lock.json` and `plan.out.json` when missing or stale.
 - `status --json` always emits a machine-readable next action (even when lock is missing/stale).
-- `apply` refuses if `plan.out.json` does not match the current `lock.json` (same snapshot/hashes).
+- `apply` still executes from a deterministic plan snapshot tied to the current lock.
 
 Surface discovery (first-class, no “confidence”):
 - Goal: produce a canonical `<doc-pack>/inventory/surface.json` with stable item IDs and evidence refs (even when runtime help is missing/stripped).
@@ -802,7 +851,7 @@ LLM UX helpers (tool-owned edits, not hand-crafted JSON):
 
 Acceptance criteria:
 - Starting from a moved doc pack (arbitrary CWD), an agent can iterate:
-  `validate → plan → apply` until requirements are met or blocked, without modifying anything outside the doc pack.
+  `apply` until requirements are met or blocked, without modifying anything outside the doc pack.
 - Starting from a doc pack with missing/stripped help output, the tool can still:
   - produce a surface inventory mechanically, or
   - fail with explicit blocker codes and an evidence-linked smallest “next unlock” action (scenario/fixture/manual seed).
