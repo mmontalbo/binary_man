@@ -577,6 +577,7 @@ mod tests {
                         assertion_seed_path: Some("work/file.txt".to_string()),
                         assertion_token: Some("file.txt".to_string()),
                     }],
+                    behavior_warnings: Vec::new(),
                     stub_blockers_preview: Vec::new(),
                 }),
                 evidence: Vec::new(),

@@ -232,6 +232,8 @@ mod tests {
                 format!("inventory/scenarios/{surface_id}-delta-variant.json"),
                 format!("inventory/scenarios/{surface_id}-delta-extra.json"),
             ],
+            behavior_confounded_scenario_ids: Vec::new(),
+            behavior_confounded_extra_surface_ids: Vec::new(),
             evidence: vec![
                 enrich::EvidenceRef {
                     path: format!("inventory/scenarios/{surface_id}-delta-baseline.json"),

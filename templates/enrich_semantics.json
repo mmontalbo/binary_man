@@ -137,7 +137,8 @@
   "behavior_assertions": {
     "strip_ansi": true,
     "trim_whitespace": true,
-    "collapse_internal_whitespace": false
+    "collapse_internal_whitespace": false,
+    "confounded_coverage_gate": false
   },
   "requirements": {
     "synopsis_min_lines": 1

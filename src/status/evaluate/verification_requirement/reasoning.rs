@@ -2,6 +2,8 @@ use super::super::preview_ids;
 use super::{BehaviorExclusionState, LedgerEntries};
 use crate::enrich;
 
+const BEHAVIOR_WARNING_PREVIEW_LIMIT: usize = 10;
+
 pub(super) fn behavior_reason_code_for_id(
     surface_id: &str,
     missing_value_examples: &std::collections::BTreeSet<String>,
@@ -30,6 +32,9 @@ pub(super) fn behavior_recommended_fix(reason_code: &str) -> &'static str {
         "missing_value_examples" => {
             "add value_examples overlay in inventory/surface.overlays.json"
         }
+        "required_value_missing" => {
+            "rewrite behavior scenario argv to include a required option value (use value_examples or __value__)"
+        }
         "missing_behavior_scenario" => "add behavior scenario",
         "scenario_failed" => "fix behavior scenario run",
         "missing_assertions" => "add non-empty assertions[] semantic predicates",
@@ -48,6 +53,9 @@ fn behavior_diagnostic_fix_hint(reason_code: &str) -> &'static str {
     match reason_code {
         "missing_behavior_scenario" => {
             "merge scaffold into scenarios/plan.json, then fill coverage_tier/covers/baseline_scenario_id/assertions"
+        }
+        "required_value_missing" => {
+            "rewrite scenario argv so the covered required-value option has a usable value token"
         }
         "missing_assertions" => {
             "add non-empty assertions[] and at least one stable expect.stdout_* or expect.stderr_* predicate"
@@ -121,6 +129,46 @@ pub(super) fn build_behavior_unverified_diagnostics(
             }
         })
         .collect()
+}
+
+pub(super) fn build_behavior_warnings(
+    required_ids: &[String],
+    ledger_entries: &LedgerEntries,
+    include_full: bool,
+) -> Vec<enrich::BehaviorVerificationWarning> {
+    let mut warnings = Vec::new();
+    for surface_id in required_ids {
+        let Some(entry) = ledger_entries.get(surface_id) else {
+            continue;
+        };
+        if entry.behavior_confounded_extra_surface_ids.is_empty() {
+            continue;
+        }
+        if !include_full && warnings.len() >= BEHAVIOR_WARNING_PREVIEW_LIMIT {
+            break;
+        }
+        let scenario_id = entry
+            .behavior_confounded_scenario_ids
+            .first()
+            .cloned()
+            .or_else(|| entry.behavior_unverified_scenario_id.clone())
+            .or_else(|| entry.behavior_scenario_ids.first().cloned());
+        let surface_list = entry.behavior_confounded_extra_surface_ids.join(", ");
+        let message = match scenario_id.as_deref() {
+            Some(id) => {
+                format!("scenario {id} covers {surface_id} but also exercises {surface_list}")
+            }
+            None => format!("{surface_id} coverage also exercises {surface_list}"),
+        };
+        warnings.push(enrich::BehaviorVerificationWarning {
+            surface_id: surface_id.clone(),
+            scenario_id,
+            warning_code: "confounded_behavior_coverage".to_string(),
+            message,
+            extra_surface_ids: entry.behavior_confounded_extra_surface_ids.clone(),
+        });
+    }
+    warnings
 }
 
 pub(super) fn build_behavior_reason_summary(
@@ -274,6 +322,9 @@ pub(super) fn behavior_unverified_reason(
         "missing_assertions" => format!(
             "reason_code={reason_code}; {recommended_fix} for scenario {scenario_id}{assertion_context}; expect.* alone does not verify behavior. Prefer exact-line stdout assertions for short tokens."
         ),
+        "required_value_missing" => format!(
+            "reason_code={reason_code}; {recommended_fix} for scenario {scenario_id}. Rewrite scenario.argv so {surface_id} uses an explicit value (example: {surface_id}=auto or {surface_id} __value__)."
+        ),
         "assertion_seed_path_not_seeded" | "seed_mismatch" => format!(
             "reason_code={reason_code}; {recommended_fix} for scenario {scenario_id}{assertion_context}. Example:\nseed.entries: [{{\"path\":\"work/file.txt\",\"kind\":\"file\",\"contents\":\"...\"}}]\nassertion: {{\"seed_path\":\"work/file.txt\",\"stdout_token\":\"file.txt\"}}"
         ),
@@ -331,7 +382,10 @@ fn format_assertion_context(
 
 #[cfg(test)]
 mod tests {
-    use super::{behavior_diagnostic_fix_hint, build_behavior_unverified_diagnostics};
+    use super::{
+        behavior_diagnostic_fix_hint, build_behavior_unverified_diagnostics,
+        build_behavior_warnings,
+    };
     use crate::scenarios;
     use std::collections::{BTreeMap, BTreeSet};
 
@@ -353,6 +407,8 @@ mod tests {
             behavior_scenario_paths: Vec::new(),
             delta_outcome: None,
             delta_evidence_paths: Vec::new(),
+            behavior_confounded_scenario_ids: Vec::new(),
+            behavior_confounded_extra_surface_ids: Vec::new(),
             evidence: Vec::new(),
         }
     }
@@ -361,6 +417,7 @@ mod tests {
     fn behavior_unverified_diagnostics_include_reason_code_fix_hints() {
         let reason_codes = [
             "missing_behavior_scenario",
+            "required_value_missing",
             "missing_assertions",
             "missing_delta_assertion",
             "missing_semantic_predicate",
@@ -388,5 +445,25 @@ mod tests {
             let expected_hint = behavior_diagnostic_fix_hint(&diagnostic.reason_code);
             assert_eq!(diagnostic.fix_hint, expected_hint);
         }
+    }
+
+    #[test]
+    fn behavior_warnings_include_confounded_coverage_details() {
+        let mut ledger = BTreeMap::new();
+        let mut entry = entry_with_reason("--color", "assertion_failed");
+        entry.behavior_confounded_scenario_ids = vec!["verify_color".to_string()];
+        entry.behavior_confounded_extra_surface_ids = vec!["--group-directories-first".to_string()];
+        ledger.insert("--color".to_string(), entry);
+
+        let warnings = build_behavior_warnings(&["--color".to_string()], &ledger, true);
+        assert_eq!(warnings.len(), 1);
+        let warning = &warnings[0];
+        assert_eq!(warning.surface_id, "--color");
+        assert_eq!(warning.warning_code, "confounded_behavior_coverage");
+        assert_eq!(warning.scenario_id.as_deref(), Some("verify_color"));
+        assert_eq!(
+            warning.extra_surface_ids,
+            vec!["--group-directories-first".to_string()]
+        );
     }
 }

@@ -227,6 +227,18 @@ pub struct BehaviorUnverifiedDiagnostic {
     pub assertion_token: Option<String>,
 }
 
+/// Non-gating warning for behavior verification coverage quality.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct BehaviorVerificationWarning {
+    pub surface_id: String,
+    pub warning_code: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scenario_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_surface_ids: Vec<String>,
+}
+
 /// Compact surface snapshot for behavior stub blockers.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct VerificationStubSurfacePreview {
@@ -288,6 +300,8 @@ pub struct VerificationTriageSummary {
     pub behavior_unverified_preview: Vec<BehaviorUnverifiedPreview>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub behavior_unverified_diagnostics: Vec<BehaviorUnverifiedDiagnostic>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub behavior_warnings: Vec<BehaviorVerificationWarning>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stub_blockers_preview: Vec<VerificationStubBlockerPreview>,
 }

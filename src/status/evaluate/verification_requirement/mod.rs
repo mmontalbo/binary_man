@@ -20,7 +20,7 @@ use overlays::{
 };
 use reasoning::{
     behavior_reason_code_for_id, behavior_unverified_reason, build_behavior_reason_summary,
-    build_behavior_unverified_preview, load_behavior_exclusion_state,
+    build_behavior_unverified_preview, build_behavior_warnings, load_behavior_exclusion_state,
 };
 use selectors::{
     behavior_counts_for_ids, behavior_scenario_surface_ids, collect_missing_value_examples,
@@ -231,6 +231,7 @@ fn eval_auto_verification(
         behavior_unverified_reasons: Vec::new(),
         behavior_unverified_preview: Vec::new(),
         behavior_unverified_diagnostics: Vec::new(),
+        behavior_warnings: Vec::new(),
         stub_blockers_preview: Vec::new(),
     };
     let summary_preview = format!(
@@ -288,6 +289,9 @@ fn eval_auto_verification(
 const BEHAVIOR_BATCH_LIMIT: usize = 10;
 const BEHAVIOR_RERUN_CAP: usize = 2;
 const DELTA_PATH_FALLBACK: &str = "inventory/scenarios/<delta_variant>.json";
+const STARTER_SEED_PATH_PLACEHOLDER: &str = "work/item.txt";
+const STARTER_STDOUT_TOKEN_PLACEHOLDER: &str = "item.txt";
+const REQUIRED_VALUE_PLACEHOLDER: &str = "__value__";
 
 #[derive(serde::Deserialize)]
 struct ScenarioEvidenceId {
@@ -498,16 +502,73 @@ fn assertion_starters_for_missing_assertions(
             },
         ]
     } else {
-        vec![enrich::BehaviorAssertionStarter {
-            kind: "variant_stdout_differs_from_baseline".to_string(),
-            seed_path: None,
-            stdout_token: None,
-        }]
+        vec![
+            enrich::BehaviorAssertionStarter {
+                kind: "baseline_stdout_not_contains_seed_path".to_string(),
+                seed_path: Some(STARTER_SEED_PATH_PLACEHOLDER.to_string()),
+                stdout_token: Some(STARTER_STDOUT_TOKEN_PLACEHOLDER.to_string()),
+            },
+            enrich::BehaviorAssertionStarter {
+                kind: "variant_stdout_contains_seed_path".to_string(),
+                seed_path: Some(STARTER_SEED_PATH_PLACEHOLDER.to_string()),
+                stdout_token: Some(STARTER_STDOUT_TOKEN_PLACEHOLDER.to_string()),
+            },
+            enrich::BehaviorAssertionStarter {
+                kind: "baseline_stdout_contains_seed_path".to_string(),
+                seed_path: Some(STARTER_SEED_PATH_PLACEHOLDER.to_string()),
+                stdout_token: Some(STARTER_STDOUT_TOKEN_PLACEHOLDER.to_string()),
+            },
+            enrich::BehaviorAssertionStarter {
+                kind: "variant_stdout_not_contains_seed_path".to_string(),
+                seed_path: Some(STARTER_SEED_PATH_PLACEHOLDER.to_string()),
+                stdout_token: Some(STARTER_STDOUT_TOKEN_PLACEHOLDER.to_string()),
+            },
+        ]
     };
     if !include_full {
         starters.truncate(2);
     }
     starters
+}
+
+fn preferred_required_value_token(
+    surface: &crate::surface::SurfaceInventory,
+    surface_id: &str,
+) -> String {
+    let Some(item) = crate::surface::primary_surface_item_by_id(surface, surface_id) else {
+        return REQUIRED_VALUE_PLACEHOLDER.to_string();
+    };
+    item.invocation
+        .value_examples
+        .iter()
+        .map(|value| value.trim())
+        .find(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            item.invocation
+                .value_placeholder
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| REQUIRED_VALUE_PLACEHOLDER.to_string())
+}
+
+fn required_value_argv_rewrite_hint(
+    surface: &crate::surface::SurfaceInventory,
+    surface_id: &str,
+) -> String {
+    let value_token = preferred_required_value_token(surface, surface_id);
+    let separator = crate::surface::primary_surface_item_by_id(surface, surface_id)
+        .map(|item| item.invocation.value_separator.as_str())
+        .unwrap_or("unknown");
+    let argv_fragment = match separator {
+        "equals" => format!("{surface_id}={value_token}"),
+        "space" => format!("{surface_id} {value_token}"),
+        _ => format!("{surface_id}={value_token} or {surface_id} {value_token}"),
+    };
+    format!("scenario.argv should include `{argv_fragment}`")
 }
 
 fn suggested_exclusion_payload(
@@ -720,6 +781,7 @@ fn eval_behavior_verification(ctx: &mut QueueVerificationContext<'_>) -> Verific
         ledger_entries,
         ctx.include_full,
     );
+    let behavior_warnings = build_behavior_warnings(required_ids, ledger_entries, ctx.include_full);
     let remaining_by_kind_summary = vec![enrich::VerificationKindSummary {
         kind: "option".to_string(),
         target_count: required_ids.len(),
@@ -741,6 +803,7 @@ fn eval_behavior_verification(ctx: &mut QueueVerificationContext<'_>) -> Verific
         behavior_unverified_reasons,
         behavior_unverified_preview,
         behavior_unverified_diagnostics,
+        behavior_warnings,
         stub_blockers_preview: Vec::new(),
     };
 
@@ -867,10 +930,13 @@ fn eval_behavior_verification(ctx: &mut QueueVerificationContext<'_>) -> Verific
             &needs_apply_ids,
             ledger_entries,
             &[
+                BehaviorReasonKind::RequiredValueMissing,
+                BehaviorReasonKind::AssertionSeedPathNotSeeded,
+                BehaviorReasonKind::SeedSignatureMismatch,
+                BehaviorReasonKind::SeedMismatch,
+                BehaviorReasonKind::AssertionFailed,
                 BehaviorReasonKind::ScenarioFailed,
                 BehaviorReasonKind::MissingAssertions,
-                BehaviorReasonKind::AssertionFailed,
-                BehaviorReasonKind::MissingBehaviorScenario,
             ],
         )
         .or_else(|| {
@@ -884,6 +950,16 @@ fn eval_behavior_verification(ctx: &mut QueueVerificationContext<'_>) -> Verific
                     BehaviorReasonKind::MissingDeltaAssertion,
                     BehaviorReasonKind::MissingSemanticPredicate,
                 ],
+            )
+        })
+        .or_else(|| {
+            first_reason_id_by_priority(
+                required_ids,
+                &remaining_set,
+                &non_blocking_missing_value_examples,
+                &needs_apply_ids,
+                ledger_entries,
+                &[BehaviorReasonKind::MissingBehaviorScenario],
             )
         })
         .or_else(|| {
@@ -963,13 +1039,20 @@ fn eval_behavior_verification(ctx: &mut QueueVerificationContext<'_>) -> Verific
                         assertion_kind,
                         assertion_seed_path,
                     );
+                    if action_reason_code == "required_value_missing" {
+                        reason.push_str("; ");
+                        reason.push_str(&required_value_argv_rewrite_hint(ctx.surface, &next_id));
+                    }
                     if scenario_missing && reason_code == "missing_value_examples" {
                         reason.push_str(
                             "; scaffold argv uses a placeholder value token (optional: add value_examples overlay later)",
                         );
                     }
                     reason.push_str("; apply patch as merge/upsert by scenario.id");
-                    let assertion_starters = if action_reason_code == "missing_assertions" {
+                    let assertion_starters = if matches!(
+                        action_reason_code.as_str(),
+                        "missing_assertions" | "missing_behavior_scenario"
+                    ) {
                         assertion_starters_for_missing_assertions(entry, ctx.include_full)
                     } else {
                         Vec::new()
@@ -1302,8 +1385,9 @@ pub(super) fn eval_verification_requirement(
 #[cfg(test)]
 mod tests {
     use super::{
-        load_behavior_retry_counts, outputs_equal_workaround_needs_delta_rerun,
-        suggested_exclusion_only_next_action, QueueVerificationContext, BEHAVIOR_RERUN_CAP,
+        eval_behavior_verification, load_behavior_retry_counts,
+        outputs_equal_workaround_needs_delta_rerun, suggested_exclusion_only_next_action,
+        QueueVerificationContext, BEHAVIOR_RERUN_CAP,
     };
     use crate::enrich;
     use crate::scenarios;
@@ -1348,7 +1432,63 @@ mod tests {
             behavior_scenario_paths: vec![delta_path.to_string()],
             delta_outcome: Some("outputs_equal".to_string()),
             delta_evidence_paths: vec![delta_path.to_string()],
+            behavior_confounded_scenario_ids: Vec::new(),
+            behavior_confounded_extra_surface_ids: Vec::new(),
             evidence: Vec::new(),
+        }
+    }
+
+    fn verification_entry_with_reason(
+        surface_id: &str,
+        reason_code: &str,
+    ) -> scenarios::VerificationEntry {
+        scenarios::VerificationEntry {
+            surface_id: surface_id.to_string(),
+            status: "verified".to_string(),
+            behavior_status: "unverified".to_string(),
+            behavior_exclusion_reason_code: None,
+            behavior_unverified_reason_code: Some(reason_code.to_string()),
+            behavior_unverified_scenario_id: Some(format!(
+                "verify_{}",
+                surface_id.trim_start_matches('-')
+            )),
+            behavior_unverified_assertion_kind: None,
+            behavior_unverified_assertion_seed_path: None,
+            behavior_unverified_assertion_token: None,
+            scenario_ids: Vec::new(),
+            scenario_paths: Vec::new(),
+            behavior_scenario_ids: Vec::new(),
+            behavior_assertion_scenario_ids: Vec::new(),
+            behavior_scenario_paths: Vec::new(),
+            delta_outcome: None,
+            delta_evidence_paths: Vec::new(),
+            behavior_confounded_scenario_ids: Vec::new(),
+            behavior_confounded_extra_surface_ids: Vec::new(),
+            evidence: Vec::new(),
+        }
+    }
+
+    fn minimal_surface_with_ids(surface_ids: &[&str]) -> surface::SurfaceInventory {
+        let items = surface_ids
+            .iter()
+            .map(|surface_id| surface::SurfaceItem {
+                kind: "option".to_string(),
+                id: (*surface_id).to_string(),
+                display: (*surface_id).to_string(),
+                description: None,
+                forms: vec![(*surface_id).to_string()],
+                invocation: surface::SurfaceInvocation::default(),
+                evidence: Vec::new(),
+            })
+            .collect();
+        surface::SurfaceInventory {
+            schema_version: 2,
+            generated_at_epoch_ms: 0,
+            binary_name: Some("bin".to_string()),
+            inputs_hash: None,
+            discovery: Vec::new(),
+            items,
+            blockers: Vec::new(),
         }
     }
 
@@ -1504,6 +1644,248 @@ mod tests {
             }
             enrich::NextAction::Edit { .. } => {
                 panic!("expected command next_action for suggestion-only cap hit");
+            }
+        }
+
+        std::fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn behavior_priority_repairs_existing_rejections_before_missing_behavior_stubs() {
+        let root = temp_doc_pack_root("bman-verification-repair-priority");
+        let paths = enrich::DocPackPaths::new(root.clone());
+        let mut plan: scenarios::ScenarioPlan =
+            serde_json::from_str(&scenarios::plan_stub(Some("bin"))).expect("parse plan stub");
+        plan.scenarios
+            .retain(|scenario| scenario.kind != scenarios::ScenarioKind::Behavior);
+
+        let surface = minimal_surface_with_ids(&["--new", "--repair"]);
+        let mut ledger_entries = BTreeMap::new();
+        ledger_entries.insert(
+            "--new".to_string(),
+            verification_entry_with_reason("--new", "missing_behavior_scenario"),
+        );
+        ledger_entries.insert(
+            "--repair".to_string(),
+            verification_entry_with_reason("--repair", "seed_mismatch"),
+        );
+
+        let mut evidence = Vec::new();
+        let mut local_blockers = Vec::new();
+        let mut verification_next_action = None;
+        let missing = Vec::new();
+        let surface_evidence = enrich::EvidenceRef {
+            path: "inventory/surface.json".to_string(),
+            sha256: None,
+        };
+        let scenarios_evidence = enrich::EvidenceRef {
+            path: "scenarios/plan.json".to_string(),
+            sha256: None,
+        };
+        let mut ctx = QueueVerificationContext {
+            plan: &plan,
+            surface: &surface,
+            include_full: true,
+            ledger_entries: Some(&ledger_entries),
+            evidence: &mut evidence,
+            local_blockers: &mut local_blockers,
+            verification_next_action: &mut verification_next_action,
+            missing: &missing,
+            paths: &paths,
+            surface_evidence: &surface_evidence,
+            scenarios_evidence: &scenarios_evidence,
+        };
+
+        let _ = eval_behavior_verification(&mut ctx);
+        let next_action = ctx
+            .verification_next_action
+            .as_ref()
+            .expect("expected next action");
+        match next_action {
+            enrich::NextAction::Edit { payload, .. } => {
+                let payload = payload.as_ref().expect("expected behavior payload");
+                assert_eq!(payload.target_ids, vec!["--repair".to_string()]);
+                assert_eq!(payload.reason_code.as_deref(), Some("seed_mismatch"));
+            }
+            enrich::NextAction::Command { .. } => {
+                panic!("expected edit next action");
+            }
+        }
+
+        std::fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn missing_behavior_scenario_next_action_payload_includes_assertion_starters() {
+        let root = temp_doc_pack_root("bman-verification-starter-payload");
+        let paths = enrich::DocPackPaths::new(root.clone());
+        let mut plan: scenarios::ScenarioPlan =
+            serde_json::from_str(&scenarios::plan_stub(Some("bin"))).expect("parse plan stub");
+        plan.scenarios
+            .retain(|scenario| scenario.kind != scenarios::ScenarioKind::Behavior);
+        let surface = minimal_surface("--color");
+        let mut ledger_entries = BTreeMap::new();
+        ledger_entries.insert(
+            "--color".to_string(),
+            verification_entry_with_reason("--color", "missing_behavior_scenario"),
+        );
+
+        let mut evidence = Vec::new();
+        let mut local_blockers = Vec::new();
+        let mut verification_next_action = None;
+        let missing = Vec::new();
+        let surface_evidence = enrich::EvidenceRef {
+            path: "inventory/surface.json".to_string(),
+            sha256: None,
+        };
+        let scenarios_evidence = enrich::EvidenceRef {
+            path: "scenarios/plan.json".to_string(),
+            sha256: None,
+        };
+        let mut ctx = QueueVerificationContext {
+            plan: &plan,
+            surface: &surface,
+            include_full: true,
+            ledger_entries: Some(&ledger_entries),
+            evidence: &mut evidence,
+            local_blockers: &mut local_blockers,
+            verification_next_action: &mut verification_next_action,
+            missing: &missing,
+            paths: &paths,
+            surface_evidence: &surface_evidence,
+            scenarios_evidence: &scenarios_evidence,
+        };
+
+        let _ = eval_behavior_verification(&mut ctx);
+        let next_action = ctx
+            .verification_next_action
+            .as_ref()
+            .expect("expected next action");
+        match next_action {
+            enrich::NextAction::Edit { payload, .. } => {
+                let payload = payload.as_ref().expect("expected behavior payload");
+                assert_eq!(
+                    payload.reason_code.as_deref(),
+                    Some("missing_behavior_scenario")
+                );
+                assert!(!payload.assertion_starters.is_empty());
+                assert!(payload
+                    .assertion_starters
+                    .iter()
+                    .all(|starter| starter.kind != "variant_stdout_differs_from_baseline"));
+            }
+            enrich::NextAction::Command { .. } => {
+                panic!("expected edit next action");
+            }
+        }
+
+        std::fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn required_value_missing_next_action_includes_argv_rewrite_hint() {
+        let root = temp_doc_pack_root("bman-verification-required-value-hint");
+        let paths = enrich::DocPackPaths::new(root.clone());
+        let mut plan: scenarios::ScenarioPlan =
+            serde_json::from_str(&scenarios::plan_stub(Some("bin"))).expect("parse plan stub");
+        plan.scenarios.push(scenarios::ScenarioSpec {
+            id: "verify_color".to_string(),
+            kind: scenarios::ScenarioKind::Behavior,
+            publish: false,
+            argv: vec!["--color".to_string(), "work".to_string()],
+            env: BTreeMap::new(),
+            seed_dir: None,
+            seed: None,
+            cwd: None,
+            timeout_seconds: None,
+            net_mode: None,
+            no_sandbox: None,
+            no_strace: None,
+            snippet_max_lines: None,
+            snippet_max_bytes: None,
+            coverage_tier: Some("behavior".to_string()),
+            baseline_scenario_id: Some("baseline".to_string()),
+            assertions: Vec::new(),
+            covers: vec!["--color".to_string()],
+            coverage_ignore: false,
+            expect: scenarios::ScenarioExpect::default(),
+        });
+        let surface = surface::SurfaceInventory {
+            schema_version: 2,
+            generated_at_epoch_ms: 0,
+            binary_name: Some("bin".to_string()),
+            inputs_hash: None,
+            discovery: Vec::new(),
+            items: vec![surface::SurfaceItem {
+                kind: "option".to_string(),
+                id: "--color".to_string(),
+                display: "--color".to_string(),
+                description: None,
+                forms: vec!["--color=WHEN".to_string()],
+                invocation: surface::SurfaceInvocation {
+                    value_arity: "required".to_string(),
+                    value_separator: "equals".to_string(),
+                    value_placeholder: None,
+                    value_examples: vec!["auto".to_string()],
+                    requires_argv: Vec::new(),
+                },
+                evidence: Vec::new(),
+            }],
+            blockers: Vec::new(),
+        };
+
+        let mut entry = verification_entry_with_reason("--color", "required_value_missing");
+        entry.behavior_unverified_scenario_id = Some("verify_color".to_string());
+        entry.behavior_scenario_ids = vec!["verify_color".to_string()];
+        entry.behavior_scenario_paths = vec!["inventory/scenarios/verify_color-1.json".to_string()];
+        let mut ledger_entries = BTreeMap::new();
+        ledger_entries.insert("--color".to_string(), entry);
+
+        let mut evidence = Vec::new();
+        let mut local_blockers = Vec::new();
+        let mut verification_next_action = None;
+        let missing = Vec::new();
+        let surface_evidence = enrich::EvidenceRef {
+            path: "inventory/surface.json".to_string(),
+            sha256: None,
+        };
+        let scenarios_evidence = enrich::EvidenceRef {
+            path: "scenarios/plan.json".to_string(),
+            sha256: None,
+        };
+        let mut ctx = QueueVerificationContext {
+            plan: &plan,
+            surface: &surface,
+            include_full: true,
+            ledger_entries: Some(&ledger_entries),
+            evidence: &mut evidence,
+            local_blockers: &mut local_blockers,
+            verification_next_action: &mut verification_next_action,
+            missing: &missing,
+            paths: &paths,
+            surface_evidence: &surface_evidence,
+            scenarios_evidence: &scenarios_evidence,
+        };
+
+        let _ = eval_behavior_verification(&mut ctx);
+        let next_action = ctx
+            .verification_next_action
+            .as_ref()
+            .expect("expected next action");
+        match next_action {
+            enrich::NextAction::Edit {
+                reason, payload, ..
+            } => {
+                assert!(reason.contains("required_value_missing"));
+                assert!(reason.contains("scenario.argv should include `--color=auto`"));
+                let payload = payload.as_ref().expect("expected behavior payload");
+                assert_eq!(
+                    payload.reason_code.as_deref(),
+                    Some("required_value_missing")
+                );
+            }
+            enrich::NextAction::Command { .. } => {
+                panic!("expected edit next action");
             }
         }
 

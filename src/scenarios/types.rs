@@ -485,6 +485,10 @@ pub struct VerificationEntry {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub delta_evidence_paths: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub behavior_confounded_scenario_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub behavior_confounded_extra_surface_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<enrich::EvidenceRef>,
 }
 

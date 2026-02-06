@@ -173,6 +173,8 @@ pub struct BehaviorAssertionSemantics {
     pub trim_whitespace: bool,
     #[serde(default)]
     pub collapse_internal_whitespace: bool,
+    #[serde(default)]
+    pub confounded_coverage_gate: bool,
 }
 
 impl Default for BehaviorAssertionSemantics {
@@ -181,6 +183,7 @@ impl Default for BehaviorAssertionSemantics {
             strip_ansi: true,
             trim_whitespace: true,
             collapse_internal_whitespace: false,
+            confounded_coverage_gate: false,
         }
     }
 }

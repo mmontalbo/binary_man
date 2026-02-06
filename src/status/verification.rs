@@ -348,7 +348,7 @@ fn behavior_variant_spec(
         snippet_max_bytes: None,
         coverage_tier: Some("behavior".to_string()),
         baseline_scenario_id: Some(baseline_id.to_string()),
-        assertions: vec![scenarios::BehaviorAssertion::VariantStdoutDiffersFromBaseline {}],
+        assertions: Vec::new(),
         covers: vec![surface_id.to_string()],
         coverage_ignore: false,
         expect: scenarios::ScenarioExpect::default(),
@@ -738,10 +738,7 @@ mod tests {
             serde_json::from_value(scenarios[0].clone()).unwrap();
 
         assert!(variant.expect.exit_code.is_none());
-        assert_eq!(
-            variant.assertions,
-            vec![scenarios::BehaviorAssertion::VariantStdoutDiffersFromBaseline {}]
-        );
+        assert!(variant.assertions.is_empty());
         assert!(payload.get("defaults").is_some());
         assert!(!content.contains("\"expect\""));
         assert!(!content.contains("\"schema_version\""));

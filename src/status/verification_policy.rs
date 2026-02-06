@@ -78,6 +78,7 @@ impl VerificationStatus {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BehaviorReasonKind {
     MissingValueExamples,
+    RequiredValueMissing,
     MissingBehaviorScenario,
     ScenarioFailed,
     MissingAssertions,
@@ -96,6 +97,7 @@ impl BehaviorReasonKind {
     pub(crate) fn from_code(raw: Option<&str>) -> Self {
         match raw.unwrap_or("unknown") {
             "missing_value_examples" => Self::MissingValueExamples,
+            "required_value_missing" => Self::RequiredValueMissing,
             "missing_behavior_scenario" => Self::MissingBehaviorScenario,
             "scenario_failed" => Self::ScenarioFailed,
             "missing_assertions" => Self::MissingAssertions,

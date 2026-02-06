@@ -17,7 +17,10 @@ use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static VERIFICATION_ROOT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Build the verification ledger from surface inventory and scenario evidence.
 pub fn build_verification_ledger(
@@ -138,6 +141,8 @@ pub fn build_verification_ledger(
             behavior_scenario_paths: row.behavior_scenario_paths,
             delta_outcome: row.delta_outcome,
             delta_evidence_paths: row.delta_evidence_paths,
+            behavior_confounded_scenario_ids: row.behavior_confounded_scenario_ids,
+            behavior_confounded_extra_surface_ids: row.behavior_confounded_extra_surface_ids,
             evidence,
         });
     }
@@ -260,21 +265,20 @@ fn prepare_verification_root(
     doc_pack_root: &Path,
     staging_root: Option<&Path>,
 ) -> Result<VerificationQueryRoot> {
+    let root_suffix = verification_root_suffix()?;
     let (root, cleanup) = if let Some(staging_root) = staging_root {
         let txn_root = staging_root
             .parent()
             .ok_or_else(|| anyhow!("staging root has no parent"))?;
-        let now = enrich::now_epoch_ms()?;
         (
             txn_root
                 .join("scratch")
-                .join(format!("verification_root-{now}")),
+                .join(format!("verification_root-{root_suffix}")),
             false,
         )
     } else {
-        let now = enrich::now_epoch_ms()?;
         (
-            std::env::temp_dir().join(format!("bman-verification-{now}")),
+            std::env::temp_dir().join(format!("bman-verification-{root_suffix}")),
             true,
         )
     };
@@ -360,6 +364,15 @@ fn prepare_verification_root(
     Ok(VerificationQueryRoot { root, cleanup })
 }
 
+fn verification_root_suffix() -> Result<String> {
+    let now_ns = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("compute verification root timestamp")?
+        .as_nanos();
+    let seq = VERIFICATION_ROOT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    Ok(format!("{now_ns}-{}-{seq}", std::process::id()))
+}
+
 fn copy_scenario_evidence(src_root: &Path, dest_root: &Path) -> Result<()> {
     if !src_root.is_dir() {
         return Ok(());
@@ -413,6 +426,10 @@ struct VerificationRow {
     delta_outcome: Option<String>,
     #[serde(default)]
     delta_evidence_paths: Vec<String>,
+    #[serde(default)]
+    behavior_confounded_scenario_ids: Vec<String>,
+    #[serde(default)]
+    behavior_confounded_extra_surface_ids: Vec<String>,
 }
 
 struct VerificationQueryRoot {
@@ -497,7 +514,58 @@ mod tests {
   to_json([]::VARCHAR[]) as behavior_assertion_scenario_ids,
   to_json([]::VARCHAR[]) as behavior_scenario_paths,
   null as delta_outcome,
-  to_json([]::VARCHAR[]) as delta_evidence_paths
+  to_json([]::VARCHAR[]) as delta_evidence_paths,
+  to_json([]::VARCHAR[]) as behavior_confounded_scenario_ids,
+  to_json([]::VARCHAR[]) as behavior_confounded_extra_surface_ids
+from read_json_auto('inventory/surface.json') as inv,
+  unnest(inv.items) as t(item)
+where item.kind = 'option';"
+        );
+        std::fs::write(path, sql).expect("write query");
+    }
+
+    fn sql_varchar_array(values: &[&str]) -> String {
+        if values.is_empty() {
+            "[]::VARCHAR[]".to_string()
+        } else {
+            let joined = values
+                .iter()
+                .map(|value| format!("'{value}'"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("[{joined}]::VARCHAR[]")
+        }
+    }
+
+    fn write_verification_query_with_confounded(
+        path: &std::path::Path,
+        behavior_status: &str,
+        reason_code: &str,
+        scenario_id: &str,
+        confounded_scenario_ids: &[&str],
+        confounded_extra_surface_ids: &[&str],
+    ) {
+        let confounded_scenarios_sql = sql_varchar_array(confounded_scenario_ids);
+        let confounded_extras_sql = sql_varchar_array(confounded_extra_surface_ids);
+        let sql = format!(
+            "select
+  item.id as surface_id,
+  'recognized' as status,
+  '{behavior_status}' as behavior_status,
+  '{reason_code}' as behavior_unverified_reason_code,
+  '{scenario_id}' as behavior_unverified_scenario_id,
+  null as behavior_unverified_assertion_kind,
+  null as behavior_unverified_assertion_seed_path,
+  null as behavior_unverified_assertion_token,
+  to_json([]::VARCHAR[]) as scenario_ids,
+  to_json([]::VARCHAR[]) as scenario_paths,
+  to_json([]::VARCHAR[]) as behavior_scenario_ids,
+  to_json([]::VARCHAR[]) as behavior_assertion_scenario_ids,
+  to_json([]::VARCHAR[]) as behavior_scenario_paths,
+  null as delta_outcome,
+  to_json([]::VARCHAR[]) as delta_evidence_paths,
+  to_json({confounded_scenarios_sql}) as behavior_confounded_scenario_ids,
+  to_json({confounded_extras_sql}) as behavior_confounded_extra_surface_ids
 from read_json_auto('inventory/surface.json') as inv,
   unnest(inv.items) as t(item)
 where item.kind = 'option';"
@@ -562,6 +630,8 @@ where item.kind = 'option';"
             behavior_scenario_paths: Vec::new(),
             delta_outcome: Some("not_applicable".to_string()),
             delta_evidence_paths: Vec::new(),
+            behavior_confounded_scenario_ids: Vec::new(),
+            behavior_confounded_extra_surface_ids: Vec::new(),
         }];
         let surface = surface::SurfaceInventory {
             schema_version: 2,
@@ -666,6 +736,65 @@ where item.kind = 'option';"
                 .behavior_unverified_assertion_kind
                 .as_deref(),
             Some("variant_stdout_has_line")
+        );
+    }
+
+    #[test]
+    fn verification_ledger_maps_required_value_reason_and_confounded_columns() {
+        let root = temp_doc_pack_root("bman-ledger-required-value");
+        let surface = surface::SurfaceInventory {
+            schema_version: 2,
+            generated_at_epoch_ms: 0,
+            binary_name: Some("bin".to_string()),
+            inputs_hash: None,
+            discovery: Vec::new(),
+            items: vec![surface::SurfaceItem {
+                kind: "option".to_string(),
+                id: "--color".to_string(),
+                display: "--color".to_string(),
+                description: None,
+                forms: vec!["--color[=WHEN]".to_string()],
+                invocation: surface::SurfaceInvocation::default(),
+                evidence: Vec::new(),
+            }],
+            blockers: Vec::new(),
+        };
+        write_minimal_pack_inputs(&root, &surface);
+        let query = root.join("query-required-value.sql");
+        write_verification_query_with_confounded(
+            &query,
+            "rejected",
+            "required_value_missing",
+            "verify_color",
+            &["verify_color"],
+            &["--group-directories-first"],
+        );
+
+        let ledger = build_verification_ledger(
+            "bin",
+            &surface,
+            &root,
+            &root.join("scenarios").join("plan.json"),
+            &query,
+            None,
+            Some(&root),
+        )
+        .expect("build ledger");
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert_eq!(ledger.entries.len(), 1);
+        let entry = &ledger.entries[0];
+        assert_eq!(
+            entry.behavior_unverified_reason_code.as_deref(),
+            Some("required_value_missing")
+        );
+        assert_eq!(
+            entry.behavior_confounded_scenario_ids,
+            vec!["verify_color".to_string()]
+        );
+        assert_eq!(
+            entry.behavior_confounded_extra_surface_ids,
+            vec!["--group-directories-first".to_string()]
         );
     }
 }

@@ -114,7 +114,7 @@ with
       'enrich/semantics.json',
       columns={
         'verification': 'STRUCT(accepted STRUCT(exit_code BIGINT, exit_signal BIGINT, stdout_contains_all VARCHAR[], stdout_contains_any VARCHAR[], stdout_regex_all VARCHAR[], stdout_regex_any VARCHAR[], stderr_contains_all VARCHAR[], stderr_contains_any VARCHAR[], stderr_regex_all VARCHAR[], stderr_regex_any VARCHAR[])[], rejected STRUCT(exit_code BIGINT, exit_signal BIGINT, stdout_contains_all VARCHAR[], stdout_contains_any VARCHAR[], stdout_regex_all VARCHAR[], stdout_regex_any VARCHAR[], stderr_contains_all VARCHAR[], stderr_contains_any VARCHAR[], stderr_regex_all VARCHAR[], stderr_regex_any VARCHAR[])[])',
-        'behavior_assertions': 'STRUCT(strip_ansi BOOLEAN, trim_whitespace BOOLEAN, collapse_internal_whitespace BOOLEAN)'
+        'behavior_assertions': 'STRUCT(strip_ansi BOOLEAN, trim_whitespace BOOLEAN, collapse_internal_whitespace BOOLEAN, confounded_coverage_gate BOOLEAN)'
       }
     )
   ),
@@ -122,7 +122,8 @@ with
     select
       coalesce(semantics.behavior_assertions.strip_ansi, true) as strip_ansi,
       coalesce(semantics.behavior_assertions.trim_whitespace, true) as trim_whitespace,
-      coalesce(semantics.behavior_assertions.collapse_internal_whitespace, false) as collapse_internal_whitespace
+      coalesce(semantics.behavior_assertions.collapse_internal_whitespace, false) as collapse_internal_whitespace,
+      coalesce(semantics.behavior_assertions.confounded_coverage_gate, false) as confounded_coverage_gate
     from semantics
   ),
   verification_rules as (
@@ -923,6 +924,7 @@ with
       variant_last_pass,
       baseline_last_pass,
       last_pass,
+      argv,
       cover_raw as surface_id
     from covers_raw
     where cover_raw is not null
@@ -938,6 +940,86 @@ with
           else token = cover_raw
         end
       )
+  ),
+  required_value_misuse as (
+    select
+      c.surface_id,
+      c.scenario_id
+    from covers_norm c
+    join surface s
+      on s.surface_id = c.surface_id
+    where c.coverage_tier = 'behavior'
+      and s.value_arity = 'required'
+      and (
+        exists (
+          select 1
+          from unnest(coalesce(c.argv, []::VARCHAR[])) as t(token)
+          where starts_with(token, c.surface_id || '=')
+            and trim(substr(token, length(c.surface_id) + 2)) = ''
+        )
+        or (
+          list_position(coalesce(c.argv, []::VARCHAR[]), c.surface_id) is not null
+          and not exists (
+            select 1
+            from unnest(coalesce(c.argv, []::VARCHAR[])) as t(token)
+            where starts_with(token, c.surface_id || '=')
+              and trim(substr(token, length(c.surface_id) + 2)) <> ''
+          )
+          and (
+            coalesce(array_length(c.argv), 0)
+              = list_position(coalesce(c.argv, []::VARCHAR[]), c.surface_id)
+            or coalesce(
+              trim(
+                list_extract(
+                  c.argv,
+                  list_position(coalesce(c.argv, []::VARCHAR[]), c.surface_id) + 1
+                )
+              ),
+              ''
+            ) = ''
+            or starts_with(
+              coalesce(
+                list_extract(
+                  c.argv,
+                  list_position(coalesce(c.argv, []::VARCHAR[]), c.surface_id) + 1
+                ),
+                ''
+              ),
+              '-'
+            )
+          )
+        )
+      )
+    group by c.surface_id, c.scenario_id
+  ),
+  behavior_confounded_cover as (
+    select
+      c.surface_id,
+      c.scenario_id,
+      extra.surface_id as extra_surface_id,
+      semantics.confounded_coverage_gate as confounded_coverage_gate
+    from covers_norm c
+    join behavior_semantics semantics on true
+    cross join unnest(coalesce(c.argv, []::VARCHAR[])) as t(token)
+    join surface extra
+      on extra.surface_id <> c.surface_id
+    where c.coverage_tier = 'behavior'
+      and case
+        when starts_with(extra.surface_id, '--') then token = extra.surface_id
+          or starts_with(token, extra.surface_id || '=')
+        when starts_with(extra.surface_id, '-') then token = extra.surface_id
+          or starts_with(token, extra.surface_id)
+        else token = extra.surface_id
+      end
+  ),
+  behavior_confounded_rollup as (
+    select
+      surface_id,
+      list_sort(list_distinct(list(scenario_id))) as scenario_ids,
+      list_sort(list_distinct(list(extra_surface_id))) as extra_surface_ids,
+      max(case when confounded_coverage_gate then 1 else 0 end) = 1 as confounded_coverage_gate
+    from behavior_confounded_cover
+    group by surface_id
   ),
   accepted_status as (
     select
@@ -1023,6 +1105,11 @@ with
           then 'missing_value_examples'
           else 'missing_behavior_scenario'
         end
+        when exists (
+          select 1
+          from required_value_misuse r
+          where r.surface_id = s.surface_id
+        ) then 'required_value_missing'
         when not exists (
           select 1
           from covers_norm c
@@ -1120,6 +1207,16 @@ with
         or not c.variant_last_pass
         or not c.baseline_last_pass
       )
+    union all
+    select
+      r.surface_id,
+      'required_value_missing' as reason_code,
+      r.scenario_id,
+      cast(null as VARCHAR) as assertion_kind,
+      cast(null as VARCHAR) as assertion_seed_path,
+      cast(null as VARCHAR) as assertion_token,
+      1 as priority
+    from required_value_misuse r
     union all
     select
       c.surface_id,
@@ -1342,7 +1439,13 @@ select
     else behavior_reason_detail.assertion_token
   end as behavior_unverified_assertion_token,
   delta_outcome.delta_outcome as delta_outcome,
-  to_json(coalesce(delta_outcome.delta_evidence_paths, []::VARCHAR[])) as delta_evidence_paths
+  to_json(coalesce(delta_outcome.delta_evidence_paths, []::VARCHAR[])) as delta_evidence_paths,
+  to_json(
+    coalesce(behavior_confounded_rollup.scenario_ids, []::VARCHAR[])
+  ) as behavior_confounded_scenario_ids,
+  to_json(
+    coalesce(behavior_confounded_rollup.extra_surface_ids, []::VARCHAR[])
+  ) as behavior_confounded_extra_surface_ids
 from surface
 left join accepted_status using (surface_id)
 left join behavior_status using (surface_id)
@@ -1356,4 +1459,5 @@ left join behavior_scenario_rollup using (surface_id)
 left join behavior_assertion_scenario_rollup using (surface_id)
 left join behavior_path_rollup using (surface_id)
 left join delta_outcome using (surface_id)
+left join behavior_confounded_rollup using (surface_id)
 order by surface.surface_id;

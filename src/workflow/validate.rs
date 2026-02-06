@@ -207,6 +207,8 @@ mod tests {
                 behavior_scenario_paths: Vec::new(),
                 delta_outcome: Some("not_applicable".to_string()),
                 delta_evidence_paths: Vec::new(),
+                behavior_confounded_scenario_ids: Vec::new(),
+                behavior_confounded_extra_surface_ids: Vec::new(),
                 evidence: Vec::new(),
             }],
             warnings: Vec::new(),
