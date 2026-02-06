@@ -300,28 +300,12 @@ pub(crate) fn behavior_scenarios_batch_stub(
 }
 
 fn behavior_baseline_spec(id: &str) -> scenarios::ScenarioSpec {
-    scenarios::ScenarioSpec {
-        id: id.to_string(),
-        kind: scenarios::ScenarioKind::Behavior,
-        publish: false,
-        argv: vec![scenarios::DEFAULT_BEHAVIOR_SEED_DIR.to_string()],
-        env: BTreeMap::new(),
-        seed_dir: None,
-        seed: None,
-        cwd: None,
-        timeout_seconds: None,
-        net_mode: None,
-        no_sandbox: None,
-        no_strace: None,
-        snippet_max_lines: None,
-        snippet_max_bytes: None,
-        coverage_tier: Some("behavior".to_string()),
-        baseline_scenario_id: None,
-        assertions: Vec::new(),
-        covers: Vec::new(),
-        coverage_ignore: true,
-        expect: scenarios::ScenarioExpect::default(),
-    }
+    let mut spec = behavior_scenario_spec(
+        id.to_string(),
+        vec![scenarios::DEFAULT_BEHAVIOR_SEED_DIR.to_string()],
+    );
+    spec.coverage_ignore = true;
+    spec
 }
 
 fn behavior_variant_spec(
@@ -331,8 +315,15 @@ fn behavior_variant_spec(
     argv: Vec<String>,
 ) -> scenarios::ScenarioSpec {
     let stub_id = verification_stub_id(plan, surface_id);
+    let mut spec = behavior_scenario_spec(stub_id, argv);
+    spec.baseline_scenario_id = Some(baseline_id.to_string());
+    spec.covers = vec![surface_id.to_string()];
+    spec
+}
+
+fn behavior_scenario_spec(id: String, argv: Vec<String>) -> scenarios::ScenarioSpec {
     scenarios::ScenarioSpec {
-        id: stub_id,
+        id,
         kind: scenarios::ScenarioKind::Behavior,
         publish: false,
         argv,
@@ -347,9 +338,9 @@ fn behavior_variant_spec(
         snippet_max_lines: None,
         snippet_max_bytes: None,
         coverage_tier: Some("behavior".to_string()),
-        baseline_scenario_id: Some(baseline_id.to_string()),
+        baseline_scenario_id: None,
         assertions: Vec::new(),
-        covers: vec![surface_id.to_string()],
+        covers: Vec::new(),
         coverage_ignore: false,
         expect: scenarios::ScenarioExpect::default(),
     }

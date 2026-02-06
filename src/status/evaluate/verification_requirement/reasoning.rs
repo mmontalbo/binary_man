@@ -1,6 +1,7 @@
 use super::super::preview_ids;
 use super::{BehaviorExclusionState, LedgerEntries};
 use crate::enrich;
+use crate::status::verification_policy::BehaviorReasonKind;
 
 const BEHAVIOR_WARNING_PREVIEW_LIMIT: usize = 10;
 
@@ -17,59 +18,58 @@ pub(super) fn behavior_reason_code_for_id(
         .and_then(|entry| entry.behavior_unverified_reason_code.as_ref())
         .map(String::as_str)
         .unwrap_or("unknown");
-    normalize_behavior_reason_code(reason_code).to_string()
-}
-
-fn normalize_behavior_reason_code(reason_code: &str) -> &str {
-    match reason_code {
-        "surface_missing" => "unknown",
-        _ => reason_code,
-    }
+    BehaviorReasonKind::from_code(Some(reason_code))
+        .as_code()
+        .to_string()
 }
 
 pub(super) fn behavior_recommended_fix(reason_code: &str) -> &'static str {
-    match reason_code {
-        "missing_value_examples" => {
+    match BehaviorReasonKind::from_code(Some(reason_code)) {
+        BehaviorReasonKind::MissingValueExamples => {
             "add value_examples overlay in inventory/surface.overlays.json"
         }
-        "required_value_missing" => {
+        BehaviorReasonKind::RequiredValueMissing => {
             "rewrite behavior scenario argv to include a required option value (use value_examples or __value__)"
         }
-        "missing_behavior_scenario" => "add behavior scenario",
-        "scenario_failed" => "fix behavior scenario run",
-        "missing_assertions" => "add non-empty assertions[] semantic predicates",
-        "assertion_seed_path_not_seeded" => "fix seed_path (seed.entries path) + stdout_token",
-        "seed_signature_mismatch" => "align baseline and variant seed entries",
-        "seed_mismatch" => "add seed-grounded assertions",
-        "missing_delta_assertion" => "add delta assertion pair",
-        "missing_semantic_predicate" => "add stdout/stderr expect predicate",
-        "outputs_equal" => "add requires_argv workaround overlay, rerun delta verification, then exclude with evidence if still equal",
-        "assertion_failed" => "fix assertion failure",
+        BehaviorReasonKind::MissingBehaviorScenario => "add behavior scenario",
+        BehaviorReasonKind::ScenarioFailed => "fix behavior scenario run",
+        BehaviorReasonKind::MissingAssertions => "add non-empty assertions[] semantic predicates",
+        BehaviorReasonKind::AssertionSeedPathNotSeeded => {
+            "fix seed_path (seed.entries path) + stdout_token"
+        }
+        BehaviorReasonKind::SeedSignatureMismatch => "align baseline and variant seed entries",
+        BehaviorReasonKind::SeedMismatch => "add seed-grounded assertions",
+        BehaviorReasonKind::MissingDeltaAssertion => "add delta assertion pair",
+        BehaviorReasonKind::MissingSemanticPredicate => "add stdout/stderr expect predicate",
+        BehaviorReasonKind::OutputsEqual => "add requires_argv workaround overlay, rerun delta verification, then exclude with evidence if still equal",
+        BehaviorReasonKind::AssertionFailed => "fix assertion failure",
         _ => "inspect verification_ledger.json",
     }
 }
 
 fn behavior_diagnostic_fix_hint(reason_code: &str) -> &'static str {
-    match reason_code {
-        "missing_behavior_scenario" => {
+    match BehaviorReasonKind::from_code(Some(reason_code)) {
+        BehaviorReasonKind::MissingBehaviorScenario => {
             "merge scaffold into scenarios/plan.json, then fill coverage_tier/covers/baseline_scenario_id/assertions"
         }
-        "required_value_missing" => {
+        BehaviorReasonKind::RequiredValueMissing => {
             "rewrite scenario argv so the covered required-value option has a usable value token"
         }
-        "missing_assertions" => {
+        BehaviorReasonKind::MissingAssertions => {
             "add non-empty assertions[] and at least one stable expect.stdout_* or expect.stderr_* predicate"
         }
-        "missing_delta_assertion" => {
+        BehaviorReasonKind::MissingDeltaAssertion => {
             "add a delta pair (baseline_* + variant_*) or variant_stdout_differs_from_baseline"
         }
-        "missing_semantic_predicate" => {
+        BehaviorReasonKind::MissingSemanticPredicate => {
             "add a stable stdout/stderr semantic predicate in expect.*"
         }
-        "outputs_equal" => {
+        BehaviorReasonKind::OutputsEqual => {
             "change variant argv/fixture so output differs from baseline, rerun apply, then re-check"
         }
-        "scenario_failed" => "fix argv/seed/expect so baseline and variant runs both pass",
+        BehaviorReasonKind::ScenarioFailed => {
+            "fix argv/seed/expect so baseline and variant runs both pass"
+        }
         _ => behavior_recommended_fix(reason_code),
     }
 }
@@ -315,41 +315,42 @@ pub(super) fn behavior_unverified_reason(
     assertion_kind: Option<&str>,
     assertion_seed_path: Option<&str>,
 ) -> String {
-    let reason_code = reason_code.unwrap_or("unknown");
+    let reason_kind = BehaviorReasonKind::from_code(reason_code);
+    let reason_code = reason_kind.as_code();
     let recommended_fix = behavior_recommended_fix(reason_code);
     let assertion_context = format_assertion_context(assertion_kind, assertion_seed_path);
-    match reason_code {
-        "missing_assertions" => format!(
+    match reason_kind {
+        BehaviorReasonKind::MissingAssertions => format!(
             "reason_code={reason_code}; {recommended_fix} for scenario {scenario_id}{assertion_context}; expect.* alone does not verify behavior. Prefer exact-line stdout assertions for short tokens."
         ),
-        "required_value_missing" => format!(
+        BehaviorReasonKind::RequiredValueMissing => format!(
             "reason_code={reason_code}; {recommended_fix} for scenario {scenario_id}. Rewrite scenario.argv so {surface_id} uses an explicit value (example: {surface_id}=auto or {surface_id} __value__)."
         ),
-        "assertion_seed_path_not_seeded" | "seed_mismatch" => format!(
+        BehaviorReasonKind::AssertionSeedPathNotSeeded | BehaviorReasonKind::SeedMismatch => format!(
             "reason_code={reason_code}; {recommended_fix} for scenario {scenario_id}{assertion_context}. Example:\nseed.entries: [{{\"path\":\"work/file.txt\",\"kind\":\"file\",\"contents\":\"...\"}}]\nassertion: {{\"seed_path\":\"work/file.txt\",\"stdout_token\":\"file.txt\"}}"
         ),
-        "seed_signature_mismatch" => format!(
+        BehaviorReasonKind::SeedSignatureMismatch => format!(
             "reason_code={reason_code}; {recommended_fix} for scenario {scenario_id}{assertion_context}"
         ),
-        "missing_delta_assertion" => format!(
+        BehaviorReasonKind::MissingDeltaAssertion => format!(
             "reason_code={reason_code}; {recommended_fix} for scenario {scenario_id}{assertion_context}"
         ),
-        "missing_semantic_predicate" => format!(
+        BehaviorReasonKind::MissingSemanticPredicate => format!(
             "reason_code={reason_code}; {recommended_fix} for scenario {scenario_id}{assertion_context}"
         ),
-        "outputs_equal" => format!(
+        BehaviorReasonKind::OutputsEqual => format!(
             "reason_code={reason_code}; {recommended_fix} for scenario {scenario_id}{assertion_context}. Add requires_argv workaround hints, rerun delta checks, and only exclude after recording attempted_workarounds evidence."
         ),
-        "assertion_failed" => format!(
+        BehaviorReasonKind::AssertionFailed => format!(
             "reason_code={reason_code}; {recommended_fix} in scenario {scenario_id}{assertion_context}"
         ),
-        "scenario_failed" => format!(
+        BehaviorReasonKind::ScenarioFailed => format!(
             "reason_code={reason_code}; {recommended_fix} in scenario {scenario_id}"
         ),
-        "missing_behavior_scenario" => {
+        BehaviorReasonKind::MissingBehaviorScenario => {
             format!("reason_code={reason_code}; {recommended_fix} for {surface_id}")
         }
-        "missing_value_examples" => {
+        BehaviorReasonKind::MissingValueExamples => {
             format!("reason_code={reason_code}; {recommended_fix} for {surface_id}")
         }
         _ => format!("reason_code={reason_code}; {recommended_fix} for {surface_id}"),

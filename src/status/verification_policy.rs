@@ -94,8 +94,27 @@ pub(crate) enum BehaviorReasonKind {
 }
 
 impl BehaviorReasonKind {
+    pub(crate) fn as_code(self) -> &'static str {
+        match self {
+            Self::MissingValueExamples => "missing_value_examples",
+            Self::RequiredValueMissing => "required_value_missing",
+            Self::MissingBehaviorScenario => "missing_behavior_scenario",
+            Self::ScenarioFailed => "scenario_failed",
+            Self::MissingAssertions => "missing_assertions",
+            Self::AssertionSeedPathNotSeeded => "assertion_seed_path_not_seeded",
+            Self::SeedSignatureMismatch => "seed_signature_mismatch",
+            Self::SeedMismatch => "seed_mismatch",
+            Self::MissingDeltaAssertion => "missing_delta_assertion",
+            Self::MissingSemanticPredicate => "missing_semantic_predicate",
+            Self::OutputsEqual => "outputs_equal",
+            Self::AssertionFailed => "assertion_failed",
+            Self::Unknown => "unknown",
+            Self::Other => "other",
+        }
+    }
+
     pub(crate) fn from_code(raw: Option<&str>) -> Self {
-        match raw.unwrap_or("unknown") {
+        match normalize_behavior_reason_code(raw.unwrap_or("unknown")) {
             "missing_value_examples" => Self::MissingValueExamples,
             "required_value_missing" => Self::RequiredValueMissing,
             "missing_behavior_scenario" => Self::MissingBehaviorScenario,
@@ -111,6 +130,13 @@ impl BehaviorReasonKind {
             "unknown" => Self::Unknown,
             _ => Self::Other,
         }
+    }
+}
+
+pub(crate) fn normalize_behavior_reason_code(raw: &str) -> &str {
+    match raw {
+        "surface_missing" => "unknown",
+        _ => raw,
     }
 }
 
