@@ -1,17 +1,17 @@
+mod auto;
+mod inputs;
 mod ledger;
 mod overlays;
 mod reasoning;
 mod selectors;
 
-use super::super::inputs::{
-    load_scenario_plan_state, load_surface_inventory_state, ScenarioPlanLoadError,
-    ScenarioPlanLoadResult, SurfaceLoadError, SurfaceLoadResult,
-};
 use super::{format_preview, preview_ids, EvalState};
 use crate::status::verification_policy::{
     BehaviorReasonKind, DeltaOutcomeKind, VerificationStatus, VerificationTier,
 };
 use anyhow::Result;
+use auto::{eval_auto_verification, AutoVerificationContext};
+use inputs::{base_evidence, ensure_verification_policy, load_verification_inputs};
 use ledger::load_or_build_verification_ledger_entries;
 use overlays::{
     build_stub_blockers_preview, surface_overlays_behavior_exclusion_stub_batch,
@@ -41,26 +41,6 @@ struct VerificationEvalOutput {
     behavior_unverified_count: Option<usize>,
 }
 
-struct VerificationInputs {
-    surface: Option<crate::surface::SurfaceInventory>,
-    plan: Option<scenarios::ScenarioPlan>,
-    surface_evidence: enrich::EvidenceRef,
-    scenarios_evidence: enrich::EvidenceRef,
-    template_path: std::path::PathBuf,
-    template_evidence: enrich::EvidenceRef,
-    semantics_path: std::path::PathBuf,
-    semantics_evidence: enrich::EvidenceRef,
-}
-
-struct AutoVerificationContext<'a> {
-    ledger_entries: Option<&'a LedgerEntries>,
-    evidence: &'a mut Vec<enrich::EvidenceRef>,
-    verification_next_action: &'a mut Option<enrich::NextAction>,
-    local_blockers: &'a [enrich::Blocker],
-    missing: &'a [String],
-    paths: &'a enrich::DocPackPaths,
-}
-
 struct QueueVerificationContext<'a> {
     plan: &'a scenarios::ScenarioPlan,
     surface: &'a crate::surface::SurfaceInventory,
@@ -82,208 +62,6 @@ struct BehaviorExclusionState {
     excluded_preview: Vec<String>,
     excluded: Vec<enrich::VerificationExclusion>,
     excluded_reason_summary: Vec<enrich::VerificationReasonSummary>,
-}
-
-fn load_verification_inputs(
-    paths: &enrich::DocPackPaths,
-    missing_artifacts: &mut Vec<String>,
-    missing: &mut Vec<String>,
-    local_blockers: &mut Vec<enrich::Blocker>,
-) -> Result<VerificationInputs> {
-    let SurfaceLoadResult {
-        evidence: surface_evidence,
-        surface,
-        error,
-    } = load_surface_inventory_state(paths, missing_artifacts)?;
-    let ScenarioPlanLoadResult {
-        evidence: scenarios_evidence,
-        plan,
-        error: plan_error,
-    } = load_scenario_plan_state(paths, missing_artifacts)?;
-    let template_path = paths
-        .root()
-        .join(enrich::VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL);
-    let template_evidence = paths.evidence_from_path(&template_path)?;
-    let semantics_path = paths.semantics_path();
-    let semantics_evidence = paths.evidence_from_path(&semantics_path)?;
-
-    let surface = match error {
-        Some(SurfaceLoadError::Missing) => {
-            missing.push("surface inventory missing".to_string());
-            None
-        }
-        Some(SurfaceLoadError::Parse(message)) => {
-            let blocker = enrich::Blocker {
-                code: "surface_parse_error".to_string(),
-                message,
-                evidence: vec![surface_evidence.clone()],
-                next_action: None,
-            };
-            local_blockers.push(blocker);
-            None
-        }
-        Some(SurfaceLoadError::Invalid(message)) => {
-            let blocker = enrich::Blocker {
-                code: "surface_schema_invalid".to_string(),
-                message,
-                evidence: vec![surface_evidence.clone()],
-                next_action: Some("fix inventory/surface.json".to_string()),
-            };
-            local_blockers.push(blocker);
-            None
-        }
-        None => surface,
-    };
-
-    let plan = match plan_error {
-        Some(ScenarioPlanLoadError::Missing) => {
-            missing.push("scenarios plan missing".to_string());
-            None
-        }
-        Some(ScenarioPlanLoadError::Invalid(message)) => {
-            let blocker = enrich::Blocker {
-                code: "scenario_plan_invalid".to_string(),
-                message,
-                evidence: vec![scenarios_evidence.clone()],
-                next_action: Some("fix scenarios/plan.json".to_string()),
-            };
-            local_blockers.push(blocker);
-            None
-        }
-        None => plan,
-    };
-
-    if !template_path.is_file() {
-        missing_artifacts.push(template_evidence.path.clone());
-        missing.push(format!(
-            "verification lens missing ({})",
-            enrich::VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL
-        ));
-    }
-    if !semantics_path.is_file() {
-        missing_artifacts.push(semantics_evidence.path.clone());
-        missing.push("verification semantics missing (enrich/semantics.json)".to_string());
-    }
-
-    Ok(VerificationInputs {
-        surface,
-        plan,
-        surface_evidence,
-        scenarios_evidence,
-        template_path,
-        template_evidence,
-        semantics_path,
-        semantics_evidence,
-    })
-}
-
-fn base_evidence(inputs: &VerificationInputs) -> Vec<enrich::EvidenceRef> {
-    vec![
-        inputs.surface_evidence.clone(),
-        inputs.scenarios_evidence.clone(),
-        inputs.template_evidence.clone(),
-        inputs.semantics_evidence.clone(),
-    ]
-}
-
-fn eval_auto_verification(
-    auto_state: crate::status::verification::AutoVerificationState,
-    ctx: &mut AutoVerificationContext<'_>,
-) -> VerificationEvalOutput {
-    let crate::status::verification::AutoVerificationState {
-        targets,
-        remaining_ids,
-        remaining_by_kind,
-        excluded,
-        excluded_count,
-        ..
-    } = auto_state;
-    if let Some(ledger_entries) = ctx.ledger_entries {
-        for surface_id in &remaining_ids {
-            if let Some(entry) = ledger_entries.get(surface_id) {
-                ctx.evidence.extend(entry.evidence.iter().cloned());
-            }
-        }
-    }
-    let remaining_preview = preview_ids(&remaining_ids);
-    let remaining_by_kind_summary = remaining_by_kind
-        .iter()
-        .map(|group| enrich::VerificationKindSummary {
-            kind: group.kind.as_str().to_string(),
-            target_count: group.target_count,
-            remaining_count: group.remaining_ids.len(),
-            remaining_preview: preview_ids(&group.remaining_ids),
-        })
-        .collect();
-    let excluded_ids = excluded
-        .iter()
-        .map(|entry| entry.surface_id.clone())
-        .collect::<Vec<_>>();
-    let summary = enrich::VerificationTriageSummary {
-        triaged_unverified_count: remaining_ids.len(),
-        triaged_unverified_preview: remaining_preview,
-        remaining_by_kind: remaining_by_kind_summary,
-        excluded_count: (excluded_count > 0).then_some(excluded_count),
-        behavior_excluded_count: excluded_count,
-        behavior_excluded_preview: preview_ids(&excluded_ids),
-        behavior_excluded_reasons: Vec::new(),
-        excluded,
-        behavior_unverified_reasons: Vec::new(),
-        behavior_unverified_preview: Vec::new(),
-        behavior_unverified_diagnostics: Vec::new(),
-        behavior_warnings: Vec::new(),
-        stub_blockers_preview: Vec::new(),
-    };
-    let summary_preview = format!(
-        "auto verification: {} remaining ({})",
-        summary.triaged_unverified_count,
-        format_preview(
-            summary.triaged_unverified_count,
-            &summary.triaged_unverified_preview
-        )
-    );
-    let has_unverified = summary.triaged_unverified_count > 0;
-
-    let mut output = VerificationEvalOutput {
-        triage_summary: Some(summary),
-        unverified_ids: Vec::new(),
-        behavior_verified_count: None,
-        behavior_unverified_count: None,
-    };
-    if has_unverified {
-        output.unverified_ids.push(summary_preview);
-    }
-    if ctx.verification_next_action.is_none()
-        && !remaining_ids.is_empty()
-        && ctx.local_blockers.is_empty()
-        && ctx.missing.is_empty()
-    {
-        let remaining_total = remaining_ids.len();
-        let by_kind = remaining_by_kind
-            .iter()
-            .map(|group| format!("{} {}", group.kind.as_str(), group.remaining_ids.len()))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let mut reason = format!("auto verification remaining: {remaining_total}");
-        if !by_kind.is_empty() {
-            reason.push_str(&format!(" ({by_kind})"));
-        }
-        reason.push_str(&format!(
-            "; max_new_runs_per_apply={}",
-            targets.max_new_runs_per_apply
-        ));
-        reason.push_str(&format!(
-            "; set scenarios/plan.json.verification.policy.max_new_runs_per_apply >= {remaining_total} to finish in one apply"
-        ));
-        let root = ctx.paths.root().display();
-        *ctx.verification_next_action = Some(enrich::NextAction::Command {
-            command: format!("bman apply --doc-pack {root}"),
-            reason,
-            payload: None,
-        });
-    }
-
-    output
 }
 
 const BEHAVIOR_BATCH_LIMIT: usize = 10;
@@ -681,6 +459,343 @@ fn set_outputs_equal_cap_hit_next_action(
     true
 }
 
+fn first_behavior_reason_target(
+    required_ids: &[String],
+    remaining_set: &std::collections::BTreeSet<String>,
+    needs_apply_ids: &std::collections::BTreeSet<String>,
+    ledger_entries: &LedgerEntries,
+) -> Option<String> {
+    let non_blocking_missing_value_examples = std::collections::BTreeSet::new();
+    first_reason_id_by_priority(
+        required_ids,
+        remaining_set,
+        &non_blocking_missing_value_examples,
+        needs_apply_ids,
+        ledger_entries,
+        &[
+            BehaviorReasonKind::RequiredValueMissing,
+            BehaviorReasonKind::AssertionSeedPathNotSeeded,
+            BehaviorReasonKind::SeedSignatureMismatch,
+            BehaviorReasonKind::SeedMismatch,
+            BehaviorReasonKind::AssertionFailed,
+            BehaviorReasonKind::ScenarioFailed,
+            BehaviorReasonKind::MissingAssertions,
+        ],
+    )
+    .or_else(|| {
+        first_reason_id_by_priority(
+            required_ids,
+            remaining_set,
+            &non_blocking_missing_value_examples,
+            needs_apply_ids,
+            ledger_entries,
+            &[
+                BehaviorReasonKind::MissingDeltaAssertion,
+                BehaviorReasonKind::MissingSemanticPredicate,
+            ],
+        )
+    })
+    .or_else(|| {
+        first_reason_id_by_priority(
+            required_ids,
+            remaining_set,
+            &non_blocking_missing_value_examples,
+            needs_apply_ids,
+            ledger_entries,
+            &[BehaviorReasonKind::MissingBehaviorScenario],
+        )
+    })
+    .or_else(|| {
+        first_reason_id(
+            required_ids,
+            remaining_set,
+            &non_blocking_missing_value_examples,
+            needs_apply_ids,
+        )
+    })
+}
+
+fn reason_based_behavior_next_action(
+    ctx: &mut QueueVerificationContext<'_>,
+    summary: &mut enrich::VerificationTriageSummary,
+    next_id: &str,
+    missing_value_examples: &std::collections::BTreeSet<String>,
+    retry_counts: &std::collections::BTreeMap<String, usize>,
+    ledger_entries: &LedgerEntries,
+) -> Option<enrich::NextAction> {
+    let reason_code = behavior_reason_code_for_id(next_id, missing_value_examples, ledger_entries);
+    let entry = ledger_entries.get(next_id);
+    let scenario_missing = entry.is_some_and(|entry| entry.behavior_scenario_ids.is_empty());
+    let scenario_id = entry
+        .and_then(|entry| {
+            entry
+                .behavior_unverified_scenario_id
+                .as_deref()
+                .or_else(|| entry.behavior_scenario_ids.first().map(String::as_str))
+        })
+        .map(str::to_string)
+        .unwrap_or_else(|| next_id.to_string());
+    let assertion_kind =
+        entry.and_then(|entry| entry.behavior_unverified_assertion_kind.as_deref());
+    let assertion_seed_path =
+        entry.and_then(|entry| entry.behavior_unverified_assertion_seed_path.as_deref());
+    let action_reason_code = if scenario_missing && reason_code == "missing_value_examples" {
+        "missing_behavior_scenario".to_string()
+    } else {
+        reason_code.clone()
+    };
+    let retry_count = retry_counts.get(next_id).copied().unwrap_or(0);
+    if reason_code == "missing_delta_assertion" && retry_count >= BEHAVIOR_RERUN_CAP {
+        return Some(suggested_exclusion_only_next_action(
+            ctx,
+            &[next_id.to_string()],
+            "missing_delta_assertion",
+            retry_counts,
+            ledger_entries,
+        ));
+    }
+
+    let content = if scenario_missing {
+        let target_ids = vec![next_id.to_string()];
+        summary.stub_blockers_preview =
+            build_stub_blockers_preview(ctx, &target_ids, ledger_entries, &reason_code, false);
+        crate::status::verification::behavior_scenarios_batch_stub(
+            ctx.plan,
+            ctx.surface,
+            &target_ids,
+        )
+        .or_else(|| crate::status::verification::behavior_baseline_stub(ctx.plan, ctx.surface))
+    } else {
+        crate::status::verification::behavior_scenario_stub(ctx.plan, &scenario_id).or_else(|| {
+            crate::status::verification::behavior_scenarios_batch_stub(
+                ctx.plan,
+                ctx.surface,
+                &[next_id.to_string()],
+            )
+        })
+    };
+    let content = content?;
+
+    let mut reason = behavior_unverified_reason(
+        Some(&action_reason_code),
+        &scenario_id,
+        next_id,
+        assertion_kind,
+        assertion_seed_path,
+    );
+    if action_reason_code == "required_value_missing" {
+        reason.push_str("; ");
+        reason.push_str(&required_value_argv_rewrite_hint(ctx.surface, next_id));
+    }
+    if scenario_missing && reason_code == "missing_value_examples" {
+        reason.push_str(
+            "; scaffold argv uses a placeholder value token (optional: add value_examples overlay later)",
+        );
+    }
+    reason.push_str("; apply patch as merge/upsert by scenario.id");
+    let assertion_starters = if matches!(
+        action_reason_code.as_str(),
+        "missing_assertions" | "missing_behavior_scenario"
+    ) {
+        assertion_starters_for_missing_assertions(entry, ctx.include_full)
+    } else {
+        Vec::new()
+    };
+    let payload = behavior_payload(
+        &[next_id.to_string()],
+        Some(&action_reason_code),
+        retry_counts,
+        ledger_entries,
+        &[],
+        assertion_starters,
+        None,
+    );
+    Some(enrich::NextAction::Edit {
+        path: "scenarios/plan.json".to_string(),
+        content,
+        reason,
+        edit_strategy: crate::status::verification::BEHAVIOR_SCENARIO_EDIT_STRATEGY.to_string(),
+        payload,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn maybe_set_behavior_next_action(
+    ctx: &mut QueueVerificationContext<'_>,
+    summary: &mut enrich::VerificationTriageSummary,
+    required_ids: &[String],
+    remaining_set: &std::collections::BTreeSet<String>,
+    missing_value_examples: &std::collections::BTreeSet<String>,
+    needs_apply_ids: &std::collections::BTreeSet<String>,
+    outputs_equal_without_workaround: &[String],
+    outputs_equal_with_workaround_needs_rerun: &[String],
+    outputs_equal_with_workaround_ready_for_exclusion: &[String],
+    retry_counts: &std::collections::BTreeMap<String, usize>,
+    ledger_entries: &LedgerEntries,
+) {
+    let can_set_next_action = ctx.verification_next_action.is_none()
+        && ctx.missing.is_empty()
+        && ctx.local_blockers.is_empty();
+    if !can_set_next_action {
+        return;
+    }
+
+    if !outputs_equal_without_workaround.is_empty() {
+        let content = surface_overlays_requires_argv_stub_batch(
+            ctx.paths,
+            ctx.surface,
+            outputs_equal_without_workaround,
+        );
+        summary.stub_blockers_preview = build_stub_blockers_preview(
+            ctx,
+            outputs_equal_without_workaround,
+            ledger_entries,
+            STUB_REASON_OUTPUTS_EQUAL_NEEDS_WORKAROUND,
+            true,
+        );
+        let payload = behavior_payload(
+            outputs_equal_without_workaround,
+            Some("outputs_equal"),
+            retry_counts,
+            ledger_entries,
+            &["overlays[].invocation.requires_argv"],
+            Vec::new(),
+            None,
+        );
+        *ctx.verification_next_action = Some(enrich::NextAction::Edit {
+            path: "inventory/surface.overlays.json".to_string(),
+            content,
+            reason: "add requires_argv workaround overlays in inventory/surface.overlays.json; see verification.stub_blockers_preview".to_string(),
+            edit_strategy: enrich::default_edit_strategy(),
+            payload,
+        });
+        return;
+    }
+
+    if !outputs_equal_with_workaround_needs_rerun.is_empty() {
+        let (cap_hit, needs_rerun) = partition_cap_hit(
+            outputs_equal_with_workaround_needs_rerun.to_vec(),
+            retry_counts,
+        );
+        if !set_outputs_equal_cap_hit_next_action(
+            ctx,
+            summary,
+            &cap_hit,
+            retry_counts,
+            ledger_entries,
+        ) && !needs_rerun.is_empty()
+        {
+            summary.stub_blockers_preview = build_stub_blockers_preview(
+                ctx,
+                &needs_rerun,
+                ledger_entries,
+                STUB_REASON_OUTPUTS_EQUAL_AFTER_WORKAROUND,
+                true,
+            );
+            let root = ctx.paths.root().display();
+            let next_id = needs_rerun[0].clone();
+            let payload = behavior_payload(
+                &needs_rerun,
+                Some("outputs_equal"),
+                retry_counts,
+                ledger_entries,
+                &["overlays[].behavior_exclusion"],
+                Vec::new(),
+                None,
+            );
+            *ctx.verification_next_action = Some(enrich::NextAction::Command {
+                command: format!("bman apply --doc-pack {root}"),
+                reason: format!(
+                    "rerun behavior delta checks after requires_argv workaround for {next_id} ({} targets)",
+                    needs_rerun.len()
+                ),
+                payload,
+            });
+        }
+        return;
+    }
+
+    if !outputs_equal_with_workaround_ready_for_exclusion.is_empty() {
+        let (cap_hit, ready_for_exclusion) = partition_cap_hit(
+            outputs_equal_with_workaround_ready_for_exclusion.to_vec(),
+            retry_counts,
+        );
+        if !set_outputs_equal_cap_hit_next_action(
+            ctx,
+            summary,
+            &cap_hit,
+            retry_counts,
+            ledger_entries,
+        ) && !ready_for_exclusion.is_empty()
+        {
+            let content = surface_overlays_behavior_exclusion_stub_batch(
+                ctx.paths,
+                ctx.surface,
+                &ready_for_exclusion,
+                ledger_entries,
+            );
+            summary.stub_blockers_preview = build_stub_blockers_preview(
+                ctx,
+                &ready_for_exclusion,
+                ledger_entries,
+                STUB_REASON_OUTPUTS_EQUAL_AFTER_WORKAROUND,
+                true,
+            );
+            let payload = behavior_payload(
+                &ready_for_exclusion,
+                Some("outputs_equal"),
+                retry_counts,
+                ledger_entries,
+                &["overlays[].behavior_exclusion"],
+                Vec::new(),
+                None,
+            );
+            *ctx.verification_next_action = Some(enrich::NextAction::Edit {
+                path: "inventory/surface.overlays.json".to_string(),
+                content,
+                reason: "record behavior exclusions in inventory/surface.overlays.json; see verification.stub_blockers_preview".to_string(),
+                edit_strategy: enrich::default_edit_strategy(),
+                payload,
+            });
+        }
+        return;
+    }
+
+    if let Some(next_id) =
+        first_behavior_reason_target(required_ids, remaining_set, needs_apply_ids, ledger_entries)
+    {
+        if let Some(action) = reason_based_behavior_next_action(
+            ctx,
+            summary,
+            &next_id,
+            missing_value_examples,
+            retry_counts,
+            ledger_entries,
+        ) {
+            *ctx.verification_next_action = Some(action);
+        }
+        return;
+    }
+
+    if let Some(next_id) = first_matching_id(required_ids, needs_apply_ids) {
+        let root = ctx.paths.root().display();
+        let payload = behavior_payload(
+            std::slice::from_ref(&next_id),
+            Some("needs_apply"),
+            retry_counts,
+            ledger_entries,
+            &[],
+            Vec::new(),
+            None,
+        );
+        *ctx.verification_next_action = Some(enrich::NextAction::Command {
+            command: format!("bman apply --doc-pack {root}"),
+            reason: format!("run behavior verification for {next_id}"),
+            payload,
+        });
+    }
+}
+
 #[allow(clippy::cognitive_complexity, clippy::too_many_lines)]
 fn eval_behavior_verification(ctx: &mut QueueVerificationContext<'_>) -> VerificationEvalOutput {
     let Some(targets) = scenarios::auto_verification_targets_for_behavior(ctx.plan, ctx.surface)
@@ -807,293 +922,19 @@ fn eval_behavior_verification(ctx: &mut QueueVerificationContext<'_>) -> Verific
         stub_blockers_preview: Vec::new(),
     };
 
-    let can_set_next_action = ctx.verification_next_action.is_none()
-        && ctx.missing.is_empty()
-        && ctx.local_blockers.is_empty();
-
-    if can_set_next_action {
-        let non_blocking_missing_value_examples = std::collections::BTreeSet::new();
-        if !outputs_equal_without_workaround.is_empty() {
-            let content = surface_overlays_requires_argv_stub_batch(
-                ctx.paths,
-                ctx.surface,
-                &outputs_equal_without_workaround,
-            );
-            summary.stub_blockers_preview = build_stub_blockers_preview(
-                ctx,
-                &outputs_equal_without_workaround,
-                ledger_entries,
-                STUB_REASON_OUTPUTS_EQUAL_NEEDS_WORKAROUND,
-                true,
-            );
-            let payload = behavior_payload(
-                &outputs_equal_without_workaround,
-                Some("outputs_equal"),
-                &retry_counts,
-                ledger_entries,
-                &["overlays[].invocation.requires_argv"],
-                Vec::new(),
-                None,
-            );
-            *ctx.verification_next_action = Some(enrich::NextAction::Edit {
-                path: "inventory/surface.overlays.json".to_string(),
-                content,
-                reason: "add requires_argv workaround overlays in inventory/surface.overlays.json; see verification.stub_blockers_preview".to_string(),
-                edit_strategy: enrich::default_edit_strategy(),
-                payload,
-            });
-        } else if !outputs_equal_with_workaround_needs_rerun.is_empty() {
-            let (cap_hit, needs_rerun) =
-                partition_cap_hit(outputs_equal_with_workaround_needs_rerun, &retry_counts);
-            if !set_outputs_equal_cap_hit_next_action(
-                ctx,
-                &mut summary,
-                &cap_hit,
-                &retry_counts,
-                ledger_entries,
-            ) && !needs_rerun.is_empty()
-            {
-                summary.stub_blockers_preview = build_stub_blockers_preview(
-                    ctx,
-                    &needs_rerun,
-                    ledger_entries,
-                    STUB_REASON_OUTPUTS_EQUAL_AFTER_WORKAROUND,
-                    true,
-                );
-                let root = ctx.paths.root().display();
-                let next_id = needs_rerun[0].clone();
-                let payload = behavior_payload(
-                    &needs_rerun,
-                    Some("outputs_equal"),
-                    &retry_counts,
-                    ledger_entries,
-                    &["overlays[].behavior_exclusion"],
-                    Vec::new(),
-                    None,
-                );
-                *ctx.verification_next_action = Some(enrich::NextAction::Command {
-                    command: format!("bman apply --doc-pack {root}"),
-                    reason: format!(
-                        "rerun behavior delta checks after requires_argv workaround for {next_id} ({} targets)",
-                        needs_rerun.len()
-                    ),
-                    payload,
-                });
-            }
-        } else if !outputs_equal_with_workaround_ready_for_exclusion.is_empty() {
-            let (cap_hit, ready_for_exclusion) = partition_cap_hit(
-                outputs_equal_with_workaround_ready_for_exclusion,
-                &retry_counts,
-            );
-            if !set_outputs_equal_cap_hit_next_action(
-                ctx,
-                &mut summary,
-                &cap_hit,
-                &retry_counts,
-                ledger_entries,
-            ) && !ready_for_exclusion.is_empty()
-            {
-                let content = surface_overlays_behavior_exclusion_stub_batch(
-                    ctx.paths,
-                    ctx.surface,
-                    &ready_for_exclusion,
-                    ledger_entries,
-                );
-                summary.stub_blockers_preview = build_stub_blockers_preview(
-                    ctx,
-                    &ready_for_exclusion,
-                    ledger_entries,
-                    STUB_REASON_OUTPUTS_EQUAL_AFTER_WORKAROUND,
-                    true,
-                );
-                let payload = behavior_payload(
-                    &ready_for_exclusion,
-                    Some("outputs_equal"),
-                    &retry_counts,
-                    ledger_entries,
-                    &["overlays[].behavior_exclusion"],
-                    Vec::new(),
-                    None,
-                );
-                *ctx.verification_next_action = Some(enrich::NextAction::Edit {
-                    path: "inventory/surface.overlays.json".to_string(),
-                    content,
-                    reason: "record behavior exclusions in inventory/surface.overlays.json; see verification.stub_blockers_preview".to_string(),
-                    edit_strategy: enrich::default_edit_strategy(),
-                    payload,
-                });
-            }
-        } else if let Some(next_id) = first_reason_id_by_priority(
-            required_ids,
-            &remaining_set,
-            &non_blocking_missing_value_examples,
-            &needs_apply_ids,
-            ledger_entries,
-            &[
-                BehaviorReasonKind::RequiredValueMissing,
-                BehaviorReasonKind::AssertionSeedPathNotSeeded,
-                BehaviorReasonKind::SeedSignatureMismatch,
-                BehaviorReasonKind::SeedMismatch,
-                BehaviorReasonKind::AssertionFailed,
-                BehaviorReasonKind::ScenarioFailed,
-                BehaviorReasonKind::MissingAssertions,
-            ],
-        )
-        .or_else(|| {
-            first_reason_id_by_priority(
-                required_ids,
-                &remaining_set,
-                &non_blocking_missing_value_examples,
-                &needs_apply_ids,
-                ledger_entries,
-                &[
-                    BehaviorReasonKind::MissingDeltaAssertion,
-                    BehaviorReasonKind::MissingSemanticPredicate,
-                ],
-            )
-        })
-        .or_else(|| {
-            first_reason_id_by_priority(
-                required_ids,
-                &remaining_set,
-                &non_blocking_missing_value_examples,
-                &needs_apply_ids,
-                ledger_entries,
-                &[BehaviorReasonKind::MissingBehaviorScenario],
-            )
-        })
-        .or_else(|| {
-            first_reason_id(
-                required_ids,
-                &remaining_set,
-                &non_blocking_missing_value_examples,
-                &needs_apply_ids,
-            )
-        }) {
-            let reason_code =
-                behavior_reason_code_for_id(&next_id, &missing_value_examples, ledger_entries);
-            let entry = ledger_entries.get(&next_id);
-            let scenario_missing =
-                entry.is_some_and(|entry| entry.behavior_scenario_ids.is_empty());
-            let scenario_id = entry
-                .and_then(|entry| {
-                    entry
-                        .behavior_unverified_scenario_id
-                        .as_deref()
-                        .or_else(|| entry.behavior_scenario_ids.first().map(String::as_str))
-                })
-                .map(str::to_string)
-                .unwrap_or_else(|| next_id.clone());
-            let assertion_kind =
-                entry.and_then(|entry| entry.behavior_unverified_assertion_kind.as_deref());
-            let assertion_seed_path =
-                entry.and_then(|entry| entry.behavior_unverified_assertion_seed_path.as_deref());
-            let action_reason_code = if scenario_missing && reason_code == "missing_value_examples"
-            {
-                "missing_behavior_scenario".to_string()
-            } else {
-                reason_code.clone()
-            };
-            let retry_count = retry_counts.get(&next_id).copied().unwrap_or(0);
-            if reason_code == "missing_delta_assertion" && retry_count >= BEHAVIOR_RERUN_CAP {
-                *ctx.verification_next_action = Some(suggested_exclusion_only_next_action(
-                    ctx,
-                    std::slice::from_ref(&next_id),
-                    "missing_delta_assertion",
-                    &retry_counts,
-                    ledger_entries,
-                ));
-            } else {
-                let content = if scenario_missing {
-                    let target_ids = vec![next_id.clone()];
-                    summary.stub_blockers_preview = build_stub_blockers_preview(
-                        ctx,
-                        &target_ids,
-                        ledger_entries,
-                        &reason_code,
-                        false,
-                    );
-                    crate::status::verification::behavior_scenarios_batch_stub(
-                        ctx.plan,
-                        ctx.surface,
-                        &target_ids,
-                    )
-                    .or_else(|| {
-                        crate::status::verification::behavior_baseline_stub(ctx.plan, ctx.surface)
-                    })
-                } else {
-                    crate::status::verification::behavior_scenario_stub(ctx.plan, &scenario_id)
-                        .or_else(|| {
-                            crate::status::verification::behavior_scenarios_batch_stub(
-                                ctx.plan,
-                                ctx.surface,
-                                std::slice::from_ref(&next_id),
-                            )
-                        })
-                };
-                if let Some(content) = content {
-                    let mut reason = behavior_unverified_reason(
-                        Some(&action_reason_code),
-                        &scenario_id,
-                        &next_id,
-                        assertion_kind,
-                        assertion_seed_path,
-                    );
-                    if action_reason_code == "required_value_missing" {
-                        reason.push_str("; ");
-                        reason.push_str(&required_value_argv_rewrite_hint(ctx.surface, &next_id));
-                    }
-                    if scenario_missing && reason_code == "missing_value_examples" {
-                        reason.push_str(
-                            "; scaffold argv uses a placeholder value token (optional: add value_examples overlay later)",
-                        );
-                    }
-                    reason.push_str("; apply patch as merge/upsert by scenario.id");
-                    let assertion_starters = if matches!(
-                        action_reason_code.as_str(),
-                        "missing_assertions" | "missing_behavior_scenario"
-                    ) {
-                        assertion_starters_for_missing_assertions(entry, ctx.include_full)
-                    } else {
-                        Vec::new()
-                    };
-                    let payload = behavior_payload(
-                        std::slice::from_ref(&next_id),
-                        Some(&action_reason_code),
-                        &retry_counts,
-                        ledger_entries,
-                        &[],
-                        assertion_starters,
-                        None,
-                    );
-                    *ctx.verification_next_action = Some(enrich::NextAction::Edit {
-                        path: "scenarios/plan.json".to_string(),
-                        content,
-                        reason,
-                        edit_strategy: crate::status::verification::BEHAVIOR_SCENARIO_EDIT_STRATEGY
-                            .to_string(),
-                        payload,
-                    });
-                }
-            }
-        } else if let Some(next_id) = first_matching_id(required_ids, &needs_apply_ids) {
-            let root = ctx.paths.root().display();
-            let payload = behavior_payload(
-                std::slice::from_ref(&next_id),
-                Some("needs_apply"),
-                &retry_counts,
-                ledger_entries,
-                &[],
-                Vec::new(),
-                None,
-            );
-            *ctx.verification_next_action = Some(enrich::NextAction::Command {
-                command: format!("bman apply --doc-pack {root}"),
-                reason: format!("run behavior verification for {next_id}"),
-                payload,
-            });
-        }
-    }
+    maybe_set_behavior_next_action(
+        ctx,
+        &mut summary,
+        required_ids,
+        &remaining_set,
+        &missing_value_examples,
+        &needs_apply_ids,
+        &outputs_equal_without_workaround,
+        &outputs_equal_with_workaround_needs_rerun,
+        &outputs_equal_with_workaround_ready_for_exclusion,
+        &retry_counts,
+        ledger_entries,
+    );
 
     let summary_preview = format!(
         "behavior verification: {} remaining ({})",
@@ -1148,27 +989,6 @@ fn modified_epoch_ms(path: &std::path::Path) -> Option<u128> {
     let modified = std::fs::metadata(path).ok()?.modified().ok()?;
     let duration = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
     Some(duration.as_millis())
-}
-
-fn ensure_verification_policy(
-    plan: &scenarios::ScenarioPlan,
-    missing: &mut Vec<String>,
-    verification_next_action: &mut Option<enrich::NextAction>,
-    binary_name: Option<&str>,
-) {
-    if plan.verification.policy.is_some() {
-        return;
-    }
-    missing.push("verification policy missing (scenarios/plan.json)".to_string());
-    let content =
-        serde_json::to_string_pretty(plan).unwrap_or_else(|_| scenarios::plan_stub(binary_name));
-    *verification_next_action = Some(enrich::NextAction::Edit {
-        path: "scenarios/plan.json".to_string(),
-        content,
-        reason: "add verification policy in scenarios/plan.json".to_string(),
-        edit_strategy: enrich::default_edit_strategy(),
-        payload: None,
-    });
 }
 
 pub(super) fn eval_verification_requirement(
