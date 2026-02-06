@@ -87,7 +87,10 @@ pub fn auto_verification_scenarios(
                 argv,
                 env: BTreeMap::new(),
                 seed_dir: None,
-                seed: None,
+                // Pin inline empty seed so auto scenarios do not inherit behavior defaults.seed.
+                seed: Some(super::ScenarioSeedSpec {
+                    entries: Vec::new(),
+                }),
                 cwd: None,
                 timeout_seconds: None,
                 net_mode: None,
@@ -157,7 +160,7 @@ fn existence_argv(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scenarios::{VerificationPlan, VerificationPolicy};
+    use crate::scenarios::{ScenarioDefaults, VerificationPlan, VerificationPolicy};
 
     fn surface_with_option_and_subcommand() -> SurfaceInventory {
         SurfaceInventory {
@@ -265,5 +268,41 @@ mod tests {
             scenario_argv_for_id(&scenarios_b, "auto_verify::subcommand::show"),
             vec!["show".to_string(), "--help".to_string()]
         );
+    }
+
+    #[test]
+    fn auto_verification_digest_ignores_behavior_defaults_seed_changes() {
+        let base_plan = plan_with_policy();
+        let surface = surface_with_option_and_subcommand();
+        let targets = auto_verification_targets(&base_plan, &surface).unwrap();
+        let semantics: Semantics =
+            serde_json::from_str(crate::templates::ENRICH_SEMANTICS_JSON).unwrap();
+        let scenarios = auto_verification_scenarios(&targets, &semantics);
+        let scenario = scenarios
+            .iter()
+            .find(|candidate| candidate.id == "auto_verify::option::--color")
+            .cloned()
+            .expect("auto scenario");
+
+        let mut plan_a = base_plan.clone();
+        plan_a.defaults = Some(ScenarioDefaults {
+            seed: Some(super::super::default_behavior_seed()),
+            ..ScenarioDefaults::default()
+        });
+        let mut changed_seed = super::super::default_behavior_seed();
+        changed_seed.entries[0].contents = Some("changed\n".to_string());
+        let mut plan_b = base_plan;
+        plan_b.defaults = Some(ScenarioDefaults {
+            seed: Some(changed_seed),
+            ..ScenarioDefaults::default()
+        });
+
+        let digest_a = super::super::config::effective_scenario_config(&plan_a, &scenario)
+            .expect("digest A")
+            .scenario_digest;
+        let digest_b = super::super::config::effective_scenario_config(&plan_b, &scenario)
+            .expect("digest B")
+            .scenario_digest;
+        assert_eq!(digest_a, digest_b);
     }
 }
