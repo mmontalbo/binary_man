@@ -267,19 +267,15 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<(Vec<PathBuf>, Option<
     let binary_name = inputs.binary_name;
     let staging_root = inputs.staging_root;
     let args = inputs.args;
+    let (wants_surface, wants_coverage_ledger, wants_scenarios, wants_render) = actions
+        .iter()
+        .fold((false, false, false, false), |flags, action| match action {
+            enrich::PlannedAction::SurfaceDiscovery => (true, flags.1, flags.2, flags.3),
+            enrich::PlannedAction::CoverageLedger => (flags.0, true, flags.2, flags.3),
+            enrich::PlannedAction::ScenarioRuns => (flags.0, flags.1, true, flags.3),
+            enrich::PlannedAction::RenderManPage => (flags.0, flags.1, flags.2, true),
+        });
 
-    let wants_surface = actions
-        .iter()
-        .any(|action| matches!(action, enrich::PlannedAction::SurfaceDiscovery));
-    let wants_coverage_ledger = actions
-        .iter()
-        .any(|action| matches!(action, enrich::PlannedAction::CoverageLedger));
-    let wants_scenarios = actions
-        .iter()
-        .any(|action| matches!(action, enrich::PlannedAction::ScenarioRuns));
-    let wants_render = actions
-        .iter()
-        .any(|action| matches!(action, enrich::PlannedAction::RenderManPage));
     let requirements = enrich::normalized_requirements(&ctx.config);
     let emit_coverage_ledger = requirements
         .iter()

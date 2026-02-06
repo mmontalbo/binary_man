@@ -298,6 +298,63 @@ fn error_chain_message(err: &anyhow::Error) -> String {
         .join(": ")
 }
 
+struct BlockedStatusSummaryArgs<'a> {
+    binary_name: Option<&'a str>,
+    lock_status: enrich::LockStatus,
+    plan_status: enrich::PlanStatus,
+    blockers: Vec<enrich::Blocker>,
+    decision_reason: String,
+    next_action: enrich::NextAction,
+    force_used: bool,
+}
+
+fn blocked_status_summary(args: BlockedStatusSummaryArgs<'_>) -> Result<enrich::StatusSummary> {
+    let BlockedStatusSummaryArgs {
+        binary_name,
+        lock_status,
+        plan_status,
+        blockers,
+        decision_reason,
+        next_action,
+        force_used,
+    } = args;
+    Ok(enrich::StatusSummary {
+        schema_version: 1,
+        generated_at_epoch_ms: enrich::now_epoch_ms()?,
+        binary_name: binary_name.map(str::to_string),
+        lock: lock_status,
+        plan: plan_status,
+        requirements: Vec::new(),
+        missing_artifacts: Vec::new(),
+        blockers,
+        scenario_failures: Vec::new(),
+        lens_summary: Vec::new(),
+        decision: enrich::Decision::Blocked,
+        decision_reason: Some(decision_reason),
+        next_action,
+        warnings: Vec::new(),
+        man_warnings: Vec::new(),
+        force_used,
+    })
+}
+
+fn blocker(code: &str, message: String, evidence: enrich::EvidenceRef) -> enrich::Blocker {
+    enrich::Blocker {
+        code: code.to_string(),
+        message,
+        evidence: vec![evidence],
+        next_action: None,
+    }
+}
+
+fn apply_refresh_next_action(paths: &enrich::DocPackPaths, reason: &str) -> enrich::NextAction {
+    enrich::NextAction::Command {
+        command: format!("bman apply --doc-pack {}", paths.root().display()),
+        reason: reason.to_string(),
+        payload: None,
+    }
+}
+
 fn build_invalid_config_summary(
     paths: &enrich::DocPackPaths,
     binary_name: Option<&str>,
@@ -307,36 +364,23 @@ fn build_invalid_config_summary(
     message: String,
     force_used: bool,
 ) -> Result<enrich::StatusSummary> {
-    let evidence = paths.evidence_from_path(&paths.config_path())?;
-    let blocker = enrich::Blocker {
-        code: code.to_string(),
-        message,
-        evidence: vec![evidence],
-        next_action: None,
-    };
-    let stub = enrich::config_stub();
-    Ok(enrich::StatusSummary {
-        schema_version: 1,
-        generated_at_epoch_ms: enrich::now_epoch_ms()?,
-        binary_name: binary_name.map(|name| name.to_string()),
-        lock: lock_status,
-        plan: plan_status,
-        requirements: Vec::new(),
-        missing_artifacts: Vec::new(),
-        blockers: vec![blocker],
-        scenario_failures: Vec::new(),
-        lens_summary: Vec::new(),
-        decision: enrich::Decision::Blocked,
-        decision_reason: Some(format!("blockers present: {}", code)),
+    blocked_status_summary(BlockedStatusSummaryArgs {
+        binary_name,
+        lock_status,
+        plan_status,
+        blockers: vec![blocker(
+            code,
+            message,
+            paths.evidence_from_path(&paths.config_path())?,
+        )],
+        decision_reason: format!("blockers present: {code}"),
         next_action: enrich::NextAction::Edit {
             path: "enrich/config.json".to_string(),
-            content: stub,
+            content: enrich::config_stub(),
             reason: "enrich/config.json invalid; replace with a minimal stub".to_string(),
             edit_strategy: enrich::default_edit_strategy(),
             payload: None,
         },
-        warnings: Vec::new(),
-        man_warnings: Vec::new(),
         force_used,
     })
 }
@@ -350,36 +394,23 @@ fn build_invalid_plan_summary(
     message: String,
     force_used: bool,
 ) -> Result<enrich::StatusSummary> {
-    let evidence = paths.evidence_from_path(&paths.scenarios_plan_path())?;
-    let blocker = enrich::Blocker {
-        code: code.to_string(),
-        message,
-        evidence: vec![evidence],
-        next_action: None,
-    };
-    let stub = scenarios::plan_stub(binary_name);
-    Ok(enrich::StatusSummary {
-        schema_version: 1,
-        generated_at_epoch_ms: enrich::now_epoch_ms()?,
-        binary_name: binary_name.map(|name| name.to_string()),
-        lock: lock_status,
-        plan: plan_status,
-        requirements: Vec::new(),
-        missing_artifacts: Vec::new(),
-        blockers: vec![blocker],
-        scenario_failures: Vec::new(),
-        lens_summary: Vec::new(),
-        decision: enrich::Decision::Blocked,
-        decision_reason: Some(format!("blockers present: {}", code)),
+    blocked_status_summary(BlockedStatusSummaryArgs {
+        binary_name,
+        lock_status,
+        plan_status,
+        blockers: vec![blocker(
+            code,
+            message,
+            paths.evidence_from_path(&paths.scenarios_plan_path())?,
+        )],
+        decision_reason: format!("blockers present: {code}"),
         next_action: enrich::NextAction::Edit {
             path: "scenarios/plan.json".to_string(),
-            content: stub,
+            content: scenarios::plan_stub(binary_name),
             reason: "scenarios/plan.json invalid; replace with a minimal stub".to_string(),
             edit_strategy: enrich::default_edit_strategy(),
             payload: None,
         },
-        warnings: Vec::new(),
-        man_warnings: Vec::new(),
         force_used,
     })
 }
@@ -411,23 +442,19 @@ fn build_parse_error_summary(args: ParseErrorSummaryArgs<'_>) -> Result<enrich::
     let mut blockers = Vec::new();
 
     if let Some(message) = lock_parse_error {
-        let evidence = paths.evidence_from_path(&paths.lock_path())?;
-        blockers.push(enrich::Blocker {
-            code: "lock_parse_error".to_string(),
+        blockers.push(blocker(
+            "lock_parse_error",
             message,
-            evidence: vec![evidence],
-            next_action: None,
-        });
+            paths.evidence_from_path(&paths.lock_path())?,
+        ));
     }
 
     if let Some(message) = plan_parse_error {
-        let evidence = paths.evidence_from_path(&paths.plan_path())?;
-        blockers.push(enrich::Blocker {
-            code: "plan_parse_error".to_string(),
+        blockers.push(blocker(
+            "plan_parse_error",
             message,
-            evidence: vec![evidence],
-            next_action: None,
-        });
+            paths.evidence_from_path(&paths.plan_path())?,
+        ));
     }
 
     let mut next_action = match config_state {
@@ -464,19 +491,13 @@ fn build_parse_error_summary(args: ParseErrorSummaryArgs<'_>) -> Result<enrich::
     };
 
     if next_action.is_none() {
-        if lock_parse_error_present {
-            next_action = Some(enrich::NextAction::Command {
-                command: format!("bman apply --doc-pack {}", paths.root().display()),
-                reason: "lock parse error; apply will refresh".to_string(),
-                payload: None,
+        next_action = lock_parse_error_present
+            .then(|| apply_refresh_next_action(paths, "lock parse error; apply will refresh"))
+            .or_else(|| {
+                plan_parse_error_present.then(|| {
+                    apply_refresh_next_action(paths, "plan parse error; apply will refresh")
+                })
             });
-        } else if plan_parse_error_present {
-            next_action = Some(enrich::NextAction::Command {
-                command: format!("bman apply --doc-pack {}", paths.root().display()),
-                reason: "plan parse error; apply will refresh".to_string(),
-                payload: None,
-            });
-        }
     }
 
     let mut next_action = next_action.unwrap_or_else(|| enrich::NextAction::Command {
@@ -490,22 +511,13 @@ fn build_parse_error_summary(args: ParseErrorSummaryArgs<'_>) -> Result<enrich::
         .map(|blocker| blocker.code.clone())
         .collect();
 
-    Ok(enrich::StatusSummary {
-        schema_version: 1,
-        generated_at_epoch_ms: enrich::now_epoch_ms()?,
-        binary_name: binary_name.map(|name| name.to_string()),
-        lock: lock_status,
-        plan: plan_status,
-        requirements: Vec::new(),
-        missing_artifacts: Vec::new(),
+    blocked_status_summary(BlockedStatusSummaryArgs {
+        binary_name,
+        lock_status,
+        plan_status,
         blockers,
-        scenario_failures: Vec::new(),
-        lens_summary: Vec::new(),
-        decision: enrich::Decision::Blocked,
-        decision_reason: Some(format!("blockers present: {}", codes.join(", "))),
+        decision_reason: format!("blockers present: {}", codes.join(", ")),
         next_action,
-        warnings: Vec::new(),
-        man_warnings: Vec::new(),
         force_used,
     })
 }
