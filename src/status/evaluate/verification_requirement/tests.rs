@@ -1,12 +1,13 @@
-
 use super::{
     eval_behavior_verification, load_behavior_retry_counts,
-    outputs_equal_workaround_needs_delta_rerun, suggested_exclusion_only_next_action,
-    QueueVerificationContext, BEHAVIOR_RERUN_CAP,
+    outputs_equal_workaround_needs_delta_rerun, project_behavior_scaffold_merge,
+    suggested_exclusion_only_next_action, QueueVerificationContext, BEHAVIOR_BATCH_LIMIT,
+    BEHAVIOR_RERUN_CAP,
 };
 use crate::enrich;
 use crate::scenarios;
 use crate::surface;
+use crate::verification_progress::load_verification_progress;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -127,6 +128,183 @@ fn minimal_surface(surface_id: &str) -> surface::SurfaceInventory {
     }
 }
 
+fn outputs_equal_needs_rerun_fixture(
+    name: &str,
+) -> (
+    std::path::PathBuf,
+    enrich::DocPackPaths,
+    scenarios::ScenarioPlan,
+    surface::SurfaceInventory,
+    BTreeMap<String, scenarios::VerificationEntry>,
+) {
+    let root = temp_doc_pack_root(name);
+    let paths = enrich::DocPackPaths::new(root.clone());
+    let mut plan: scenarios::ScenarioPlan =
+        serde_json::from_str(&scenarios::plan_stub(Some("bin"))).expect("parse plan stub");
+    plan.scenarios
+        .retain(|scenario| scenario.kind != scenarios::ScenarioKind::Behavior);
+    plan.scenarios.push(scenarios::ScenarioSpec {
+        id: "baseline".to_string(),
+        kind: scenarios::ScenarioKind::Behavior,
+        publish: false,
+        argv: vec!["work".to_string()],
+        env: BTreeMap::new(),
+        seed_dir: None,
+        seed: None,
+        cwd: None,
+        timeout_seconds: None,
+        net_mode: None,
+        no_sandbox: None,
+        no_strace: None,
+        snippet_max_lines: None,
+        snippet_max_bytes: None,
+        coverage_tier: Some("behavior".to_string()),
+        baseline_scenario_id: None,
+        assertions: Vec::new(),
+        covers: Vec::new(),
+        coverage_ignore: true,
+        expect: scenarios::ScenarioExpect::default(),
+    });
+    plan.scenarios.push(scenarios::ScenarioSpec {
+        id: "verify_color".to_string(),
+        kind: scenarios::ScenarioKind::Behavior,
+        publish: false,
+        argv: vec!["--color".to_string(), "work".to_string()],
+        env: BTreeMap::new(),
+        seed_dir: None,
+        seed: None,
+        cwd: None,
+        timeout_seconds: None,
+        net_mode: None,
+        no_sandbox: None,
+        no_strace: None,
+        snippet_max_lines: None,
+        snippet_max_bytes: None,
+        coverage_tier: Some("behavior".to_string()),
+        baseline_scenario_id: Some("baseline".to_string()),
+        assertions: Vec::new(),
+        covers: vec!["--color".to_string()],
+        coverage_ignore: false,
+        expect: scenarios::ScenarioExpect::default(),
+    });
+    let surface = surface::SurfaceInventory {
+        schema_version: 2,
+        generated_at_epoch_ms: 0,
+        binary_name: Some("bin".to_string()),
+        inputs_hash: None,
+        discovery: Vec::new(),
+        items: vec![surface::SurfaceItem {
+            kind: "option".to_string(),
+            id: "--color".to_string(),
+            display: "--color".to_string(),
+            description: None,
+            forms: vec!["--color".to_string()],
+            invocation: surface::SurfaceInvocation {
+                requires_argv: vec!["work".to_string()],
+                ..Default::default()
+            },
+            evidence: Vec::new(),
+        }],
+        blockers: Vec::new(),
+    };
+
+    let delta_100 = "inventory/scenarios/verify_color-100.json";
+    let delta_300 = "inventory/scenarios/verify_color-300.json";
+    write_file(&root.join(delta_100), r#"{"scenario_id":"verify_color"}"#);
+    write_file(&root.join(delta_300), r#"{"scenario_id":"verify_color"}"#);
+    std::thread::sleep(Duration::from_millis(20));
+    write_file(
+        &root.join("inventory/surface.overlays.json"),
+        r#"{"schema_version":3,"items":[],"overlays":[]}"#,
+    );
+
+    let mut entry = verification_entry(delta_300);
+    entry.delta_evidence_paths = vec![delta_300.to_string()];
+    entry.behavior_scenario_paths = vec![delta_300.to_string()];
+    let mut entries = BTreeMap::new();
+    entries.insert("--color".to_string(), entry);
+
+    (root, paths, plan, surface, entries)
+}
+
+fn eval_behavior_next_action(
+    plan: &scenarios::ScenarioPlan,
+    surface: &surface::SurfaceInventory,
+    ledger_entries: &BTreeMap<String, scenarios::VerificationEntry>,
+    paths: &enrich::DocPackPaths,
+) -> enrich::NextAction {
+    let mut evidence = Vec::new();
+    let mut local_blockers = Vec::new();
+    let mut verification_next_action = None;
+    let missing = Vec::new();
+    let surface_evidence = enrich::EvidenceRef {
+        path: "inventory/surface.json".to_string(),
+        sha256: None,
+    };
+    let scenarios_evidence = enrich::EvidenceRef {
+        path: "scenarios/plan.json".to_string(),
+        sha256: None,
+    };
+    let mut ctx = QueueVerificationContext {
+        plan,
+        surface,
+        include_full: true,
+        ledger_entries: Some(ledger_entries),
+        evidence: &mut evidence,
+        local_blockers: &mut local_blockers,
+        verification_next_action: &mut verification_next_action,
+        missing: &missing,
+        paths,
+        surface_evidence: &surface_evidence,
+        scenarios_evidence: &scenarios_evidence,
+    };
+    let _ = eval_behavior_verification(&mut ctx);
+    ctx.verification_next_action
+        .clone()
+        .expect("expected next action")
+}
+
+fn effective_seed_paths_for_test(
+    plan: &scenarios::ScenarioPlan,
+    scenario: &scenarios::ScenarioSpec,
+) -> std::collections::BTreeSet<String> {
+    let defaults = plan.defaults.as_ref();
+    let seed = if scenario.seed.is_some() {
+        scenario.seed.as_ref()
+    } else if scenario.seed_dir.is_some() {
+        None
+    } else {
+        defaults.and_then(|value| value.seed.as_ref())
+    };
+    let mut paths = std::collections::BTreeSet::new();
+    if let Some(seed) = seed {
+        for entry in &seed.entries {
+            let path = entry.path.trim();
+            if path.is_empty() {
+                continue;
+            }
+            paths.insert(path.to_string());
+        }
+    }
+    paths
+}
+
+fn assertion_seed_path(assertion: &scenarios::BehaviorAssertion) -> Option<&str> {
+    match assertion {
+        scenarios::BehaviorAssertion::BaselineStdoutNotContainsSeedPath { seed_path, .. }
+        | scenarios::BehaviorAssertion::BaselineStdoutContainsSeedPath { seed_path, .. }
+        | scenarios::BehaviorAssertion::VariantStdoutContainsSeedPath { seed_path, .. }
+        | scenarios::BehaviorAssertion::VariantStdoutNotContainsSeedPath { seed_path, .. }
+        | scenarios::BehaviorAssertion::BaselineStdoutHasLine { seed_path, .. }
+        | scenarios::BehaviorAssertion::BaselineStdoutNotHasLine { seed_path, .. }
+        | scenarios::BehaviorAssertion::VariantStdoutHasLine { seed_path, .. }
+        | scenarios::BehaviorAssertion::VariantStdoutNotHasLine { seed_path, .. } => {
+            Some(seed_path.as_str())
+        }
+        scenarios::BehaviorAssertion::VariantStdoutDiffersFromBaseline {} => None,
+    }
+}
+
 #[test]
 fn outputs_equal_workaround_needs_rerun_when_overlays_are_newer_than_delta_evidence() {
     let root = temp_doc_pack_root("bman-verification-rerun");
@@ -164,7 +342,7 @@ fn outputs_equal_workaround_does_not_need_rerun_when_delta_evidence_is_newer() {
 }
 
 #[test]
-fn retry_count_does_not_overcount_from_unrelated_historical_files() {
+fn outputs_equal_retry_count_uses_verification_progress_state() {
     let root = temp_doc_pack_root("bman-verification-retry-count");
     let paths = enrich::DocPackPaths::new(root.clone());
     let current_delta_rel = "inventory/scenarios/verify_color-300.json";
@@ -173,22 +351,24 @@ fn retry_count_does_not_overcount_from_unrelated_historical_files() {
         r#"{"scenario_id":"verify_color"}"#,
     );
     write_file(
-        &root.join("inventory/scenarios/verify_color-100.json"),
-        r#"{"scenario_id":"verify_color"}"#,
-    );
-    write_file(
-        &root.join("inventory/scenarios/verify_color-200.json"),
-        r#"{"scenario_id":"verify_color"}"#,
-    );
-    write_file(
-        &root.join("inventory/scenarios/unrelated-999.json"),
-        r#"{"scenario_id":"unrelated"}"#,
+        &root.join("inventory/verification_progress.json"),
+        r#"{
+  "schema_version": 1,
+  "outputs_equal_retries_by_surface": {
+    "--color": {
+      "retry_count": 2,
+      "delta_signature": "scenario:verify_color"
+    }
+  }
+}"#,
     );
 
     let mut ledger_entries = BTreeMap::new();
     ledger_entries.insert("--color".to_string(), verification_entry(current_delta_rel));
-    let retry_counts = load_behavior_retry_counts(&paths, &ledger_entries);
-    assert_eq!(retry_counts.get("--color").copied(), Some(0));
+    let progress = load_verification_progress(&paths);
+    let retry_counts =
+        load_behavior_retry_counts(&paths, &ledger_entries, &progress, &["--color".to_string()]);
+    assert_eq!(retry_counts.get("--color").copied(), Some(2));
 
     std::fs::remove_dir_all(root).expect("cleanup");
 }
@@ -503,6 +683,380 @@ fn required_value_missing_next_action_includes_argv_rewrite_hint() {
             panic!("expected edit next action");
         }
     }
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn missing_assertions_scaffold_projects_and_uses_seeded_assertions() {
+    let root = temp_doc_pack_root("bman-verification-missing-assertions-valid-scaffold");
+    let paths = enrich::DocPackPaths::new(root.clone());
+    let mut plan: scenarios::ScenarioPlan =
+        serde_json::from_str(&scenarios::plan_stub(Some("bin"))).expect("parse plan stub");
+    plan.defaults = None;
+    plan.scenarios
+        .retain(|scenario| scenario.kind != scenarios::ScenarioKind::Behavior);
+    plan.scenarios.push(scenarios::ScenarioSpec {
+        id: "baseline".to_string(),
+        kind: scenarios::ScenarioKind::Behavior,
+        publish: false,
+        argv: vec!["work".to_string()],
+        env: BTreeMap::new(),
+        seed_dir: None,
+        seed: None,
+        cwd: None,
+        timeout_seconds: None,
+        net_mode: None,
+        no_sandbox: None,
+        no_strace: None,
+        snippet_max_lines: None,
+        snippet_max_bytes: None,
+        coverage_tier: Some("behavior".to_string()),
+        baseline_scenario_id: None,
+        assertions: Vec::new(),
+        covers: Vec::new(),
+        coverage_ignore: true,
+        expect: scenarios::ScenarioExpect::default(),
+    });
+    plan.scenarios.push(scenarios::ScenarioSpec {
+        id: "verify_color".to_string(),
+        kind: scenarios::ScenarioKind::Behavior,
+        publish: false,
+        argv: vec!["--color".to_string(), "work".to_string()],
+        env: BTreeMap::new(),
+        seed_dir: None,
+        seed: None,
+        cwd: None,
+        timeout_seconds: None,
+        net_mode: None,
+        no_sandbox: None,
+        no_strace: None,
+        snippet_max_lines: None,
+        snippet_max_bytes: None,
+        coverage_tier: Some("behavior".to_string()),
+        baseline_scenario_id: Some("baseline".to_string()),
+        assertions: Vec::new(),
+        covers: vec!["--color".to_string()],
+        coverage_ignore: false,
+        expect: scenarios::ScenarioExpect::default(),
+    });
+    let surface = minimal_surface("--color");
+    let mut entry = verification_entry_with_reason("--color", "missing_assertions");
+    entry.behavior_unverified_scenario_id = Some("verify_color".to_string());
+    entry.behavior_scenario_ids = vec!["verify_color".to_string()];
+    entry.behavior_scenario_paths = vec!["inventory/scenarios/verify_color-1.json".to_string()];
+    let mut ledger_entries = BTreeMap::new();
+    ledger_entries.insert("--color".to_string(), entry);
+
+    let next_action = eval_behavior_next_action(&plan, &surface, &ledger_entries, &paths);
+    let content = match next_action {
+        enrich::NextAction::Edit {
+            content, payload, ..
+        } => {
+            let payload = payload.expect("expected behavior payload");
+            assert_eq!(payload.reason_code.as_deref(), Some("missing_assertions"));
+            assert_eq!(payload.target_ids, vec!["--color".to_string()]);
+            content
+        }
+        enrich::NextAction::Command { .. } => panic!("expected edit next action"),
+    };
+    let projected =
+        project_behavior_scaffold_merge(&plan, &root, &content).expect("scaffold merge validates");
+    let baseline = projected
+        .scenarios
+        .iter()
+        .find(|scenario| scenario.id == "baseline")
+        .expect("baseline scenario");
+    let variant = projected
+        .scenarios
+        .iter()
+        .find(|scenario| scenario.id == "verify_color")
+        .expect("variant scenario");
+    assert!(!variant.assertions.is_empty());
+    let baseline_paths = effective_seed_paths_for_test(&projected, baseline);
+    let variant_paths = effective_seed_paths_for_test(&projected, variant);
+    for assertion in &variant.assertions {
+        let Some(seed_path) = assertion_seed_path(assertion) else {
+            continue;
+        };
+        assert!(baseline_paths.contains(seed_path));
+        assert!(variant_paths.contains(seed_path));
+    }
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn missing_behavior_scenario_batches_are_deterministic_and_bounded() {
+    let root = temp_doc_pack_root("bman-verification-missing-behavior-batch");
+    let paths = enrich::DocPackPaths::new(root.clone());
+    let mut plan: scenarios::ScenarioPlan =
+        serde_json::from_str(&scenarios::plan_stub(Some("bin"))).expect("parse plan stub");
+    plan.scenarios
+        .retain(|scenario| scenario.kind != scenarios::ScenarioKind::Behavior);
+
+    let ids: Vec<String> = (0..14).map(|idx| format!("--opt{idx:02}")).collect();
+    let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let surface = minimal_surface_with_ids(&id_refs);
+    let mut ledger_entries = BTreeMap::new();
+    for surface_id in &ids {
+        ledger_entries.insert(
+            surface_id.clone(),
+            verification_entry_with_reason(surface_id, "missing_behavior_scenario"),
+        );
+    }
+
+    let first = eval_behavior_next_action(&plan, &surface, &ledger_entries, &paths);
+    let second = eval_behavior_next_action(&plan, &surface, &ledger_entries, &paths);
+    match (first, second) {
+        (
+            enrich::NextAction::Edit {
+                content: content_a,
+                payload: payload_a,
+                ..
+            },
+            enrich::NextAction::Edit {
+                content: content_b,
+                payload: payload_b,
+                ..
+            },
+        ) => {
+            let payload_a = payload_a.expect("first payload");
+            let payload_b = payload_b.expect("second payload");
+            assert_eq!(
+                payload_a.reason_code.as_deref(),
+                Some("missing_behavior_scenario")
+            );
+            assert_eq!(payload_a.target_ids.len(), BEHAVIOR_BATCH_LIMIT);
+            assert!(payload_a.target_ids.len() > 1);
+            assert_eq!(payload_a.target_ids, payload_b.target_ids);
+            assert_eq!(content_a, content_b);
+        }
+        _ => panic!("expected edit next action on both evaluations"),
+    }
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn missing_assertions_batches_emit_non_empty_assertions_and_validate() {
+    let root = temp_doc_pack_root("bman-verification-missing-assertions-batch");
+    let paths = enrich::DocPackPaths::new(root.clone());
+    let mut plan: scenarios::ScenarioPlan =
+        serde_json::from_str(&scenarios::plan_stub(Some("bin"))).expect("parse plan stub");
+    plan.scenarios
+        .retain(|scenario| scenario.kind != scenarios::ScenarioKind::Behavior);
+    plan.scenarios.push(scenarios::ScenarioSpec {
+        id: "baseline".to_string(),
+        kind: scenarios::ScenarioKind::Behavior,
+        publish: false,
+        argv: vec!["work".to_string()],
+        env: BTreeMap::new(),
+        seed_dir: None,
+        seed: None,
+        cwd: None,
+        timeout_seconds: None,
+        net_mode: None,
+        no_sandbox: None,
+        no_strace: None,
+        snippet_max_lines: None,
+        snippet_max_bytes: None,
+        coverage_tier: Some("behavior".to_string()),
+        baseline_scenario_id: None,
+        assertions: Vec::new(),
+        covers: Vec::new(),
+        coverage_ignore: true,
+        expect: scenarios::ScenarioExpect::default(),
+    });
+
+    let ids: Vec<String> = (0..14).map(|idx| format!("--flag{idx:02}")).collect();
+    let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    for surface_id in &ids {
+        let scenario_id = format!("verify_{}", surface_id.trim_start_matches('-'));
+        plan.scenarios.push(scenarios::ScenarioSpec {
+            id: scenario_id,
+            kind: scenarios::ScenarioKind::Behavior,
+            publish: false,
+            argv: vec![surface_id.clone(), "work".to_string()],
+            env: BTreeMap::new(),
+            seed_dir: None,
+            seed: None,
+            cwd: None,
+            timeout_seconds: None,
+            net_mode: None,
+            no_sandbox: None,
+            no_strace: None,
+            snippet_max_lines: None,
+            snippet_max_bytes: None,
+            coverage_tier: Some("behavior".to_string()),
+            baseline_scenario_id: Some("baseline".to_string()),
+            assertions: Vec::new(),
+            covers: vec![surface_id.clone()],
+            coverage_ignore: false,
+            expect: scenarios::ScenarioExpect::default(),
+        });
+    }
+    let surface = minimal_surface_with_ids(&id_refs);
+    let mut ledger_entries = BTreeMap::new();
+    for surface_id in &ids {
+        let scenario_id = format!("verify_{}", surface_id.trim_start_matches('-'));
+        let mut entry = verification_entry_with_reason(surface_id, "missing_assertions");
+        entry.behavior_unverified_scenario_id = Some(scenario_id.clone());
+        entry.behavior_scenario_ids = vec![scenario_id];
+        entry.behavior_scenario_paths = vec![format!(
+            "inventory/scenarios/verify_{}-1.json",
+            surface_id.trim_start_matches('-')
+        )];
+        ledger_entries.insert(surface_id.clone(), entry);
+    }
+
+    let next_action = eval_behavior_next_action(&plan, &surface, &ledger_entries, &paths);
+    let content = match next_action {
+        enrich::NextAction::Edit {
+            content, payload, ..
+        } => {
+            let payload = payload.expect("expected payload");
+            assert_eq!(payload.reason_code.as_deref(), Some("missing_assertions"));
+            assert_eq!(payload.target_ids.len(), BEHAVIOR_BATCH_LIMIT);
+            assert!(payload.target_ids.len() > 1);
+            content
+        }
+        enrich::NextAction::Command { .. } => panic!("expected edit next action"),
+    };
+
+    let payload_json: serde_json::Value =
+        serde_json::from_str(&content).expect("parse scaffold payload");
+    let upserts = payload_json
+        .get("upsert_scenarios")
+        .and_then(serde_json::Value::as_array)
+        .expect("upsert_scenarios array");
+    for surface_id in ids.iter().take(BEHAVIOR_BATCH_LIMIT) {
+        let upsert = upserts
+            .iter()
+            .find(|scenario| {
+                scenario
+                    .get("covers")
+                    .and_then(serde_json::Value::as_array)
+                    .is_some_and(|covers| {
+                        covers
+                            .iter()
+                            .filter_map(serde_json::Value::as_str)
+                            .any(|cover| cover == surface_id)
+                    })
+            })
+            .expect("upsert scenario for batched target");
+        let assertions = upsert
+            .get("assertions")
+            .and_then(serde_json::Value::as_array)
+            .expect("assertions array");
+        assert!(!assertions.is_empty());
+    }
+
+    let projected =
+        project_behavior_scaffold_merge(&plan, &root, &content).expect("scaffold merge validates");
+    for surface_id in ids.iter().take(BEHAVIOR_BATCH_LIMIT) {
+        let scenario_id = format!("verify_{}", surface_id.trim_start_matches('-'));
+        let scenario = projected
+            .scenarios
+            .iter()
+            .find(|scenario| scenario.id == scenario_id)
+            .expect("projected scenario");
+        assert!(!scenario.assertions.is_empty());
+    }
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn outputs_equal_status_is_read_only_and_pivots_only_from_persisted_cap() {
+    let (root, paths, plan, surface, entries) =
+        outputs_equal_needs_rerun_fixture("bman-verification-outputs-equal-pivot");
+
+    let progress_path = paths.verification_progress_path();
+    for _ in 0..3 {
+        let action = eval_behavior_next_action(&plan, &surface, &entries, &paths);
+        match action {
+            enrich::NextAction::Command {
+                command, reason, ..
+            } => {
+                assert!(command.contains("--rerun-scenario-id verify_color"));
+                assert_ne!(
+                    command.trim(),
+                    format!("bman apply --doc-pack {}", root.display())
+                );
+                assert!(reason.contains("no-progress retry 1/2"));
+            }
+            enrich::NextAction::Edit { .. } => panic!("status-only polling must not advance cap"),
+        }
+    }
+    assert!(
+        !progress_path.is_file(),
+        "status evaluation must not write verification progress"
+    );
+
+    write_file(
+        &progress_path,
+        r#"{
+  "schema_version": 1,
+  "outputs_equal_retries_by_surface": {
+    "--color": {
+      "retry_count": 2,
+      "delta_signature": "scenario:verify_color"
+    }
+  }
+}"#,
+    );
+
+    let edit_action = eval_behavior_next_action(&plan, &surface, &entries, &paths);
+    match edit_action {
+        enrich::NextAction::Edit {
+            path,
+            reason,
+            payload,
+            ..
+        } => {
+            assert_eq!(path, "inventory/surface.overlays.json");
+            assert!(reason.contains("stopped outputs_equal command retries"));
+            let payload = payload.expect("expected payload");
+            assert_eq!(payload.reason_code.as_deref(), Some("outputs_equal"));
+        }
+        enrich::NextAction::Command { .. } => panic!("expected edit after cap"),
+    }
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn outputs_equal_status_does_not_mutate_existing_retry_progress() {
+    let (root, paths, plan, surface, entries) =
+        outputs_equal_needs_rerun_fixture("bman-verification-outputs-equal-read-only");
+    let progress_path = paths.verification_progress_path();
+    write_file(
+        &progress_path,
+        r#"{
+  "schema_version": 1,
+  "outputs_equal_retries_by_surface": {
+    "--color": {
+      "retry_count": 1,
+      "delta_signature": "scenario:verify_color"
+    }
+  }
+}"#,
+    );
+    let before = std::fs::read_to_string(&progress_path).expect("read initial progress");
+
+    for _ in 0..3 {
+        let action = eval_behavior_next_action(&plan, &surface, &entries, &paths);
+        match action {
+            enrich::NextAction::Command { reason, .. } => {
+                assert!(reason.contains("no-progress retry 2/2"));
+            }
+            enrich::NextAction::Edit { .. } => panic!("status-only polling must remain command"),
+        }
+    }
+
+    let after = std::fs::read_to_string(&progress_path).expect("read progress after status");
+    assert_eq!(before, after);
 
     std::fs::remove_dir_all(root).expect("cleanup");
 }

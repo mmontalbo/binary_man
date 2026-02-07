@@ -9,7 +9,7 @@ use super::{format_preview, preview_ids, EvalState};
 use crate::status::verification_policy::{
     BehaviorReasonKind, DeltaOutcomeKind, VerificationStatus, VerificationTier,
 };
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use auto::{eval_auto_verification, AutoVerificationContext};
 use inputs::{base_evidence, ensure_verification_policy, load_verification_inputs};
 use ledger::load_or_build_verification_ledger_entries;
@@ -30,6 +30,10 @@ use selectors::{
 
 use crate::enrich;
 use crate::scenarios;
+use crate::verification_progress::{
+    load_verification_progress, outputs_equal_delta_signature, scenario_id_from_evidence_path,
+    VerificationProgress,
+};
 
 type LedgerEntries = std::collections::BTreeMap<String, scenarios::VerificationEntry>;
 
@@ -69,11 +73,30 @@ const BEHAVIOR_RERUN_CAP: usize = 2;
 const DELTA_PATH_FALLBACK: &str = "inventory/scenarios/<delta_variant>.json";
 const STARTER_SEED_PATH_PLACEHOLDER: &str = "work/item.txt";
 const STARTER_STDOUT_TOKEN_PLACEHOLDER: &str = "item.txt";
+const SCAFFOLD_SENTINEL_SEED_PATH: &str = "work/.bman_assertion_sentinel.txt";
+const SCAFFOLD_SENTINEL_SEED_CONTENTS: &str = "sentinel\n";
 const REQUIRED_VALUE_PLACEHOLDER: &str = "__value__";
 
 #[derive(serde::Deserialize)]
 struct ScenarioEvidenceId {
     scenario_id: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BehaviorMergePatchPayload {
+    #[serde(default)]
+    defaults: Option<serde_json::Value>,
+    #[serde(default)]
+    upsert_scenarios: Vec<scenarios::ScenarioSpec>,
+}
+
+#[derive(serde::Serialize)]
+struct BehaviorScaffoldEditPayload {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    defaults: Option<scenarios::ScenarioDefaults>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    upsert_scenarios: Vec<scenarios::ScenarioSpec>,
 }
 
 fn normalize_target_ids(target_ids: &[String]) -> Vec<String> {
@@ -125,16 +148,6 @@ fn preferred_behavior_scenario_id(entry: &scenarios::VerificationEntry) -> Optio
         .map(str::to_string)
 }
 
-fn scenario_id_from_evidence_path(path: &str) -> Option<String> {
-    let filename = std::path::Path::new(path.trim()).file_name()?.to_str()?;
-    let stem = filename.strip_suffix(".json")?;
-    let (scenario_id, epoch_suffix) = stem.rsplit_once('-')?;
-    epoch_suffix
-        .bytes()
-        .all(|byte| byte.is_ascii_digit())
-        .then(|| scenario_id.to_string())
-}
-
 fn scenario_id_from_evidence_file(paths: &enrich::DocPackPaths, rel_path: &str) -> Option<String> {
     let rel_path = rel_path.trim();
     if rel_path.is_empty() {
@@ -148,7 +161,7 @@ fn scenario_id_from_evidence_file(paths: &enrich::DocPackPaths, rel_path: &str) 
         .filter(|scenario_id| !scenario_id.is_empty())
 }
 
-fn retry_count_for_entry(
+fn historical_retry_count_for_entry(
     paths: &enrich::DocPackPaths,
     entry: &scenarios::VerificationEntry,
 ) -> Option<usize> {
@@ -181,14 +194,47 @@ fn retry_count_for_entry(
     (matching_runs > 0).then_some(matching_runs.saturating_sub(1))
 }
 
-fn load_behavior_retry_counts(
+fn outputs_equal_retry_count_for_surface_id(
+    progress: &VerificationProgress,
+    surface_id: &str,
+    delta_signature: &str,
+) -> usize {
+    progress
+        .outputs_equal_retries_by_surface
+        .get(surface_id)
+        .filter(|entry| entry.delta_signature.as_deref().unwrap_or_default() == delta_signature)
+        .map_or(0, |entry| entry.retry_count)
+}
+
+fn load_historical_behavior_retry_counts(
     paths: &enrich::DocPackPaths,
     ledger_entries: &LedgerEntries,
 ) -> std::collections::BTreeMap<String, usize> {
     let mut retry_counts = std::collections::BTreeMap::new();
     for (surface_id, entry) in ledger_entries {
-        if let Some(retry_count) = retry_count_for_entry(paths, entry) {
+        if let Some(retry_count) = historical_retry_count_for_entry(paths, entry) {
             retry_counts.insert(surface_id.clone(), retry_count);
+        }
+    }
+    retry_counts
+}
+
+fn load_behavior_retry_counts(
+    paths: &enrich::DocPackPaths,
+    ledger_entries: &LedgerEntries,
+    progress: &VerificationProgress,
+    outputs_equal_surface_ids: &[String],
+) -> std::collections::BTreeMap<String, usize> {
+    let mut retry_counts = load_historical_behavior_retry_counts(paths, ledger_entries);
+    for surface_id in normalize_target_ids(outputs_equal_surface_ids) {
+        let delta_signature =
+            outputs_equal_delta_signature(ledger_entries.get(surface_id.as_str()));
+        let retry_count =
+            outputs_equal_retry_count_for_surface_id(progress, &surface_id, &delta_signature);
+        if retry_count == 0 {
+            retry_counts.remove(&surface_id);
+        } else {
+            retry_counts.insert(surface_id, retry_count);
         }
     }
     retry_counts
@@ -307,6 +353,446 @@ fn assertion_starters_for_missing_assertions(
         starters.truncate(2);
     }
     starters
+}
+
+fn action_reason_code_for_surface_id(
+    surface_id: &str,
+    missing_value_examples: &std::collections::BTreeSet<String>,
+    ledger_entries: &LedgerEntries,
+) -> String {
+    let reason_code =
+        behavior_reason_code_for_id(surface_id, missing_value_examples, ledger_entries);
+    let entry = ledger_entries.get(surface_id);
+    let scenario_missing = entry.is_some_and(|entry| entry.behavior_scenario_ids.is_empty());
+    if scenario_missing && reason_code == "missing_value_examples" {
+        "missing_behavior_scenario".to_string()
+    } else {
+        reason_code
+    }
+}
+
+fn batched_target_ids_for_reason(
+    required_ids: &[String],
+    remaining_set: &std::collections::BTreeSet<String>,
+    missing_value_examples: &std::collections::BTreeSet<String>,
+    needs_apply_ids: &std::collections::BTreeSet<String>,
+    ledger_entries: &LedgerEntries,
+    reason_code: &str,
+    limit: usize,
+) -> Vec<String> {
+    let mut selected = Vec::new();
+    for surface_id in required_ids {
+        if selected.len() >= limit {
+            break;
+        }
+        if !remaining_set.contains(surface_id) {
+            continue;
+        }
+        if missing_value_examples.contains(surface_id) || needs_apply_ids.contains(surface_id) {
+            continue;
+        }
+        if action_reason_code_for_surface_id(surface_id, missing_value_examples, ledger_entries)
+            != reason_code
+        {
+            continue;
+        }
+        selected.push(surface_id.clone());
+    }
+    selected
+}
+
+fn render_behavior_scaffold_content(
+    defaults: Option<scenarios::ScenarioDefaults>,
+    mut upsert_scenarios: Vec<scenarios::ScenarioSpec>,
+) -> Option<String> {
+    upsert_scenarios.sort_by(|a, b| a.id.cmp(&b.id));
+    upsert_scenarios.dedup_by(|a, b| a.id == b.id);
+    if defaults.is_none() && upsert_scenarios.is_empty() {
+        return None;
+    }
+    let payload = BehaviorScaffoldEditPayload {
+        defaults,
+        upsert_scenarios,
+    };
+    serde_json::to_string_pretty(&payload).ok()
+}
+
+fn merge_defaults_patch(
+    plan: &mut scenarios::ScenarioPlan,
+    defaults_patch: &serde_json::Value,
+) -> Result<()> {
+    let defaults_map = defaults_patch
+        .as_object()
+        .ok_or_else(|| anyhow!("merge payload defaults must be a JSON object"))?;
+    let mut merged_defaults = serde_json::to_value(plan.defaults.clone().unwrap_or_default())
+        .map_err(|err| anyhow!("serialize existing scenario defaults: {err}"))?;
+    let merged_map = merged_defaults
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("existing defaults must serialize as a JSON object"))?;
+    for (key, value) in defaults_map {
+        merged_map.insert(key.clone(), value.clone());
+    }
+    let parsed: scenarios::ScenarioDefaults = serde_json::from_value(merged_defaults)
+        .map_err(|err| anyhow!("parse merged scenario defaults: {err}"))?;
+    plan.defaults = Some(parsed);
+    Ok(())
+}
+
+fn project_behavior_scaffold_merge(
+    plan: &scenarios::ScenarioPlan,
+    doc_pack_root: &std::path::Path,
+    content: &str,
+) -> Result<scenarios::ScenarioPlan> {
+    let payload: BehaviorMergePatchPayload = serde_json::from_str(content).map_err(|err| {
+        anyhow!("parse status next_action.content as merge_behavior_scenarios payload: {err}")
+    })?;
+    if payload.defaults.is_none() && payload.upsert_scenarios.is_empty() {
+        return Err(anyhow!(
+            "merge payload must include defaults and/or upsert_scenarios"
+        ));
+    }
+    let mut projected = plan.clone();
+    if let Some(defaults_patch) = payload.defaults.as_ref() {
+        merge_defaults_patch(&mut projected, defaults_patch)?;
+    }
+    for mut scenario in payload.upsert_scenarios {
+        let scenario_id = scenario.id.trim();
+        if scenario_id.is_empty() {
+            return Err(anyhow!("upsert_scenarios[].id must not be empty"));
+        }
+        scenario.id = scenario_id.to_string();
+        if let Some(existing) = projected
+            .scenarios
+            .iter_mut()
+            .find(|existing| existing.id == scenario.id)
+        {
+            *existing = scenario;
+        } else {
+            projected.scenarios.push(scenario);
+        }
+    }
+    scenarios::validate_plan(&projected, doc_pack_root)?;
+    Ok(projected)
+}
+
+fn content_projects_as_valid_behavior_merge(
+    plan: &scenarios::ScenarioPlan,
+    doc_pack_root: &std::path::Path,
+    content: &str,
+) -> bool {
+    project_behavior_scaffold_merge(plan, doc_pack_root, content).is_ok()
+}
+
+fn first_valid_scaffold_content<I>(
+    plan: &scenarios::ScenarioPlan,
+    doc_pack_root: &std::path::Path,
+    candidates: I,
+) -> Option<String>
+where
+    I: IntoIterator<Item = Option<String>>,
+{
+    for candidate in candidates {
+        let Some(content) = candidate else {
+            continue;
+        };
+        if content_projects_as_valid_behavior_merge(plan, doc_pack_root, &content) {
+            return Some(content);
+        }
+    }
+    None
+}
+
+fn behavior_scenario_for_surface_id<'a>(
+    plan: &'a scenarios::ScenarioPlan,
+    ledger_entries: &LedgerEntries,
+    surface_id: &str,
+) -> Option<&'a scenarios::ScenarioSpec> {
+    let entry = ledger_entries.get(surface_id)?;
+    let scenario_id = preferred_behavior_scenario_id(entry)?;
+    plan.scenarios
+        .iter()
+        .find(|scenario| scenario.id == scenario_id)
+}
+
+fn build_existing_behavior_scenarios_scaffold(
+    plan: &scenarios::ScenarioPlan,
+    ledger_entries: &LedgerEntries,
+    target_ids: &[String],
+) -> Option<String> {
+    let mut scenarios_by_id = std::collections::BTreeMap::new();
+    for surface_id in normalize_target_ids(target_ids) {
+        let Some(scenario) = behavior_scenario_for_surface_id(plan, ledger_entries, &surface_id)
+        else {
+            continue;
+        };
+        scenarios_by_id.insert(scenario.id.clone(), scenario.clone());
+    }
+    render_behavior_scaffold_content(None, scenarios_by_id.into_values().collect())
+}
+
+fn minimal_behavior_baseline_scenario(id: &str) -> scenarios::ScenarioSpec {
+    scenarios::ScenarioSpec {
+        id: id.to_string(),
+        kind: scenarios::ScenarioKind::Behavior,
+        publish: false,
+        argv: vec![scenarios::DEFAULT_BEHAVIOR_SEED_DIR.to_string()],
+        env: std::collections::BTreeMap::new(),
+        seed_dir: None,
+        seed: None,
+        cwd: None,
+        timeout_seconds: None,
+        net_mode: None,
+        no_sandbox: None,
+        no_strace: None,
+        snippet_max_lines: None,
+        snippet_max_bytes: None,
+        coverage_tier: Some("behavior".to_string()),
+        baseline_scenario_id: None,
+        assertions: Vec::new(),
+        covers: Vec::new(),
+        coverage_ignore: true,
+        expect: scenarios::ScenarioExpect::default(),
+    }
+}
+
+fn effective_seed_paths(
+    plan: &scenarios::ScenarioPlan,
+    scenario: &scenarios::ScenarioSpec,
+) -> std::collections::BTreeSet<String> {
+    let defaults = plan.defaults.as_ref();
+    let seed = if scenario.seed.is_some() {
+        scenario.seed.as_ref()
+    } else if scenario.seed_dir.is_some() {
+        None
+    } else {
+        defaults.and_then(|value| value.seed.as_ref())
+    };
+    let mut paths = std::collections::BTreeSet::new();
+    if let Some(seed) = seed {
+        for entry in &seed.entries {
+            let path = entry.path.trim();
+            if path.is_empty() {
+                continue;
+            }
+            paths.insert(path.to_string());
+        }
+    }
+    paths
+}
+
+fn stdout_token_for_seed_path(
+    entry: Option<&scenarios::VerificationEntry>,
+    seed_path: &str,
+) -> Option<String> {
+    entry
+        .and_then(|entry| entry.behavior_unverified_assertion_token.as_deref())
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            seed_path
+                .rsplit('/')
+                .next()
+                .map(str::trim)
+                .filter(|token| !token.is_empty())
+                .map(str::to_string)
+        })
+}
+
+fn safe_seed_assertions(
+    seed_path: &str,
+    stdout_token: Option<String>,
+) -> Vec<scenarios::BehaviorAssertion> {
+    vec![
+        scenarios::BehaviorAssertion::BaselineStdoutNotContainsSeedPath {
+            seed_path: seed_path.to_string(),
+            stdout_token: stdout_token.clone(),
+        },
+        scenarios::BehaviorAssertion::VariantStdoutContainsSeedPath {
+            seed_path: seed_path.to_string(),
+            stdout_token,
+        },
+    ]
+}
+
+fn ensure_seed_entry(seed: &mut scenarios::ScenarioSeedSpec, path: &str, contents: &str) {
+    let path = path.trim();
+    if path.is_empty() {
+        return;
+    }
+    if seed.entries.iter().any(|entry| entry.path.trim() == path) {
+        return;
+    }
+    seed.entries.push(scenarios::ScenarioSeedEntry {
+        path: path.to_string(),
+        kind: scenarios::SeedEntryKind::File,
+        contents: Some(contents.to_string()),
+        target: None,
+        mode: None,
+    });
+}
+
+fn seed_spec_with_sentinel(
+    seed: Option<&scenarios::ScenarioSeedSpec>,
+) -> scenarios::ScenarioSeedSpec {
+    let mut seed = seed
+        .cloned()
+        .unwrap_or_else(scenarios::default_behavior_seed);
+    ensure_seed_entry(
+        &mut seed,
+        SCAFFOLD_SENTINEL_SEED_PATH,
+        SCAFFOLD_SENTINEL_SEED_CONTENTS,
+    );
+    seed.entries
+        .sort_by(|a, b| a.path.as_str().cmp(b.path.as_str()));
+    seed.entries.dedup_by(|a, b| a.path.trim() == b.path.trim());
+    seed
+}
+
+fn defaults_seed_patch_with_sentinel(
+    plan: &scenarios::ScenarioPlan,
+    current_patch: Option<&scenarios::ScenarioSeedSpec>,
+) -> scenarios::ScenarioSeedSpec {
+    if let Some(seed) = current_patch {
+        return seed_spec_with_sentinel(Some(seed));
+    }
+    let plan_defaults_seed = plan
+        .defaults
+        .as_ref()
+        .and_then(|defaults| defaults.seed.as_ref());
+    seed_spec_with_sentinel(plan_defaults_seed)
+}
+
+fn scenario_with_assertion_starters(
+    plan: &scenarios::ScenarioPlan,
+    ledger_entries: &LedgerEntries,
+    surface_id: &str,
+    baseline_by_id: &mut std::collections::BTreeMap<String, scenarios::ScenarioSpec>,
+    upsert_by_id: &mut std::collections::BTreeMap<String, scenarios::ScenarioSpec>,
+    defaults_seed_patch: &mut Option<scenarios::ScenarioSeedSpec>,
+) {
+    let Some(entry) = ledger_entries.get(surface_id) else {
+        return;
+    };
+    let Some(scenario_id) = preferred_behavior_scenario_id(entry) else {
+        return;
+    };
+    let Some(mut scenario) = plan
+        .scenarios
+        .iter()
+        .find(|candidate| candidate.id == scenario_id)
+        .cloned()
+    else {
+        return;
+    };
+
+    let baseline_id = scenario
+        .baseline_scenario_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .or_else(|| crate::status::verification::find_behavior_baseline_id(plan))
+        .unwrap_or_else(|| "baseline".to_string());
+    scenario.baseline_scenario_id = Some(baseline_id.clone());
+    scenario.coverage_tier = Some("behavior".to_string());
+
+    let baseline_in_plan = plan
+        .scenarios
+        .iter()
+        .find(|candidate| candidate.id == baseline_id)
+        .cloned();
+    let baseline = baseline_by_id
+        .entry(baseline_id.clone())
+        .or_insert_with(|| {
+            baseline_in_plan.unwrap_or_else(|| minimal_behavior_baseline_scenario(&baseline_id))
+        })
+        .clone();
+
+    let preferred_seed_path = entry
+        .behavior_unverified_assertion_seed_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty());
+    let scenario_seed_paths = effective_seed_paths(plan, &scenario);
+    let baseline_seed_paths = effective_seed_paths(plan, &baseline);
+    let mut shared_seed_paths = scenario_seed_paths
+        .intersection(&baseline_seed_paths)
+        .cloned()
+        .collect::<Vec<_>>();
+    shared_seed_paths.sort();
+
+    let mut resolved_seed_path = preferred_seed_path
+        .filter(|path| shared_seed_paths.iter().any(|seed| seed == *path))
+        .map(str::to_string)
+        .or_else(|| shared_seed_paths.first().cloned());
+
+    if resolved_seed_path.is_none() {
+        if scenario.seed_dir.is_some() || baseline.seed_dir.is_some() {
+            scenario.assertions =
+                vec![scenarios::BehaviorAssertion::VariantStdoutDiffersFromBaseline {}];
+            upsert_by_id.insert(scenario.id.clone(), scenario);
+            return;
+        }
+
+        if scenario.seed.is_some() {
+            scenario.seed = Some(seed_spec_with_sentinel(scenario.seed.as_ref()));
+        } else {
+            *defaults_seed_patch = Some(defaults_seed_patch_with_sentinel(
+                plan,
+                defaults_seed_patch.as_ref(),
+            ));
+        }
+
+        if let Some(baseline_upsert) = baseline_by_id.get_mut(&baseline_id) {
+            if baseline_upsert.seed.is_some() {
+                baseline_upsert.seed = Some(seed_spec_with_sentinel(baseline_upsert.seed.as_ref()));
+            } else {
+                *defaults_seed_patch = Some(defaults_seed_patch_with_sentinel(
+                    plan,
+                    defaults_seed_patch.as_ref(),
+                ));
+            }
+        }
+        resolved_seed_path = Some(SCAFFOLD_SENTINEL_SEED_PATH.to_string());
+    }
+
+    if let Some(seed_path) = resolved_seed_path {
+        let stdout_token = stdout_token_for_seed_path(Some(entry), &seed_path);
+        scenario.assertions = safe_seed_assertions(&seed_path, stdout_token);
+    } else {
+        scenario.assertions =
+            vec![scenarios::BehaviorAssertion::VariantStdoutDiffersFromBaseline {}];
+    }
+    upsert_by_id.insert(scenario.id.clone(), scenario);
+}
+
+fn build_missing_assertions_scaffold_content(
+    plan: &scenarios::ScenarioPlan,
+    ledger_entries: &LedgerEntries,
+    target_ids: &[String],
+) -> Option<String> {
+    let mut defaults_seed_patch: Option<scenarios::ScenarioSeedSpec> = None;
+    let mut baseline_by_id = std::collections::BTreeMap::new();
+    let mut upsert_by_id = std::collections::BTreeMap::new();
+    for surface_id in normalize_target_ids(target_ids) {
+        scenario_with_assertion_starters(
+            plan,
+            ledger_entries,
+            &surface_id,
+            &mut baseline_by_id,
+            &mut upsert_by_id,
+            &mut defaults_seed_patch,
+        );
+    }
+    for baseline in baseline_by_id.into_values() {
+        upsert_by_id.insert(baseline.id.clone(), baseline);
+    }
+    let defaults = defaults_seed_patch.map(|seed| scenarios::ScenarioDefaults {
+        seed: Some(seed),
+        ..Default::default()
+    });
+    render_behavior_scaffold_content(defaults, upsert_by_id.into_values().collect())
 }
 
 fn preferred_required_value_token(
@@ -432,7 +918,7 @@ fn partition_cap_hit(
     })
 }
 
-fn set_outputs_equal_cap_hit_next_action(
+fn set_outputs_equal_plateau_next_action(
     ctx: &mut QueueVerificationContext<'_>,
     summary: &mut enrich::VerificationTriageSummary,
     cap_hit: &[String],
@@ -449,14 +935,66 @@ fn set_outputs_equal_cap_hit_next_action(
         STUB_REASON_OUTPUTS_EQUAL_AFTER_WORKAROUND,
         true,
     );
-    *ctx.verification_next_action = Some(suggested_exclusion_only_next_action(
-        ctx,
+    let content = surface_overlays_behavior_exclusion_stub_batch(
+        ctx.paths,
+        ctx.surface,
         cap_hit,
-        "outputs_equal",
+        ledger_entries,
+    );
+    let payload = behavior_payload(
+        cap_hit,
+        Some("outputs_equal"),
         retry_counts,
         ledger_entries,
-    ));
+        &["overlays[].behavior_exclusion"],
+        Vec::new(),
+        None,
+    );
+    *ctx.verification_next_action = Some(enrich::NextAction::Edit {
+        path: "inventory/surface.overlays.json".to_string(),
+        content,
+        reason: format!(
+            "stopped outputs_equal command retries after {BEHAVIOR_RERUN_CAP} no-progress attempts; add behavior_exclusion stubs with attempted_workarounds evidence placeholders in inventory/surface.overlays.json"
+        ),
+        edit_strategy: enrich::default_edit_strategy(),
+        payload,
+    });
     true
+}
+
+fn rerun_scenario_ids_for_surface_ids(
+    surface_ids: &[String],
+    ledger_entries: &LedgerEntries,
+) -> Vec<String> {
+    let mut scenario_ids = std::collections::BTreeSet::new();
+    for surface_id in normalize_target_ids(surface_ids) {
+        let Some(entry) = ledger_entries.get(surface_id.as_str()) else {
+            continue;
+        };
+        if let Some(scenario_id) = preferred_behavior_scenario_id(entry) {
+            scenario_ids.insert(scenario_id);
+        }
+        for scenario_id in &entry.behavior_scenario_ids {
+            let scenario_id = scenario_id.trim();
+            if scenario_id.is_empty() {
+                continue;
+            }
+            scenario_ids.insert(scenario_id.to_string());
+        }
+    }
+    scenario_ids.into_iter().collect()
+}
+
+fn targeted_outputs_equal_rerun_command(
+    doc_pack_root: &std::path::Path,
+    scenario_ids: &[String],
+) -> String {
+    let mut command = format!("bman apply --doc-pack {}", doc_pack_root.display());
+    for scenario_id in scenario_ids {
+        command.push_str(" --rerun-scenario-id ");
+        command.push_str(scenario_id);
+    }
+    command
 }
 
 fn first_behavior_reason_target(
@@ -518,13 +1056,23 @@ fn first_behavior_reason_target(
 fn reason_based_behavior_next_action(
     ctx: &mut QueueVerificationContext<'_>,
     summary: &mut enrich::VerificationTriageSummary,
-    next_id: &str,
+    target_ids: &[String],
     missing_value_examples: &std::collections::BTreeSet<String>,
     retry_counts: &std::collections::BTreeMap<String, usize>,
     ledger_entries: &LedgerEntries,
 ) -> Option<enrich::NextAction> {
-    let reason_code = behavior_reason_code_for_id(next_id, missing_value_examples, ledger_entries);
-    let entry = ledger_entries.get(next_id);
+    let mut ordered_target_ids = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for target_id in target_ids {
+        let target_id = target_id.trim();
+        if target_id.is_empty() || !seen.insert(target_id.to_string()) {
+            continue;
+        }
+        ordered_target_ids.push(target_id.to_string());
+    }
+    let next_id = ordered_target_ids.first()?.clone();
+    let reason_code = behavior_reason_code_for_id(&next_id, missing_value_examples, ledger_entries);
+    let entry = ledger_entries.get(&next_id);
     let scenario_missing = entry.is_some_and(|entry| entry.behavior_scenario_ids.is_empty());
     let scenario_id = entry
         .and_then(|entry| {
@@ -544,53 +1092,105 @@ fn reason_based_behavior_next_action(
     } else {
         reason_code.clone()
     };
-    let retry_count = retry_counts.get(next_id).copied().unwrap_or(0);
+    let retry_count = retry_counts.get(&next_id).copied().unwrap_or(0);
     if reason_code == "missing_delta_assertion" && retry_count >= BEHAVIOR_RERUN_CAP {
         return Some(suggested_exclusion_only_next_action(
             ctx,
-            &[next_id.to_string()],
+            &[next_id],
             "missing_delta_assertion",
             retry_counts,
             ledger_entries,
         ));
     }
 
-    let content = if scenario_missing {
-        let target_ids = vec![next_id.to_string()];
-        summary.stub_blockers_preview =
-            build_stub_blockers_preview(ctx, &target_ids, ledger_entries, &reason_code, false);
-        crate::status::verification::behavior_scenarios_batch_stub(
-            ctx.plan,
-            ctx.surface,
-            &target_ids,
-        )
-        .or_else(|| crate::status::verification::behavior_baseline_stub(ctx.plan, ctx.surface))
-    } else {
-        crate::status::verification::behavior_scenario_stub(ctx.plan, &scenario_id).or_else(|| {
+    let scaffold_candidates = if action_reason_code == "missing_assertions" {
+        vec![
+            build_missing_assertions_scaffold_content(
+                ctx.plan,
+                ledger_entries,
+                &ordered_target_ids,
+            ),
+            build_missing_assertions_scaffold_content(
+                ctx.plan,
+                ledger_entries,
+                std::slice::from_ref(&next_id),
+            ),
+        ]
+    } else if scenario_missing {
+        summary.stub_blockers_preview = build_stub_blockers_preview(
+            ctx,
+            &ordered_target_ids,
+            ledger_entries,
+            &reason_code,
+            false,
+        );
+        vec![
             crate::status::verification::behavior_scenarios_batch_stub(
                 ctx.plan,
                 ctx.surface,
-                &[next_id.to_string()],
-            )
-        })
+                &ordered_target_ids,
+            ),
+            crate::status::verification::behavior_scenarios_batch_stub(
+                ctx.plan,
+                ctx.surface,
+                std::slice::from_ref(&next_id),
+            ),
+            crate::status::verification::behavior_baseline_stub(ctx.plan, ctx.surface),
+        ]
+    } else {
+        let assertion_repair_reason = matches!(
+            action_reason_code.as_str(),
+            "assertion_seed_path_not_seeded"
+                | "seed_signature_mismatch"
+                | "seed_mismatch"
+                | "assertion_failed"
+                | "missing_delta_assertion"
+        );
+        let mut candidates = vec![
+            build_existing_behavior_scenarios_scaffold(
+                ctx.plan,
+                ledger_entries,
+                std::slice::from_ref(&next_id),
+            ),
+            crate::status::verification::behavior_scenario_stub(ctx.plan, &scenario_id),
+        ];
+        if assertion_repair_reason {
+            candidates.push(build_missing_assertions_scaffold_content(
+                ctx.plan,
+                ledger_entries,
+                std::slice::from_ref(&next_id),
+            ));
+        }
+        candidates.push(crate::status::verification::behavior_scenarios_batch_stub(
+            ctx.plan,
+            ctx.surface,
+            std::slice::from_ref(&next_id),
+        ));
+        candidates
     };
-    let content = content?;
+    let content = first_valid_scaffold_content(ctx.plan, ctx.paths.root(), scaffold_candidates)?;
 
     let mut reason = behavior_unverified_reason(
         Some(&action_reason_code),
         &scenario_id,
-        next_id,
+        &next_id,
         assertion_kind,
         assertion_seed_path,
     );
     if action_reason_code == "required_value_missing" {
         reason.push_str("; ");
-        reason.push_str(&required_value_argv_rewrite_hint(ctx.surface, next_id));
+        reason.push_str(&required_value_argv_rewrite_hint(ctx.surface, &next_id));
     }
     if scenario_missing && reason_code == "missing_value_examples" {
         reason.push_str(
             "; scaffold argv uses a placeholder value token (optional: add value_examples overlay later)",
         );
+    }
+    if ordered_target_ids.len() > 1 {
+        reason.push_str(&format!(
+            "; batched deterministic scaffold for {} targets",
+            ordered_target_ids.len()
+        ));
     }
     reason.push_str("; apply patch as merge/upsert by scenario.id");
     let assertion_starters = if matches!(
@@ -602,7 +1202,7 @@ fn reason_based_behavior_next_action(
         Vec::new()
     };
     let payload = behavior_payload(
-        &[next_id.to_string()],
+        &ordered_target_ids,
         Some(&action_reason_code),
         retry_counts,
         ledger_entries,
@@ -677,7 +1277,7 @@ fn maybe_set_behavior_next_action(
             outputs_equal_with_workaround_needs_rerun.to_vec(),
             retry_counts,
         );
-        if !set_outputs_equal_cap_hit_next_action(
+        if !set_outputs_equal_plateau_next_action(
             ctx,
             summary,
             &cap_hit,
@@ -692,8 +1292,23 @@ fn maybe_set_behavior_next_action(
                 STUB_REASON_OUTPUTS_EQUAL_AFTER_WORKAROUND,
                 true,
             );
-            let root = ctx.paths.root().display();
-            let next_id = needs_rerun[0].clone();
+            let scenario_ids = {
+                let ids = rerun_scenario_ids_for_surface_ids(&needs_rerun, ledger_entries);
+                if ids.is_empty() {
+                    normalize_target_ids(&needs_rerun)
+                        .into_iter()
+                        .map(|surface_id| {
+                            format!(
+                                "verify_{}",
+                                surface_id.trim_start_matches('-').trim().replace('-', "_")
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                } else {
+                    ids
+                }
+            };
+            let command = targeted_outputs_equal_rerun_command(ctx.paths.root(), &scenario_ids);
             let payload = behavior_payload(
                 &needs_rerun,
                 Some("outputs_equal"),
@@ -703,11 +1318,15 @@ fn maybe_set_behavior_next_action(
                 Vec::new(),
                 None,
             );
+            let retry = max_retry_count(&needs_rerun, retry_counts).unwrap_or(0);
             *ctx.verification_next_action = Some(enrich::NextAction::Command {
-                command: format!("bman apply --doc-pack {root}"),
+                command,
                 reason: format!(
-                    "rerun behavior delta checks after requires_argv workaround for {next_id} ({} targets)",
-                    needs_rerun.len()
+                    "requires_argv workaround is present but outputs_equal evidence has not progressed; rerun targeted behavior delta checks for {} scenario ids ({} targets, no-progress retry {}/{})",
+                    scenario_ids.len(),
+                    needs_rerun.len(),
+                    retry.saturating_add(1),
+                    BEHAVIOR_RERUN_CAP
                 ),
                 payload,
             });
@@ -720,7 +1339,7 @@ fn maybe_set_behavior_next_action(
             outputs_equal_with_workaround_ready_for_exclusion.to_vec(),
             retry_counts,
         );
-        if !set_outputs_equal_cap_hit_next_action(
+        if !set_outputs_equal_plateau_next_action(
             ctx,
             summary,
             &cap_hit,
@@ -764,10 +1383,33 @@ fn maybe_set_behavior_next_action(
     if let Some(next_id) =
         first_behavior_reason_target(required_ids, remaining_set, needs_apply_ids, ledger_entries)
     {
+        let action_reason_code =
+            action_reason_code_for_surface_id(&next_id, missing_value_examples, ledger_entries);
+        let target_ids = if matches!(
+            action_reason_code.as_str(),
+            "missing_behavior_scenario" | "missing_assertions"
+        ) {
+            let batched = batched_target_ids_for_reason(
+                required_ids,
+                remaining_set,
+                missing_value_examples,
+                needs_apply_ids,
+                ledger_entries,
+                &action_reason_code,
+                BEHAVIOR_BATCH_LIMIT,
+            );
+            if batched.is_empty() {
+                vec![next_id]
+            } else {
+                batched
+            }
+        } else {
+            vec![next_id]
+        };
         if let Some(action) = reason_based_behavior_next_action(
             ctx,
             summary,
-            &next_id,
+            &target_ids,
             missing_value_examples,
             retry_counts,
             ledger_entries,
@@ -863,7 +1505,6 @@ fn eval_behavior_verification(ctx: &mut QueueVerificationContext<'_>) -> Verific
     let missing_value_examples =
         collect_missing_value_examples(ctx.surface, &remaining_ids, ledger_entries);
     let needs_apply_ids = needs_apply_ids(&plan_behavior_ids, &remaining_set, ledger_entries);
-    let retry_counts = load_behavior_retry_counts(ctx.paths, ledger_entries);
     let outputs_equal_ids = select_delta_outcome_ids_for_remaining(
         required_ids,
         &remaining_set,
@@ -886,6 +1527,19 @@ fn eval_behavior_verification(ctx: &mut QueueVerificationContext<'_>) -> Verific
                 .get(surface_id.as_str())
                 .is_some_and(|entry| outputs_equal_workaround_needs_delta_rerun(ctx.paths, entry))
         });
+    let verification_progress = load_verification_progress(ctx.paths);
+    let outputs_equal_retry_ids = outputs_equal_without_workaround
+        .iter()
+        .chain(outputs_equal_with_workaround_needs_rerun.iter())
+        .chain(outputs_equal_with_workaround_ready_for_exclusion.iter())
+        .cloned()
+        .collect::<Vec<_>>();
+    let retry_counts = load_behavior_retry_counts(
+        ctx.paths,
+        ledger_entries,
+        &verification_progress,
+        &outputs_equal_retry_ids,
+    );
     let behavior_unverified_reasons =
         build_behavior_reason_summary(&remaining_ids, &missing_value_examples, ledger_entries);
     let behavior_unverified_preview =
