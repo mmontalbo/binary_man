@@ -356,6 +356,27 @@ mod tests {
             "-- test\n".as_bytes(),
         )
         .unwrap();
+        fs::create_dir_all(root.join("queries").join("verification_from_scenarios")).unwrap();
+        fs::write(
+            root.join(enrich::VERIFICATION_FROM_SCENARIOS_SECTION_TEMPLATE_RELS[0]),
+            "-- test section\n".as_bytes(),
+        )
+        .unwrap();
+        fs::write(
+            root.join(enrich::VERIFICATION_FROM_SCENARIOS_SECTION_TEMPLATE_RELS[1]),
+            "-- test section\n".as_bytes(),
+        )
+        .unwrap();
+        fs::write(
+            root.join(enrich::VERIFICATION_FROM_SCENARIOS_SECTION_TEMPLATE_RELS[2]),
+            "-- test section\n".as_bytes(),
+        )
+        .unwrap();
+        fs::write(
+            root.join(enrich::VERIFICATION_FROM_SCENARIOS_SECTION_TEMPLATE_RELS[3]),
+            "-- test section\n".as_bytes(),
+        )
+        .unwrap();
         fs::write(
             root.join("binary_lens").join("export_plan.json"),
             "{}".as_bytes(),

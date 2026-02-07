@@ -5,7 +5,7 @@
 use super::{
     DocPackPaths, EnrichConfig, RequirementId, CONFIG_SCHEMA_VERSION,
     SCENARIO_USAGE_LENS_TEMPLATE_REL, SURFACE_LENS_TEMPLATE_RELS,
-    VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL,
+    VERIFICATION_FROM_SCENARIOS_SECTION_TEMPLATE_RELS, VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL,
 };
 use anyhow::{anyhow, Context, Result};
 use std::fs;
@@ -102,6 +102,9 @@ pub fn resolve_inputs(config: &EnrichConfig, doc_pack_root: &Path) -> Result<Vec
         required_inputs.push(rel.to_string());
     }
     required_inputs.push(VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL.to_string());
+    for rel in VERIFICATION_FROM_SCENARIOS_SECTION_TEMPLATE_RELS {
+        required_inputs.push(rel.to_string());
+    }
     required_inputs.push(SCENARIOS_PLAN_REL.to_string());
     required_inputs.push(BINARY_LENS_EXPORT_PLAN_REL.to_string());
     let mut inputs = Vec::new();
@@ -130,3 +133,7 @@ fn has_parent_components(path: &Path) -> bool {
     path.components()
         .any(|component| matches!(component, std::path::Component::ParentDir))
 }
+
+#[cfg(test)]
+#[path = "config_tests.rs"]
+mod tests;
