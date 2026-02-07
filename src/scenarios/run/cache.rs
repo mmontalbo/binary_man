@@ -56,7 +56,11 @@ pub(super) fn should_run_scenario(
     scenario_digest: &str,
     entry: Option<&ScenarioIndexEntry>,
     has_previous_outcome: bool,
+    forced_rerun: bool,
 ) -> bool {
+    if forced_rerun {
+        return true;
+    }
     if !has_previous_outcome {
         return true;
     }
@@ -79,27 +83,33 @@ pub(super) fn should_run_scenario(
 mod tests {
     use super::*;
 
-    #[test]
-    fn should_run_scenario_respects_run_mode() {
-        let entry = ScenarioIndexEntry {
+    fn passing_entry() -> ScenarioIndexEntry {
+        ScenarioIndexEntry {
             scenario_id: "scenario".to_string(),
             scenario_digest: "abc".to_string(),
             last_run_epoch_ms: None,
             last_pass: Some(true),
             failures: Vec::new(),
             evidence_paths: Vec::new(),
-        };
+        }
+    }
+
+    #[test]
+    fn should_run_scenario_respects_run_mode() {
+        let entry = passing_entry();
         assert!(!should_run_scenario(
             ScenarioRunMode::Default,
             "abc",
             Some(&entry),
-            true
+            true,
+            false
         ));
         assert!(should_run_scenario(
             ScenarioRunMode::Default,
             "def",
             Some(&entry),
-            true
+            true,
+            false
         ));
         let failed_entry = ScenarioIndexEntry {
             last_pass: Some(false),
@@ -109,37 +119,80 @@ mod tests {
             ScenarioRunMode::Default,
             "abc",
             Some(&failed_entry),
-            true
+            true,
+            false
         ));
         assert!(should_run_scenario(
             ScenarioRunMode::Default,
             "abc",
             None,
-            true
+            true,
+            false
         ));
         assert!(should_run_scenario(
             ScenarioRunMode::RerunAll,
             "abc",
             Some(&entry),
-            true
+            true,
+            false
         ));
         assert!(!should_run_scenario(
             ScenarioRunMode::RerunFailed,
             "def",
             Some(&entry),
-            true
+            true,
+            false
         ));
         assert!(should_run_scenario(
             ScenarioRunMode::RerunFailed,
             "abc",
             Some(&failed_entry),
-            true
+            true,
+            false
         ));
         assert!(should_run_scenario(
             ScenarioRunMode::Default,
             "abc",
             Some(&entry),
+            false,
             false
+        ));
+        assert!(should_run_scenario(
+            ScenarioRunMode::Default,
+            "abc",
+            Some(&entry),
+            true,
+            true
+        ));
+    }
+
+    #[test]
+    fn forced_rerun_bypasses_cache_for_matching_scenario_only() {
+        let entry = passing_entry();
+        let matching_forced =
+            should_run_scenario(ScenarioRunMode::Default, "abc", Some(&entry), true, true);
+        let non_matching_not_forced =
+            should_run_scenario(ScenarioRunMode::Default, "abc", Some(&entry), true, false);
+        assert!(matching_forced);
+        assert!(!non_matching_not_forced);
+    }
+
+    #[test]
+    fn non_forced_default_mode_keeps_existing_cache_behavior() {
+        let entry = passing_entry();
+        assert!(!should_run_scenario(
+            ScenarioRunMode::Default,
+            "abc",
+            Some(&entry),
+            true,
+            false,
+        ));
+        assert!(should_run_scenario(
+            ScenarioRunMode::Default,
+            "def",
+            Some(&entry),
+            true,
+            false,
         ));
     }
 }

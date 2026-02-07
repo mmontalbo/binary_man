@@ -35,6 +35,7 @@ pub struct RunScenariosArgs<'a> {
     pub staging_root: Option<&'a Path>,
     pub kind_filter: Option<ScenarioKind>,
     pub run_mode: ScenarioRunMode,
+    pub forced_rerun_scenario_ids: Vec<String>,
     pub extra_scenarios: Vec<ScenarioSpec>,
     pub auto_run_limit: Option<usize>,
     pub auto_progress: Option<AutoVerificationProgress>,
@@ -52,6 +53,11 @@ pub struct AutoVerificationKindProgress {
     pub remaining_count: usize,
 }
 
+pub struct RunScenariosResult {
+    pub report: ExamplesReport,
+    pub executed_forced_rerun_scenario_ids: Vec<String>,
+}
+
 pub(super) struct ScenarioRunContext<'a> {
     pub(super) scenario: &'a ScenarioSpec,
     pub(super) run_config: &'a ScenarioRunConfig,
@@ -66,7 +72,8 @@ pub(super) struct ScenarioExecution {
 }
 
 /// Run scenarios and return an examples report snapshot.
-pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<ExamplesReport> {
+#[allow(clippy::cognitive_complexity)]
+pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<RunScenariosResult> {
     let plan = super::load_plan(args.scenarios_path, args.run_root)?;
     if let Some(plan_binary) = plan.binary.as_deref() {
         if plan_binary != args.binary_name {
@@ -90,6 +97,16 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<ExamplesReport> {
         .join("index.json");
     let mut scenarios: Vec<ScenarioSpec> = plan.scenarios.clone();
     scenarios.extend(args.extra_scenarios.iter().cloned());
+    let forced_ids = normalize_forced_rerun_ids(&args.forced_rerun_scenario_ids);
+    let known_scenario_ids: BTreeSet<String> = scenarios
+        .iter()
+        .map(|scenario| scenario.id.clone())
+        .collect();
+    let (forced_rerun_ids, unknown_forced_ids) =
+        split_forced_rerun_ids(&forced_ids, &known_scenario_ids);
+    for scenario_id in unknown_forced_ids {
+        eprintln!("warning: ignored --rerun-scenario-id {scenario_id}: no matching scenario id");
+    }
     let has_auto = scenarios
         .iter()
         .any(|scenario| scenario.id.starts_with(super::AUTO_VERIFY_SCENARIO_PREFIX));
@@ -120,6 +137,7 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<ExamplesReport> {
         );
     }
     let mut outcomes = Vec::new();
+    let mut executed_forced_rerun_ids = BTreeSet::new();
 
     if has_auto && args.auto_run_limit.is_some() {
         if let Some(progress) = args.auto_progress.as_ref() {
@@ -145,6 +163,7 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<ExamplesReport> {
         let has_previous_outcome =
             cache_ready && previous_outcomes.outcomes.contains_key(&scenario.id);
         let allow_index_cache = !reportable && has_index_entry;
+        let is_forced_rerun = forced_rerun_ids.contains(&scenario.id);
         // Skip when we can reuse prior outcomes for reportable scenarios, or when
         // non-reportable scenarios already have indexed evidence.
         let should_run = should_run_scenario(
@@ -152,6 +171,7 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<ExamplesReport> {
             &run_config.scenario_digest,
             index_entries.get(&scenario.id),
             has_previous_outcome || allow_index_cache,
+            is_forced_rerun,
         );
 
         let is_auto = scenario.id.starts_with(super::AUTO_VERIFY_SCENARIO_PREFIX);
@@ -177,6 +197,9 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<ExamplesReport> {
 
         if args.verbose {
             eprintln!("running scenario {} {}", args.binary_name, scenario.id);
+        }
+        if is_forced_rerun {
+            executed_forced_rerun_ids.insert(scenario.id.clone());
         }
 
         let run_argv0 = args.binary_name.to_string();
@@ -295,18 +318,49 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<ExamplesReport> {
         .context("compute timestamp")?
         .as_millis();
 
-    Ok(ExamplesReport {
-        schema_version: 1,
-        generated_at_epoch_ms,
-        binary_name: args.binary_name.to_string(),
-        pack_root: display_path(&pack_root, args.display_root),
-        scenarios_path: display_path(args.scenarios_path, args.display_root),
-        scenario_count: outcomes.len(),
-        pass_count,
-        fail_count,
-        run_ids,
-        scenarios: outcomes,
+    Ok(RunScenariosResult {
+        report: ExamplesReport {
+            schema_version: 1,
+            generated_at_epoch_ms,
+            binary_name: args.binary_name.to_string(),
+            pack_root: display_path(&pack_root, args.display_root),
+            scenarios_path: display_path(args.scenarios_path, args.display_root),
+            scenario_count: outcomes.len(),
+            pass_count,
+            fail_count,
+            run_ids,
+            scenarios: outcomes,
+        },
+        executed_forced_rerun_scenario_ids: executed_forced_rerun_ids.into_iter().collect(),
     })
+}
+
+fn normalize_forced_rerun_ids(raw: &[String]) -> Vec<String> {
+    let mut ids = raw
+        .iter()
+        .map(|id| id.trim())
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+fn split_forced_rerun_ids(
+    forced_ids: &[String],
+    known_ids: &BTreeSet<String>,
+) -> (BTreeSet<String>, Vec<String>) {
+    let mut known = BTreeSet::new();
+    let mut unknown = Vec::new();
+    for scenario_id in forced_ids {
+        if known_ids.contains(scenario_id) {
+            known.insert(scenario_id.clone());
+        } else {
+            unknown.push(scenario_id.clone());
+        }
+    }
+    (known, unknown)
 }
 
 fn emit_auto_progress_header(progress: &AutoVerificationProgress) {
@@ -346,4 +400,39 @@ fn format_auto_remaining_by_kind(groups: &[AutoVerificationKindProgress]) -> Str
         .map(|group| format!("{} {}", group.kind, group.remaining_count))
         .collect();
     parts.join(", ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forced_rerun_ids_are_trimmed_sorted_and_deduped() {
+        let ids = vec![
+            " verify_b ".to_string(),
+            "".to_string(),
+            "verify_a".to_string(),
+            "verify_b".to_string(),
+        ];
+        assert_eq!(
+            normalize_forced_rerun_ids(&ids),
+            vec!["verify_a".to_string(), "verify_b".to_string()]
+        );
+    }
+
+    #[test]
+    fn split_forced_rerun_ids_reports_unknown_ids() {
+        let forced_ids = vec![
+            "verify_a".to_string(),
+            "unknown".to_string(),
+            "verify_b".to_string(),
+        ];
+        let known_ids = BTreeSet::from(["verify_a".to_string(), "verify_b".to_string()]);
+        let (known, unknown) = split_forced_rerun_ids(&forced_ids, &known_ids);
+        assert_eq!(
+            known,
+            BTreeSet::from(["verify_a".to_string(), "verify_b".to_string()])
+        );
+        assert_eq!(unknown, vec!["unknown".to_string()]);
+    }
 }

@@ -160,6 +160,10 @@ pub struct ApplyArgs {
     #[arg(long, conflicts_with = "rerun_all")]
     pub rerun_failed: bool,
 
+    /// Force rerun for an exact scenario ID (repeatable)
+    #[arg(long = "rerun-scenario-id", value_name = "ID")]
+    pub rerun_scenario_id: Vec<String>,
+
     /// Nix flake reference for binary_lens
     #[arg(long, value_name = "REF", default_value = DEFAULT_LENS_FLAKE)]
     pub lens_flake: String,

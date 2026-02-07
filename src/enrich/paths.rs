@@ -128,6 +128,11 @@ impl DocPackPaths {
         self.inventory_dir().join("surface.overlays.json")
     }
 
+    /// Return the `inventory/verification_progress.json` path.
+    pub fn verification_progress_path(&self) -> PathBuf {
+        self.inventory_dir().join("verification_progress.json")
+    }
+
     /// Return the `man/` directory path.
     pub fn man_dir(&self) -> PathBuf {
         self.root.join("man")

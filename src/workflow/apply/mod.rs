@@ -15,8 +15,12 @@ use crate::staging::publish_staging;
 use crate::status::{build_status_summary, plan_status, planned_actions_from_requirements};
 use crate::surface::{self, apply_surface_discovery};
 use crate::util::resolve_flake_ref;
+use crate::verification_progress::{
+    load_verification_progress, outputs_equal_delta_signature, write_verification_progress,
+};
 use crate::workflow::{run_plan, run_validate};
 use anyhow::{anyhow, Context, Result};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -143,7 +147,11 @@ pub(crate) fn run_apply(args: &ApplyArgs) -> Result<()> {
     let apply_result = apply_plan_actions(&apply_inputs);
 
     let finished_at_epoch_ms = enrich::now_epoch_ms()?;
-    let (published_paths, outputs_hash) = match apply_result {
+    let ApplyPlanActionsResult {
+        published_paths,
+        outputs_hash,
+        executed_forced_rerun_scenario_ids,
+    } = match apply_result {
         Ok(result) => result,
         Err(err) => {
             let history_entry = enrich::EnrichHistoryEntry {
@@ -163,6 +171,13 @@ pub(crate) fn run_apply(args: &ApplyArgs) -> Result<()> {
     };
 
     cleanup_txn_dirs(&ctx.paths, &txn_id, args.verbose);
+
+    if let Err(err) = update_outputs_equal_retry_progress_after_apply(
+        &ctx.paths,
+        &executed_forced_rerun_scenario_ids,
+    ) {
+        eprintln!("warning: failed to persist verification progress: {err}");
+    }
 
     let summary = if planned_actions.is_empty() && !args.refresh_pack && published_paths.is_empty()
     {
@@ -258,7 +273,14 @@ struct ApplyInputs<'a> {
     args: &'a ApplyArgs,
 }
 
-fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<(Vec<PathBuf>, Option<String>)> {
+#[derive(Debug, Default)]
+struct ApplyPlanActionsResult {
+    published_paths: Vec<PathBuf>,
+    outputs_hash: Option<String>,
+    executed_forced_rerun_scenario_ids: Vec<String>,
+}
+
+fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<ApplyPlanActionsResult> {
     let ctx = inputs.ctx;
     let actions = inputs.planned_actions;
     let plan = inputs.plan;
@@ -307,6 +329,7 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<(Vec<PathBuf>, Option<
     };
 
     let mut examples_report = None;
+    let mut executed_forced_rerun_scenario_ids = Vec::new();
     let scenarios_path = ctx.paths.scenarios_plan_path();
 
     if wants_surface {
@@ -330,6 +353,7 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<(Vec<PathBuf>, Option<
         } else {
             scenarios::ScenarioRunMode::Default
         };
+        let forced_rerun_scenario_ids = normalize_rerun_scenario_ids(&args.rerun_scenario_id);
         let verification_tier = ctx
             .config
             .verification_tier
@@ -356,7 +380,7 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<(Vec<PathBuf>, Option<
             ));
             extra_scenarios.extend(batch.scenarios);
         }
-        examples_report = Some(scenarios::run_scenarios(&scenarios::RunScenariosArgs {
+        let run_result = scenarios::run_scenarios(&scenarios::RunScenariosArgs {
             pack_root: &pack_root,
             run_root: ctx.paths.root(),
             binary_name,
@@ -366,11 +390,14 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<(Vec<PathBuf>, Option<
             staging_root: Some(staging_root),
             kind_filter: None,
             run_mode,
+            forced_rerun_scenario_ids,
             extra_scenarios,
             auto_run_limit,
             auto_progress,
             verbose: args.verbose,
-        })?);
+        })?;
+        executed_forced_rerun_scenario_ids = run_result.executed_forced_rerun_scenario_ids;
+        examples_report = Some(run_result.report);
     } else if wants_render {
         examples_report = load_examples_report_optional(&ctx.paths)?;
     }
@@ -446,7 +473,178 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<(Vec<PathBuf>, Option<
         .then(|| enrich::hash_paths(ctx.paths.root(), &published_paths))
         .transpose()?;
 
-    Ok((published_paths, outputs_hash))
+    Ok(ApplyPlanActionsResult {
+        published_paths,
+        outputs_hash,
+        executed_forced_rerun_scenario_ids,
+    })
+}
+
+fn modified_epoch_ms(path: &Path) -> Option<u128> {
+    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
+    let duration = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
+    Some(duration.as_millis())
+}
+
+fn outputs_equal_workaround_needs_delta_rerun(
+    paths: &enrich::DocPackPaths,
+    entry: &scenarios::VerificationEntry,
+) -> bool {
+    let overlays_path = paths.surface_overlays_path();
+    let Some(overlays_modified_ms) = modified_epoch_ms(&overlays_path) else {
+        return false;
+    };
+    let latest_delta_modified_ms = entry
+        .delta_evidence_paths
+        .iter()
+        .filter_map(|rel| {
+            let rel = rel.trim();
+            if rel.is_empty() {
+                return None;
+            }
+            let abs = paths.root().join(rel);
+            modified_epoch_ms(&abs)
+        })
+        .max();
+    match latest_delta_modified_ms {
+        Some(delta_modified_ms) => delta_modified_ms <= overlays_modified_ms,
+        None => true,
+    }
+}
+
+fn surface_has_requires_argv_hint(surface: &surface::SurfaceInventory, surface_id: &str) -> bool {
+    surface::primary_surface_item_by_id(surface, surface_id)
+        .is_some_and(|item| !item.invocation.requires_argv.is_empty())
+}
+
+fn fallback_behavior_scenario_id_for_surface_id(surface_id: &str) -> String {
+    format!(
+        "verify_{}",
+        surface_id.trim_start_matches('-').trim().replace('-', "_")
+    )
+}
+
+fn behavior_scenario_ids_for_entry(
+    surface_id: &str,
+    entry: &scenarios::VerificationEntry,
+) -> BTreeSet<String> {
+    let mut ids = BTreeSet::new();
+    if let Some(scenario_id) = entry.behavior_unverified_scenario_id.as_deref() {
+        let scenario_id = scenario_id.trim();
+        if !scenario_id.is_empty() {
+            ids.insert(scenario_id.to_string());
+        }
+    }
+    for scenario_id in &entry.behavior_scenario_ids {
+        let scenario_id = scenario_id.trim();
+        if scenario_id.is_empty() {
+            continue;
+        }
+        ids.insert(scenario_id.to_string());
+    }
+    if ids.is_empty() {
+        ids.insert(fallback_behavior_scenario_id_for_surface_id(surface_id));
+    }
+    ids
+}
+
+fn normalize_rerun_ids(ids: &[String]) -> BTreeSet<String> {
+    ids.iter()
+        .map(|id| id.trim())
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn update_outputs_equal_retry_progress_after_apply(
+    paths: &enrich::DocPackPaths,
+    executed_forced_rerun_scenario_ids: &[String],
+) -> Result<()> {
+    let verification_ledger_path = paths.root().join("verification_ledger.json");
+    if !verification_ledger_path.is_file() || !paths.surface_path().is_file() {
+        return Ok(());
+    }
+
+    let Some(ledger_entries) = scenarios::load_verification_entries(paths.root()) else {
+        return Err(anyhow!(
+            "parse {} for outputs_equal retry progress",
+            verification_ledger_path.display()
+        ));
+    };
+    let surface = surface::load_surface_inventory(&paths.surface_path())
+        .with_context(|| format!("load {}", paths.surface_path().display()))?;
+    let executed_forced_rerun_ids = normalize_rerun_ids(executed_forced_rerun_scenario_ids);
+    let mut progress = load_verification_progress(paths);
+
+    let active_outputs_equal_surface_ids: BTreeSet<String> = ledger_entries
+        .iter()
+        .filter(|(surface_id, entry)| {
+            entry.delta_outcome.as_deref() == Some("outputs_equal")
+                && surface_has_requires_argv_hint(&surface, surface_id)
+                && outputs_equal_workaround_needs_delta_rerun(paths, entry)
+        })
+        .map(|(surface_id, _)| surface_id.clone())
+        .collect();
+
+    let before_len = progress.outputs_equal_retries_by_surface.len();
+    progress
+        .outputs_equal_retries_by_surface
+        .retain(|surface_id, _| active_outputs_equal_surface_ids.contains(surface_id));
+    let mut changed = progress.outputs_equal_retries_by_surface.len() != before_len;
+
+    for surface_id in &active_outputs_equal_surface_ids {
+        let Some(entry) = ledger_entries.get(surface_id.as_str()) else {
+            continue;
+        };
+        let scenario_ids = behavior_scenario_ids_for_entry(surface_id, entry);
+        let was_forced_rerun_executed = scenario_ids
+            .iter()
+            .any(|scenario_id| executed_forced_rerun_ids.contains(scenario_id));
+        let delta_signature = outputs_equal_delta_signature(Some(entry));
+
+        if !was_forced_rerun_executed {
+            if let Some(progress_entry) = progress
+                .outputs_equal_retries_by_surface
+                .get_mut(surface_id)
+            {
+                if progress_entry.delta_signature.as_deref() != Some(delta_signature.as_str()) {
+                    progress_entry.retry_count = 0;
+                    progress_entry.delta_signature = Some(delta_signature);
+                    changed = true;
+                }
+            }
+            continue;
+        }
+
+        let progress_entry = progress
+            .outputs_equal_retries_by_surface
+            .entry(surface_id.clone())
+            .or_default();
+        if progress_entry.delta_signature.as_deref() != Some(delta_signature.as_str()) {
+            progress_entry.retry_count = 0;
+        }
+        progress_entry.retry_count = progress_entry.retry_count.saturating_add(1);
+        progress_entry.delta_signature = Some(delta_signature);
+        changed = true;
+    }
+
+    if changed {
+        write_verification_progress(paths, &progress)?;
+    }
+
+    Ok(())
+}
+
+fn normalize_rerun_scenario_ids(raw: &[String]) -> Vec<String> {
+    let mut ids = raw
+        .iter()
+        .map(|id| id.trim())
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    ids.sort();
+    ids.dedup();
+    ids
 }
 
 fn auto_verification_progress(

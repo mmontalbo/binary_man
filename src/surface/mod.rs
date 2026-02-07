@@ -224,6 +224,7 @@ fn maybe_auto_run_help_scenarios(args: AutoRunHelpScenariosArgs<'_>) -> Result<b
                     staging_root: Some(staging_root),
                     kind_filter: Some(scenarios::ScenarioKind::Help),
                     run_mode: scenarios::ScenarioRunMode::Default,
+                    forced_rerun_scenario_ids: Vec::new(),
                     extra_scenarios: Vec::new(),
                     auto_run_limit: None,
                     auto_progress: None,

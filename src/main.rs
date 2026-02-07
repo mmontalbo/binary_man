@@ -31,6 +31,7 @@ mod status;
 mod surface;
 mod templates;
 mod util;
+mod verification_progress;
 mod workflow;
 
 use anyhow::Result;
