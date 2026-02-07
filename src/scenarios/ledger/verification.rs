@@ -22,6 +22,37 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 static VERIFICATION_ROOT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+#[derive(Debug)]
+pub(crate) struct VerificationQueryTemplateReadError {
+    path: PathBuf,
+    source: std::io::Error,
+}
+
+impl std::fmt::Display for VerificationQueryTemplateReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "verification query template read failed for {}: {}",
+            self.path.display(),
+            self.source
+        )
+    }
+}
+
+impl std::error::Error for VerificationQueryTemplateReadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
+pub(crate) fn verification_query_template_failure_path(err: &anyhow::Error) -> Option<&Path> {
+    err.chain().find_map(|cause| {
+        cause
+            .downcast_ref::<VerificationQueryTemplateReadError>()
+            .map(|read_err| read_err.path.as_path())
+    })
+}
+
 /// Build the verification ledger from surface inventory and scenario evidence.
 pub fn build_verification_ledger(
     binary_name: &str,
@@ -205,8 +236,12 @@ fn load_verification_query_template_inner(
     include_stack.push(stack_path);
 
     let rendered = (|| -> Result<String> {
-        let source = fs::read_to_string(template_path)
-            .with_context(|| format!("read {}", template_path.display()))?;
+        let source = fs::read_to_string(template_path).map_err(|source| {
+            anyhow!(VerificationQueryTemplateReadError {
+                path: template_path.to_path_buf(),
+                source,
+            })
+        })?;
         let base_dir = template_path.parent().unwrap_or_else(|| Path::new("."));
         let mut output = String::new();
         for line in source.lines() {

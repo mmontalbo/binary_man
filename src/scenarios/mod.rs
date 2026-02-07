@@ -27,6 +27,7 @@ pub use auto_verification::{
     auto_verification_scenarios, auto_verification_targets, auto_verification_targets_for_behavior,
     AutoVerificationTargets,
 };
+pub(crate) use ledger::verification_query_template_failure_path;
 pub use ledger::{build_coverage_ledger, build_verification_ledger, normalize_surface_id};
 pub(crate) use plan::load_plan_if_exists;
 pub use plan::{load_plan, plan_stub};

@@ -57,19 +57,39 @@ pub(super) fn load_or_build_verification_ledger_entries(
             behavior_unverified_count: ledger.behavior_unverified_count,
         }),
         Err(err) => {
+            let failure_path = scenarios::verification_query_template_failure_path(&err)
+                .map(|path| doc_pack_relative_or_display(paths, path));
+            let next_action_path = failure_path
+                .clone()
+                .unwrap_or_else(|| enrich::VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL.to_string());
+            let mut evidence = vec![template_evidence.clone()];
+            if let Some(path) = scenarios::verification_query_template_failure_path(&err) {
+                if let Ok(include_evidence) = paths.evidence_from_path(path) {
+                    evidence.push(include_evidence);
+                }
+            }
+            enrich::dedupe_evidence_refs(&mut evidence);
+            let message = if let Some(path) = failure_path {
+                format!("verification query template error at {path}: {err}")
+            } else {
+                err.to_string()
+            };
             let blocker = enrich::Blocker {
                 code: "verification_query_error".to_string(),
-                message: err.to_string(),
-                evidence: vec![template_evidence.clone()],
-                next_action: Some(format!(
-                    "fix {}",
-                    enrich::VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL
-                )),
+                message,
+                evidence,
+                next_action: Some(format!("fix {next_action_path}")),
             };
             local_blockers.push(blocker);
             None
         }
     }
+}
+
+fn doc_pack_relative_or_display(paths: &enrich::DocPackPaths, path: &Path) -> String {
+    paths
+        .rel_path(path)
+        .unwrap_or_else(|_| path.display().to_string())
 }
 
 fn load_cached_verification_ledger_snapshot(
@@ -187,3 +207,7 @@ fn modified_epoch_ms(path: &Path) -> Option<u128> {
     let duration = modified.duration_since(UNIX_EPOCH).ok()?;
     Some(duration.as_millis())
 }
+
+#[cfg(test)]
+#[path = "ledger_tests.rs"]
+mod tests;
