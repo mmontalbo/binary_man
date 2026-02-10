@@ -221,7 +221,7 @@ impl App {
 
         let mut lines = Vec::new();
         let status = req.status.as_str();
-        let tier = req.verification_tier.as_deref().unwrap_or("accepted");
+        let tier = req.verification_tier.as_deref().unwrap_or("behavior");
         let tier_label = if tier == "behavior" {
             "behavior"
         } else {

@@ -766,7 +766,7 @@ fn auto_verification_progress(
     )
     .ok()
     .map(|ledger| scenarios::verification_entries_by_surface_id(ledger.entries));
-    let verification_tier = config.verification_tier.as_deref().unwrap_or("accepted");
+    let verification_tier = config.verification_tier.as_deref().unwrap_or("behavior");
     if let Some(summary) = crate::status::auto_verification_plan_summary(
         scenario_plan,
         &batch.surface,

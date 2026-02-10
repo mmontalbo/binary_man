@@ -122,7 +122,7 @@ fn build_verification_plan_summary(
     )
     .ok()
     .map(|ledger| scenarios::verification_entries_by_surface_id(ledger.entries));
-    let verification_tier = config.verification_tier.as_deref().unwrap_or("accepted");
+    let verification_tier = config.verification_tier.as_deref().unwrap_or("behavior");
     crate::status::auto_verification_plan_summary(
         &plan,
         &surface,

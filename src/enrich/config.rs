@@ -30,7 +30,7 @@ pub fn default_config() -> EnrichConfig {
         schema_version: CONFIG_SCHEMA_VERSION,
         usage_lens_template: SCENARIO_USAGE_LENS_TEMPLATE_REL.to_string(),
         requirements: default_requirements(),
-        verification_tier: Some("accepted".to_string()),
+        verification_tier: Some("behavior".to_string()),
     }
 }
 
