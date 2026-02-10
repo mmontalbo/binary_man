@@ -4,7 +4,9 @@
 //! artifact-driven flow stays predictable.
 mod apply;
 mod context;
+mod decisions;
 mod init;
+mod lm_response;
 mod merge_behavior_edit;
 mod plan;
 mod status;

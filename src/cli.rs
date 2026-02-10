@@ -61,6 +61,10 @@ pub struct StatusArgs {
     /// Emit a verbose transcript of the workflow
     #[arg(long)]
     pub verbose: bool,
+
+    /// Emit LM-friendly decision list with evidence for unverified items
+    #[arg(long)]
+    pub decisions: bool,
 }
 
 /// Apply a status-provided behavior merge edit to scenarios/plan.json.
@@ -167,6 +171,10 @@ pub struct ApplyArgs {
     /// Nix flake reference for binary_lens
     #[arg(long, value_name = "REF", default_value = DEFAULT_LENS_FLAKE)]
     pub lens_flake: String,
+
+    /// Path to LM response JSON file (from `bman status --decisions` workflow)
+    #[arg(long, value_name = "FILE")]
+    pub lm_response: Option<PathBuf>,
 }
 
 /// Inspect command inputs for the read-only TUI.
