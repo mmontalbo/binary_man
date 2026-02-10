@@ -318,6 +318,8 @@ fn behavior_variant_spec(
     let mut spec = behavior_scenario_spec(stub_id, argv);
     spec.baseline_scenario_id = Some(baseline_id.to_string());
     spec.covers = vec![surface_id.to_string()];
+    // Default to outputs_differ - simplest assertion that works for any option
+    spec.assertions = vec![scenarios::BehaviorAssertion::OutputsDiffer {}];
     spec
 }
 
@@ -339,6 +341,8 @@ fn behavior_scenario_spec(id: String, argv: Vec<String>) -> scenarios::ScenarioS
         snippet_max_bytes: None,
         coverage_tier: Some("behavior".to_string()),
         baseline_scenario_id: None,
+        // Assertions are added by behavior_variant_spec, not here
+        // (baselines use this function and shouldn't have assertions)
         assertions: Vec::new(),
         covers: Vec::new(),
         coverage_ignore: false,

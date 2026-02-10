@@ -1,4 +1,3 @@
-
 use super::slim_status_for_actionability;
 use crate::enrich;
 
@@ -64,9 +63,11 @@ fn slim_status_drops_rich_behavior_diagnostics() {
         lens_summary: Vec::new(),
         decision: enrich::Decision::Incomplete,
         decision_reason: None,
+        focus: None,
         next_action: enrich::NextAction::Command {
             command: "bman apply --doc-pack .".to_string(),
             reason: "verification pending".to_string(),
+            hint: None,
             payload: None,
         },
         warnings: Vec::new(),

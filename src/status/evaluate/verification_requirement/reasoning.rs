@@ -25,53 +25,21 @@ pub(super) fn behavior_reason_code_for_id(
 
 pub(super) fn behavior_recommended_fix(reason_code: &str) -> &'static str {
     match BehaviorReasonKind::from_code(Some(reason_code)) {
-        BehaviorReasonKind::MissingValueExamples => {
-            "add value_examples overlay in inventory/surface.overlays.json"
+        BehaviorReasonKind::NoScenario => {
+            "add behavior scenario with baseline_scenario_id and assertions"
         }
-        BehaviorReasonKind::RequiredValueMissing => {
-            "rewrite behavior scenario argv to include a required option value (use value_examples or __value__)"
+        BehaviorReasonKind::ScenarioError => {
+            "fix scenario configuration (argv, seed, or assertions)"
         }
-        BehaviorReasonKind::MissingBehaviorScenario => "add behavior scenario",
-        BehaviorReasonKind::ScenarioFailed => "fix behavior scenario run",
-        BehaviorReasonKind::MissingAssertions => "add non-empty assertions[] semantic predicates",
-        BehaviorReasonKind::AssertionSeedPathNotSeeded => {
-            "fix seed_path (seed.entries path) + stdout_token"
+        BehaviorReasonKind::AssertionFailed => "fix assertions or update seed fixtures",
+        BehaviorReasonKind::OutputsEqual => {
+            "add workaround hints, rerun, then exclude with evidence if still equal"
         }
-        BehaviorReasonKind::SeedSignatureMismatch => "align baseline and variant seed entries",
-        BehaviorReasonKind::SeedMismatch => "add seed-grounded assertions",
-        BehaviorReasonKind::MissingDeltaAssertion => "add delta assertion pair",
-        BehaviorReasonKind::MissingSemanticPredicate => "add stdout/stderr expect predicate",
-        BehaviorReasonKind::OutputsEqual => "add requires_argv workaround overlay, rerun delta verification, then exclude with evidence if still equal",
-        BehaviorReasonKind::AssertionFailed => "fix assertion failure",
-        _ => "inspect verification_ledger.json",
     }
 }
 
 fn behavior_diagnostic_fix_hint(reason_code: &str) -> &'static str {
-    match BehaviorReasonKind::from_code(Some(reason_code)) {
-        BehaviorReasonKind::MissingBehaviorScenario => {
-            "merge scaffold into scenarios/plan.json, then fill coverage_tier/covers/baseline_scenario_id/assertions"
-        }
-        BehaviorReasonKind::RequiredValueMissing => {
-            "rewrite scenario argv so the covered required-value option has a usable value token"
-        }
-        BehaviorReasonKind::MissingAssertions => {
-            "add non-empty assertions[] and at least one stable expect.stdout_* or expect.stderr_* predicate"
-        }
-        BehaviorReasonKind::MissingDeltaAssertion => {
-            "add a delta pair (baseline_* + variant_*) or variant_stdout_differs_from_baseline"
-        }
-        BehaviorReasonKind::MissingSemanticPredicate => {
-            "add a stable stdout/stderr semantic predicate in expect.*"
-        }
-        BehaviorReasonKind::OutputsEqual => {
-            "change variant argv/fixture so output differs from baseline, rerun apply, then re-check"
-        }
-        BehaviorReasonKind::ScenarioFailed => {
-            "fix argv/seed/expect so baseline and variant runs both pass"
-        }
-        _ => behavior_recommended_fix(reason_code),
-    }
+    behavior_recommended_fix(reason_code)
 }
 
 pub(super) fn build_behavior_unverified_preview(
@@ -206,7 +174,7 @@ pub(super) fn build_behavior_reason_summary(
 pub(super) fn load_behavior_exclusion_state(
     paths: &enrich::DocPackPaths,
     required_ids: &[String],
-    ledger_entries: &LedgerEntries,
+    _ledger_entries: &LedgerEntries,
     include_full: bool,
 ) -> anyhow::Result<BehaviorExclusionState> {
     let overlays_path = paths.surface_overlays_path();
@@ -220,23 +188,7 @@ pub(super) fn load_behavior_exclusion_state(
     }
 
     let required_set: std::collections::BTreeSet<String> = required_ids.iter().cloned().collect();
-    let mut ledger_by_surface_id = std::collections::BTreeMap::new();
-    for (surface_id, entry) in ledger_entries {
-        ledger_by_surface_id.insert(
-            surface_id.clone(),
-            crate::surface::BehaviorExclusionLedgerEntry {
-                delta_outcome: entry.delta_outcome.clone(),
-                delta_evidence_paths: entry.delta_evidence_paths.clone(),
-            },
-        );
-    }
-    let excluded_by_id = crate::surface::validate_behavior_exclusions(
-        &exclusions,
-        &required_set,
-        &ledger_by_surface_id,
-        "missing from verification_ledger entries",
-        "requires delta_outcome evidence",
-    )?;
+    let excluded_by_id = crate::surface::validate_behavior_exclusions(&exclusions, &required_set)?;
 
     let mut excluded_ids: Vec<String> = excluded_by_id.keys().cloned().collect();
     excluded_ids.sort();
@@ -312,72 +264,25 @@ pub(super) fn behavior_unverified_reason(
     reason_code: Option<&str>,
     scenario_id: &str,
     surface_id: &str,
-    assertion_kind: Option<&str>,
-    assertion_seed_path: Option<&str>,
+    _assertion_kind: Option<&str>,
+    _assertion_seed_path: Option<&str>,
 ) -> String {
     let reason_kind = BehaviorReasonKind::from_code(reason_code);
     let reason_code = reason_kind.as_code();
-    let recommended_fix = behavior_recommended_fix(reason_code);
-    let assertion_context = format_assertion_context(assertion_kind, assertion_seed_path);
+    let fix = behavior_recommended_fix(reason_code);
     match reason_kind {
-        BehaviorReasonKind::MissingAssertions => format!(
-            "reason_code={reason_code}; {recommended_fix} for scenario {scenario_id}{assertion_context}; expect.* alone does not verify behavior. Prefer exact-line stdout assertions for short tokens."
-        ),
-        BehaviorReasonKind::RequiredValueMissing => format!(
-            "reason_code={reason_code}; {recommended_fix} for scenario {scenario_id}. Rewrite scenario.argv so {surface_id} uses an explicit value (example: {surface_id}=auto or {surface_id} __value__)."
-        ),
-        BehaviorReasonKind::AssertionSeedPathNotSeeded | BehaviorReasonKind::SeedMismatch => format!(
-            "reason_code={reason_code}; {recommended_fix} for scenario {scenario_id}{assertion_context}. Example:\nseed.entries: [{{\"path\":\"work/file.txt\",\"kind\":\"file\",\"contents\":\"...\"}}]\nassertion: {{\"seed_path\":\"work/file.txt\",\"stdout_token\":\"file.txt\"}}"
-        ),
-        BehaviorReasonKind::SeedSignatureMismatch => format!(
-            "reason_code={reason_code}; {recommended_fix} for scenario {scenario_id}{assertion_context}"
-        ),
-        BehaviorReasonKind::MissingDeltaAssertion => format!(
-            "reason_code={reason_code}; {recommended_fix} for scenario {scenario_id}{assertion_context}"
-        ),
-        BehaviorReasonKind::MissingSemanticPredicate => format!(
-            "reason_code={reason_code}; {recommended_fix} for scenario {scenario_id}{assertion_context}"
-        ),
-        BehaviorReasonKind::OutputsEqual => format!(
-            "reason_code={reason_code}; {recommended_fix} for scenario {scenario_id}{assertion_context}. Add requires_argv workaround hints, rerun delta checks, and only exclude after recording attempted_workarounds evidence."
-        ),
-        BehaviorReasonKind::AssertionFailed => format!(
-            "reason_code={reason_code}; {recommended_fix} in scenario {scenario_id}{assertion_context}"
-        ),
-        BehaviorReasonKind::ScenarioFailed => format!(
-            "reason_code={reason_code}; {recommended_fix} in scenario {scenario_id}"
-        ),
-        BehaviorReasonKind::MissingBehaviorScenario => {
-            format!("reason_code={reason_code}; {recommended_fix} for {surface_id}")
+        BehaviorReasonKind::NoScenario => {
+            format!("{reason_code}: {fix} for {surface_id}")
         }
-        BehaviorReasonKind::MissingValueExamples => {
-            format!("reason_code={reason_code}; {recommended_fix} for {surface_id}")
+        BehaviorReasonKind::ScenarioError => {
+            format!("{reason_code}: {fix} for scenario {scenario_id}")
         }
-        _ => format!("reason_code={reason_code}; {recommended_fix} for {surface_id}"),
-    }
-}
-
-fn format_assertion_context(
-    assertion_kind: Option<&str>,
-    assertion_seed_path: Option<&str>,
-) -> String {
-    let mut parts = Vec::new();
-    if let Some(kind) = assertion_kind {
-        let kind = kind.trim();
-        if !kind.is_empty() {
-            parts.push(format!("assertion={kind}"));
+        BehaviorReasonKind::AssertionFailed => {
+            format!("{reason_code}: {fix} in scenario {scenario_id}")
         }
-    }
-    if let Some(seed_path) = assertion_seed_path {
-        let seed_path = seed_path.trim();
-        if !seed_path.is_empty() {
-            parts.push(format!("seed_path={seed_path}"));
+        BehaviorReasonKind::OutputsEqual => {
+            format!("{reason_code}: {fix} for scenario {scenario_id}")
         }
-    }
-    if parts.is_empty() {
-        String::new()
-    } else {
-        format!(" ({})", parts.join(", "))
     }
 }
 
@@ -416,14 +321,12 @@ mod tests {
 
     #[test]
     fn behavior_unverified_diagnostics_include_reason_code_fix_hints() {
+        // Test all reason codes that can be produced by the system
         let reason_codes = [
-            "missing_behavior_scenario",
-            "required_value_missing",
-            "missing_assertions",
-            "missing_delta_assertion",
-            "missing_semantic_predicate",
+            "no_scenario",
             "outputs_equal",
-            "scenario_failed",
+            "assertion_failed",
+            "scenario_error",
         ];
         let remaining_ids = reason_codes
             .iter()

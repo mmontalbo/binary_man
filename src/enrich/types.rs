@@ -453,15 +453,8 @@ pub struct SuggestedBehaviorExclusion {
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct SuggestedBehaviorExclusionEvidence {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub attempted_workarounds: Vec<SuggestedBehaviorExclusionWorkaround>,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct SuggestedBehaviorExclusionWorkaround {
-    pub kind: String,
-    pub ref_path: String,
-    pub delta_variant_path_after: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delta_variant_path: Option<String>,
 }
 
 /// Deterministic next action used by both humans and agents.
@@ -471,6 +464,9 @@ pub enum NextAction {
     Command {
         command: String,
         reason: String,
+        /// Concise instruction for LMs (e.g., "Run to execute verification scenarios").
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hint: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         payload: Option<BehaviorNextActionPayload>,
     },
@@ -478,6 +474,9 @@ pub enum NextAction {
         path: String,
         content: String,
         reason: String,
+        /// Concise instruction for LMs (e.g., "Add assertions to verify behavior").
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hint: Option<String>,
         #[serde(default = "default_edit_strategy")]
         edit_strategy: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -491,6 +490,24 @@ pub fn normalize_next_action(next_action: &mut NextAction) {
             *edit_strategy = default_edit_strategy();
         }
     }
+}
+
+/// Summarizes the primary focus area for the next action.
+///
+/// This gives LMs a quick reference to understand what needs attention
+/// without parsing the full requirements array.
+#[derive(Debug, Serialize, Clone)]
+pub struct ActionFocus {
+    /// Which requirement needs work (e.g., "verification").
+    pub requirement: String,
+    /// Why items are unmet (e.g., "no_scenario", "assertion_failed").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<String>,
+    /// How many items are affected by this focus area.
+    pub affected_count: usize,
+    /// Sample of affected item IDs (max 3 for quick reference).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sample_ids: Vec<String>,
 }
 
 /// Canonical status summary emitted by `bman status --json`.
@@ -510,6 +527,9 @@ pub struct StatusSummary {
     pub lens_summary: Vec<LensSummary>,
     pub decision: Decision,
     pub decision_reason: Option<String>,
+    /// Summary of the primary focus area for the next action.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focus: Option<ActionFocus>,
     pub next_action: NextAction,
     pub warnings: Vec<String>,
     pub man_warnings: Vec<String>,

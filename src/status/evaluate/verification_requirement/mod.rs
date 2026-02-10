@@ -12,7 +12,7 @@ use crate::status::verification_policy::{
 use anyhow::{anyhow, Result};
 use auto::{eval_auto_verification, AutoVerificationContext};
 use inputs::{base_evidence, ensure_verification_policy, load_verification_inputs};
-use ledger::load_or_build_verification_ledger_entries;
+use ledger::build_verification_ledger_entries;
 use overlays::{
     build_stub_blockers_preview, surface_overlays_behavior_exclusion_stub_batch,
     surface_overlays_requires_argv_stub_batch, STUB_REASON_OUTPUTS_EQUAL_AFTER_WORKAROUND,
@@ -31,6 +31,7 @@ use selectors::{
 use crate::enrich;
 use crate::scenarios;
 use crate::verification_progress::{
+    build_action_signature, get_assertion_failed_no_progress_count, is_noop_action,
     load_verification_progress, outputs_equal_delta_signature, scenario_id_from_evidence_path,
     VerificationProgress,
 };
@@ -70,11 +71,10 @@ struct BehaviorExclusionState {
 
 const BEHAVIOR_BATCH_LIMIT: usize = 10;
 const BEHAVIOR_RERUN_CAP: usize = 2;
+const ASSERTION_FAILED_NOOP_CAP: usize = 2;
 const DELTA_PATH_FALLBACK: &str = "inventory/scenarios/<delta_variant>.json";
 const STARTER_SEED_PATH_PLACEHOLDER: &str = "work/item.txt";
 const STARTER_STDOUT_TOKEN_PLACEHOLDER: &str = "item.txt";
-const SCAFFOLD_SENTINEL_SEED_PATH: &str = "work/.bman_assertion_sentinel.txt";
-const SCAFFOLD_SENTINEL_SEED_CONTENTS: &str = "sentinel\n";
 const REQUIRED_VALUE_PLACEHOLDER: &str = "__value__";
 
 #[derive(serde::Deserialize)]
@@ -364,8 +364,9 @@ fn action_reason_code_for_surface_id(
         behavior_reason_code_for_id(surface_id, missing_value_examples, ledger_entries);
     let entry = ledger_entries.get(surface_id);
     let scenario_missing = entry.is_some_and(|entry| entry.behavior_scenario_ids.is_empty());
+    // Normalize missing_value_examples to no_scenario when scenario is absent
     if scenario_missing && reason_code == "missing_value_examples" {
-        "missing_behavior_scenario".to_string()
+        "no_scenario".to_string()
     } else {
         reason_code
     }
@@ -555,121 +556,12 @@ fn minimal_behavior_baseline_scenario(id: &str) -> scenarios::ScenarioSpec {
     }
 }
 
-fn effective_seed_paths(
-    plan: &scenarios::ScenarioPlan,
-    scenario: &scenarios::ScenarioSpec,
-) -> std::collections::BTreeSet<String> {
-    let defaults = plan.defaults.as_ref();
-    let seed = if scenario.seed.is_some() {
-        scenario.seed.as_ref()
-    } else if scenario.seed_dir.is_some() {
-        None
-    } else {
-        defaults.and_then(|value| value.seed.as_ref())
-    };
-    let mut paths = std::collections::BTreeSet::new();
-    if let Some(seed) = seed {
-        for entry in &seed.entries {
-            let path = entry.path.trim();
-            if path.is_empty() {
-                continue;
-            }
-            paths.insert(path.to_string());
-        }
-    }
-    paths
-}
-
-fn stdout_token_for_seed_path(
-    entry: Option<&scenarios::VerificationEntry>,
-    seed_path: &str,
-) -> Option<String> {
-    entry
-        .and_then(|entry| entry.behavior_unverified_assertion_token.as_deref())
-        .map(str::trim)
-        .filter(|token| !token.is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            seed_path
-                .rsplit('/')
-                .next()
-                .map(str::trim)
-                .filter(|token| !token.is_empty())
-                .map(str::to_string)
-        })
-}
-
-fn safe_seed_assertions(
-    seed_path: &str,
-    stdout_token: Option<String>,
-) -> Vec<scenarios::BehaviorAssertion> {
-    vec![
-        scenarios::BehaviorAssertion::BaselineStdoutNotContainsSeedPath {
-            seed_path: seed_path.to_string(),
-            stdout_token: stdout_token.clone(),
-        },
-        scenarios::BehaviorAssertion::VariantStdoutContainsSeedPath {
-            seed_path: seed_path.to_string(),
-            stdout_token,
-        },
-    ]
-}
-
-fn ensure_seed_entry(seed: &mut scenarios::ScenarioSeedSpec, path: &str, contents: &str) {
-    let path = path.trim();
-    if path.is_empty() {
-        return;
-    }
-    if seed.entries.iter().any(|entry| entry.path.trim() == path) {
-        return;
-    }
-    seed.entries.push(scenarios::ScenarioSeedEntry {
-        path: path.to_string(),
-        kind: scenarios::SeedEntryKind::File,
-        contents: Some(contents.to_string()),
-        target: None,
-        mode: None,
-    });
-}
-
-fn seed_spec_with_sentinel(
-    seed: Option<&scenarios::ScenarioSeedSpec>,
-) -> scenarios::ScenarioSeedSpec {
-    let mut seed = seed
-        .cloned()
-        .unwrap_or_else(scenarios::default_behavior_seed);
-    ensure_seed_entry(
-        &mut seed,
-        SCAFFOLD_SENTINEL_SEED_PATH,
-        SCAFFOLD_SENTINEL_SEED_CONTENTS,
-    );
-    seed.entries
-        .sort_by(|a, b| a.path.as_str().cmp(b.path.as_str()));
-    seed.entries.dedup_by(|a, b| a.path.trim() == b.path.trim());
-    seed
-}
-
-fn defaults_seed_patch_with_sentinel(
-    plan: &scenarios::ScenarioPlan,
-    current_patch: Option<&scenarios::ScenarioSeedSpec>,
-) -> scenarios::ScenarioSeedSpec {
-    if let Some(seed) = current_patch {
-        return seed_spec_with_sentinel(Some(seed));
-    }
-    let plan_defaults_seed = plan
-        .defaults
-        .as_ref()
-        .and_then(|defaults| defaults.seed.as_ref());
-    seed_spec_with_sentinel(plan_defaults_seed)
-}
-
 fn scenario_with_assertion_starters(
     plan: &scenarios::ScenarioPlan,
     ledger_entries: &LedgerEntries,
     surface_id: &str,
     baseline_by_id: &mut std::collections::BTreeMap<String, scenarios::ScenarioSpec>,
     upsert_by_id: &mut std::collections::BTreeMap<String, scenarios::ScenarioSpec>,
-    defaults_seed_patch: &mut Option<scenarios::ScenarioSeedSpec>,
 ) {
     let Some(entry) = ledger_entries.get(surface_id) else {
         return;
@@ -686,6 +578,7 @@ fn scenario_with_assertion_starters(
         return;
     };
 
+    // Ensure scenario has a baseline
     let baseline_id = scenario
         .baseline_scenario_id
         .as_deref()
@@ -697,73 +590,17 @@ fn scenario_with_assertion_starters(
     scenario.baseline_scenario_id = Some(baseline_id.clone());
     scenario.coverage_tier = Some("behavior".to_string());
 
-    let baseline_in_plan = plan
-        .scenarios
-        .iter()
-        .find(|candidate| candidate.id == baseline_id)
-        .cloned();
-    let baseline = baseline_by_id
-        .entry(baseline_id.clone())
-        .or_insert_with(|| {
-            baseline_in_plan.unwrap_or_else(|| minimal_behavior_baseline_scenario(&baseline_id))
-        })
-        .clone();
+    // Ensure baseline exists in the scaffold
+    baseline_by_id.entry(baseline_id).or_insert_with_key(|id| {
+        plan.scenarios
+            .iter()
+            .find(|candidate| candidate.id == *id)
+            .cloned()
+            .unwrap_or_else(|| minimal_behavior_baseline_scenario(id))
+    });
 
-    let preferred_seed_path = entry
-        .behavior_unverified_assertion_seed_path
-        .as_deref()
-        .map(str::trim)
-        .filter(|path| !path.is_empty());
-    let scenario_seed_paths = effective_seed_paths(plan, &scenario);
-    let baseline_seed_paths = effective_seed_paths(plan, &baseline);
-    let mut shared_seed_paths = scenario_seed_paths
-        .intersection(&baseline_seed_paths)
-        .cloned()
-        .collect::<Vec<_>>();
-    shared_seed_paths.sort();
-
-    let mut resolved_seed_path = preferred_seed_path
-        .filter(|path| shared_seed_paths.iter().any(|seed| seed == *path))
-        .map(str::to_string)
-        .or_else(|| shared_seed_paths.first().cloned());
-
-    if resolved_seed_path.is_none() {
-        if scenario.seed_dir.is_some() || baseline.seed_dir.is_some() {
-            scenario.assertions =
-                vec![scenarios::BehaviorAssertion::VariantStdoutDiffersFromBaseline {}];
-            upsert_by_id.insert(scenario.id.clone(), scenario);
-            return;
-        }
-
-        if scenario.seed.is_some() {
-            scenario.seed = Some(seed_spec_with_sentinel(scenario.seed.as_ref()));
-        } else {
-            *defaults_seed_patch = Some(defaults_seed_patch_with_sentinel(
-                plan,
-                defaults_seed_patch.as_ref(),
-            ));
-        }
-
-        if let Some(baseline_upsert) = baseline_by_id.get_mut(&baseline_id) {
-            if baseline_upsert.seed.is_some() {
-                baseline_upsert.seed = Some(seed_spec_with_sentinel(baseline_upsert.seed.as_ref()));
-            } else {
-                *defaults_seed_patch = Some(defaults_seed_patch_with_sentinel(
-                    plan,
-                    defaults_seed_patch.as_ref(),
-                ));
-            }
-        }
-        resolved_seed_path = Some(SCAFFOLD_SENTINEL_SEED_PATH.to_string());
-    }
-
-    if let Some(seed_path) = resolved_seed_path {
-        let stdout_token = stdout_token_for_seed_path(Some(entry), &seed_path);
-        scenario.assertions = safe_seed_assertions(&seed_path, stdout_token);
-    } else {
-        scenario.assertions =
-            vec![scenarios::BehaviorAssertion::VariantStdoutDiffersFromBaseline {}];
-    }
+    // Default to outputs_differ - simplest assertion that works for any option
+    scenario.assertions = vec![scenarios::BehaviorAssertion::OutputsDiffer {}];
     upsert_by_id.insert(scenario.id.clone(), scenario);
 }
 
@@ -772,7 +609,6 @@ fn build_missing_assertions_scaffold_content(
     ledger_entries: &LedgerEntries,
     target_ids: &[String],
 ) -> Option<String> {
-    let mut defaults_seed_patch: Option<scenarios::ScenarioSeedSpec> = None;
     let mut baseline_by_id = std::collections::BTreeMap::new();
     let mut upsert_by_id = std::collections::BTreeMap::new();
     for surface_id in normalize_target_ids(target_ids) {
@@ -782,17 +618,12 @@ fn build_missing_assertions_scaffold_content(
             &surface_id,
             &mut baseline_by_id,
             &mut upsert_by_id,
-            &mut defaults_seed_patch,
         );
     }
     for baseline in baseline_by_id.into_values() {
         upsert_by_id.insert(baseline.id.clone(), baseline);
     }
-    let defaults = defaults_seed_patch.map(|seed| scenarios::ScenarioDefaults {
-        seed: Some(seed),
-        ..Default::default()
-    });
-    render_behavior_scaffold_content(defaults, upsert_by_id.into_values().collect())
+    render_behavior_scaffold_content(None, upsert_by_id.into_values().collect())
 }
 
 fn preferred_required_value_token(
@@ -840,27 +671,15 @@ fn suggested_exclusion_payload(
     surface_id: &str,
     reason_code: &str,
     retry_count: usize,
-    delta_variant_path_after: Option<&str>,
+    delta_variant_path: Option<&str>,
 ) -> enrich::SuggestedBehaviorExclusionPayload {
-    let (exclusion_reason_code, workaround_kind, ref_path) = match reason_code {
-        "missing_delta_assertion" => ("assertion_gap", "other", "scenarios/plan.json"),
-        _ => (
-            "fixture_gap",
-            "added_requires_argv",
-            "inventory/surface.overlays.json",
-        ),
+    let exclusion_reason_code = match reason_code {
+        "missing_delta_assertion" => "assertion_gap",
+        _ => "fixture_gap",
     };
     let note = format!(
         "reason_code={reason_code}; rerun cap reached after {retry_count} retries; exclude only if behavior remains unverifiable"
     );
-    let delta_variant_path_after = delta_variant_path_after
-        .unwrap_or(DELTA_PATH_FALLBACK)
-        .to_string();
-    let fallback_workaround = enrich::SuggestedBehaviorExclusionWorkaround {
-        kind: workaround_kind.to_string(),
-        ref_path: ref_path.to_string(),
-        delta_variant_path_after,
-    };
     enrich::SuggestedBehaviorExclusionPayload {
         kind: surface_kind.to_string(),
         id: surface_id.to_string(),
@@ -868,7 +687,11 @@ fn suggested_exclusion_payload(
             reason_code: exclusion_reason_code.to_string(),
             note: Some(note),
             evidence: enrich::SuggestedBehaviorExclusionEvidence {
-                attempted_workarounds: vec![fallback_workaround],
+                delta_variant_path: Some(
+                    delta_variant_path
+                        .unwrap_or(DELTA_PATH_FALLBACK)
+                        .to_string(),
+                ),
             },
         },
     }
@@ -905,6 +728,7 @@ fn suggested_exclusion_only_next_action(
         reason: format!(
             "rerun cap reached for {reason_code}; review next_action.payload.suggested_exclusion_payload and apply exclusion manually if justified"
         ),
+        hint: Some("Review suggested exclusion and apply if justified".to_string()),
         payload,
     }
 }
@@ -954,8 +778,9 @@ fn set_outputs_equal_plateau_next_action(
         path: "inventory/surface.overlays.json".to_string(),
         content,
         reason: format!(
-            "stopped outputs_equal command retries after {BEHAVIOR_RERUN_CAP} no-progress attempts; add behavior_exclusion stubs with attempted_workarounds evidence placeholders in inventory/surface.overlays.json"
+            "stopped outputs_equal retries after {BEHAVIOR_RERUN_CAP} no-progress attempts; add behavior_exclusion stubs in inventory/surface.overlays.json"
         ),
+        hint: Some("Add exclusion stubs after max retries".to_string()),
         edit_strategy: enrich::default_edit_strategy(),
         payload,
     });
@@ -1003,54 +828,24 @@ fn first_behavior_reason_target(
     needs_apply_ids: &std::collections::BTreeSet<String>,
     ledger_entries: &LedgerEntries,
 ) -> Option<String> {
-    let non_blocking_missing_value_examples = std::collections::BTreeSet::new();
+    let empty = std::collections::BTreeSet::new();
+    // Priority: scenario_error > assertion_failed > no_scenario > outputs_equal
+    // NoScenario before OutputsEqual so we scaffold new scenarios first,
+    // then deal with outputs_equal (which often just need exclusion)
     first_reason_id_by_priority(
         required_ids,
         remaining_set,
-        &non_blocking_missing_value_examples,
+        &empty,
         needs_apply_ids,
         ledger_entries,
         &[
-            BehaviorReasonKind::RequiredValueMissing,
-            BehaviorReasonKind::AssertionSeedPathNotSeeded,
-            BehaviorReasonKind::SeedSignatureMismatch,
-            BehaviorReasonKind::SeedMismatch,
+            BehaviorReasonKind::ScenarioError,
             BehaviorReasonKind::AssertionFailed,
-            BehaviorReasonKind::ScenarioFailed,
-            BehaviorReasonKind::MissingAssertions,
+            BehaviorReasonKind::NoScenario,
+            BehaviorReasonKind::OutputsEqual,
         ],
     )
-    .or_else(|| {
-        first_reason_id_by_priority(
-            required_ids,
-            remaining_set,
-            &non_blocking_missing_value_examples,
-            needs_apply_ids,
-            ledger_entries,
-            &[
-                BehaviorReasonKind::MissingDeltaAssertion,
-                BehaviorReasonKind::MissingSemanticPredicate,
-            ],
-        )
-    })
-    .or_else(|| {
-        first_reason_id_by_priority(
-            required_ids,
-            remaining_set,
-            &non_blocking_missing_value_examples,
-            needs_apply_ids,
-            ledger_entries,
-            &[BehaviorReasonKind::MissingBehaviorScenario],
-        )
-    })
-    .or_else(|| {
-        first_reason_id(
-            required_ids,
-            remaining_set,
-            &non_blocking_missing_value_examples,
-            needs_apply_ids,
-        )
-    })
+    .or_else(|| first_reason_id(required_ids, remaining_set, &empty, needs_apply_ids))
 }
 
 fn reason_based_behavior_next_action(
@@ -1087,8 +882,9 @@ fn reason_based_behavior_next_action(
         entry.and_then(|entry| entry.behavior_unverified_assertion_kind.as_deref());
     let assertion_seed_path =
         entry.and_then(|entry| entry.behavior_unverified_assertion_seed_path.as_deref());
+    // Normalize missing_value_examples to no_scenario when scenario is absent
     let action_reason_code = if scenario_missing && reason_code == "missing_value_examples" {
-        "missing_behavior_scenario".to_string()
+        "no_scenario".to_string()
     } else {
         reason_code.clone()
     };
@@ -1103,20 +899,7 @@ fn reason_based_behavior_next_action(
         ));
     }
 
-    let scaffold_candidates = if action_reason_code == "missing_assertions" {
-        vec![
-            build_missing_assertions_scaffold_content(
-                ctx.plan,
-                ledger_entries,
-                &ordered_target_ids,
-            ),
-            build_missing_assertions_scaffold_content(
-                ctx.plan,
-                ledger_entries,
-                std::slice::from_ref(&next_id),
-            ),
-        ]
-    } else if scenario_missing {
+    let scaffold_candidates = if scenario_missing {
         summary.stub_blockers_preview = build_stub_blockers_preview(
             ctx,
             &ordered_target_ids,
@@ -1146,14 +929,8 @@ fn reason_based_behavior_next_action(
                 | "assertion_failed"
                 | "missing_delta_assertion"
         );
-        let mut candidates = vec![
-            build_existing_behavior_scenarios_scaffold(
-                ctx.plan,
-                ledger_entries,
-                std::slice::from_ref(&next_id),
-            ),
-            crate::status::verification::behavior_scenario_stub(ctx.plan, &scenario_id),
-        ];
+        // For assertion repair, prioritize scaffold that adds assertions
+        let mut candidates = Vec::new();
         if assertion_repair_reason {
             candidates.push(build_missing_assertions_scaffold_content(
                 ctx.plan,
@@ -1161,6 +938,15 @@ fn reason_based_behavior_next_action(
                 std::slice::from_ref(&next_id),
             ));
         }
+        candidates.push(build_existing_behavior_scenarios_scaffold(
+            ctx.plan,
+            ledger_entries,
+            std::slice::from_ref(&next_id),
+        ));
+        candidates.push(crate::status::verification::behavior_scenario_stub(
+            ctx.plan,
+            &scenario_id,
+        ));
         candidates.push(crate::status::verification::behavior_scenarios_batch_stub(
             ctx.plan,
             ctx.surface,
@@ -1169,6 +955,54 @@ fn reason_based_behavior_next_action(
         candidates
     };
     let content = first_valid_scaffold_content(ctx.plan, ctx.paths.root(), scaffold_candidates)?;
+
+    // No-op guard for assertion_failed: detect repeated identical edits with no evidence change
+    if action_reason_code == "assertion_failed" {
+        let verification_progress = load_verification_progress(ctx.paths);
+        let candidate_signature =
+            build_action_signature(Some("assertion_failed"), &next_id, &content, entry);
+
+        if is_noop_action(&verification_progress, &next_id, &candidate_signature) {
+            let no_progress_count =
+                get_assertion_failed_no_progress_count(&verification_progress, &next_id);
+
+            // If at/over cap, pivot to exclusion
+            if no_progress_count >= ASSERTION_FAILED_NOOP_CAP {
+                return Some(suggested_exclusion_only_next_action(
+                    ctx,
+                    &[next_id],
+                    "assertion_failed",
+                    retry_counts,
+                    ledger_entries,
+                ));
+            }
+
+            // Otherwise, pivot to targeted rerun command
+            let scenario_ids =
+                rerun_scenario_ids_for_surface_ids(std::slice::from_ref(&next_id), ledger_entries);
+            let command = targeted_outputs_equal_rerun_command(ctx.paths.root(), &scenario_ids);
+            let payload = behavior_payload(
+                std::slice::from_ref(&next_id),
+                Some("assertion_failed"),
+                retry_counts,
+                ledger_entries,
+                &[],
+                Vec::new(),
+                None,
+            );
+            return Some(enrich::NextAction::Command {
+                command,
+                reason: format!(
+                    "assertion_failed edit would be identical to previous with no evidence change; pivot to targeted rerun for {} scenario ids (no-progress attempt {}/{})",
+                    scenario_ids.len(),
+                    no_progress_count.saturating_add(1),
+                    ASSERTION_FAILED_NOOP_CAP
+                ),
+                hint: Some("Rerun scenario to detect evidence changes".to_string()),
+                payload,
+            });
+        }
+    }
 
     let mut reason = behavior_unverified_reason(
         Some(&action_reason_code),
@@ -1193,10 +1027,7 @@ fn reason_based_behavior_next_action(
         ));
     }
     reason.push_str("; apply patch as merge/upsert by scenario.id");
-    let assertion_starters = if matches!(
-        action_reason_code.as_str(),
-        "missing_assertions" | "missing_behavior_scenario"
-    ) {
+    let assertion_starters = if action_reason_code == "no_scenario" {
         assertion_starters_for_missing_assertions(entry, ctx.include_full)
     } else {
         Vec::new()
@@ -1214,6 +1045,7 @@ fn reason_based_behavior_next_action(
         path: "scenarios/plan.json".to_string(),
         content,
         reason,
+        hint: Some("Add or fix behavior scenario assertions".to_string()),
         edit_strategy: crate::status::verification::BEHAVIOR_SCENARIO_EDIT_STRATEGY.to_string(),
         payload,
     })
@@ -1266,6 +1098,7 @@ fn maybe_set_behavior_next_action(
             path: "inventory/surface.overlays.json".to_string(),
             content,
             reason: "add requires_argv workaround overlays in inventory/surface.overlays.json; see verification.stub_blockers_preview".to_string(),
+            hint: Some("Add requires_argv workaround overlays".to_string()),
             edit_strategy: enrich::default_edit_strategy(),
             payload,
         });
@@ -1328,6 +1161,7 @@ fn maybe_set_behavior_next_action(
                     retry.saturating_add(1),
                     BEHAVIOR_RERUN_CAP
                 ),
+                hint: Some("Rerun to verify workaround effect".to_string()),
                 payload,
             });
         }
@@ -1373,6 +1207,7 @@ fn maybe_set_behavior_next_action(
                 path: "inventory/surface.overlays.json".to_string(),
                 content,
                 reason: "record behavior exclusions in inventory/surface.overlays.json; see verification.stub_blockers_preview".to_string(),
+                hint: Some("Add behavior exclusion overlays".to_string()),
                 edit_strategy: enrich::default_edit_strategy(),
                 payload,
             });
@@ -1387,7 +1222,7 @@ fn maybe_set_behavior_next_action(
             action_reason_code_for_surface_id(&next_id, missing_value_examples, ledger_entries);
         let target_ids = if matches!(
             action_reason_code.as_str(),
-            "missing_behavior_scenario" | "missing_assertions"
+            "no_scenario" | "outputs_equal"
         ) {
             let batched = batched_target_ids_for_reason(
                 required_ids,
@@ -1433,6 +1268,7 @@ fn maybe_set_behavior_next_action(
         *ctx.verification_next_action = Some(enrich::NextAction::Command {
             command: format!("bman apply --doc-pack {root}"),
             reason: format!("run behavior verification for {next_id}"),
+            hint: Some("Run to execute behavior verification".to_string()),
             payload,
         });
     }
@@ -1652,7 +1488,6 @@ pub(super) fn eval_verification_requirement(
     let paths = state.paths;
     let binary_name = state.binary_name;
     let config = state.config;
-    let lock_status = state.lock_status;
     let include_full = state.include_full;
     let missing_artifacts = &mut *state.missing_artifacts;
     let blockers = &mut *state.blockers;
@@ -1675,13 +1510,12 @@ pub(super) fn eval_verification_requirement(
 
     if let (Some(surface), Some(plan)) = (inputs.surface.as_ref(), inputs.plan.as_ref()) {
         if inputs.template_path.is_file() && inputs.semantics_path.is_file() {
-            ledger_snapshot = load_or_build_verification_ledger_entries(
+            ledger_snapshot = build_verification_ledger_entries(
                 binary_name,
                 surface,
                 plan,
                 paths,
                 &inputs.template_path,
-                lock_status,
                 &mut local_blockers,
                 &inputs.template_evidence,
             );

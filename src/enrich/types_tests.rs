@@ -1,4 +1,3 @@
-
 use super::*;
 
 #[test]
@@ -24,6 +23,7 @@ fn normalize_next_action_fills_missing_edit_strategy() {
         path: "enrich/config.json".to_string(),
         content: "{}".to_string(),
         reason: "replace".to_string(),
+        hint: None,
         edit_strategy: String::new(),
         payload: None,
     };

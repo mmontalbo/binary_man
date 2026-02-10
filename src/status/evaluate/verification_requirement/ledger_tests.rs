@@ -1,4 +1,4 @@
-use super::load_or_build_verification_ledger_entries;
+use super::build_verification_ledger_entries;
 use crate::enrich;
 use crate::scenarios;
 use crate::surface;
@@ -58,20 +58,14 @@ fn verification_query_error_reports_missing_include_path() {
     let plan: scenarios::ScenarioPlan =
         serde_json::from_str(&scenarios::plan_stub(Some("bin"))).expect("parse plan stub");
     let surface = minimal_surface();
-    let lock_status = enrich::LockStatus {
-        present: false,
-        stale: false,
-        inputs_hash: None,
-    };
     let mut local_blockers = Vec::new();
 
-    let snapshot = load_or_build_verification_ledger_entries(
+    let snapshot = build_verification_ledger_entries(
         Some("bin"),
         &surface,
         &plan,
         &paths,
         &template_path,
-        &lock_status,
         &mut local_blockers,
         &template_evidence,
     );

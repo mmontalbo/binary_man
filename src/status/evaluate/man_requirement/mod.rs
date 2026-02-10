@@ -61,6 +61,7 @@ pub(super) fn eval_man_page_requirement(
                 path: "enrich/semantics.json".to_string(),
                 content: semantics::semantics_stub(Some(binary_name)),
                 reason: "semantics missing; add render rules".to_string(),
+                hint: Some("Create semantics file with render rules".to_string()),
                 edit_strategy: enrich::default_edit_strategy(),
                 payload: None,
             });
@@ -84,6 +85,7 @@ pub(super) fn eval_man_page_requirement(
                 path: "enrich/semantics.json".to_string(),
                 content: semantics::semantics_stub(Some(binary_name)),
                 reason: format!("fix semantics: {message}"),
+                hint: Some("Fix invalid semantics file".to_string()),
                 edit_strategy: enrich::default_edit_strategy(),
                 payload: None,
             });
@@ -141,6 +143,7 @@ pub(super) fn eval_man_page_requirement(
                 reason:
                     "help scenarios produced no usable usage text; update help scenarios or semantics"
                         .to_string(),
+                hint: Some("Add help scenarios for usage text".to_string()),
                 edit_strategy: enrich::default_edit_strategy(),
                 payload: None,
             });
@@ -235,6 +238,7 @@ pub(super) fn eval_man_page_requirement(
                         "update semantics (missing extractions: {})",
                         summary.semantics_unmet.join(", ")
                     ),
+                    hint: Some("Add missing extraction rules".to_string()),
                     edit_strategy: enrich::default_edit_strategy(),
                     payload: None,
                 });

@@ -1,12 +1,14 @@
 //! Workflow status step.
 //!
 //! Status summarizes the pack deterministically and provides the next action.
+use super::decisions;
 use super::load_manifest_optional;
 use crate::cli::StatusArgs;
 use crate::docpack::doc_pack_root_for_status;
 use crate::enrich;
 use crate::scenarios;
 use crate::status::{build_status_summary, plan_status};
+use crate::surface;
 use anyhow::{anyhow, Context, Result};
 use std::path::PathBuf;
 
@@ -140,6 +142,10 @@ pub fn run_status(args: &StatusArgs) -> Result<()> {
     let mut summary = computation.summary;
     let paths = enrich::DocPackPaths::new(doc_pack_root);
 
+    if args.decisions {
+        return run_decisions_output(&paths, summary.binary_name.as_deref());
+    }
+
     if args.json {
         if !args.full {
             slim_status_for_actionability(&mut summary);
@@ -224,21 +230,6 @@ fn slim_behavior_next_action_payload(payload: &mut Option<enrich::BehaviorNextAc
     }
     if value.assertion_starters.len() > 2 {
         value.assertion_starters.truncate(2);
-    }
-    if let Some(suggested) = value.suggested_exclusion_payload.as_mut() {
-        if suggested
-            .behavior_exclusion
-            .evidence
-            .attempted_workarounds
-            .len()
-            > 1
-        {
-            suggested
-                .behavior_exclusion
-                .evidence
-                .attempted_workarounds
-                .truncate(1);
-        }
     }
     if value.is_empty() {
         *payload = None;
@@ -331,6 +322,7 @@ fn blocked_status_summary(args: BlockedStatusSummaryArgs<'_>) -> Result<enrich::
         lens_summary: Vec::new(),
         decision: enrich::Decision::Blocked,
         decision_reason: Some(decision_reason),
+        focus: None,
         next_action,
         warnings: Vec::new(),
         man_warnings: Vec::new(),
@@ -351,6 +343,7 @@ fn apply_refresh_next_action(paths: &enrich::DocPackPaths, reason: &str) -> enri
     enrich::NextAction::Command {
         command: format!("bman apply --doc-pack {}", paths.root().display()),
         reason: reason.to_string(),
+        hint: Some("Run to refresh doc pack state".to_string()),
         payload: None,
     }
 }
@@ -378,6 +371,7 @@ fn build_invalid_config_summary(
             path: "enrich/config.json".to_string(),
             content: enrich::config_stub(),
             reason: "enrich/config.json invalid; replace with a minimal stub".to_string(),
+            hint: Some("Fix invalid config file".to_string()),
             edit_strategy: enrich::default_edit_strategy(),
             payload: None,
         },
@@ -408,6 +402,7 @@ fn build_invalid_plan_summary(
             path: "scenarios/plan.json".to_string(),
             content: scenarios::plan_stub(binary_name),
             reason: "scenarios/plan.json invalid; replace with a minimal stub".to_string(),
+            hint: Some("Fix invalid plan file".to_string()),
             edit_strategy: enrich::default_edit_strategy(),
             payload: None,
         },
@@ -463,6 +458,7 @@ fn build_parse_error_summary(args: ParseErrorSummaryArgs<'_>) -> Result<enrich::
                 Some(enrich::NextAction::Command {
                     command: format!("bman init --doc-pack {}", paths.root().display()),
                     reason: "enrich/config.json missing".to_string(),
+                    hint: Some("Initialize config file".to_string()),
                     payload: None,
                 })
             } else {
@@ -472,6 +468,7 @@ fn build_parse_error_summary(args: ParseErrorSummaryArgs<'_>) -> Result<enrich::
                         paths.root().display()
                     ),
                     reason: "pack missing; init requires explicit --binary".to_string(),
+                    hint: Some("Initialize doc pack".to_string()),
                     payload: None,
                 })
             }
@@ -485,6 +482,7 @@ fn build_parse_error_summary(args: ParseErrorSummaryArgs<'_>) -> Result<enrich::
             path: "enrich/config.json".to_string(),
             content: enrich::config_stub(),
             reason: "enrich/config.json invalid; replace with a minimal stub".to_string(),
+            hint: Some("Fix invalid config file".to_string()),
             edit_strategy: enrich::default_edit_strategy(),
             payload: None,
         }),
@@ -503,6 +501,7 @@ fn build_parse_error_summary(args: ParseErrorSummaryArgs<'_>) -> Result<enrich::
     let mut next_action = next_action.unwrap_or_else(|| enrich::NextAction::Command {
         command: format!("bman status --doc-pack {}", paths.root().display()),
         reason: "status blocked; recheck when needed".to_string(),
+        hint: None,
         payload: None,
     });
     enrich::normalize_next_action(&mut next_action);
@@ -520,6 +519,49 @@ fn build_parse_error_summary(args: ParseErrorSummaryArgs<'_>) -> Result<enrich::
         next_action,
         force_used,
     })
+}
+
+/// Generate and print the LM-friendly decisions output.
+fn run_decisions_output(paths: &enrich::DocPackPaths, binary_name: Option<&str>) -> Result<()> {
+    let surface_path = paths.surface_path();
+    if !surface_path.is_file() {
+        return Err(anyhow!(
+            "surface.json not found at {}; run `bman apply` first",
+            surface_path.display()
+        ));
+    }
+
+    let surface_inventory: surface::SurfaceInventory = serde_json::from_str(
+        &std::fs::read_to_string(&surface_path).context("read surface inventory")?,
+    )
+    .context("parse surface inventory")?;
+
+    let verification_binary = binary_name
+        .map(|s| s.to_string())
+        .or_else(|| surface_inventory.binary_name.clone())
+        .unwrap_or_else(|| "<binary>".to_string());
+
+    // Build verification ledger on-the-fly
+    let scenarios_path = paths.scenarios_plan_path();
+    let template_path = paths
+        .root()
+        .join(enrich::VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL);
+    let ledger = scenarios::build_verification_ledger(
+        &verification_binary,
+        &surface_inventory,
+        paths.root(),
+        &scenarios_path,
+        &template_path,
+        None,
+        Some(paths.root()),
+    )
+    .context("compute verification ledger for decisions output")?;
+
+    let output = decisions::build_decisions(paths, binary_name, &ledger, &surface_inventory)?;
+    let text = serde_json::to_string_pretty(&output).context("serialize decisions output")?;
+    println!("{text}");
+
+    Ok(())
 }
 
 #[cfg(test)]

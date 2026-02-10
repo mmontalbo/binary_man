@@ -188,17 +188,7 @@ fn effective_seed_paths(
 }
 
 fn assertion_seed_path(assertion: &BehaviorAssertion) -> Option<&str> {
-    match assertion {
-        BehaviorAssertion::BaselineStdoutNotContainsSeedPath { seed_path, .. }
-        | BehaviorAssertion::BaselineStdoutContainsSeedPath { seed_path, .. }
-        | BehaviorAssertion::VariantStdoutContainsSeedPath { seed_path, .. }
-        | BehaviorAssertion::VariantStdoutNotContainsSeedPath { seed_path, .. }
-        | BehaviorAssertion::BaselineStdoutHasLine { seed_path, .. }
-        | BehaviorAssertion::BaselineStdoutNotHasLine { seed_path, .. }
-        | BehaviorAssertion::VariantStdoutHasLine { seed_path, .. }
-        | BehaviorAssertion::VariantStdoutNotHasLine { seed_path, .. } => Some(seed_path.as_str()),
-        BehaviorAssertion::VariantStdoutDiffersFromBaseline {} => None,
-    }
+    assertion.seed_path()
 }
 
 /// Render a minimal scenario plan stub for edit suggestions.
@@ -215,7 +205,7 @@ pub fn plan_stub(binary_name: Option<&str>) -> String {
 mod tests {
     use super::*;
     use crate::scenarios::{
-        BehaviorAssertion, ScenarioExpect, ScenarioKind, ScenarioSpec, VerificationPlan,
+        BehaviorAssertion, RunTarget, ScenarioExpect, ScenarioKind, ScenarioSpec, VerificationPlan,
     };
     use std::collections::BTreeMap;
     use std::path::Path;
@@ -266,9 +256,11 @@ mod tests {
             snippet_max_bytes: None,
             coverage_tier: Some("behavior".to_string()),
             baseline_scenario_id: baseline_id.map(|value| value.to_string()),
-            assertions: vec![BehaviorAssertion::VariantStdoutContainsSeedPath {
+            assertions: vec![BehaviorAssertion::StdoutContains {
+                run: RunTarget::Variant,
                 seed_path: seed_path.to_string(),
-                stdout_token: None,
+                token: None,
+                exact_line: false,
             }],
             covers: vec!["-a".to_string()],
             coverage_ignore: false,
@@ -330,7 +322,6 @@ mod tests {
         assert!(message.contains("scenario verify"));
         assert!(message.contains("baseline_scenario_id baseline"));
         assert!(message.contains("seed_path"));
-        assert!(message.contains("stdout_token"));
     }
 
     #[test]

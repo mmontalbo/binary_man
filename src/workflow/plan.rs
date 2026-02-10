@@ -48,6 +48,7 @@ pub fn run_plan(args: &PlanArgs) -> Result<()> {
     let mut next_action = enrich::NextAction::Command {
         command: format!("bman apply --doc-pack {}", ctx.paths.root().display()),
         reason: "apply the planned actions".to_string(),
+        hint: Some("Run to execute planned actions".to_string()),
         payload: None,
     };
     enrich::normalize_next_action(&mut next_action);
@@ -102,7 +103,25 @@ fn build_verification_plan_summary(
         return None;
     }
     let surface = surface::load_surface_inventory(&surface_path).ok()?;
-    let ledger_entries = scenarios::load_verification_entries(ctx.paths.root());
+    let binary_name = surface
+        .binary_name
+        .clone()
+        .unwrap_or_else(|| "<binary>".to_string());
+    let template_path = ctx
+        .paths
+        .root()
+        .join(enrich::VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL);
+    let ledger_entries = scenarios::build_verification_ledger(
+        &binary_name,
+        &surface,
+        ctx.paths.root(),
+        &ctx.paths.scenarios_plan_path(),
+        &template_path,
+        None,
+        Some(ctx.paths.root()),
+    )
+    .ok()
+    .map(|ledger| scenarios::verification_entries_by_surface_id(ledger.entries));
     let verification_tier = config.verification_tier.as_deref().unwrap_or("accepted");
     crate::status::auto_verification_plan_summary(
         &plan,

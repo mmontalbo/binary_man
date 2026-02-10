@@ -13,6 +13,7 @@ fn apply_args(refresh_pack: bool) -> ApplyArgs {
         rerun_failed: false,
         rerun_scenario_id: Vec::new(),
         lens_flake: "unused".to_string(),
+        lm_response: None,
     }
 }
 
@@ -33,52 +34,41 @@ fn write_file(path: &std::path::Path, contents: &str) {
     std::fs::write(path, contents.as_bytes()).expect("write file");
 }
 
-fn write_outputs_equal_verification_ledger(root: &std::path::Path, delta_rel: &str) {
-    let ledger = crate::scenarios::VerificationLedger {
-        schema_version: 1,
-        generated_at_epoch_ms: 0,
-        binary_name: "bin".to_string(),
-        scenarios_path: "scenarios/plan.json".to_string(),
-        surface_path: "inventory/surface.json".to_string(),
-        total_count: 1,
-        verified_count: 0,
-        unverified_count: 1,
-        unverified_ids: vec!["--color".to_string()],
-        behavior_verified_count: 0,
-        behavior_unverified_count: 1,
-        behavior_unverified_ids: vec!["--color".to_string()],
-        excluded_count: 0,
-        excluded: Vec::new(),
-        entries: vec![crate::scenarios::VerificationEntry {
-            surface_id: "--color".to_string(),
-            status: "verified".to_string(),
-            behavior_status: "unverified".to_string(),
-            behavior_exclusion_reason_code: None,
-            behavior_unverified_reason_code: Some("outputs_equal".to_string()),
-            behavior_unverified_scenario_id: Some("verify_color".to_string()),
-            behavior_unverified_assertion_kind: None,
-            behavior_unverified_assertion_seed_path: None,
-            behavior_unverified_assertion_token: None,
-            scenario_ids: Vec::new(),
-            scenario_paths: Vec::new(),
-            behavior_scenario_ids: vec!["verify_color".to_string()],
-            behavior_assertion_scenario_ids: Vec::new(),
-            behavior_scenario_paths: vec![delta_rel.to_string()],
-            delta_outcome: Some("outputs_equal".to_string()),
-            delta_evidence_paths: vec![delta_rel.to_string()],
-            behavior_confounded_scenario_ids: Vec::new(),
-            behavior_confounded_extra_surface_ids: Vec::new(),
-            evidence: Vec::new(),
-        }],
-        warnings: Vec::new(),
+fn outputs_equal_verification_entries(
+    delta_rel: &str,
+) -> BTreeMap<String, scenarios::VerificationEntry> {
+    let entry = scenarios::VerificationEntry {
+        surface_id: "--color".to_string(),
+        status: "verified".to_string(),
+        behavior_status: "unverified".to_string(),
+        behavior_exclusion_reason_code: None,
+        behavior_unverified_reason_code: Some("outputs_equal".to_string()),
+        behavior_unverified_scenario_id: Some("verify_color".to_string()),
+        behavior_unverified_assertion_kind: None,
+        behavior_unverified_assertion_seed_path: None,
+        behavior_unverified_assertion_token: None,
+        scenario_ids: Vec::new(),
+        scenario_paths: Vec::new(),
+        behavior_scenario_ids: vec!["verify_color".to_string()],
+        behavior_assertion_scenario_ids: Vec::new(),
+        behavior_scenario_paths: vec![delta_rel.to_string()],
+        delta_outcome: Some("outputs_equal".to_string()),
+        delta_evidence_paths: vec![delta_rel.to_string()],
+        behavior_confounded_scenario_ids: Vec::new(),
+        behavior_confounded_extra_surface_ids: Vec::new(),
+        evidence: Vec::new(),
     };
-    write_file(
-        &root.join("verification_ledger.json"),
-        &serde_json::to_string_pretty(&ledger).expect("serialize verification ledger"),
-    );
+    let mut entries = BTreeMap::new();
+    entries.insert("--color".to_string(), entry);
+    entries
 }
 
-fn setup_outputs_equal_retry_fixture(root: &std::path::Path) -> enrich::DocPackPaths {
+struct OutputsEqualFixture {
+    paths: enrich::DocPackPaths,
+    entries: BTreeMap<String, scenarios::VerificationEntry>,
+}
+
+fn setup_outputs_equal_retry_fixture(root: &std::path::Path) -> OutputsEqualFixture {
     let paths = enrich::DocPackPaths::new(root.to_path_buf());
     let surface = crate::surface::SurfaceInventory {
         schema_version: 2,
@@ -116,8 +106,8 @@ fn setup_outputs_equal_retry_fixture(root: &std::path::Path) -> enrich::DocPackP
         r#"{"schema_version":3,"items":[],"overlays":[]}"#,
     );
 
-    write_outputs_equal_verification_ledger(root, delta_rel);
-    paths
+    let entries = outputs_equal_verification_entries(delta_rel);
+    OutputsEqualFixture { paths, entries }
 }
 
 #[test]
@@ -189,20 +179,28 @@ fn refresh_pack_runs_before_validate_and_plan_derivation() {
 #[test]
 fn executed_targeted_reruns_increment_outputs_equal_retry_progress() {
     let root = temp_doc_pack_root("bman-apply-progress-increment");
-    let paths = setup_outputs_equal_retry_fixture(&root);
+    let fixture = setup_outputs_equal_retry_fixture(&root);
 
-    update_outputs_equal_retry_progress_after_apply(&paths, &[String::from("verify_color")])
-        .expect("first retry increment");
-    let first = load_verification_progress(&paths);
+    update_outputs_equal_retry_progress_after_apply(
+        &fixture.paths,
+        &[String::from("verify_color")],
+        &fixture.entries,
+    )
+    .expect("first retry increment");
+    let first = load_verification_progress(&fixture.paths);
     let first_retry = first
         .outputs_equal_retries_by_surface
         .get("--color")
         .map(|entry| entry.retry_count);
     assert_eq!(first_retry, Some(1));
 
-    update_outputs_equal_retry_progress_after_apply(&paths, &[String::from("verify_color")])
-        .expect("second retry increment");
-    let second = load_verification_progress(&paths);
+    update_outputs_equal_retry_progress_after_apply(
+        &fixture.paths,
+        &[String::from("verify_color")],
+        &fixture.entries,
+    )
+    .expect("second retry increment");
+    let second = load_verification_progress(&fixture.paths);
     let second_retry = second
         .outputs_equal_retries_by_surface
         .get("--color")
@@ -215,16 +213,20 @@ fn executed_targeted_reruns_increment_outputs_equal_retry_progress() {
 #[test]
 fn unknown_or_empty_forced_reruns_do_not_increment_retry_progress() {
     let root = temp_doc_pack_root("bman-apply-progress-unknown");
-    let paths = setup_outputs_equal_retry_fixture(&root);
+    let fixture = setup_outputs_equal_retry_fixture(&root);
 
-    update_outputs_equal_retry_progress_after_apply(&paths, &[String::from("unknown_scenario")])
-        .expect("unknown forced rerun should not fail");
-    let after_unknown = load_verification_progress(&paths);
+    update_outputs_equal_retry_progress_after_apply(
+        &fixture.paths,
+        &[String::from("unknown_scenario")],
+        &fixture.entries,
+    )
+    .expect("unknown forced rerun should not fail");
+    let after_unknown = load_verification_progress(&fixture.paths);
     assert!(after_unknown.outputs_equal_retries_by_surface.is_empty());
 
-    update_outputs_equal_retry_progress_after_apply(&paths, &[])
+    update_outputs_equal_retry_progress_after_apply(&fixture.paths, &[], &fixture.entries)
         .expect("empty forced rerun set should not fail");
-    let after_empty = load_verification_progress(&paths);
+    let after_empty = load_verification_progress(&fixture.paths);
     assert!(after_empty.outputs_equal_retries_by_surface.is_empty());
 
     std::fs::remove_dir_all(root).expect("cleanup");
@@ -233,11 +235,15 @@ fn unknown_or_empty_forced_reruns_do_not_increment_retry_progress() {
 #[test]
 fn outputs_equal_retry_counts_accumulate_across_delta_path_churn() {
     let root = temp_doc_pack_root("bman-apply-progress-delta-churn");
-    let paths = setup_outputs_equal_retry_fixture(&root);
+    let fixture = setup_outputs_equal_retry_fixture(&root);
 
-    update_outputs_equal_retry_progress_after_apply(&paths, &[String::from("verify_color")])
-        .expect("first retry increment");
-    let first = load_verification_progress(&paths);
+    update_outputs_equal_retry_progress_after_apply(
+        &fixture.paths,
+        &[String::from("verify_color")],
+        &fixture.entries,
+    )
+    .expect("first retry increment");
+    let first = load_verification_progress(&fixture.paths);
     assert_eq!(
         first
             .outputs_equal_retries_by_surface
@@ -251,22 +257,244 @@ fn outputs_equal_retry_counts_accumulate_across_delta_path_churn() {
         &root.join(next_delta_rel),
         r#"{"scenario_id":"verify_color","schema_version":3}"#,
     );
-    write_outputs_equal_verification_ledger(&root, next_delta_rel);
+    let next_entries = outputs_equal_verification_entries(next_delta_rel);
     std::thread::sleep(Duration::from_millis(20));
     write_file(
-        &paths.surface_overlays_path(),
+        &fixture.paths.surface_overlays_path(),
         r#"{"schema_version":3,"items":[],"overlays":[]}"#,
     );
 
-    update_outputs_equal_retry_progress_after_apply(&paths, &[String::from("verify_color")])
-        .expect("second retry increment");
-    let second = load_verification_progress(&paths);
+    update_outputs_equal_retry_progress_after_apply(
+        &fixture.paths,
+        &[String::from("verify_color")],
+        &next_entries,
+    )
+    .expect("second retry increment");
+    let second = load_verification_progress(&fixture.paths);
     assert_eq!(
         second
             .outputs_equal_retries_by_surface
             .get("--color")
             .map(|entry| entry.retry_count),
         Some(2)
+    );
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+fn assertion_failed_verification_entries(
+    delta_rel: &str,
+) -> BTreeMap<String, scenarios::VerificationEntry> {
+    let entry = scenarios::VerificationEntry {
+        surface_id: "--color".to_string(),
+        status: "verified".to_string(),
+        behavior_status: "unverified".to_string(),
+        behavior_exclusion_reason_code: None,
+        behavior_unverified_reason_code: Some("assertion_failed".to_string()),
+        behavior_unverified_scenario_id: Some("verify_color".to_string()),
+        behavior_unverified_assertion_kind: Some("variant_stdout_contains_seed_path".to_string()),
+        behavior_unverified_assertion_seed_path: Some("work/item.txt".to_string()),
+        behavior_unverified_assertion_token: Some("item.txt".to_string()),
+        scenario_ids: Vec::new(),
+        scenario_paths: Vec::new(),
+        behavior_scenario_ids: vec!["verify_color".to_string()],
+        behavior_assertion_scenario_ids: Vec::new(),
+        behavior_scenario_paths: vec![delta_rel.to_string()],
+        delta_outcome: Some("outputs_differ".to_string()),
+        delta_evidence_paths: vec![delta_rel.to_string()],
+        behavior_confounded_scenario_ids: Vec::new(),
+        behavior_confounded_extra_surface_ids: Vec::new(),
+        evidence: Vec::new(),
+    };
+    let mut entries = BTreeMap::new();
+    entries.insert("--color".to_string(), entry);
+    entries
+}
+
+struct AssertionFailedFixture {
+    paths: enrich::DocPackPaths,
+    entries: BTreeMap<String, scenarios::VerificationEntry>,
+}
+
+fn setup_assertion_failed_retry_fixture(root: &std::path::Path) -> AssertionFailedFixture {
+    let paths = enrich::DocPackPaths::new(root.to_path_buf());
+    let surface = crate::surface::SurfaceInventory {
+        schema_version: 2,
+        generated_at_epoch_ms: 0,
+        binary_name: Some("bin".to_string()),
+        inputs_hash: None,
+        discovery: Vec::new(),
+        items: vec![crate::surface::SurfaceItem {
+            kind: "option".to_string(),
+            id: "--color".to_string(),
+            display: "--color".to_string(),
+            description: None,
+            forms: vec!["--color".to_string()],
+            invocation: crate::surface::SurfaceInvocation::default(),
+            evidence: Vec::new(),
+        }],
+        blockers: Vec::new(),
+    };
+    write_file(
+        &paths.surface_path(),
+        &serde_json::to_string_pretty(&surface).expect("serialize surface"),
+    );
+
+    let delta_rel = "inventory/scenarios/verify_color-300.json";
+    write_file(
+        &root.join(delta_rel),
+        r#"{"scenario_id":"verify_color","schema_version":3}"#,
+    );
+
+    let entries = assertion_failed_verification_entries(delta_rel);
+    AssertionFailedFixture { paths, entries }
+}
+
+#[test]
+fn assertion_failed_progress_increments_on_forced_rerun_with_no_evidence_change() {
+    let root = temp_doc_pack_root("bman-apply-assertion-failed-increment");
+    let fixture = setup_assertion_failed_retry_fixture(&root);
+
+    // Set up initial progress with a fingerprint
+    let mut progress = crate::verification_progress::VerificationProgress::default();
+    progress.assertion_failed_by_surface.insert(
+        "--color".to_string(),
+        crate::verification_progress::AssertionFailedProgressEntry {
+            no_progress_count: 0,
+            last_signature: crate::verification_progress::ActionSignature {
+                reason_code: Some("assertion_failed".to_string()),
+                target_id: Some("--color".to_string()),
+                content_hash: Some("abc123".to_string()),
+                evidence_fingerprint: Some(
+                    "assertion_kind:variant_stdout_contains_seed_path|reason:assertion_failed|scenario:verify_color".to_string(),
+                ),
+            },
+        },
+    );
+    crate::verification_progress::write_verification_progress(&fixture.paths, &progress)
+        .expect("write initial progress");
+
+    // Execute forced rerun - evidence fingerprint matches, so no progress
+    update_assertion_failed_progress_after_apply(
+        &fixture.paths,
+        &[String::from("verify_color")],
+        &fixture.entries,
+    )
+    .expect("first forced rerun");
+    let after = load_verification_progress(&fixture.paths);
+    let entry = after
+        .assertion_failed_by_surface
+        .get("--color")
+        .expect("entry should exist");
+    assert_eq!(entry.no_progress_count, 1);
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn assertion_failed_progress_resets_on_evidence_change() {
+    let root = temp_doc_pack_root("bman-apply-assertion-failed-reset");
+    let fixture = setup_assertion_failed_retry_fixture(&root);
+
+    // Set up initial progress with a DIFFERENT fingerprint (evidence has changed)
+    let mut progress = crate::verification_progress::VerificationProgress::default();
+    progress.assertion_failed_by_surface.insert(
+        "--color".to_string(),
+        crate::verification_progress::AssertionFailedProgressEntry {
+            no_progress_count: 1,
+            last_signature: crate::verification_progress::ActionSignature {
+                reason_code: Some("assertion_failed".to_string()),
+                target_id: Some("--color".to_string()),
+                content_hash: Some("abc123".to_string()),
+                evidence_fingerprint: Some("old_different_fingerprint".to_string()),
+            },
+        },
+    );
+    crate::verification_progress::write_verification_progress(&fixture.paths, &progress)
+        .expect("write initial progress");
+
+    // Execute forced rerun - evidence fingerprint changed, so progress reset
+    update_assertion_failed_progress_after_apply(
+        &fixture.paths,
+        &[String::from("verify_color")],
+        &fixture.entries,
+    )
+    .expect("forced rerun");
+    let after = load_verification_progress(&fixture.paths);
+    let entry = after
+        .assertion_failed_by_surface
+        .get("--color")
+        .expect("entry should exist");
+    assert_eq!(entry.no_progress_count, 0);
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn assertion_failed_progress_transitions_to_exclusion_at_cap() {
+    let root = temp_doc_pack_root("bman-apply-assertion-failed-cap");
+    let fixture = setup_assertion_failed_retry_fixture(&root);
+
+    // Set up initial progress near cap
+    let mut progress = crate::verification_progress::VerificationProgress::default();
+    progress.assertion_failed_by_surface.insert(
+        "--color".to_string(),
+        crate::verification_progress::AssertionFailedProgressEntry {
+            no_progress_count: ASSERTION_FAILED_NOOP_CAP - 1,
+            last_signature: crate::verification_progress::ActionSignature {
+                reason_code: Some("assertion_failed".to_string()),
+                target_id: Some("--color".to_string()),
+                content_hash: Some("abc123".to_string()),
+                evidence_fingerprint: Some(
+                    "assertion_kind:variant_stdout_contains_seed_path|reason:assertion_failed|scenario:verify_color".to_string(),
+                ),
+            },
+        },
+    );
+    crate::verification_progress::write_verification_progress(&fixture.paths, &progress)
+        .expect("write initial progress");
+
+    // Execute forced rerun - should hit cap
+    update_assertion_failed_progress_after_apply(
+        &fixture.paths,
+        &[String::from("verify_color")],
+        &fixture.entries,
+    )
+    .expect("forced rerun");
+    let after = load_verification_progress(&fixture.paths);
+    let entry = after
+        .assertion_failed_by_surface
+        .get("--color")
+        .expect("entry should exist");
+    assert_eq!(entry.no_progress_count, ASSERTION_FAILED_NOOP_CAP);
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn assertion_failed_progress_cleans_up_entries_for_non_assertion_failed_surfaces() {
+    let root = temp_doc_pack_root("bman-apply-assertion-failed-cleanup");
+    let fixture = setup_assertion_failed_retry_fixture(&root);
+
+    // Set up progress with an entry for a surface that is no longer assertion_failed
+    let mut progress = crate::verification_progress::VerificationProgress::default();
+    progress.assertion_failed_by_surface.insert(
+        "--other".to_string(), // This surface is not in the ledger as assertion_failed
+        crate::verification_progress::AssertionFailedProgressEntry {
+            no_progress_count: 1,
+            last_signature: crate::verification_progress::ActionSignature::default(),
+        },
+    );
+    crate::verification_progress::write_verification_progress(&fixture.paths, &progress)
+        .expect("write initial progress");
+
+    // Execute any apply - should clean up the stale entry
+    update_assertion_failed_progress_after_apply(&fixture.paths, &[], &fixture.entries)
+        .expect("apply");
+    let after = load_verification_progress(&fixture.paths);
+    assert!(
+        !after.assertion_failed_by_surface.contains_key("--other"),
+        "stale entry should be removed"
     );
 
     std::fs::remove_dir_all(root).expect("cleanup");

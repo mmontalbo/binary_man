@@ -159,11 +159,10 @@ If `enrich/config.json.requirements` includes `"verification"` (default for new 
 - Auto-verify evidence is intentionally truncated to `snippet_max_*`; rerun a manual scenario if you need full output.
 
 ### Behavior reason-code to quick fix
-- `missing_behavior_scenario`: merge the status stub into `scenarios/plan.json`, then fill assertions.
-- `missing_assertions` or `missing_semantic_predicate`: add non-empty `assertions[]` plus at least one stable stdout/stderr semantic predicate.
-- `missing_delta_assertion`: add a seed-grounded add/remove pair, or `variant_stdout_differs_from_baseline` plus semantic predicate.
+- `no_scenario`: merge the status stub into `scenarios/plan.json`, then fill assertions.
+- `assertion_failed`: add or fix assertions so they pass; ensure stable stdout/stderr predicates.
 - `outputs_equal`: strengthen variant argv/fixture so output differs meaningfully from baseline, then rerun apply.
-- `scenario_failed`: fix argv/seed/expect so both baseline and variant runs pass before re-checking behavior.
+- `scenario_error`: fix argv/seed/expect so both baseline and variant runs pass before re-checking behavior.
 
 ### What counts as verifying an id
 - Scenario-to-surface mapping is explicit: every entry in `covers` must be the exact `surface_id` you are verifying (no argv inference).

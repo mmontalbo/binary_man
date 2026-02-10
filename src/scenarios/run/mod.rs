@@ -22,6 +22,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use cache::{load_previous_outcomes, should_run_scenario};
 use exec::{
     build_failed_execution, build_run_kv_args, build_success_execution, invoke_binary_lens_run,
+    warm_lens_flake,
 };
 
 /// Inputs needed to execute a batch of scenarios.
@@ -89,6 +90,10 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<RunScenariosResult> 
         .pack_root
         .canonicalize()
         .with_context(|| format!("resolve pack root {}", args.pack_root.display()))?;
+
+    // Pre-warm the lens flake to ensure Nix store is populated before scenario loop.
+    // This moves the one-time fetch/build cost out of per-scenario execution.
+    warm_lens_flake(args.lens_flake, args.verbose)?;
 
     let scenarios_index_path = args
         .run_root
@@ -292,7 +297,7 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<RunScenariosResult> 
                 " (skipped {auto_skipped_cache} cached, {auto_skipped_limit} limit)"
             ));
         }
-        summary.push_str("; see verification_ledger.json or bman status --json");
+        summary.push_str("; see bman status --json");
         eprintln!("{summary}");
     }
 

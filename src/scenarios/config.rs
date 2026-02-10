@@ -1,6 +1,6 @@
 use super::seed::normalize_seed_path;
 use super::{
-    ScenarioExpect, ScenarioPlan, ScenarioSpec, DEFAULT_SNIPPET_MAX_BYTES,
+    BehaviorAssertion, ScenarioExpect, ScenarioPlan, ScenarioSpec, DEFAULT_SNIPPET_MAX_BYTES,
     DEFAULT_SNIPPET_MAX_LINES,
 };
 use crate::util::sha256_hex;
@@ -50,6 +50,9 @@ struct ScenarioDigestInput {
     snippet_max_lines: usize,
     snippet_max_bytes: usize,
     env: BTreeMap<String, String>,
+    // Behavior verification fields - changes to these should invalidate cache
+    assertions: Vec<BehaviorAssertion>,
+    baseline_scenario_id: Option<String>,
 }
 
 pub(super) fn effective_scenario_config(
@@ -208,6 +211,8 @@ fn scenario_digest(args: &ScenarioDigestArgs<'_>) -> Result<String> {
         snippet_max_lines,
         snippet_max_bytes,
         env: env.clone(),
+        assertions: scenario.assertions.clone(),
+        baseline_scenario_id: scenario.baseline_scenario_id.clone(),
     };
     let bytes = serde_json::to_vec(&payload).context("serialize scenario digest input")?;
     Ok(sha256_hex(&bytes))
@@ -228,7 +233,8 @@ fn merge_env(
 mod tests {
     use super::*;
     use crate::scenarios::{
-        plan_stub, ScenarioDefaults, ScenarioKind, VerificationPlan, VerificationTargetKind,
+        plan_stub, RunTarget, ScenarioDefaults, ScenarioKind, VerificationPlan,
+        VerificationTargetKind,
     };
     use std::collections::BTreeMap;
 
@@ -428,5 +434,36 @@ mod tests {
         assert_plan_stub_env(&plan);
         assert_plan_stub_defaults(&plan);
         assert_plan_stub_help_scenarios(&plan);
+    }
+
+    #[test]
+    fn scenario_digest_sensitive_to_assertions() {
+        let scenario = base_scenario();
+        let plan = plan_with(vec![scenario.clone()], None);
+        let first = effective_scenario_config(&plan, &scenario).unwrap();
+
+        let mut scenario_with_assertions = scenario;
+        scenario_with_assertions
+            .assertions
+            .push(super::BehaviorAssertion::StdoutContains {
+                run: RunTarget::Variant,
+                seed_path: "work/file.txt".to_string(),
+                token: Some("file.txt".to_string()),
+                exact_line: false,
+            });
+        let with_assertions = effective_scenario_config(&plan, &scenario_with_assertions).unwrap();
+        assert_ne!(first.scenario_digest, with_assertions.scenario_digest);
+    }
+
+    #[test]
+    fn scenario_digest_sensitive_to_baseline_scenario_id() {
+        let scenario = base_scenario();
+        let plan = plan_with(vec![scenario.clone()], None);
+        let first = effective_scenario_config(&plan, &scenario).unwrap();
+
+        let mut scenario_with_baseline = scenario;
+        scenario_with_baseline.baseline_scenario_id = Some("baseline".to_string());
+        let with_baseline = effective_scenario_config(&plan, &scenario_with_baseline).unwrap();
+        assert_ne!(first.scenario_digest, with_baseline.scenario_digest);
     }
 }

@@ -199,8 +199,9 @@
             and c.coverage_tier = 'behavior'
             and c.variant_last_pass
             and c.baseline_last_pass
-            and c.seed_signature_match
-            and c.seeded_assertion_count > 0
+            -- Only require seed_signature_match if using seeded assertions
+            and (c.seeded_assertion_count = 0 or c.seed_signature_match)
+            and (c.seeded_assertion_count > 0 or c.delta_assertion_present)
             and c.assertions_pass
             and c.delta_proof_pass
             and c.semantic_predicate_pass
@@ -220,84 +221,14 @@
     select
       s.surface_id,
       case
+        -- no_scenario: no behavior scenario covers this surface
         when not exists (
           select 1
           from covers_norm c
           where c.surface_id = s.surface_id
             and c.coverage_tier = 'behavior'
-        ) then case
-          when s.value_arity = 'required'
-            and coalesce(array_length(s.value_examples), 0) = 0
-          then 'missing_value_examples'
-          else 'missing_behavior_scenario'
-        end
-        when exists (
-          select 1
-          from required_value_misuse r
-          where r.surface_id = s.surface_id
-        ) then 'required_value_missing'
-        when not exists (
-          select 1
-          from covers_norm c
-          where c.surface_id = s.surface_id
-            and c.coverage_tier = 'behavior'
-            and c.has_evidence
-        ) then 'scenario_failed'
-        when exists (
-          select 1
-          from covers_norm c
-          where c.surface_id = s.surface_id
-            and c.coverage_tier = 'behavior'
-            and c.has_evidence
-            and (
-              not c.variant_last_pass
-              or not c.baseline_last_pass
-            )
-        ) then 'scenario_failed'
-        when not exists (
-          select 1
-          from covers_norm c
-          where c.surface_id = s.surface_id
-            and c.coverage_tier = 'behavior'
-            and c.assertion_count > 0
-        ) then 'missing_assertions'
-        when exists (
-          select 1
-          from covers_norm c
-          where c.surface_id = s.surface_id
-            and c.coverage_tier = 'behavior'
-            and c.seed_path_missing
-        ) then 'assertion_seed_path_not_seeded'
-        when exists (
-          select 1
-          from covers_norm c
-          where c.surface_id = s.surface_id
-            and c.coverage_tier = 'behavior'
-            and c.seed_path_assertion_count > 0
-            and not c.seed_path_missing
-            and not c.seed_signature_match
-        ) then 'seed_signature_mismatch'
-        when not exists (
-          select 1
-          from covers_norm c
-          where c.surface_id = s.surface_id
-            and c.coverage_tier = 'behavior'
-            and c.seed_path_assertion_count > 0
-        ) then 'seed_mismatch'
-        when not exists (
-          select 1
-          from covers_norm c
-          where c.surface_id = s.surface_id
-            and c.coverage_tier = 'behavior'
-            and c.delta_assertion_present
-        ) then 'missing_delta_assertion'
-        when not exists (
-          select 1
-          from covers_norm c
-          where c.surface_id = s.surface_id
-            and c.coverage_tier = 'behavior'
-            and c.semantic_predicate_present
-        ) then 'missing_semantic_predicate'
+        ) then 'no_scenario'
+        -- outputs_equal: variant output same as baseline
         when exists (
           select 1
           from covers_norm c
@@ -306,21 +237,33 @@
             and c.delta_assertion_present
             and c.outputs_equal
         ) then 'outputs_equal'
+        -- assertion_failed: assertions ran but didn't pass
         when exists (
           select 1
           from covers_norm c
           where c.surface_id = s.surface_id
             and c.coverage_tier = 'behavior'
+            and c.has_evidence
+            and c.variant_last_pass
+            and c.baseline_last_pass
             and (not c.assertions_pass or not c.delta_proof_pass)
         ) then 'assertion_failed'
+        -- scenario_error: everything else (run failed, missing assertions, bad config)
+        when exists (
+          select 1
+          from covers_norm c
+          where c.surface_id = s.surface_id
+            and c.coverage_tier = 'behavior'
+        ) then 'scenario_error'
         else null
       end as behavior_unverified_reason_code
     from surface s
   ),
   behavior_reason_detail_candidates as (
+    -- scenario_error: any behavior scenario with issues
     select
       c.surface_id,
-      'scenario_failed' as reason_code,
+      'scenario_error' as reason_code,
       c.scenario_id,
       cast(null as VARCHAR) as assertion_kind,
       cast(null as VARCHAR) as assertion_seed_path,
@@ -328,99 +271,8 @@
       10 as priority
     from covers_norm c
     where c.coverage_tier = 'behavior'
-      and (
-        not c.has_evidence
-        or not c.variant_last_pass
-        or not c.baseline_last_pass
-      )
     union all
-    select
-      r.surface_id,
-      'required_value_missing' as reason_code,
-      r.scenario_id,
-      cast(null as VARCHAR) as assertion_kind,
-      cast(null as VARCHAR) as assertion_seed_path,
-      cast(null as VARCHAR) as assertion_token,
-      1 as priority
-    from required_value_misuse r
-    union all
-    select
-      c.surface_id,
-      'missing_assertions' as reason_code,
-      c.scenario_id,
-      cast(null as VARCHAR) as assertion_kind,
-      cast(null as VARCHAR) as assertion_seed_path,
-      cast(null as VARCHAR) as assertion_token,
-      10 as priority
-    from covers_norm c
-    where c.coverage_tier = 'behavior'
-      and c.assertion_count = 0
-    union all
-    select
-      c.surface_id,
-      'assertion_seed_path_not_seeded' as reason_code,
-      d.scenario_id,
-      d.assertion_kind,
-      d.seed_path as assertion_seed_path,
-      d.match_token as assertion_token,
-      1 as priority
-    from behavior_assertion_detail d
-    join covers_norm c
-      on c.scenario_id = d.scenario_id
-    where c.coverage_tier = 'behavior'
-      and d.seed_path_missing = 1
-    union all
-    select
-      c.surface_id,
-      'seed_signature_mismatch' as reason_code,
-      d.scenario_id,
-      d.assertion_kind,
-      d.seed_path as assertion_seed_path,
-      d.match_token as assertion_token,
-      1 as priority
-    from behavior_assertion_detail d
-    join covers_norm c
-      on c.scenario_id = d.scenario_id
-    where c.coverage_tier = 'behavior'
-      and d.uses_seed_path_assertion
-      and not d.seed_signature_match
-    union all
-    select
-      c.surface_id,
-      'seed_mismatch' as reason_code,
-      c.scenario_id,
-      cast(null as VARCHAR) as assertion_kind,
-      cast(null as VARCHAR) as assertion_seed_path,
-      cast(null as VARCHAR) as assertion_token,
-      10 as priority
-    from covers_norm c
-    where c.coverage_tier = 'behavior'
-      and c.seed_path_assertion_count = 0
-    union all
-    select
-      c.surface_id,
-      'missing_delta_assertion' as reason_code,
-      c.scenario_id,
-      cast(null as VARCHAR) as assertion_kind,
-      cast(null as VARCHAR) as assertion_seed_path,
-      cast(null as VARCHAR) as assertion_token,
-      10 as priority
-    from covers_norm c
-    where c.coverage_tier = 'behavior'
-      and not c.delta_assertion_present
-    union all
-    select
-      c.surface_id,
-      'missing_semantic_predicate' as reason_code,
-      c.scenario_id,
-      cast(null as VARCHAR) as assertion_kind,
-      cast(null as VARCHAR) as assertion_seed_path,
-      cast(null as VARCHAR) as assertion_token,
-      10 as priority
-    from covers_norm c
-    where c.coverage_tier = 'behavior'
-      and not c.semantic_predicate_present
-    union all
+    -- outputs_equal
     select
       c.surface_id,
       'outputs_equal' as reason_code,
@@ -428,26 +280,27 @@
       cast(null as VARCHAR) as assertion_kind,
       cast(null as VARCHAR) as assertion_seed_path,
       cast(null as VARCHAR) as assertion_token,
-      10 as priority
+      5 as priority
     from covers_norm c
     where c.coverage_tier = 'behavior'
       and c.delta_assertion_present
       and c.outputs_equal
     union all
+    -- assertion_failed
     select
       c.surface_id,
       'assertion_failed' as reason_code,
-      d.scenario_id,
-      d.assertion_kind,
-      d.seed_path as assertion_seed_path,
-      d.match_token as assertion_token,
+      c.scenario_id,
+      cast(null as VARCHAR) as assertion_kind,
+      cast(null as VARCHAR) as assertion_seed_path,
+      cast(null as VARCHAR) as assertion_token,
       1 as priority
-    from behavior_assertion_detail d
-    join covers_norm c
-      on c.scenario_id = d.scenario_id
+    from covers_norm c
     where c.coverage_tier = 'behavior'
-      and d.assertion_ready = 1
-      and d.assertion_pass = 0
+      and c.has_evidence
+      and c.variant_last_pass
+      and c.baseline_last_pass
+      and (not c.assertions_pass or not c.delta_proof_pass)
   ),
   behavior_reason_detail as (
     select

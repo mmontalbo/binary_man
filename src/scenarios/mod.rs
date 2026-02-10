@@ -51,12 +51,3 @@ pub(crate) fn verification_entries_by_surface_id(
     }
     by_surface_id
 }
-
-pub(crate) fn load_verification_entries(
-    doc_pack_root: &std::path::Path,
-) -> Option<std::collections::BTreeMap<String, VerificationEntry>> {
-    let path = doc_pack_root.join("verification_ledger.json");
-    let bytes = std::fs::read(path).ok()?;
-    let ledger: VerificationLedger = serde_json::from_slice(&bytes).ok()?;
-    Some(verification_entries_by_surface_id(ledger.entries))
-}

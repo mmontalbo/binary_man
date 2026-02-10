@@ -29,23 +29,26 @@
       s.baseline_scenario_id,
       a.kind as assertion_kind,
       a.seed_path as seed_path,
-      a.stdout_token as stdout_token,
-      coalesce(a.stdout_token, a.seed_path) as match_token,
+      coalesce(a.token, a.seed_path) as match_token,
+      a.run as run_target,
+      coalesce(a.exact_line, false) as exact_line,
+      a.kind in ('stdout_contains', 'stdout_lacks') as uses_seed_path_assertion,
       case
-        when a.kind in (
-          'baseline_stdout_not_contains_seed_path',
-          'baseline_stdout_contains_seed_path',
-          'variant_stdout_contains_seed_path',
-          'variant_stdout_not_contains_seed_path',
-          'baseline_stdout_has_line',
-          'baseline_stdout_not_has_line',
-          'variant_stdout_has_line',
-          'variant_stdout_not_has_line'
-        ) then true
-        else false
-      end as uses_seed_path_assertion
+        when a.kind = 'stdout_contains' and a.run = 'baseline' then 'baseline_contains'
+        when a.kind = 'stdout_contains' and a.run = 'variant' then 'variant_contains'
+        when a.kind = 'stdout_lacks' and a.run = 'baseline' then 'baseline_lacks'
+        when a.kind = 'stdout_lacks' and a.run = 'variant' then 'variant_lacks'
+        when a.kind = 'outputs_differ' then 'outputs_differ'
+        else a.kind
+      end as normalized_kind
     from combined_scenarios s,
-      unnest(coalesce(s.assertions, [])) as t(a)
+      unnest(coalesce(s.assertions, []::STRUCT(
+        kind VARCHAR,
+        seed_path VARCHAR,
+        token VARCHAR,
+        run VARCHAR,
+        exact_line BOOLEAN
+      )[])) as t(a)
     where s.coverage_tier = 'behavior'
   ),
   behavior_assertion_detail as (
@@ -53,8 +56,10 @@
       b.scenario_id,
       b.baseline_scenario_id,
       b.assertion_kind,
+      b.normalized_kind,
       b.seed_path,
       b.match_token,
+      b.exact_line,
       b.uses_seed_path_assertion,
       b.variant_last_pass,
       b.baseline_last_pass,
@@ -68,75 +73,56 @@
       b.seeded_assertion,
       b.assertion_ready,
       case
-        when b.assertion_kind = 'baseline_stdout_not_contains_seed_path' then
+        -- Baseline contains (substring or exact line)
+        when b.normalized_kind = 'baseline_contains' then
           case
             when b.assertion_ready = 0 then 0
             when b.baseline_stdout is null then 0
-            when position(b.match_token in b.baseline_stdout) = 0 then 1
-            else 0
-          end
-        when b.assertion_kind = 'baseline_stdout_contains_seed_path' then
-          case
-            when b.assertion_ready = 0 then 0
-            when b.baseline_stdout is null then 0
-            when position(b.match_token in b.baseline_stdout) > 0 then 1
-            else 0
-          end
-        when b.assertion_kind = 'baseline_stdout_has_line' then
-          case
-            when b.assertion_ready = 0 then 0
-            when b.baseline_stdout is null then 0
-            when list_contains(
+            when b.exact_line and list_contains(
               str_split(b.baseline_stdout, chr(10)),
               b.match_token
             ) then 1
+            when not b.exact_line and position(b.match_token in b.baseline_stdout) > 0 then 1
             else 0
           end
-        when b.assertion_kind = 'baseline_stdout_not_has_line' then
+        -- Baseline lacks (substring or exact line)
+        when b.normalized_kind = 'baseline_lacks' then
           case
             when b.assertion_ready = 0 then 0
             when b.baseline_stdout is null then 0
-            when not list_contains(
+            when b.exact_line and not list_contains(
               str_split(b.baseline_stdout, chr(10)),
               b.match_token
             ) then 1
+            when not b.exact_line and position(b.match_token in b.baseline_stdout) = 0 then 1
             else 0
           end
-        when b.assertion_kind = 'variant_stdout_contains_seed_path' then
+        -- Variant contains (substring or exact line)
+        when b.normalized_kind = 'variant_contains' then
           case
             when b.assertion_ready = 0 then 0
             when b.variant_stdout is null then 0
-            when position(b.match_token in b.variant_stdout) > 0 then 1
-            else 0
-          end
-        when b.assertion_kind = 'variant_stdout_has_line' then
-          case
-            when b.assertion_ready = 0 then 0
-            when b.variant_stdout is null then 0
-            when list_contains(
+            when b.exact_line and list_contains(
               str_split(b.variant_stdout, chr(10)),
               b.match_token
             ) then 1
+            when not b.exact_line and position(b.match_token in b.variant_stdout) > 0 then 1
             else 0
           end
-        when b.assertion_kind = 'variant_stdout_not_contains_seed_path' then
+        -- Variant lacks (substring or exact line)
+        when b.normalized_kind = 'variant_lacks' then
           case
             when b.assertion_ready = 0 then 0
             when b.variant_stdout is null then 0
-            when position(b.match_token in b.variant_stdout) = 0 then 1
-            else 0
-          end
-        when b.assertion_kind = 'variant_stdout_not_has_line' then
-          case
-            when b.assertion_ready = 0 then 0
-            when b.variant_stdout is null then 0
-            when not list_contains(
+            when b.exact_line and not list_contains(
               str_split(b.variant_stdout, chr(10)),
               b.match_token
             ) then 1
+            when not b.exact_line and position(b.match_token in b.variant_stdout) = 0 then 1
             else 0
           end
-        when b.assertion_kind = 'variant_stdout_differs_from_baseline' then
+        -- Outputs differ
+        when b.normalized_kind = 'outputs_differ' then
           case
             when b.assertion_ready = 0 then 0
             when b.variant_stdout is null then 0
@@ -151,8 +137,10 @@
         b.scenario_id,
         b.baseline_scenario_id,
         b.assertion_kind,
+        b.normalized_kind,
         b.seed_path,
         b.match_token,
+        b.exact_line,
         b.uses_seed_path_assertion,
         ctx.variant_last_pass,
         ctx.baseline_last_pass,
@@ -232,7 +220,9 @@
           when not coalesce(ctx.baseline_last_pass, false) then 0
           when b.uses_seed_path_assertion
             and (b.seed_path is null or b.seed_path = '') then 0
-          when not coalesce(ctx.seed_signature_match, false) then 0
+          -- Only require seed_signature_match for assertions that use seed paths
+          when b.uses_seed_path_assertion
+            and not coalesce(ctx.seed_signature_match, false) then 0
           when b.uses_seed_path_assertion
             and not exists (
               select 1
@@ -258,82 +248,15 @@
     select
       scenario_id,
       seed_path,
-      max(
-        case
-          when assertion_kind in (
-            'baseline_stdout_not_contains_seed_path',
-            'baseline_stdout_not_has_line'
-          ) then 1
-          else 0
-        end
-      ) as has_baseline_not,
-      max(
-        case
-          when assertion_kind in (
-            'baseline_stdout_not_contains_seed_path',
-            'baseline_stdout_not_has_line'
-          )
-            and assertion_pass = 1 then 1
-          else 0
-        end
-      ) as baseline_not_pass,
-      max(
-        case
-          when assertion_kind in (
-            'baseline_stdout_contains_seed_path',
-            'baseline_stdout_has_line'
-          ) then 1
-          else 0
-        end
-      ) as has_baseline_contains,
-      max(
-        case
-          when assertion_kind in (
-            'baseline_stdout_contains_seed_path',
-            'baseline_stdout_has_line'
-          )
-            and assertion_pass = 1 then 1
-          else 0
-        end
-      ) as baseline_contains_pass,
-      max(
-        case
-          when assertion_kind in (
-            'variant_stdout_contains_seed_path',
-            'variant_stdout_has_line'
-          ) then 1
-          else 0
-        end
-      ) as has_variant_contains,
-      max(
-        case
-          when assertion_kind in (
-            'variant_stdout_contains_seed_path',
-            'variant_stdout_has_line'
-          )
-            and assertion_pass = 1 then 1
-          else 0
-        end
-      ) as variant_contains_pass,
-      max(
-        case
-          when assertion_kind in (
-            'variant_stdout_not_contains_seed_path',
-            'variant_stdout_not_has_line'
-          ) then 1
-          else 0
-        end
-      ) as has_variant_not,
-      max(
-        case
-          when assertion_kind in (
-            'variant_stdout_not_contains_seed_path',
-            'variant_stdout_not_has_line'
-          )
-            and assertion_pass = 1 then 1
-          else 0
-        end
-      ) as variant_not_pass
+      -- Using normalized_kind which maps both legacy and new formats
+      max(case when normalized_kind = 'baseline_lacks' then 1 else 0 end) as has_baseline_not,
+      max(case when normalized_kind = 'baseline_lacks' and assertion_pass = 1 then 1 else 0 end) as baseline_not_pass,
+      max(case when normalized_kind = 'baseline_contains' then 1 else 0 end) as has_baseline_contains,
+      max(case when normalized_kind = 'baseline_contains' and assertion_pass = 1 then 1 else 0 end) as baseline_contains_pass,
+      max(case when normalized_kind = 'variant_contains' then 1 else 0 end) as has_variant_contains,
+      max(case when normalized_kind = 'variant_contains' and assertion_pass = 1 then 1 else 0 end) as variant_contains_pass,
+      max(case when normalized_kind = 'variant_lacks' then 1 else 0 end) as has_variant_not,
+      max(case when normalized_kind = 'variant_lacks' and assertion_pass = 1 then 1 else 0 end) as variant_not_pass
     from behavior_assertion_detail
     where uses_seed_path_assertion = true
     group by scenario_id, seed_path
@@ -373,19 +296,9 @@
       ) as seed_path_assertion_count,
       sum(case when seed_path_missing = 1 then 1 else 0 end) as seed_path_missing_count,
       min(case when assertion_pass = 1 then 1 else 0 end) as all_pass_int,
-      max(
-        case
-          when assertion_kind = 'variant_stdout_differs_from_baseline' then 1
-          else 0
-        end
-      ) as diff_assertion_present,
-      max(
-        case
-          when assertion_kind = 'variant_stdout_differs_from_baseline'
-            and assertion_pass = 1 then 1
-          else 0
-        end
-      ) as diff_assertion_pass
+      -- Using normalized_kind to match both legacy and new format
+      max(case when normalized_kind = 'outputs_differ' then 1 else 0 end) as diff_assertion_present,
+      max(case when normalized_kind = 'outputs_differ' and assertion_pass = 1 then 1 else 0 end) as diff_assertion_pass
     from behavior_assertion_detail
     group by scenario_id
   ),
@@ -416,10 +329,12 @@
       coalesce(s.expect_has_output_predicate, false) as expect_has_output_predicate,
       (
         coalesce(s.expect_has_output_predicate, false)
+        or coalesce(a.diff_assertion_present, 0) = 1
         or coalesce(dp.delta_pair_present, 0) = 1
       ) as semantic_predicate_present,
       (
         coalesce(s.expect_has_output_predicate, false)
+        or coalesce(a.diff_assertion_pass, 0) = 1
         or coalesce(dp.delta_pair_pass, 0) = 1
       ) as semantic_predicate_pass,
       coalesce(ctx.seed_signature_match, false) as seed_signature_match,

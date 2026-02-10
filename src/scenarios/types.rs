@@ -10,6 +10,18 @@ fn default_true() -> bool {
     true
 }
 
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+/// Target run for assertion evaluation (baseline or variant).
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RunTarget {
+    Baseline,
+    Variant,
+}
+
 fn default_scenario_kind() -> ScenarioKind {
     ScenarioKind::Behavior
 }
@@ -348,51 +360,48 @@ impl ScenarioExpect {
 }
 
 /// Assertion vocabulary for behavior scenarios.
+///
+/// Three assertion types:
+/// - `stdout_contains`: Token should be present in stdout
+/// - `stdout_lacks`: Token should be absent from stdout
+/// - `outputs_differ`: Variant stdout should differ from baseline
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
 pub enum BehaviorAssertion {
-    BaselineStdoutNotContainsSeedPath {
+    /// Token should be present in stdout (substring or exact line match).
+    StdoutContains {
+        run: RunTarget,
         seed_path: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        stdout_token: Option<String>,
+        token: Option<String>,
+        /// If true, match exact line instead of substring.
+        #[serde(default, skip_serializing_if = "is_false")]
+        exact_line: bool,
     },
-    BaselineStdoutContainsSeedPath {
+    /// Token should be absent from stdout (substring or exact line match).
+    StdoutLacks {
+        run: RunTarget,
         seed_path: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        stdout_token: Option<String>,
+        token: Option<String>,
+        /// If true, match exact line instead of substring.
+        #[serde(default, skip_serializing_if = "is_false")]
+        exact_line: bool,
     },
-    VariantStdoutContainsSeedPath {
-        seed_path: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        stdout_token: Option<String>,
-    },
-    VariantStdoutNotContainsSeedPath {
-        seed_path: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        stdout_token: Option<String>,
-    },
-    BaselineStdoutHasLine {
-        seed_path: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        stdout_token: Option<String>,
-    },
-    BaselineStdoutNotHasLine {
-        seed_path: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        stdout_token: Option<String>,
-    },
-    VariantStdoutHasLine {
-        seed_path: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        stdout_token: Option<String>,
-    },
-    VariantStdoutNotHasLine {
-        seed_path: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        stdout_token: Option<String>,
-    },
-    VariantStdoutDiffersFromBaseline {},
+    /// Variant stdout should differ from baseline stdout.
+    OutputsDiffer {},
+}
+
+impl BehaviorAssertion {
+    /// Get the seed_path for seed-grounded assertions.
+    pub fn seed_path(&self) -> Option<&str> {
+        match self {
+            BehaviorAssertion::StdoutContains { seed_path, .. }
+            | BehaviorAssertion::StdoutLacks { seed_path, .. } => Some(seed_path),
+            BehaviorAssertion::OutputsDiffer {} => None,
+        }
+    }
 }
 
 /// Coverage ledger emitted after scenario runs.

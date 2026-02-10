@@ -3,6 +3,7 @@ use crate::scenarios;
 use crate::staging::write_staged_json;
 use crate::surface;
 use anyhow::{anyhow, Result};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 pub(super) struct LedgerArgs<'a> {
@@ -11,27 +12,35 @@ pub(super) struct LedgerArgs<'a> {
     pub(super) binary_name: Option<&'a str>,
     pub(super) scenarios_path: &'a Path,
     pub(super) emit_coverage: bool,
-    pub(super) emit_verification: bool,
+    pub(super) compute_verification: bool,
 }
 
-pub(super) fn write_ledgers(args: &LedgerArgs<'_>) -> Result<()> {
+pub(super) struct LedgerResult {
+    pub(super) verification_entries: Option<BTreeMap<String, scenarios::VerificationEntry>>,
+}
+
+/// Write coverage ledger and compute verification entries.
+/// Returns verification entries for use by progress tracking (no longer writes verification_ledger.json).
+pub(super) fn write_ledgers(args: &LedgerArgs<'_>) -> Result<LedgerResult> {
     let LedgerArgs {
         paths,
         staging_root,
         binary_name,
         scenarios_path,
         emit_coverage,
-        emit_verification,
+        compute_verification,
     } = *args;
 
-    if (emit_coverage || emit_verification) && !scenarios_path.is_file() {
+    if (emit_coverage || compute_verification) && !scenarios_path.is_file() {
         return Err(anyhow!(
             "scenarios plan missing at {}",
             scenarios_path.display()
         ));
     }
-    if !scenarios_path.is_file() || (!emit_coverage && !emit_verification) {
-        return Ok(());
+    if !scenarios_path.is_file() || (!emit_coverage && !compute_verification) {
+        return Ok(LedgerResult {
+            verification_entries: None,
+        });
     }
 
     let staged_surface = staging_root.join("inventory").join("surface.json");
@@ -41,7 +50,9 @@ pub(super) fn write_ledgers(args: &LedgerArgs<'_>) -> Result<()> {
         paths.surface_path()
     };
     if !surface_path.is_file() {
-        return Ok(());
+        return Ok(LedgerResult {
+            verification_entries: None,
+        });
     }
 
     let surface = surface::load_surface_inventory(&surface_path)?;
@@ -60,7 +71,7 @@ pub(super) fn write_ledgers(args: &LedgerArgs<'_>) -> Result<()> {
         write_staged_json(staging_root, "coverage_ledger.json", &ledger)?;
     }
 
-    if emit_verification {
+    let verification_entries = if compute_verification {
         let verification_template = paths
             .root()
             .join(enrich::VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL);
@@ -78,9 +89,17 @@ pub(super) fn write_ledgers(args: &LedgerArgs<'_>) -> Result<()> {
                 Some(staging_root),
                 Some(paths.root()),
             )?;
-            write_staged_json(staging_root, "verification_ledger.json", &ledger)?;
+            Some(scenarios::verification_entries_by_surface_id(
+                ledger.entries,
+            ))
+        } else {
+            None
         }
-    }
+    } else {
+        None
+    };
 
-    Ok(())
+    Ok(LedgerResult {
+        verification_entries,
+    })
 }

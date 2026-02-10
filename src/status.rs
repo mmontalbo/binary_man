@@ -90,6 +90,7 @@ pub fn build_status_summary(args: BuildStatusSummaryArgs<'_>) -> Result<enrich::
                 path: "scenarios/plan.json".to_string(),
                 content: plan_content,
                 reason: format!("edit scenario {}", scenario_failures[0].scenario_id),
+                hint: Some("Fix failing scenario assertions".to_string()),
                 edit_strategy: enrich::default_edit_strategy(),
                 payload: None,
             }
@@ -147,6 +148,8 @@ pub fn build_status_summary(args: BuildStatusSummaryArgs<'_>) -> Result<enrich::
         .unwrap_or_default();
     let lens_summary = lens::build_lens_summary(&paths, config, &mut warnings, man_meta.as_ref());
 
+    let focus = build_action_focus(&eval.requirements, &next_action);
+
     Ok(enrich::StatusSummary {
         schema_version: 1,
         generated_at_epoch_ms: enrich::now_epoch_ms()?,
@@ -159,6 +162,7 @@ pub fn build_status_summary(args: BuildStatusSummaryArgs<'_>) -> Result<enrich::
         scenario_failures,
         decision: eval.decision,
         decision_reason: eval.decision_reason,
+        focus,
         next_action,
         warnings,
         man_warnings,
@@ -181,6 +185,7 @@ fn determine_next_action(
             return enrich::NextAction::Command {
                 command: format!("bman init --doc-pack {}", doc_pack_root.display()),
                 reason: "enrich/config.json missing".to_string(),
+                hint: Some("Initialize doc pack configuration".to_string()),
                 payload: None,
             };
         }
@@ -190,6 +195,7 @@ fn determine_next_action(
                 doc_pack_root.display()
             ),
             reason: "pack missing; init requires explicit --binary".to_string(),
+            hint: Some("Initialize new doc pack with binary name".to_string()),
             payload: None,
         };
     }
@@ -197,6 +203,7 @@ fn determine_next_action(
         return enrich::NextAction::Command {
             command: format!("bman apply --doc-pack {}", doc_pack_root.display()),
             reason: "lock missing or stale; apply will refresh".to_string(),
+            hint: Some("Run to refresh lock state".to_string()),
             payload: None,
         };
     }
@@ -204,6 +211,7 @@ fn determine_next_action(
         return enrich::NextAction::Command {
             command: format!("bman apply --doc-pack {}", doc_pack_root.display()),
             reason: "plan missing or stale; apply will refresh".to_string(),
+            hint: Some("Run to refresh plan state".to_string()),
             payload: None,
         };
     }
@@ -216,12 +224,14 @@ fn determine_next_action(
         return enrich::NextAction::Command {
             command: format!("bman apply --doc-pack {}", doc_pack_root.display()),
             reason,
+            hint: Some("Run to execute pending actions".to_string()),
             payload: None,
         };
     }
     enrich::NextAction::Command {
         command: format!("bman status --doc-pack {}", doc_pack_root.display()),
         reason: "requirements met; recheck when needed".to_string(),
+        hint: None,
         payload: None,
     }
 }
@@ -235,6 +245,7 @@ pub(crate) fn next_action_for_missing_inputs(
             path: "scenarios/plan.json".to_string(),
             content: scenarios::plan_stub(binary_name),
             reason: "scenarios/plan.json missing; create a minimal stub".to_string(),
+            hint: Some("Create scenarios plan file".to_string()),
             edit_strategy: enrich::default_edit_strategy(),
             payload: None,
         };
@@ -246,6 +257,7 @@ pub(crate) fn next_action_for_missing_inputs(
                 paths.root().display()
             ),
             reason: "pack missing; init requires explicit --binary".to_string(),
+            hint: Some("Initialize doc pack".to_string()),
             payload: None,
         };
     }
@@ -253,9 +265,61 @@ pub(crate) fn next_action_for_missing_inputs(
         path: "enrich/config.json".to_string(),
         content: enrich::config_stub(),
         reason: "config inputs missing; replace with a minimal stub".to_string(),
+        hint: Some("Create config file".to_string()),
         edit_strategy: enrich::default_edit_strategy(),
         payload: None,
     }
+}
+
+/// Build an ActionFocus summarizing the primary focus area for the next action.
+fn build_action_focus(
+    requirements: &[enrich::RequirementStatus],
+    next_action: &enrich::NextAction,
+) -> Option<enrich::ActionFocus> {
+    // Extract reason_code from next_action payload if present
+    let payload_reason_code = match next_action {
+        enrich::NextAction::Command { payload, .. } => {
+            payload.as_ref().and_then(|p| p.reason_code.clone())
+        }
+        enrich::NextAction::Edit { payload, .. } => {
+            payload.as_ref().and_then(|p| p.reason_code.clone())
+        }
+    };
+    let payload_target_ids = match next_action {
+        enrich::NextAction::Command { payload, .. } => payload
+            .as_ref()
+            .map(|p| p.target_ids.clone())
+            .unwrap_or_default(),
+        enrich::NextAction::Edit { payload, .. } => payload
+            .as_ref()
+            .map(|p| p.target_ids.clone())
+            .unwrap_or_default(),
+    };
+
+    // Find the first unmet requirement
+    let unmet = requirements
+        .iter()
+        .find(|r| r.status == enrich::RequirementState::Unmet)?;
+
+    // Determine affected count and sample IDs
+    let (affected_count, sample_ids) = if !payload_target_ids.is_empty() {
+        let count = payload_target_ids.len();
+        let sample: Vec<String> = payload_target_ids.into_iter().take(3).collect();
+        (count, sample)
+    } else if !unmet.unverified_ids.is_empty() {
+        let count = unmet.unverified_ids.len();
+        let sample: Vec<String> = unmet.unverified_ids.iter().take(3).cloned().collect();
+        (count, sample)
+    } else {
+        (0, Vec::new())
+    };
+
+    Some(enrich::ActionFocus {
+        requirement: unmet.id.to_string(),
+        reason_code: payload_reason_code,
+        affected_count,
+        sample_ids,
+    })
 }
 
 /// Print a human-readable status summary to stdout.

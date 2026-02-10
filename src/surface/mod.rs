@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub(crate) use behavior_exclusion::{validate_behavior_exclusions, BehaviorExclusionLedgerEntry};
+pub(crate) use behavior_exclusion::validate_behavior_exclusions;
 pub(crate) use overlays::{
     collect_behavior_exclusions, load_surface_overlays_if_exists, SurfaceBehaviorExclusion,
 };

@@ -360,10 +360,7 @@ impl App {
             )));
         }
 
-        let mut paths = vec!["scenarios/plan.json", "enrich/semantics.json"];
-        if self.data.verification_ledger_present {
-            paths.push("verification_ledger.json");
-        }
+        let paths = ["scenarios/plan.json", "enrich/semantics.json"];
         lines.push(Line::from(format!("Open: {}", paths.join(" | "))));
 
         lines

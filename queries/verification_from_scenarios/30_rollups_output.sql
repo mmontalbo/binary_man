@@ -52,7 +52,9 @@
           and coalesce(array_length(s.value_examples), 0) = 0 then 'missing_value_examples'
         when bs.status = 'verified' then 'delta_seen'
         when br.behavior_unverified_reason_code = 'outputs_equal' then 'outputs_equal'
-        when br.behavior_unverified_reason_code = 'scenario_failed' then 'scenario_failed'
+        when br.behavior_unverified_reason_code = 'scenario_error' then 'scenario_error'
+        when br.behavior_unverified_reason_code = 'assertion_failed' then 'assertion_failed'
+        when br.behavior_unverified_reason_code = 'no_scenario' then null
         else null
       end as delta_outcome
     from surface s

@@ -75,68 +75,33 @@ impl VerificationStatus {
     }
 }
 
+/// Behavior verification reason codes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BehaviorReasonKind {
-    MissingValueExamples,
-    RequiredValueMissing,
-    MissingBehaviorScenario,
-    ScenarioFailed,
-    MissingAssertions,
-    AssertionSeedPathNotSeeded,
-    SeedSignatureMismatch,
-    SeedMismatch,
-    MissingDeltaAssertion,
-    MissingSemanticPredicate,
-    OutputsEqual,
+    NoScenario,
+    ScenarioError,
     AssertionFailed,
-    Unknown,
-    Other,
+    OutputsEqual,
 }
 
 impl BehaviorReasonKind {
     pub(crate) fn as_code(self) -> &'static str {
         match self {
-            Self::MissingValueExamples => "missing_value_examples",
-            Self::RequiredValueMissing => "required_value_missing",
-            Self::MissingBehaviorScenario => "missing_behavior_scenario",
-            Self::ScenarioFailed => "scenario_failed",
-            Self::MissingAssertions => "missing_assertions",
-            Self::AssertionSeedPathNotSeeded => "assertion_seed_path_not_seeded",
-            Self::SeedSignatureMismatch => "seed_signature_mismatch",
-            Self::SeedMismatch => "seed_mismatch",
-            Self::MissingDeltaAssertion => "missing_delta_assertion",
-            Self::MissingSemanticPredicate => "missing_semantic_predicate",
-            Self::OutputsEqual => "outputs_equal",
+            Self::NoScenario => "no_scenario",
+            Self::ScenarioError => "scenario_error",
             Self::AssertionFailed => "assertion_failed",
-            Self::Unknown => "unknown",
-            Self::Other => "other",
+            Self::OutputsEqual => "outputs_equal",
         }
     }
 
     pub(crate) fn from_code(raw: Option<&str>) -> Self {
-        match normalize_behavior_reason_code(raw.unwrap_or("unknown")) {
-            "missing_value_examples" => Self::MissingValueExamples,
-            "required_value_missing" => Self::RequiredValueMissing,
-            "missing_behavior_scenario" => Self::MissingBehaviorScenario,
-            "scenario_failed" => Self::ScenarioFailed,
-            "missing_assertions" => Self::MissingAssertions,
-            "assertion_seed_path_not_seeded" => Self::AssertionSeedPathNotSeeded,
-            "seed_signature_mismatch" => Self::SeedSignatureMismatch,
-            "seed_mismatch" => Self::SeedMismatch,
-            "missing_delta_assertion" => Self::MissingDeltaAssertion,
-            "missing_semantic_predicate" => Self::MissingSemanticPredicate,
-            "outputs_equal" => Self::OutputsEqual,
+        match raw.unwrap_or("no_scenario") {
+            "no_scenario" => Self::NoScenario,
+            "scenario_error" => Self::ScenarioError,
             "assertion_failed" => Self::AssertionFailed,
-            "unknown" => Self::Unknown,
-            _ => Self::Other,
+            "outputs_equal" => Self::OutputsEqual,
+            _ => Self::NoScenario,
         }
-    }
-}
-
-pub(crate) fn normalize_behavior_reason_code(raw: &str) -> &str {
-    match raw {
-        "surface_missing" => "unknown",
-        _ => raw,
     }
 }
 

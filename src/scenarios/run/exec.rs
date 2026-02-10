@@ -226,6 +226,34 @@ pub(super) fn build_success_execution(
     })
 }
 
+/// Pre-warm the Nix store by building the lens flake.
+/// This ensures dependencies are cached before scenario execution begins,
+/// reducing per-scenario overhead.
+pub(super) fn warm_lens_flake(lens_flake: &str, verbose: bool) -> Result<()> {
+    if verbose {
+        eprintln!("warming lens flake: nix build {lens_flake}");
+    }
+    let started = std::time::Instant::now();
+    let status = Command::new("nix")
+        .args(["build", lens_flake, "--no-link"])
+        .status()
+        .context("spawn nix build for lens warm")?;
+    if !status.success() {
+        return Err(anyhow!(
+            "nix build {lens_flake} failed with status {}",
+            status
+                .code()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "signal".to_string())
+        ));
+    }
+    if verbose {
+        let duration_ms = started.elapsed().as_millis();
+        eprintln!("lens flake warm complete in {duration_ms}ms");
+    }
+    Ok(())
+}
+
 pub(super) fn invoke_binary_lens_run(
     pack_root: &Path,
     run_root: &Path,

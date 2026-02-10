@@ -135,6 +135,7 @@ pub(super) fn ensure_verification_policy(
         path: "scenarios/plan.json".to_string(),
         content,
         reason: "add verification policy in scenarios/plan.json".to_string(),
+        hint: Some("Add verification policy to plan".to_string()),
         edit_strategy: enrich::default_edit_strategy(),
         payload: None,
     });

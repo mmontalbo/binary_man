@@ -1,4 +1,3 @@
-
 use super::{
     behavior_baseline_stub, behavior_scenario_stub, behavior_scenarios_batch_stub,
     build_behavior_argv, BEHAVIOR_SCENARIO_EDIT_STRATEGY, REQUIRED_VALUE_PLACEHOLDER,
@@ -226,7 +225,13 @@ fn behavior_variant_stub_omits_expect_defaults() {
     let variant: scenarios::ScenarioSpec = serde_json::from_value(scenarios[0].clone()).unwrap();
 
     assert!(variant.expect.exit_code.is_none());
-    assert!(variant.assertions.is_empty());
+    // Variants include outputs_differ as default assertion
+    assert_eq!(variant.assertions.len(), 1);
+    assert!(matches!(
+        variant.assertions[0],
+        scenarios::BehaviorAssertion::OutputsDiffer {}
+    ));
+    assert!(variant.baseline_scenario_id.is_some());
     assert!(payload.get("defaults").is_some());
     assert!(!content.contains("\"expect\""));
     assert!(!content.contains("\"schema_version\""));

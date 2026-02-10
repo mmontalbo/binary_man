@@ -284,7 +284,7 @@ fn load_behavior_exclusions(
 
 fn behavior_exclusion_map(
     surface: &surface::SurfaceInventory,
-    rows: &[VerificationRow],
+    _rows: &[VerificationRow],
     exclusions: &[surface::SurfaceBehaviorExclusion],
 ) -> Result<BTreeMap<String, surface::SurfaceBehaviorExclusion>> {
     let option_ids: BTreeSet<String> = surface
@@ -295,26 +295,7 @@ fn behavior_exclusion_map(
         .filter(|id| !id.is_empty())
         .map(|id| id.to_string())
         .collect();
-    let mut row_by_surface_id = BTreeMap::new();
-    for row in rows {
-        let Some(surface_id) = row.surface_id.as_ref() else {
-            continue;
-        };
-        row_by_surface_id.insert(
-            surface_id.clone(),
-            surface::BehaviorExclusionLedgerEntry {
-                delta_outcome: row.delta_outcome.clone(),
-                delta_evidence_paths: row.delta_evidence_paths.clone(),
-            },
-        );
-    }
-    surface::validate_behavior_exclusions(
-        exclusions,
-        &option_ids,
-        &row_by_surface_id,
-        "missing from verification rows",
-        "requires delta_outcome evidence",
-    )
+    surface::validate_behavior_exclusions(exclusions, &option_ids)
 }
 
 fn excluded_entries_from_map(

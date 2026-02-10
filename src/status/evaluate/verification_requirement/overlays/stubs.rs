@@ -179,15 +179,9 @@ fn ensure_overlay_behavior_exclusion(
         "behavior_exclusion".to_string(),
         serde_json::json!({
             "reason_code": "fixture_gap",
-            "note": "still outputs_equal after requires_argv workaround and delta rerun",
+            "note": "still outputs_equal after workarounds",
             "evidence": {
-                "attempted_workarounds": [
-                    {
-                        "kind": "added_requires_argv",
-                        "ref_path": "inventory/surface.overlays.json",
-                        "delta_variant_path_after": delta_variant_path
-                    }
-                ]
+                "delta_variant_path": delta_variant_path
             }
         }),
     );

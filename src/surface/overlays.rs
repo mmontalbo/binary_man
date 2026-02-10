@@ -31,23 +31,6 @@ impl BehaviorExclusionReasonCode {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum BehaviorExclusionWorkaroundKind {
-    AddedRequiresArgv,
-    ExpandedSeed,
-    ChangedBaseline,
-    Other,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct BehaviorExclusionAttemptedWorkaround {
-    pub kind: BehaviorExclusionWorkaroundKind,
-    pub ref_path: String,
-    pub delta_variant_path_after: String,
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct BehaviorExclusionEvidence {
@@ -55,8 +38,6 @@ pub(crate) struct BehaviorExclusionEvidence {
     pub delta_variant_path: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub delta_ids: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub attempted_workarounds: Vec<BehaviorExclusionAttemptedWorkaround>,
 }
 
 impl BehaviorExclusionEvidence {
@@ -65,10 +46,6 @@ impl BehaviorExclusionEvidence {
             .as_deref()
             .is_some_and(|path| !path.trim().is_empty())
             || self.delta_ids.iter().any(|id| !id.trim().is_empty())
-            || self
-                .attempted_workarounds
-                .iter()
-                .any(|workaround| !workaround.ref_path.trim().is_empty())
     }
 }
 
@@ -111,18 +88,6 @@ impl BehaviorExclusion {
             if delta_id.trim().is_empty() {
                 return Err(anyhow!(
                     "behavior_exclusion evidence.delta_ids entries must not be empty for {surface_id}"
-                ));
-            }
-        }
-        for workaround in &self.evidence.attempted_workarounds {
-            if workaround.ref_path.trim().is_empty() {
-                return Err(anyhow!(
-                    "behavior_exclusion evidence.attempted_workarounds[].ref_path must not be empty for {surface_id}"
-                ));
-            }
-            if workaround.delta_variant_path_after.trim().is_empty() {
-                return Err(anyhow!(
-                    "behavior_exclusion evidence.attempted_workarounds[].delta_variant_path_after must not be empty for {surface_id}"
                 ));
             }
         }

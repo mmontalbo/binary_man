@@ -14,7 +14,7 @@ with
       'scenarios/plan.json',
       columns={
         'defaults': 'STRUCT(seed_dir VARCHAR, seed STRUCT(entries STRUCT(path VARCHAR, kind VARCHAR, contents VARCHAR, target VARCHAR, mode BIGINT)[]))',
-        'scenarios': 'STRUCT(id VARCHAR, coverage_ignore BOOLEAN, covers VARCHAR[], argv VARCHAR[], coverage_tier VARCHAR, baseline_scenario_id VARCHAR, assertions STRUCT(kind VARCHAR, seed_path VARCHAR, stdout_token VARCHAR)[], seed_dir VARCHAR, seed STRUCT(entries STRUCT(path VARCHAR, kind VARCHAR, contents VARCHAR, target VARCHAR, mode BIGINT)[]), expect STRUCT(exit_code BIGINT, exit_signal BIGINT, stdout_contains_all VARCHAR[], stdout_contains_any VARCHAR[], stdout_regex_all VARCHAR[], stdout_regex_any VARCHAR[], stderr_contains_all VARCHAR[], stderr_contains_any VARCHAR[], stderr_regex_all VARCHAR[], stderr_regex_any VARCHAR[]) )[]'
+        'scenarios': 'STRUCT(id VARCHAR, coverage_ignore BOOLEAN, covers VARCHAR[], argv VARCHAR[], coverage_tier VARCHAR, baseline_scenario_id VARCHAR, assertions STRUCT(kind VARCHAR, seed_path VARCHAR, token VARCHAR, run VARCHAR, exact_line BOOLEAN)[], seed_dir VARCHAR, seed STRUCT(entries STRUCT(path VARCHAR, kind VARCHAR, contents VARCHAR, target VARCHAR, mode BIGINT)[]), expect STRUCT(exit_code BIGINT, exit_signal BIGINT, stdout_contains_all VARCHAR[], stdout_contains_any VARCHAR[], stdout_regex_all VARCHAR[], stdout_regex_any VARCHAR[], stderr_contains_all VARCHAR[], stderr_contains_any VARCHAR[], stderr_regex_all VARCHAR[], stderr_regex_any VARCHAR[]) )[]'
       }
     )
   ),

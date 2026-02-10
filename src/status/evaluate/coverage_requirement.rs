@@ -143,6 +143,7 @@ pub(super) fn eval_coverage_requirement(
                         uncovered_ids.len(),
                         uncovered_ids[0]
                     ),
+                    hint: Some("Add scenario to cover unclaimed surface".to_string()),
                     edit_strategy: enrich::default_edit_strategy(),
                     payload: None,
                 });

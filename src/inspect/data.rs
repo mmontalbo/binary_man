@@ -74,7 +74,6 @@ pub(super) struct InspectData {
     pub(super) last_txn_id: Option<String>,
     pub(super) man_page_path: Option<PathBuf>,
     pub(super) verification_policy: Option<VerificationPolicySummary>,
-    pub(super) verification_ledger_present: bool,
 }
 
 impl InspectData {
@@ -94,7 +93,6 @@ impl InspectData {
         let last_history = read_last_history_entry(&paths).unwrap_or(None);
         let last_txn_id = find_last_txn_id(&paths);
         let verification_policy = load_verification_policy(&paths);
-        let verification_ledger_present = paths.root().join("verification_ledger.json").is_file();
         Ok(Self {
             intent,
             evidence,
@@ -105,7 +103,6 @@ impl InspectData {
             last_txn_id,
             man_page_path,
             verification_policy,
-            verification_ledger_present,
         })
     }
 }
@@ -187,11 +184,6 @@ fn build_output_entries(
 ) -> Result<Vec<ArtifactEntry>> {
     let mut entries = Vec::new();
     push_artifact_entry(&mut entries, paths, paths.surface_path());
-    push_artifact_entry(
-        &mut entries,
-        paths,
-        paths.root().join("verification_ledger.json"),
-    );
     push_artifact_entry(&mut entries, paths, paths.man_dir().join("meta.json"));
     if let Some(path) = man_page_path.as_ref() {
         let rel_path = paths

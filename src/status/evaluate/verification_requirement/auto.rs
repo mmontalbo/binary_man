@@ -104,6 +104,7 @@ pub(super) fn eval_auto_verification(
         *ctx.verification_next_action = Some(enrich::NextAction::Command {
             command: format!("bman apply --doc-pack {root}"),
             reason,
+            hint: Some("Run to execute auto verification".to_string()),
             payload: None,
         });
     }

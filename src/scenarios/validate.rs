@@ -221,48 +221,22 @@ fn validate_regex_patterns(patterns: &[String], field: &str) -> Result<()> {
 
 fn validate_behavior_assertion(assertion: &BehaviorAssertion) -> Result<()> {
     match assertion {
-        BehaviorAssertion::BaselineStdoutNotContainsSeedPath {
-            seed_path,
-            stdout_token,
+        BehaviorAssertion::StdoutContains {
+            seed_path, token, ..
         }
-        | BehaviorAssertion::BaselineStdoutContainsSeedPath {
-            seed_path,
-            stdout_token,
-        }
-        | BehaviorAssertion::VariantStdoutContainsSeedPath {
-            seed_path,
-            stdout_token,
-        }
-        | BehaviorAssertion::VariantStdoutNotContainsSeedPath {
-            seed_path,
-            stdout_token,
-        }
-        | BehaviorAssertion::BaselineStdoutHasLine {
-            seed_path,
-            stdout_token,
-        }
-        | BehaviorAssertion::BaselineStdoutNotHasLine {
-            seed_path,
-            stdout_token,
-        }
-        | BehaviorAssertion::VariantStdoutHasLine {
-            seed_path,
-            stdout_token,
-        }
-        | BehaviorAssertion::VariantStdoutNotHasLine {
-            seed_path,
-            stdout_token,
+        | BehaviorAssertion::StdoutLacks {
+            seed_path, token, ..
         } => {
             if seed_path.trim().is_empty() {
                 return Err(anyhow!("assertion seed_path must not be empty"));
             }
-            if let Some(token) = stdout_token {
-                if token.trim().is_empty() {
-                    return Err(anyhow!("assertion stdout_token must not be empty"));
+            if let Some(t) = token {
+                if t.trim().is_empty() {
+                    return Err(anyhow!("assertion token must not be empty"));
                 }
             }
         }
-        BehaviorAssertion::VariantStdoutDiffersFromBaseline {} => {}
+        BehaviorAssertion::OutputsDiffer {} => {}
     }
     Ok(())
 }
