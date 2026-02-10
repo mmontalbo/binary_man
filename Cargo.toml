@@ -19,3 +19,7 @@ shell-words = "1.1"
 [[bin]]
 name = "bman"
 path = "src/main.rs"
+
+[lints.clippy]
+# Deny all clippy warnings - fail the build on any warning
+all = "deny"
