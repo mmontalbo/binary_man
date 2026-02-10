@@ -5,21 +5,68 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured “enrichment loop”
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M17 — behavior authoring ergonomics simplification (small-LM workflow).
+Current focus: M18 — end-to-end LM agent validation.
 
-## M17 — Behavior Authoring Ergonomics Simplification (current)
+## M18 — End-to-End LM Agent Validation (current)
 
-Current behavior snapshot:
-- Behavior `next_action.kind: "edit"` payloads for `scenarios/plan.json` are
-  scoped and patch-like when `edit_strategy: "merge_behavior_scenarios"`:
-  merge `defaults` + `upsert_scenarios` by `scenario.id` instead of replacing the
-  whole file.
-- Baseline behavior scaffolding is auto-included when missing; there is no
-  separate user-facing “add baseline scenario” step.
-- Missing `invocation.value_examples` is non-blocking for first-pass behavior
-  scaffolding/assertion authoring (overlays remain optional refinement).
-- Default `status --json` is slim/actionability-first; `status --json --full`
-  retains rich triage/evidence detail.
+Goal: Validate that small LM agents can drive behavior verification to completion
+using the simplified M17 workflow, and identify remaining friction points.
+
+Motivation:
+- M17 simplified the tool surface for LM agents, but we haven't validated that
+  small models (Haiku-class) can actually complete behavior verification loops.
+- Real agent runs will expose edge cases, prompt issues, and workflow gaps that
+  aren't visible from manual testing.
+
+Design constraints:
+- Keep the existing `status --decisions` → LM → `apply --lm-response` loop.
+- Measure agent success by verification completion, not subjective quality.
+- Track failure modes mechanically (stuck loops, invalid actions, parse errors).
+
+Deliverables:
+1. **Agent harness**: Script/tooling to run an LM agent in a loop against a doc
+   pack, capturing decisions, responses, and outcomes.
+2. **Baseline agent prompt**: A minimal system prompt that works with the
+   `--decisions` output format and produces valid `--lm-response` actions.
+3. **Test packs**: Fresh `ls` and one multi-command CLI (e.g., `git` subset) as
+   validation targets.
+4. **Success metrics**: Track runs-to-completion, stuck-loop frequency, and
+   action validity rates.
+5. **Friction log**: Document remaining simplification opportunities discovered
+   during agent runs.
+
+Acceptance criteria:
+- A Haiku-class model can drive `ls` behavior verification to `decision: complete`
+  (or explicit exclusions) without manual intervention.
+- Failure modes are categorized and have clear remediation paths (prompt fix,
+  tool fix, or known limitation).
+
+Out of scope:
+- Fully automated CI integration (manual runs acceptable for M18).
+- Multi-agent orchestration or parallel verification.
+- Prompt optimization beyond "it works."
+
+## M17 — Behavior Authoring Ergonomics Simplification (done)
+
+Goal: Make behavior verification tractable for small LM agents by reducing
+decision complexity and providing structured workflow interfaces.
+
+Delivered:
+- **Fewer decisions per unverified item**: Reason codes consolidated from 14+ to
+  4 (`no_scenario`, `scenario_error`, `assertion_failed`, `outputs_equal`). Each
+  code maps to a single remediation path.
+- **Simpler exclusion authoring**: Exclusions require only `delta_variant_path`
+  evidence—no workaround history tracking.
+- **Deterministic retry behavior**: Stuck scenarios surface via threshold counts;
+  the tool decides when to recommend exclusion.
+- **Closed-loop LM workflow**: `bman status --decisions` emits a focused work
+  queue; `bman apply --lm-response <file>` validates and applies actions. This
+  enables `status → LM inference → apply` without manual JSON editing.
+- **Merge-style scenario editing**: `edit_strategy: "merge_behavior_scenarios"`
+  allows scoped upserts instead of full-file replacement.
+- **Auto-included baseline scaffolding**: No separate "add baseline" step.
+- **Slim status output**: Default `status --json` is actionability-first;
+  `--full` retains triage detail.
 
 ### Historical notes (pre-simplification M17 draft)
 
