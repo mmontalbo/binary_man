@@ -250,7 +250,61 @@ fn max_retry_count(
         .max()
 }
 
+fn build_scaffold_context(
+    surface: Option<&crate::surface::SurfaceInventory>,
+    target_ids: &[String],
+    reason_code: Option<&str>,
+) -> Option<enrich::ScaffoldContext> {
+    let surface = surface?;
+    let is_no_scenario = reason_code == Some("no_scenario");
+    let is_outputs_equal = reason_code == Some("outputs_equal");
+
+    if !is_no_scenario && !is_outputs_equal {
+        return None;
+    }
+
+    let mut value_required = Vec::new();
+    for target_id in target_ids {
+        let Some(item) = crate::surface::primary_surface_item_by_id(surface, target_id) else {
+            continue;
+        };
+        if item.invocation.value_arity == "required" {
+            value_required.push(enrich::ValueRequiredHint {
+                option_id: target_id.clone(),
+                placeholder: item
+                    .invocation
+                    .value_placeholder
+                    .clone()
+                    .unwrap_or_else(|| "VALUE".to_string()),
+                description: item.description.clone().unwrap_or_default(),
+            });
+        }
+    }
+
+    let has_value_required = !value_required.is_empty();
+    let guidance = if has_value_required && is_outputs_equal {
+        Some("Replace __value__ placeholders using examples from option descriptions; options with identical output may need companion flags (-l for details, -s for sizes) or behavior exclusion".to_string())
+    } else if has_value_required {
+        Some(
+            "Replace __value__ placeholders using examples from option descriptions above"
+                .to_string(),
+        )
+    } else if is_outputs_equal {
+        Some("Options showing identical output may need companion flags (-l for long format, -s for sizes) or behavior exclusion with appropriate reason_code".to_string())
+    } else {
+        None
+    };
+
+    Some(enrich::ScaffoldContext {
+        value_required,
+        has_outputs_equal: is_outputs_equal,
+        guidance,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
 fn behavior_payload(
+    surface: Option<&crate::surface::SurfaceInventory>,
     target_ids: &[String],
     reason_code: Option<&str>,
     retry_counts: &std::collections::BTreeMap<String, usize>,
@@ -260,14 +314,14 @@ fn behavior_payload(
     suggested_exclusion_payload: Option<enrich::SuggestedBehaviorExclusionPayload>,
 ) -> Option<enrich::BehaviorNextActionPayload> {
     let target_ids = normalize_target_ids(target_ids);
-    let reason_code = reason_code
+    let reason_code_str = reason_code
         .map(str::trim)
         .filter(|code| !code.is_empty())
         .map(str::to_string);
     let retry_count = max_retry_count(&target_ids, retry_counts);
     let mut latest_delta_path = latest_delta_path_for_ids(&target_ids, ledger_entries);
     if latest_delta_path.is_none()
-        && reason_code
+        && reason_code_str
             .as_deref()
             .is_some_and(|code| matches!(code, "outputs_equal" | "missing_delta_assertion"))
     {
@@ -277,14 +331,16 @@ fn behavior_payload(
         .iter()
         .map(|key| key.to_string())
         .collect();
+    let scaffold_context = build_scaffold_context(surface, &target_ids, reason_code);
     let payload = enrich::BehaviorNextActionPayload {
         target_ids,
-        reason_code,
+        reason_code: reason_code_str,
         retry_count,
         latest_delta_path,
         suggested_overlay_keys,
         assertion_starters,
         suggested_exclusion_payload,
+        scaffold_context,
     };
     (!payload.is_empty()).then_some(payload)
 }
@@ -389,7 +445,12 @@ fn batched_target_ids_for_reason(
         if !remaining_set.contains(surface_id) {
             continue;
         }
-        if missing_value_examples.contains(surface_id) || needs_apply_ids.contains(surface_id) {
+        if needs_apply_ids.contains(surface_id) {
+            continue;
+        }
+        // Only skip missing_value_examples when not batching for no_scenario
+        // (missing_value_examples normalizes to no_scenario when scenario is absent)
+        if missing_value_examples.contains(surface_id) && reason_code != "no_scenario" {
             continue;
         }
         if action_reason_code_for_surface_id(surface_id, missing_value_examples, ledger_entries)
@@ -714,6 +775,7 @@ fn suggested_exclusion_only_next_action(
         latest_delta_path_for_entry(ledger_entries.get(&next_id)).as_deref(),
     );
     let payload = behavior_payload(
+        Some(ctx.surface),
         target_ids,
         Some(reason_code),
         retry_counts,
@@ -766,6 +828,7 @@ fn set_outputs_equal_plateau_next_action(
         ledger_entries,
     );
     let payload = behavior_payload(
+        Some(ctx.surface),
         cap_hit,
         Some("outputs_equal"),
         retry_counts,
@@ -982,6 +1045,7 @@ fn reason_based_behavior_next_action(
                 rerun_scenario_ids_for_surface_ids(std::slice::from_ref(&next_id), ledger_entries);
             let command = targeted_outputs_equal_rerun_command(ctx.paths.root(), &scenario_ids);
             let payload = behavior_payload(
+                Some(ctx.surface),
                 std::slice::from_ref(&next_id),
                 Some("assertion_failed"),
                 retry_counts,
@@ -1033,6 +1097,7 @@ fn reason_based_behavior_next_action(
         Vec::new()
     };
     let payload = behavior_payload(
+        Some(ctx.surface),
         &ordered_target_ids,
         Some(&action_reason_code),
         retry_counts,
@@ -1086,6 +1151,7 @@ fn maybe_set_behavior_next_action(
             true,
         );
         let payload = behavior_payload(
+            Some(ctx.surface),
             outputs_equal_without_workaround,
             Some("outputs_equal"),
             retry_counts,
@@ -1143,6 +1209,7 @@ fn maybe_set_behavior_next_action(
             };
             let command = targeted_outputs_equal_rerun_command(ctx.paths.root(), &scenario_ids);
             let payload = behavior_payload(
+                Some(ctx.surface),
                 &needs_rerun,
                 Some("outputs_equal"),
                 retry_counts,
@@ -1195,6 +1262,7 @@ fn maybe_set_behavior_next_action(
                 true,
             );
             let payload = behavior_payload(
+                Some(ctx.surface),
                 &ready_for_exclusion,
                 Some("outputs_equal"),
                 retry_counts,
@@ -1220,10 +1288,7 @@ fn maybe_set_behavior_next_action(
     {
         let action_reason_code =
             action_reason_code_for_surface_id(&next_id, missing_value_examples, ledger_entries);
-        let target_ids = if matches!(
-            action_reason_code.as_str(),
-            "no_scenario" | "outputs_equal"
-        ) {
+        let target_ids = if matches!(action_reason_code.as_str(), "no_scenario" | "outputs_equal") {
             let batched = batched_target_ids_for_reason(
                 required_ids,
                 remaining_set,
@@ -1257,6 +1322,7 @@ fn maybe_set_behavior_next_action(
     if let Some(next_id) = first_matching_id(required_ids, needs_apply_ids) {
         let root = ctx.paths.root().display();
         let payload = behavior_payload(
+            Some(ctx.surface),
             std::slice::from_ref(&next_id),
             Some("needs_apply"),
             retry_counts,

@@ -481,7 +481,9 @@ mod tests {
             schema_version: 1,
             responses: vec![LmDecisionResponse {
                 surface_id: "--verbose".to_string(),
-                action: LmAction::AddScenario { scenario: Box::new(scenario) },
+                action: LmAction::AddScenario {
+                    scenario: Box::new(scenario),
+                },
             }],
         };
 

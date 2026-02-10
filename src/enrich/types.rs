@@ -411,6 +411,33 @@ pub struct BehaviorNextActionPayload {
     pub assertion_starters: Vec<BehaviorAssertionStarter>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suggested_exclusion_payload: Option<SuggestedBehaviorExclusionPayload>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scaffold_context: Option<ScaffoldContext>,
+}
+
+/// Contextual hints for LM-driven scaffold editing.
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct ScaffoldContext {
+    /// Options in this batch that require values, with placeholders and descriptions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub value_required: Vec<ValueRequiredHint>,
+    /// True if any target in the batch has outputs_equal status.
+    #[serde(default)]
+    pub has_outputs_equal: bool,
+    /// Actionable guidance based on batch composition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guidance: Option<String>,
+}
+
+/// Hint for an option that requires a value in its argv.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ValueRequiredHint {
+    /// The option id (e.g., "--format", "--block-size").
+    pub option_id: String,
+    /// The value placeholder from surface (e.g., "WORD", "SIZE").
+    pub placeholder: String,
+    /// The option description from surface, containing usage examples.
+    pub description: String,
 }
 
 impl BehaviorNextActionPayload {
@@ -422,6 +449,7 @@ impl BehaviorNextActionPayload {
             && self.suggested_overlay_keys.is_empty()
             && self.assertion_starters.is_empty()
             && self.suggested_exclusion_payload.is_none()
+            && self.scaffold_context.is_none()
     }
 }
 
