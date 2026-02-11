@@ -1,9 +1,75 @@
 //! LM response handling for decision point protocol.
 //!
 //! This module defines the contract for LM responses to decision items and
-//! provides validation and application logic.
-use crate::scenarios::{BehaviorAssertion, ScenarioSpec};
-use anyhow::{anyhow, Context, Result};
+//! provides validation and application logic. It serves as the boundary between
+//! unstructured LM output and the typed scenario system.
+//!
+//! # Why a Structured Response Format
+//!
+//! LMs produce free-form text, but enrichment needs structured actions:
+//!
+//! - **Type safety**: Responses are validated against known action types
+//! - **Error recovery**: Invalid responses are rejected with actionable errors
+//! - **Simplicity**: LMs use a simplified format; we expand to full scenarios
+//!
+//! # Response Schema
+//!
+//! ```json
+//! {
+//!   "schema_version": 1,
+//!   "responses": [
+//!     {
+//!       "surface_id": "--verbose",
+//!       "action": { "kind": "add_behavior_scenario", "argv": ["-v"] }
+//!     }
+//!   ]
+//! }
+//! ```
+//!
+//! # Action Types
+//!
+//! | Action | Purpose |
+//! |--------|---------|
+//! | `add_behavior_scenario` | Create a test scenario (simplified format) |
+//! | `add_scenario` | Create a test scenario (full format, legacy) |
+//! | `add_value_examples` | Specify valid values for an option |
+//! | `add_requires_argv` | Specify prerequisite flags |
+//! | `add_exclusion` | Mark item as untestable |
+//! | `skip` | Skip for now (retry later) |
+//!
+//! # Simplified Scenario Format
+//!
+//! The `add_behavior_scenario` action uses a flat seed format that reduces
+//! LM errors by making the structure obvious:
+//!
+//! ```json
+//! {
+//!   "kind": "add_behavior_scenario",
+//!   "argv": ["--all"],
+//!   "seed": {
+//!     "files": {"visible.txt": "hello"},
+//!     "dirs": ["subdir"],
+//!     "symlinks": {"link": "visible.txt"}
+//!   }
+//! }
+//! ```
+//!
+//! The module expands this to the full `ScenarioSpec` format with auto-generated
+//! ID, baseline, coverage tier, and assertions.
+//!
+//! # Validation
+//!
+//! Responses are validated before application:
+//!
+//! - `surface_id` must match an unverified item
+//! - Action fields must have valid values
+//! - Exclusion reason codes must be recognized
+//!
+//! Invalid responses are collected with error details for retry prompts.
+use crate::scenarios::{
+    BehaviorAssertion, ScenarioSeedEntry, ScenarioSeedSpec, ScenarioSpec, SeedEntryKind,
+};
+use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -32,14 +98,48 @@ pub struct LmDecisionResponse {
     pub action: LmAction,
 }
 
+/// Flat seed format for simplified scenario creation.
+/// Type is implicit in the field name, reducing LM errors.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FlatSeed {
+    /// Files to create: {"filename": "content", ...}
+    /// Created with mode 644.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub files: BTreeMap<String, String>,
+
+    /// Directories to create: ["dir1", "dir2", ...]
+    /// Created with mode 755.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dirs: Vec<String>,
+
+    /// Symlinks to create: {"linkname": "target", ...}
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub symlinks: BTreeMap<String, String>,
+
+    /// Executable files to create: {"filename": "content", ...}
+    /// Created with mode 755.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub executables: BTreeMap<String, String>,
+}
+
 /// Actions an LM can take for a decision item.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum LmAction {
-    /// Add or update a behavior scenario.
+    /// Add or update a behavior scenario (legacy complex format).
     AddScenario {
         /// Scenario specification to upsert.
         scenario: Box<ScenarioSpec>,
+    },
+
+    /// Add a behavior scenario with simplified format.
+    /// Boilerplate (id, kind, coverage_tier, baseline, covers, assertions) is auto-generated.
+    AddBehaviorScenario {
+        /// Command-line arguments (without binary name).
+        argv: Vec<String>,
+        /// Optional seed fixtures in flat format.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        seed: Option<FlatSeed>,
     },
 
     /// Fix assertions in an existing scenario.
@@ -148,13 +248,12 @@ pub fn load_lm_response(path: &std::path::Path) -> Result<LmResponseBatch> {
     let batch: LmResponseBatch =
         serde_json::from_str(&content).context("parse LM response JSON")?;
 
-    if batch.schema_version != 0 && batch.schema_version != LM_RESPONSE_SCHEMA_VERSION {
-        return Err(anyhow!(
-            "unsupported LM response schema_version {} (expected {})",
-            batch.schema_version,
-            LM_RESPONSE_SCHEMA_VERSION
-        ));
-    }
+    ensure!(
+        batch.schema_version == 0 || batch.schema_version == LM_RESPONSE_SCHEMA_VERSION,
+        "unsupported LM response schema_version {} (expected {})",
+        batch.schema_version,
+        LM_RESPONSE_SCHEMA_VERSION
+    );
 
     Ok(batch)
 }
@@ -196,6 +295,47 @@ pub fn validate_responses(
                     continue;
                 }
                 validated.scenarios_to_upsert.push((**scenario).clone());
+                result.valid_count += 1;
+            }
+
+            LmAction::AddBehaviorScenario { argv, seed } => {
+                // Validate argv is not empty
+                if argv.is_empty() {
+                    result.errors.push(ValidationError {
+                        surface_id: surface_id.to_string(),
+                        message: "add_behavior_scenario requires non-empty argv".to_string(),
+                    });
+                    continue;
+                }
+
+                // Convert flat seed to scenario seed spec
+                let seed_spec = seed.as_ref().map(flat_seed_to_seed_spec);
+
+                // Generate the full scenario with boilerplate
+                let scenario = ScenarioSpec {
+                    id: format!("verify_{}", surface_id.replace(' ', "_")),
+                    kind: crate::scenarios::ScenarioKind::Behavior,
+                    publish: false,
+                    argv: argv.clone(),
+                    env: BTreeMap::new(),
+                    seed_dir: None,
+                    seed: seed_spec,
+                    cwd: None,
+                    timeout_seconds: None,
+                    net_mode: None,
+                    no_sandbox: None,
+                    no_strace: None,
+                    snippet_max_lines: None,
+                    snippet_max_bytes: None,
+                    coverage_tier: Some("behavior".to_string()),
+                    baseline_scenario_id: Some("baseline".to_string()),
+                    assertions: vec![BehaviorAssertion::OutputsDiffer {}],
+                    covers: vec![surface_id.to_string()],
+                    coverage_ignore: false,
+                    expect: crate::scenarios::ScenarioExpect::default(),
+                };
+
+                validated.scenarios_to_upsert.push(scenario);
                 result.valid_count += 1;
             }
 
@@ -327,24 +467,80 @@ pub fn validate_responses(
 
 /// Validate a scenario specification.
 fn validate_scenario(scenario: &ScenarioSpec, surface_id: &str) -> Result<()> {
-    if scenario.id.trim().is_empty() {
-        return Err(anyhow!("scenario id must not be empty"));
-    }
-
-    if scenario.argv.is_empty() {
-        return Err(anyhow!("scenario argv must not be empty"));
-    }
-
-    // Check that the scenario covers the surface_id
-    if !scenario.covers.iter().any(|c| c == surface_id) {
-        return Err(anyhow!(
-            "scenario covers list must include '{}' (got {:?})",
-            surface_id,
-            scenario.covers
-        ));
-    }
-
+    ensure!(!scenario.id.trim().is_empty(), "scenario id must not be empty");
+    ensure!(!scenario.argv.is_empty(), "scenario argv must not be empty");
+    ensure!(
+        scenario.covers.iter().any(|c| c == surface_id),
+        "scenario covers list must include '{}' (got {:?})",
+        surface_id,
+        scenario.covers
+    );
     Ok(())
+}
+
+/// Check if a seed path is valid (not empty, ".", "..", or parent traversal).
+fn is_valid_seed_path(path: &str) -> bool {
+    let path = path.trim();
+    !path.is_empty() && path != "." && path != ".." && !path.starts_with("../")
+}
+
+/// Convert a FlatSeed to the standard ScenarioSeedSpec format.
+fn flat_seed_to_seed_spec(flat: &FlatSeed) -> ScenarioSeedSpec {
+    let mut entries = Vec::new();
+    let mut seen_paths = std::collections::HashSet::new();
+
+    // Helper to add entry if path is valid and not seen
+    let mut add_entry = |entry: ScenarioSeedEntry| {
+        if is_valid_seed_path(&entry.path) && seen_paths.insert(entry.path.clone()) {
+            entries.push(entry);
+        }
+    };
+
+    // Add files (mode 644)
+    for (path, contents) in &flat.files {
+        add_entry(ScenarioSeedEntry {
+            path: path.clone(),
+            kind: SeedEntryKind::File,
+            contents: Some(contents.clone()),
+            target: None,
+            mode: Some(0o644),
+        });
+    }
+
+    // Add directories (mode 755)
+    for path in &flat.dirs {
+        add_entry(ScenarioSeedEntry {
+            path: path.clone(),
+            kind: SeedEntryKind::Dir,
+            contents: None,
+            target: None,
+            mode: Some(0o755),
+        });
+    }
+
+    // Add symlinks
+    for (path, target) in &flat.symlinks {
+        add_entry(ScenarioSeedEntry {
+            path: path.clone(),
+            kind: SeedEntryKind::Symlink,
+            contents: None,
+            target: Some(target.clone()),
+            mode: None,
+        });
+    }
+
+    // Add executables (mode 755)
+    for (path, contents) in &flat.executables {
+        add_entry(ScenarioSeedEntry {
+            path: path.clone(),
+            kind: SeedEntryKind::File,
+            contents: Some(contents.clone()),
+            target: None,
+            mode: Some(0o755),
+        });
+    }
+
+    ScenarioSeedSpec { entries }
 }
 
 #[cfg(test)]

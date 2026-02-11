@@ -31,7 +31,19 @@ pub fn default_config() -> EnrichConfig {
         usage_lens_template: SCENARIO_USAGE_LENS_TEMPLATE_REL.to_string(),
         requirements: default_requirements(),
         verification_tier: Some("behavior".to_string()),
+        lm_command: None,
     }
+}
+
+/// Resolve the LM command from config or environment variable.
+///
+/// Priority: config.lm_command > BMAN_LM_COMMAND env var
+pub fn resolve_lm_command(config: &EnrichConfig) -> Option<String> {
+    config
+        .lm_command
+        .clone()
+        .or_else(|| std::env::var("BMAN_LM_COMMAND").ok())
+        .filter(|cmd| !cmd.trim().is_empty())
 }
 
 /// Render a pretty JSON config stub for new packs or edit suggestions.

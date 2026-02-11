@@ -2,6 +2,7 @@
 //!
 //! These types mirror pack-owned JSON files so the workflow remains deterministic
 //! and schema-driven without embedding heuristics in code.
+
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
@@ -152,6 +153,14 @@ pub struct EnrichConfig {
     pub requirements: Vec<RequirementId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verification_tier: Option<String>,
+    /// Command to invoke for LM-assisted behavior verification.
+    /// If set, `bman apply` will automatically invoke this command when
+    /// verification scenarios need to be generated or fixed.
+    /// The command receives the prompt on stdin and should output JSON on stdout.
+    /// Example: "claude -p --output-format json" or "llm -m claude-3-haiku"
+    /// Can also be set via BMAN_LM_COMMAND environment variable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lm_command: Option<String>,
 }
 
 /// Lock snapshot tying plan/apply to a stable set of inputs.

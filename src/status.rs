@@ -1,7 +1,51 @@
 //! Status summary generation for doc packs.
 //!
-//! Status is deterministic and derived from pack-owned artifacts; this module
-//! avoids heuristics so next_action stays predictable.
+//! This module computes a deterministic status summary from pack-owned artifacts.
+//! The status drives the enrichment loop by providing a `next_action` that tells
+//! the caller exactly what to do next.
+//!
+//! # Why Determinism Matters
+//!
+//! Status evaluation avoids heuristics because:
+//! - Same inputs must produce same `next_action` (reproducible builds)
+//! - External tools (LMs, scripts) can rely on predictable behavior
+//! - Debugging is tractable when outputs are reproducible
+//!
+//! # Status Structure
+//!
+//! ```text
+//! StatusSummary
+//! ├── decision: Complete | NeedsAction | Blocked
+//! ├── requirements: [RequirementStatus, ...]
+//! │   ├── surface: Met/Unmet (CLI options discovered?)
+//! │   ├── coverage: Met/Unmet (all options documented?)
+//! │   ├── verification: Met/Unmet (all options tested?)
+//! │   └── man_page: Met/Unmet (man page rendered?)
+//! ├── next_action: Command | Edit | None
+//! └── blockers: [Blocker, ...] (what's preventing progress)
+//! ```
+//!
+//! # Submodules
+//!
+//! - [`coverage`]: Coverage requirement evaluation
+//! - [`evaluate`]: Requirement evaluation framework and implementations
+//! - [`help`]: Help text extraction from binary
+//! - [`inputs`]: Input loading for status computation
+//! - [`lens`]: binary_lens integration
+//! - [`plan`]: Plan status and action computation
+//! - [`scenario_failures`]: Scenario failure analysis
+//! - [`verification`]: Verification status computation
+//! - [`verification_policy`]: Policy rules for verification tiers
+//!
+//! # Next Action Protocol
+//!
+//! The `next_action` field tells callers what to do:
+//!
+//! - `Command { command, reason }`: Run this shell command
+//! - `Edit { path, content, edit_strategy }`: Write this content to this file
+//! - `None`: Status is complete or blocked
+//!
+//! External tools can implement the protocol without understanding internals.
 use crate::enrich;
 use crate::scenarios;
 use anyhow::Result;
@@ -452,6 +496,7 @@ mod tests {
             usage_lens_template: enrich::SCENARIO_USAGE_LENS_TEMPLATE_REL.to_string(),
             requirements: vec![enrich::RequirementId::ExamplesReport],
             verification_tier: None,
+            lm_command: None,
         };
         enrich::write_config(&root, &config).unwrap();
 

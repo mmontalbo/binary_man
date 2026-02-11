@@ -1,3 +1,66 @@
+//! Verification requirement evaluation for behavior testing.
+//!
+//! This module determines whether CLI surface items (options, subcommands) are
+//! adequately tested by behavior scenarios. It is the most complex requirement
+//! evaluator because behavior verification involves multiple fallback strategies
+//! and progress tracking to avoid infinite loops.
+//!
+//! # Why This Exists
+//!
+//! Binary documentation requires proof that each CLI option actually does what
+//! the man page claims. This module evaluates scenario execution results against
+//! surface items to determine:
+//! 1. Which items are verified (have passing behavior scenarios)
+//! 2. Which items need scenarios (and what kind)
+//! 3. What the next action should be to make progress
+//!
+//! # Evaluation Flow
+//!
+//! ```text
+//! Surface Items (--verbose, --help, etc.)
+//!         │
+//!         ▼
+//! ┌───────────────────┐
+//! │ Auto-Verification │ ← Simple flags tested automatically
+//! └─────────┬─────────┘
+//!           │ remaining
+//!           ▼
+//! ┌───────────────────┐
+//! │ Behavior Scenarios│ ← LM-generated test scenarios
+//! └─────────┬─────────┘
+//!           │ unverified
+//!           ▼
+//! ┌───────────────────┐
+//! │ Scaffold/Exclusion│ ← Generate scaffolds or mark untestable
+//! └───────────────────┘
+//! ```
+//!
+//! # Submodules
+//!
+//! - [`auto`]: Handles flag-only options verified by exit code alone
+//! - [`inputs`]: Loads verification inputs (ledger, progress, policy)
+//! - [`ledger`]: Builds verification ledger entries from SQL query results
+//! - [`overlays`]: Generates surface overlay stubs (value_examples, requires_argv)
+//! - [`reasoning`]: Determines why items are unverified and builds diagnostics
+//! - [`selectors`]: Filters and prioritizes surface IDs for next action
+//!
+//! # Key Concepts
+//!
+//! - **Verification Ledger**: SQL-computed mapping of surface_id → verification status
+//! - **Delta Comparison**: Comparing baseline vs variant scenario outputs
+//! - **Outputs Equal**: When delta shows no difference, needs retry with different seed
+//! - **Exclusions**: Items marked untestable (fixture_gap, requires_tty, etc.)
+//!
+//! # Progress Tracking
+//!
+//! The module uses [`VerificationProgress`] to track retry attempts and detect
+//! no-op loops. Without this, the LM could generate the same failing scenario
+//! repeatedly. Key mechanisms:
+//!
+//! - `outputs_equal_retries`: Caps retries when baseline == variant output
+//! - `assertion_failed_by_surface`: Detects repeated identical failures
+//! - `delta_signature`: Fingerprints evidence to detect stale retries
+
 mod auto;
 mod inputs;
 mod ledger;
@@ -1547,6 +1610,42 @@ fn modified_epoch_ms(path: &std::path::Path) -> Option<u128> {
     Some(duration.as_millis())
 }
 
+/// Check if auto verification is stuck: all remaining IDs have auto_verify scenarios
+/// that ran but are still unverified. This happens for binaries like `grep` that require
+/// positional arguments - auto_verify runs `grep -a` which fails with usage errors.
+fn auto_verification_is_stuck(
+    remaining_ids: &[String],
+    paths: &enrich::DocPackPaths,
+) -> bool {
+    if remaining_ids.is_empty() {
+        return false;
+    }
+    // Load the scenario index to check if auto_verify scenarios exist for remaining IDs
+    let index_path = paths.root().join("inventory/scenarios/index.json");
+    let Ok(index_bytes) = std::fs::read(&index_path) else {
+        return false;
+    };
+    let Ok(index) = serde_json::from_slice::<scenarios::ScenarioIndex>(&index_bytes) else {
+        return false;
+    };
+    // Build a set of surface IDs that have auto_verify scenarios in the index
+    let auto_verify_surface_ids: std::collections::BTreeSet<String> = index
+        .scenarios
+        .iter()
+        .filter_map(|entry| {
+            // auto_verify scenario IDs have format: auto_verify::option::--flag
+            entry
+                .scenario_id
+                .strip_prefix("auto_verify::option::")
+                .map(str::to_string)
+        })
+        .collect();
+    // Check if ALL remaining IDs have auto_verify scenarios that ran
+    remaining_ids
+        .iter()
+        .all(|surface_id| auto_verify_surface_ids.contains(surface_id))
+}
+
 pub(super) fn eval_verification_requirement(
     state: &mut EvalState,
     req: enrich::RequirementId,
@@ -1628,6 +1727,8 @@ pub(super) fn eval_verification_requirement(
                     ledger_entries,
                     VerificationTier::Accepted,
                 );
+                // Save remaining_ids before auto_state is consumed
+                let auto_remaining_ids = auto_state.remaining_ids.clone();
                 let mut ctx = AutoVerificationContext {
                     ledger_entries,
                     evidence: &mut evidence,
@@ -1642,7 +1743,17 @@ pub(super) fn eval_verification_requirement(
                     .as_ref()
                     .is_some_and(|summary| summary.triaged_unverified_count > 0)
                 {
-                    existence_output = Some(output);
+                    // Skip auto verification if stuck: all remaining items have scenarios
+                    // that ran but are still unverified (e.g., binaries like grep where
+                    // auto_verify scenarios fail with usage errors due to missing args)
+                    let stuck = auto_verification_is_stuck(&auto_remaining_ids, paths);
+                    if stuck {
+                        // Clear the auto verification next_action so behavior verification
+                        // can set its own next_action
+                        *verification_next_action = None;
+                    } else {
+                        existence_output = Some(output);
+                    }
                 }
             }
 

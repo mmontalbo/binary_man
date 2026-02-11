@@ -17,7 +17,7 @@ pub const DEFAULT_LENS_FLAKE: &str = "../binary_lens#binary_lens";
     name = "bman",
     version,
     about = "Doc-pack enrichment workflow for binary man pages",
-    after_help = "Primary workflow:\n  init --doc-pack <dir> --binary <bin>  Bootstrap a doc pack (pack + config)\n  apply --doc-pack <dir>                Apply transactionally (auto-runs validate/plan; writes enrich/report.json)\n  status --doc-pack <dir>               Summarize requirements and deterministic next action\n\nAdvanced/debug commands:\n  validate --doc-pack <dir>             Validate inputs and write enrich/lock.json\n  plan --doc-pack <dir>                 Evaluate requirements and write enrich/plan.out.json\n  merge-behavior-edit --doc-pack <dir>  Apply merge_behavior_scenarios status patch into scenarios/plan.json\n  inspect --doc-pack <dir>              Read-only TUI inspector for doc packs\n\nExamples:\n  bman init --doc-pack /tmp/ls-docpack --binary ls\n  bman apply --doc-pack /tmp/ls-docpack\n  bman status --doc-pack /tmp/ls-docpack --json\n  bman inspect --doc-pack /tmp/ls-docpack",
+    after_help = "Primary workflow:\n  bman <binary>                         Generate comprehensive docs (like man, but auto-enriches)\n  init --doc-pack <dir> --binary <bin>  Bootstrap a doc pack (pack + config)\n  apply --doc-pack <dir>                Apply transactionally (auto-runs validate/plan; writes enrich/report.json)\n  status --doc-pack <dir>               Summarize requirements and deterministic next action\n\nAdvanced/debug commands:\n  validate --doc-pack <dir>             Validate inputs and write enrich/lock.json\n  plan --doc-pack <dir>                 Evaluate requirements and write enrich/plan.out.json\n  merge-behavior-edit --doc-pack <dir>  Apply merge_behavior_scenarios status patch into scenarios/plan.json\n  inspect --doc-pack <dir>              Read-only TUI inspector for doc packs\n\nExamples:\n  bman ls                                Generate docs for ls (runs full enrichment loop)\n  bman init --doc-pack /tmp/ls-docpack --binary ls\n  bman apply --doc-pack /tmp/ls-docpack\n  bman status --doc-pack /tmp/ls-docpack --json\n  bman inspect --doc-pack /tmp/ls-docpack",
     subcommand_required = true,
     arg_required_else_help = true
 )]
@@ -29,6 +29,11 @@ pub struct RootArgs {
 /// Top-level workflow commands.
 #[derive(Subcommand, Debug)]
 pub enum Command {
+    /// Generate comprehensive documentation for a binary (default command).
+    ///
+    /// This is the primary user-facing command. It runs the full enrichment loop
+    /// automatically, similar to how `man` displays documentation.
+    Run(RunArgs),
     Init(InitArgs),
     Validate(ValidateArgs),
     Plan(PlanArgs),
@@ -36,6 +41,56 @@ pub enum Command {
     Status(StatusArgs),
     MergeBehaviorEdit(MergeBehaviorEditArgs),
     Inspect(InspectArgs),
+}
+
+/// Run command inputs for the unified enrichment workflow.
+#[derive(Parser, Debug)]
+#[command(about = "Generate comprehensive documentation for a binary")]
+pub struct RunArgs {
+    /// Binary to document (name or path)
+    #[arg(value_name = "BINARY")]
+    pub binary: String,
+
+    /// Doc pack root (defaults to `~/.local/share/bman/packs/<binary>`)
+    #[arg(long, value_name = "DIR")]
+    pub doc_pack: Option<std::path::PathBuf>,
+
+    /// Maximum enrichment cycles before stopping (0 = unlimited)
+    #[arg(long, default_value = "50")]
+    pub max_cycles: usize,
+
+    /// Show detailed progress during enrichment
+    #[arg(long, short)]
+    pub verbose: bool,
+
+    /// Output format: man (default), json, or path (just print pack location)
+    #[arg(long, default_value = "man")]
+    pub output: OutputFormat,
+
+    /// Force refresh of the pack before enrichment
+    #[arg(long)]
+    pub refresh: bool,
+
+    /// Nix flake reference for binary_lens
+    #[arg(long, value_name = "REF", default_value = DEFAULT_LENS_FLAKE)]
+    pub lens_flake: String,
+
+    /// LM command to invoke for behavior verification (e.g., "llm -m claude-3-haiku")
+    /// The prompt is passed via stdin, response expected on stdout as JSON.
+    #[arg(long, value_name = "CMD")]
+    pub lm: Option<String>,
+}
+
+/// Output format for the run command.
+#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
+pub enum OutputFormat {
+    /// Render as man page to stdout
+    #[default]
+    Man,
+    /// Output status JSON
+    Json,
+    /// Just print the doc pack path
+    Path,
 }
 
 /// Status command inputs for a single doc pack.
@@ -175,6 +230,15 @@ pub struct ApplyArgs {
     /// Path to LM response JSON file (from `bman status --decisions` workflow)
     #[arg(long, value_name = "FILE")]
     pub lm_response: Option<PathBuf>,
+
+    /// Maximum enrichment cycles before stopping (0 = single apply, no loop)
+    /// When > 0, apply will loop: run scenarios, invoke LM if configured, repeat.
+    #[arg(long, default_value = "0")]
+    pub max_cycles: usize,
+
+    /// Override LM command (takes precedence over config and BMAN_LM_COMMAND)
+    #[arg(long, value_name = "CMD")]
+    pub lm: Option<String>,
 }
 
 /// Inspect command inputs for the read-only TUI.
