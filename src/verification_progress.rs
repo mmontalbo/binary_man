@@ -1,3 +1,57 @@
+//! Verification progress tracking to prevent infinite retry loops.
+//!
+//! This module persists state about verification attempts across apply cycles,
+//! enabling the system to detect when it's stuck and should escalate or give up.
+//!
+//! # Why This Exists
+//!
+//! Without progress tracking, the LM loop could generate the same failing
+//! scenario infinitely:
+//!
+//! 1. LM generates scenario for `--color`
+//! 2. Scenario runs, outputs are equal to baseline
+//! 3. Status says "outputs_equal, needs different seed"
+//! 4. LM generates same scenario again (no memory of previous attempt)
+//! 5. Repeat forever
+//!
+//! This module breaks the loop by tracking:
+//! - How many times we've retried an `outputs_equal` item
+//! - Whether the evidence has changed between retries
+//! - Signatures of previous actions to detect no-ops
+//!
+//! # Progress Types
+//!
+//! ## `outputs_equal_retries`
+//!
+//! Tracks items where baseline and variant outputs are identical:
+//!
+//! ```text
+//! Retry 0: Generate scenario with seed A → outputs equal
+//! Retry 1: Generate scenario with seed B → outputs equal
+//! Retry 2: Cap reached → escalate to exclusion
+//! ```
+//!
+//! The `delta_signature` field detects when evidence actually changed
+//! (different scenario ran) vs when we're seeing stale cached results.
+//!
+//! ## `assertion_failed_by_surface`
+//!
+//! Tracks items where assertions fail repeatedly with no progress:
+//!
+//! ```text
+//! Attempt 1: Generate scenario → assertion fails
+//! Attempt 2: Same scenario regenerated → same failure (no-op detected!)
+//! Attempt 3: Cap reached → escalate
+//! ```
+//!
+//! Uses `ActionSignature` to fingerprint the edit content and evidence state,
+//! detecting when the LM produces identical responses.
+//!
+//! # Persistence
+//!
+//! Progress is stored in `enrich/verification_progress.json` and survives
+//! across `bman apply` invocations. Schema version ensures forward compatibility.
+
 use crate::enrich;
 use crate::scenarios;
 use anyhow::{Context, Result};
