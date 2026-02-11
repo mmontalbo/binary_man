@@ -3,7 +3,7 @@
 //! Semantics define how help text is interpreted and how verification evidence
 //! is classified, keeping the logic out of Rust and inside JSON.
 use crate::templates;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{ensure, Context, Result};
 use regex::RegexBuilder;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -326,12 +326,11 @@ pub fn load_semantics(doc_pack_root: &Path) -> Result<Semantics> {
 
 /// Validate semantics schema for render/verification rules.
 pub fn validate_semantics(semantics: &Semantics) -> Result<()> {
-    if semantics.schema_version != SEMANTICS_SCHEMA_VERSION {
-        return Err(anyhow!(
-            "unsupported semantics schema_version {}",
-            semantics.schema_version
-        ));
-    }
+    ensure!(
+        semantics.schema_version == SEMANTICS_SCHEMA_VERSION,
+        "unsupported semantics schema_version {}",
+        semantics.schema_version
+    );
 
     for (idx, rule) in semantics.usage.line_rules.iter().enumerate() {
         validate_capture_rule(rule, &format!("usage.line_rules[{idx}]"))?;
@@ -426,12 +425,11 @@ fn validate_line_matcher(matcher: &LineMatcher, label: &str) -> Result<()> {
 fn validate_capture_rule(rule: &LineCapture, label: &str) -> Result<()> {
     let regex = compile_regex(&rule.pattern, rule.case_sensitive, label)?;
     if let Some(group) = rule.capture_group {
-        if group >= regex.captures_len() {
-            return Err(anyhow!(
-                "{label} capture_group {group} exceeds regex groups ({})",
-                regex.captures_len().saturating_sub(1)
-            ));
-        }
+        ensure!(
+            group < regex.captures_len(),
+            "{label} capture_group {group} exceeds regex groups ({})",
+            regex.captures_len().saturating_sub(1)
+        );
     }
     Ok(())
 }
@@ -439,20 +437,18 @@ fn validate_capture_rule(rule: &LineCapture, label: &str) -> Result<()> {
 fn validate_option_entry_rule(rule: &OptionEntryRule, label: &str) -> Result<()> {
     let regex = compile_regex(&rule.pattern, rule.case_sensitive, label)?;
     if let Some(group) = rule.names_group {
-        if group >= regex.captures_len() {
-            return Err(anyhow!(
-                "{label} names_group {group} exceeds regex groups ({})",
-                regex.captures_len().saturating_sub(1)
-            ));
-        }
+        ensure!(
+            group < regex.captures_len(),
+            "{label} names_group {group} exceeds regex groups ({})",
+            regex.captures_len().saturating_sub(1)
+        );
     }
     if let Some(group) = rule.desc_group {
-        if group >= regex.captures_len() {
-            return Err(anyhow!(
-                "{label} desc_group {group} exceeds regex groups ({})",
-                regex.captures_len().saturating_sub(1)
-            ));
-        }
+        ensure!(
+            group < regex.captures_len(),
+            "{label} desc_group {group} exceeds regex groups ({})",
+            regex.captures_len().saturating_sub(1)
+        );
     }
     Ok(())
 }
@@ -475,9 +471,7 @@ fn validate_verification_rule(rule: &VerificationRule, label: &str) -> Result<()
 
 fn validate_invocation_tokens(tokens: &[String], label: &str) -> Result<()> {
     for (idx, token) in tokens.iter().enumerate() {
-        if token.trim().is_empty() {
-            return Err(anyhow!("{label}[{idx}] must not be empty"));
-        }
+        ensure!(!token.trim().is_empty(), "{label}[{idx}] must not be empty");
     }
     Ok(())
 }
