@@ -2,8 +2,53 @@
 
 This document tracks the static-first roadmap for generating man pages from
 `binary_lens` packs. Dynamic execution is optional and used for scenario-backed
-validation, coverage tracking, and (eventually) a structured “enrichment loop”
+validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
+
+Current focus: M19 — multi-command CLI validation (git).
+
+## M19 — Subcommand + Options Verification at Scale (git) (current)
+
+Goal: Validate that LM-assisted behavior verification scales to CLIs with
+subcommand hierarchies by running `git config` (a subcommand with rich option
+surface) through the full verification loop.
+
+Hypothesis: The M18 infrastructure works for subcommands without modification.
+If true, M19 is a validation exercise. If false, M19 delivers the fixes.
+
+Motivation:
+- M18 validated `ls` (single command, 84 options, 92-96% behavior verified).
+- git subcommands have their own option namespaces. `git config` alone has 30+
+  options and doesn't require network/credentials.
+- Testing one subcommand deeply is more valuable than testing 100 shallowly.
+
+Approach:
+1. **Subcommand existence** (mechanical): Run `bman apply` to verify all git
+   subcommands exist (help-based, no LM needed). Baseline measurement.
+2. **Single-subcommand deep dive**: Run `bman run "git config"` with LM to
+   verify options for `git config` specifically.
+3. **Assess and iterate**: If (2) works, optionally repeat for 1-2 more
+   subcommands (`git tag`, `git branch`). If blocked, fix infrastructure.
+
+Deliverables:
+1. **Subcommand existence baseline**: All ~150 git subcommands reach existence
+   verified. Measurement: count, time, any failures.
+2. **git-config behavior verification**: `git config` options reach behavior
+   verification parity with `ls` (90%+ verified or explicitly excluded).
+3. **Subcommand-scoped invocation**: If not already working, ensure `bman run`
+   can target `"git config"` as a subcommand (not just top-level binaries).
+4. **Findings documented**: What worked, what didn't, any infrastructure gaps.
+
+Acceptance criteria:
+- Subcommand existence: 100% verified in <5 minutes.
+- `git config` behavior: 90%+ options verified or excluded, <20 minutes.
+- No manual JSON editing required during LM-assisted loop.
+
+Out of scope:
+- Behavior verification for all git subcommands.
+- Subcommands requiring repo context, network, or credentials.
+- Nested subcommand parsing (`git stash list`).
+- CI integration.
 
 ## M18 — End-to-End LM Agent Validation (done)
 
