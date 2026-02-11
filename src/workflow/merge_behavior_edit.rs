@@ -25,14 +25,10 @@ struct StatusEnvelope {
 enum StatusNextAction {
     Command {
         command: String,
-        #[allow(dead_code)]
-        reason: String,
     },
     Edit {
         path: String,
         content: String,
-        #[allow(dead_code)]
-        reason: String,
         #[serde(default = "enrich::default_edit_strategy")]
         edit_strategy: String,
     },
