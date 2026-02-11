@@ -132,7 +132,7 @@ struct BehaviorExclusionState {
     excluded_reason_summary: Vec<enrich::VerificationReasonSummary>,
 }
 
-const BEHAVIOR_BATCH_LIMIT: usize = 10;
+const BEHAVIOR_BATCH_LIMIT: usize = 15;
 const BEHAVIOR_RERUN_CAP: usize = 2;
 const ASSERTION_FAILED_NOOP_CAP: usize = 2;
 const DELTA_PATH_FALLBACK: &str = "inventory/scenarios/<delta_variant>.json";
