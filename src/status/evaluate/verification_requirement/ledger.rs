@@ -12,30 +12,35 @@ pub(super) struct VerificationLedgerSnapshot {
     pub(super) behavior_unverified_count: usize,
 }
 
+/// Inputs for building verification ledger entries.
+pub(super) struct LedgerBuildInputs<'a> {
+    pub binary_name: Option<&'a str>,
+    pub surface: &'a surface::SurfaceInventory,
+    pub plan: &'a scenarios::ScenarioPlan,
+    pub paths: &'a enrich::DocPackPaths,
+    pub template_path: &'a Path,
+    pub template_evidence: &'a enrich::EvidenceRef,
+}
+
 /// Build verification ledger entries on-the-fly from scenario evidence.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn build_verification_ledger_entries(
-    binary_name: Option<&str>,
-    surface: &surface::SurfaceInventory,
-    plan: &scenarios::ScenarioPlan,
-    paths: &enrich::DocPackPaths,
-    template_path: &Path,
+    inputs: &LedgerBuildInputs<'_>,
     local_blockers: &mut Vec<enrich::Blocker>,
-    template_evidence: &enrich::EvidenceRef,
 ) -> Option<VerificationLedgerSnapshot> {
-    let verification_binary = binary_name
+    let verification_binary = inputs
+        .binary_name
         .map(|name| name.to_string())
-        .or_else(|| surface.binary_name.clone())
-        .or_else(|| plan.binary.clone())
+        .or_else(|| inputs.surface.binary_name.clone())
+        .or_else(|| inputs.plan.binary.clone())
         .unwrap_or_else(|| "<binary>".to_string());
     match scenarios::build_verification_ledger(
         &verification_binary,
-        surface,
-        paths.root(),
-        &paths.scenarios_plan_path(),
-        template_path,
+        inputs.surface,
+        inputs.paths.root(),
+        &inputs.paths.scenarios_plan_path(),
+        inputs.template_path,
         None,
-        Some(paths.root()),
+        Some(inputs.paths.root()),
     ) {
         Ok(ledger) => Some(VerificationLedgerSnapshot {
             entries: scenarios::verification_entries_by_surface_id(ledger.entries),
@@ -46,13 +51,13 @@ pub(super) fn build_verification_ledger_entries(
         }),
         Err(err) => {
             let failure_path = scenarios::verification_query_template_failure_path(&err)
-                .map(|path| doc_pack_relative_or_display(paths, path));
+                .map(|path| doc_pack_relative_or_display(inputs.paths, path));
             let next_action_path = failure_path
                 .clone()
                 .unwrap_or_else(|| enrich::VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL.to_string());
-            let mut evidence = vec![template_evidence.clone()];
+            let mut evidence = vec![inputs.template_evidence.clone()];
             if let Some(path) = scenarios::verification_query_template_failure_path(&err) {
-                if let Ok(include_evidence) = paths.evidence_from_path(path) {
+                if let Ok(include_evidence) = inputs.paths.evidence_from_path(path) {
                     evidence.push(include_evidence);
                 }
             }

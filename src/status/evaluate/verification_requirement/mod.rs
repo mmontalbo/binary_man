@@ -75,7 +75,7 @@ use crate::status::verification_policy::{
 use anyhow::{anyhow, Result};
 use auto::{eval_auto_verification, AutoVerificationContext};
 use inputs::{base_evidence, ensure_verification_policy, load_verification_inputs};
-use ledger::build_verification_ledger_entries;
+use ledger::{build_verification_ledger_entries, LedgerBuildInputs};
 use overlays::{
     build_stub_blockers_preview, surface_overlays_behavior_exclusion_stub_batch,
     surface_overlays_requires_argv_stub_batch, STUB_REASON_OUTPUTS_EQUAL_AFTER_WORKAROUND,
@@ -87,8 +87,8 @@ use reasoning::{
 };
 use selectors::{
     behavior_counts_for_ids, behavior_scenario_surface_ids, collect_missing_value_examples,
-    first_matching_id, first_reason_id, first_reason_id_by_priority, needs_apply_ids,
-    select_delta_outcome_ids_for_remaining, surface_has_requires_argv_hint,
+    first_reason_id, first_reason_id_by_priority, needs_apply_ids,
+    select_delta_outcome_ids_for_remaining, surface_has_requires_argv_hint, BehaviorLookupContext,
 };
 
 use crate::enrich;
@@ -112,6 +112,7 @@ struct VerificationEvalOutput {
 struct QueueVerificationContext<'a> {
     plan: &'a scenarios::ScenarioPlan,
     surface: &'a crate::surface::SurfaceInventory,
+    semantics: Option<&'a crate::semantics::Semantics>,
     include_full: bool,
     ledger_entries: Option<&'a LedgerEntries>,
     evidence: &'a mut Vec<enrich::EvidenceRef>,
@@ -136,6 +137,20 @@ const BEHAVIOR_BATCH_LIMIT: usize = 15;
 const BEHAVIOR_RERUN_CAP: usize = 2;
 const ASSERTION_FAILED_NOOP_CAP: usize = 2;
 const DELTA_PATH_FALLBACK: &str = "inventory/scenarios/<delta_variant>.json";
+
+/// Result of partitioning required IDs into verified/unverified.
+struct RemainingIdsResult {
+    remaining_ids: Vec<String>,
+    verified_count: usize,
+    collected_evidence: Vec<enrich::EvidenceRef>,
+}
+
+/// Partitioned outputs_equal buckets for behavior verification.
+struct OutputsEqualPartitions {
+    without_workaround: Vec<String>,
+    with_workaround_needs_rerun: Vec<String>,
+    with_workaround_ready_for_exclusion: Vec<String>,
+}
 const STARTER_SEED_PATH_PLACEHOLDER: &str = "work/item.txt";
 const STARTER_STDOUT_TOKEN_PLACEHOLDER: &str = "item.txt";
 const REQUIRED_VALUE_PLACEHOLDER: &str = "__value__";
@@ -365,24 +380,27 @@ fn build_scaffold_context(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn behavior_payload(
-    surface: Option<&crate::surface::SurfaceInventory>,
-    target_ids: &[String],
-    reason_code: Option<&str>,
-    retry_counts: &std::collections::BTreeMap<String, usize>,
-    ledger_entries: &LedgerEntries,
-    suggested_overlay_keys: &[&str],
+/// Arguments for building a behavior next-action payload.
+struct BehaviorPayloadArgs<'a> {
+    surface: Option<&'a crate::surface::SurfaceInventory>,
+    target_ids: &'a [String],
+    reason_code: Option<&'a str>,
+    retry_counts: &'a std::collections::BTreeMap<String, usize>,
+    ledger_entries: &'a LedgerEntries,
+    suggested_overlay_keys: &'a [&'a str],
     assertion_starters: Vec<enrich::BehaviorAssertionStarter>,
     suggested_exclusion_payload: Option<enrich::SuggestedBehaviorExclusionPayload>,
-) -> Option<enrich::BehaviorNextActionPayload> {
-    let target_ids = normalize_target_ids(target_ids);
-    let reason_code_str = reason_code
+}
+
+fn behavior_payload(args: BehaviorPayloadArgs<'_>) -> Option<enrich::BehaviorNextActionPayload> {
+    let target_ids = normalize_target_ids(args.target_ids);
+    let reason_code_str = args
+        .reason_code
         .map(str::trim)
         .filter(|code| !code.is_empty())
         .map(str::to_string);
-    let retry_count = max_retry_count(&target_ids, retry_counts);
-    let mut latest_delta_path = latest_delta_path_for_ids(&target_ids, ledger_entries);
+    let retry_count = max_retry_count(&target_ids, args.retry_counts);
+    let mut latest_delta_path = latest_delta_path_for_ids(&target_ids, args.ledger_entries);
     if latest_delta_path.is_none()
         && reason_code_str
             .as_deref()
@@ -390,19 +408,20 @@ fn behavior_payload(
     {
         latest_delta_path = Some(DELTA_PATH_FALLBACK.to_string());
     }
-    let suggested_overlay_keys = suggested_overlay_keys
+    let suggested_overlay_keys = args
+        .suggested_overlay_keys
         .iter()
         .map(|key| key.to_string())
         .collect();
-    let scaffold_context = build_scaffold_context(surface, &target_ids, reason_code);
+    let scaffold_context = build_scaffold_context(args.surface, &target_ids, args.reason_code);
     let payload = enrich::BehaviorNextActionPayload {
         target_ids,
         reason_code: reason_code_str,
         retry_count,
         latest_delta_path,
         suggested_overlay_keys,
-        assertion_starters,
-        suggested_exclusion_payload,
+        assertion_starters: args.assertion_starters,
+        suggested_exclusion_payload: args.suggested_exclusion_payload,
         scaffold_context,
     };
     (!payload.is_empty()).then_some(payload)
@@ -837,16 +856,16 @@ fn suggested_exclusion_only_next_action(
         retry_count,
         latest_delta_path_for_entry(ledger_entries.get(&next_id)).as_deref(),
     );
-    let payload = behavior_payload(
-        Some(ctx.surface),
+    let payload = behavior_payload(BehaviorPayloadArgs {
+        surface: Some(ctx.surface),
         target_ids,
-        Some(reason_code),
+        reason_code: Some(reason_code),
         retry_counts,
         ledger_entries,
-        &["overlays[].behavior_exclusion"],
-        Vec::new(),
-        Some(suggested),
-    );
+        suggested_overlay_keys: &["overlays[].behavior_exclusion"],
+        assertion_starters: Vec::new(),
+        suggested_exclusion_payload: Some(suggested),
+    });
     let root = ctx.paths.root().display();
     enrich::NextAction::Command {
         command: format!("bman status --doc-pack {root}"),
@@ -890,16 +909,16 @@ fn set_outputs_equal_plateau_next_action(
         cap_hit,
         ledger_entries,
     );
-    let payload = behavior_payload(
-        Some(ctx.surface),
-        cap_hit,
-        Some("outputs_equal"),
+    let payload = behavior_payload(BehaviorPayloadArgs {
+        surface: Some(ctx.surface),
+        target_ids: cap_hit,
+        reason_code: Some("outputs_equal"),
         retry_counts,
         ledger_entries,
-        &["overlays[].behavior_exclusion"],
-        Vec::new(),
-        None,
-    );
+        suggested_overlay_keys: &["overlays[].behavior_exclusion"],
+        assertion_starters: Vec::new(),
+        suggested_exclusion_payload: None,
+    });
     *ctx.verification_next_action = Some(enrich::NextAction::Edit {
         path: "inventory/surface.overlays.json".to_string(),
         content,
@@ -955,15 +974,18 @@ fn first_behavior_reason_target(
     ledger_entries: &LedgerEntries,
 ) -> Option<String> {
     let empty = std::collections::BTreeSet::new();
+    let lookup_ctx = BehaviorLookupContext {
+        remaining_ids: remaining_set,
+        missing_value_examples: &empty,
+        needs_apply_ids,
+        ledger_entries,
+    };
     // Priority: scenario_error > assertion_failed > no_scenario > outputs_equal
     // NoScenario before OutputsEqual so we scaffold new scenarios first,
     // then deal with outputs_equal (which often just need exclusion)
     first_reason_id_by_priority(
         required_ids,
-        remaining_set,
-        &empty,
-        needs_apply_ids,
-        ledger_entries,
+        &lookup_ctx,
         &[
             BehaviorReasonKind::ScenarioError,
             BehaviorReasonKind::AssertionFailed,
@@ -971,7 +993,7 @@ fn first_behavior_reason_target(
             BehaviorReasonKind::OutputsEqual,
         ],
     )
-    .or_else(|| first_reason_id(required_ids, remaining_set, &empty, needs_apply_ids))
+    .or_else(|| first_reason_id(required_ids, &lookup_ctx))
 }
 
 fn reason_based_behavior_next_action(
@@ -1107,16 +1129,16 @@ fn reason_based_behavior_next_action(
             let scenario_ids =
                 rerun_scenario_ids_for_surface_ids(std::slice::from_ref(&next_id), ledger_entries);
             let command = targeted_outputs_equal_rerun_command(ctx.paths.root(), &scenario_ids);
-            let payload = behavior_payload(
-                Some(ctx.surface),
-                std::slice::from_ref(&next_id),
-                Some("assertion_failed"),
+            let payload = behavior_payload(BehaviorPayloadArgs {
+                surface: Some(ctx.surface),
+                target_ids: std::slice::from_ref(&next_id),
+                reason_code: Some("assertion_failed"),
                 retry_counts,
                 ledger_entries,
-                &[],
-                Vec::new(),
-                None,
-            );
+                suggested_overlay_keys: &[],
+                assertion_starters: Vec::new(),
+                suggested_exclusion_payload: None,
+            });
             return Some(enrich::NextAction::Command {
                 command,
                 reason: format!(
@@ -1159,16 +1181,16 @@ fn reason_based_behavior_next_action(
     } else {
         Vec::new()
     };
-    let payload = behavior_payload(
-        Some(ctx.surface),
-        &ordered_target_ids,
-        Some(&action_reason_code),
+    let payload = behavior_payload(BehaviorPayloadArgs {
+        surface: Some(ctx.surface),
+        target_ids: &ordered_target_ids,
+        reason_code: Some(&action_reason_code),
         retry_counts,
         ledger_entries,
-        &[],
+        suggested_overlay_keys: &[],
         assertion_starters,
-        None,
-    );
+        suggested_exclusion_payload: None,
+    });
     Some(enrich::NextAction::Edit {
         path: "scenarios/plan.json".to_string(),
         content,
@@ -1179,19 +1201,20 @@ fn reason_based_behavior_next_action(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Computed state from behavior evaluation used for setting next actions.
+struct BehaviorEvalState<'a> {
+    required_ids: &'a [String],
+    lookup_ctx: &'a BehaviorLookupContext<'a>,
+    outputs_equal_without_workaround: &'a [String],
+    outputs_equal_with_workaround_needs_rerun: &'a [String],
+    outputs_equal_with_workaround_ready_for_exclusion: &'a [String],
+    retry_counts: &'a std::collections::BTreeMap<String, usize>,
+}
+
 fn maybe_set_behavior_next_action(
     ctx: &mut QueueVerificationContext<'_>,
     summary: &mut enrich::VerificationTriageSummary,
-    required_ids: &[String],
-    remaining_set: &std::collections::BTreeSet<String>,
-    missing_value_examples: &std::collections::BTreeSet<String>,
-    needs_apply_ids: &std::collections::BTreeSet<String>,
-    outputs_equal_without_workaround: &[String],
-    outputs_equal_with_workaround_needs_rerun: &[String],
-    outputs_equal_with_workaround_ready_for_exclusion: &[String],
-    retry_counts: &std::collections::BTreeMap<String, usize>,
-    ledger_entries: &LedgerEntries,
+    state: &BehaviorEvalState<'_>,
 ) {
     let can_set_next_action = ctx.verification_next_action.is_none()
         && ctx.missing.is_empty()
@@ -1200,29 +1223,29 @@ fn maybe_set_behavior_next_action(
         return;
     }
 
-    if !outputs_equal_without_workaround.is_empty() {
+    if !state.outputs_equal_without_workaround.is_empty() {
         let content = surface_overlays_requires_argv_stub_batch(
             ctx.paths,
             ctx.surface,
-            outputs_equal_without_workaround,
+            state.outputs_equal_without_workaround,
         );
         summary.stub_blockers_preview = build_stub_blockers_preview(
             ctx,
-            outputs_equal_without_workaround,
-            ledger_entries,
+            state.outputs_equal_without_workaround,
+            state.lookup_ctx.ledger_entries,
             STUB_REASON_OUTPUTS_EQUAL_NEEDS_WORKAROUND,
             true,
         );
-        let payload = behavior_payload(
-            Some(ctx.surface),
-            outputs_equal_without_workaround,
-            Some("outputs_equal"),
-            retry_counts,
-            ledger_entries,
-            &["overlays[].invocation.requires_argv"],
-            Vec::new(),
-            None,
-        );
+        let payload = behavior_payload(BehaviorPayloadArgs {
+            surface: Some(ctx.surface),
+            target_ids: state.outputs_equal_without_workaround,
+            reason_code: Some("outputs_equal"),
+            retry_counts: state.retry_counts,
+            ledger_entries: state.lookup_ctx.ledger_entries,
+            suggested_overlay_keys: &["overlays[].invocation.requires_argv"],
+            assertion_starters: Vec::new(),
+            suggested_exclusion_payload: None,
+        });
         *ctx.verification_next_action = Some(enrich::NextAction::Edit {
             path: "inventory/surface.overlays.json".to_string(),
             content,
@@ -1234,28 +1257,29 @@ fn maybe_set_behavior_next_action(
         return;
     }
 
-    if !outputs_equal_with_workaround_needs_rerun.is_empty() {
+    if !state.outputs_equal_with_workaround_needs_rerun.is_empty() {
         let (cap_hit, needs_rerun) = partition_cap_hit(
-            outputs_equal_with_workaround_needs_rerun.to_vec(),
-            retry_counts,
+            state.outputs_equal_with_workaround_needs_rerun.to_vec(),
+            state.retry_counts,
         );
         if !set_outputs_equal_plateau_next_action(
             ctx,
             summary,
             &cap_hit,
-            retry_counts,
-            ledger_entries,
+            state.retry_counts,
+            state.lookup_ctx.ledger_entries,
         ) && !needs_rerun.is_empty()
         {
             summary.stub_blockers_preview = build_stub_blockers_preview(
                 ctx,
                 &needs_rerun,
-                ledger_entries,
+                state.lookup_ctx.ledger_entries,
                 STUB_REASON_OUTPUTS_EQUAL_AFTER_WORKAROUND,
                 true,
             );
             let scenario_ids = {
-                let ids = rerun_scenario_ids_for_surface_ids(&needs_rerun, ledger_entries);
+                let ids =
+                    rerun_scenario_ids_for_surface_ids(&needs_rerun, state.lookup_ctx.ledger_entries);
                 if ids.is_empty() {
                     normalize_target_ids(&needs_rerun)
                         .into_iter()
@@ -1271,17 +1295,17 @@ fn maybe_set_behavior_next_action(
                 }
             };
             let command = targeted_outputs_equal_rerun_command(ctx.paths.root(), &scenario_ids);
-            let payload = behavior_payload(
-                Some(ctx.surface),
-                &needs_rerun,
-                Some("outputs_equal"),
-                retry_counts,
-                ledger_entries,
-                &["overlays[].behavior_exclusion"],
-                Vec::new(),
-                None,
-            );
-            let retry = max_retry_count(&needs_rerun, retry_counts).unwrap_or(0);
+            let payload = behavior_payload(BehaviorPayloadArgs {
+                surface: Some(ctx.surface),
+                target_ids: &needs_rerun,
+                reason_code: Some("outputs_equal"),
+                retry_counts: state.retry_counts,
+                ledger_entries: state.lookup_ctx.ledger_entries,
+                suggested_overlay_keys: &["overlays[].behavior_exclusion"],
+                assertion_starters: Vec::new(),
+                suggested_exclusion_payload: None,
+            });
+            let retry = max_retry_count(&needs_rerun, state.retry_counts).unwrap_or(0);
             *ctx.verification_next_action = Some(enrich::NextAction::Command {
                 command,
                 reason: format!(
@@ -1298,42 +1322,42 @@ fn maybe_set_behavior_next_action(
         return;
     }
 
-    if !outputs_equal_with_workaround_ready_for_exclusion.is_empty() {
+    if !state.outputs_equal_with_workaround_ready_for_exclusion.is_empty() {
         let (cap_hit, ready_for_exclusion) = partition_cap_hit(
-            outputs_equal_with_workaround_ready_for_exclusion.to_vec(),
-            retry_counts,
+            state.outputs_equal_with_workaround_ready_for_exclusion.to_vec(),
+            state.retry_counts,
         );
         if !set_outputs_equal_plateau_next_action(
             ctx,
             summary,
             &cap_hit,
-            retry_counts,
-            ledger_entries,
+            state.retry_counts,
+            state.lookup_ctx.ledger_entries,
         ) && !ready_for_exclusion.is_empty()
         {
             let content = surface_overlays_behavior_exclusion_stub_batch(
                 ctx.paths,
                 ctx.surface,
                 &ready_for_exclusion,
-                ledger_entries,
+                state.lookup_ctx.ledger_entries,
             );
             summary.stub_blockers_preview = build_stub_blockers_preview(
                 ctx,
                 &ready_for_exclusion,
-                ledger_entries,
+                state.lookup_ctx.ledger_entries,
                 STUB_REASON_OUTPUTS_EQUAL_AFTER_WORKAROUND,
                 true,
             );
-            let payload = behavior_payload(
-                Some(ctx.surface),
-                &ready_for_exclusion,
-                Some("outputs_equal"),
-                retry_counts,
-                ledger_entries,
-                &["overlays[].behavior_exclusion"],
-                Vec::new(),
-                None,
-            );
+            let payload = behavior_payload(BehaviorPayloadArgs {
+                surface: Some(ctx.surface),
+                target_ids: &ready_for_exclusion,
+                reason_code: Some("outputs_equal"),
+                retry_counts: state.retry_counts,
+                ledger_entries: state.lookup_ctx.ledger_entries,
+                suggested_overlay_keys: &["overlays[].behavior_exclusion"],
+                assertion_starters: Vec::new(),
+                suggested_exclusion_payload: None,
+            });
             *ctx.verification_next_action = Some(enrich::NextAction::Edit {
                 path: "inventory/surface.overlays.json".to_string(),
                 content,
@@ -1346,18 +1370,24 @@ fn maybe_set_behavior_next_action(
         return;
     }
 
-    if let Some(next_id) =
-        first_behavior_reason_target(required_ids, remaining_set, needs_apply_ids, ledger_entries)
-    {
-        let action_reason_code =
-            action_reason_code_for_surface_id(&next_id, missing_value_examples, ledger_entries);
+    if let Some(next_id) = first_behavior_reason_target(
+        state.required_ids,
+        state.lookup_ctx.remaining_ids,
+        state.lookup_ctx.needs_apply_ids,
+        state.lookup_ctx.ledger_entries,
+    ) {
+        let action_reason_code = action_reason_code_for_surface_id(
+            &next_id,
+            state.lookup_ctx.missing_value_examples,
+            state.lookup_ctx.ledger_entries,
+        );
         let target_ids = if matches!(action_reason_code.as_str(), "no_scenario" | "outputs_equal") {
             let batched = batched_target_ids_for_reason(
-                required_ids,
-                remaining_set,
-                missing_value_examples,
-                needs_apply_ids,
-                ledger_entries,
+                state.required_ids,
+                state.lookup_ctx.remaining_ids,
+                state.lookup_ctx.missing_value_examples,
+                state.lookup_ctx.needs_apply_ids,
+                state.lookup_ctx.ledger_entries,
                 &action_reason_code,
                 BEHAVIOR_BATCH_LIMIT,
             );
@@ -1373,39 +1403,119 @@ fn maybe_set_behavior_next_action(
             ctx,
             summary,
             &target_ids,
-            missing_value_examples,
-            retry_counts,
-            ledger_entries,
+            state.lookup_ctx.missing_value_examples,
+            state.retry_counts,
+            state.lookup_ctx.ledger_entries,
         ) {
             *ctx.verification_next_action = Some(action);
         }
         return;
     }
 
-    if let Some(next_id) = first_matching_id(required_ids, needs_apply_ids) {
+    // Batch all needs_apply targets instead of processing one at a time
+    let batched_needs_apply: Vec<String> = state
+        .required_ids
+        .iter()
+        .filter(|id| state.lookup_ctx.needs_apply_ids.contains(*id))
+        .take(BEHAVIOR_BATCH_LIMIT)
+        .cloned()
+        .collect();
+
+    if !batched_needs_apply.is_empty() {
         let root = ctx.paths.root().display();
-        let payload = behavior_payload(
-            Some(ctx.surface),
-            std::slice::from_ref(&next_id),
-            Some("needs_apply"),
-            retry_counts,
-            ledger_entries,
-            &[],
-            Vec::new(),
-            None,
-        );
+        let payload = behavior_payload(BehaviorPayloadArgs {
+            surface: Some(ctx.surface),
+            target_ids: &batched_needs_apply,
+            reason_code: Some("needs_apply"),
+            retry_counts: state.retry_counts,
+            ledger_entries: state.lookup_ctx.ledger_entries,
+            suggested_overlay_keys: &[],
+            assertion_starters: Vec::new(),
+            suggested_exclusion_payload: None,
+        });
+        let reason_preview = if batched_needs_apply.len() == 1 {
+            batched_needs_apply[0].clone()
+        } else {
+            format!("{} targets", batched_needs_apply.len())
+        };
         *ctx.verification_next_action = Some(enrich::NextAction::Command {
             command: format!("bman apply --doc-pack {root}"),
-            reason: format!("run behavior verification for {next_id}"),
+            reason: format!("run behavior verification for {reason_preview}"),
             hint: Some("Run to execute behavior verification".to_string()),
             payload,
         });
     }
 }
 
-#[allow(clippy::cognitive_complexity, clippy::too_many_lines)]
+/// Partition required IDs into verified and remaining (unverified) sets.
+fn partition_remaining_ids(
+    required_ids: &[String],
+    excluded_set: &std::collections::BTreeSet<String>,
+    ledger_entries: &LedgerEntries,
+) -> RemainingIdsResult {
+    let mut remaining_ids = Vec::new();
+    let mut verified_count = 0;
+    let mut collected_evidence = Vec::new();
+
+    for surface_id in required_ids {
+        if excluded_set.contains(surface_id) {
+            continue;
+        }
+        let status = VerificationStatus::from_entry(
+            ledger_entries.get(surface_id),
+            VerificationTier::Behavior,
+        );
+        if status == VerificationStatus::Verified {
+            verified_count += 1;
+        } else {
+            remaining_ids.push(surface_id.clone());
+            if let Some(entry) = ledger_entries.get(surface_id) {
+                collected_evidence.extend(entry.evidence.iter().cloned());
+            }
+        }
+    }
+    remaining_ids.sort();
+    remaining_ids.dedup();
+
+    RemainingIdsResult {
+        remaining_ids,
+        verified_count,
+        collected_evidence,
+    }
+}
+
+/// Partition outputs_equal IDs into workaround buckets.
+fn partition_outputs_equal(
+    outputs_equal_ids: Vec<String>,
+    surface: &crate::surface::SurfaceInventory,
+    ledger_entries: &LedgerEntries,
+    paths: &enrich::DocPackPaths,
+) -> OutputsEqualPartitions {
+    let (with_workaround, without_workaround): (Vec<_>, Vec<_>) = outputs_equal_ids
+        .into_iter()
+        .partition(|surface_id| surface_has_requires_argv_hint(surface, surface_id));
+
+    let (needs_rerun, ready_for_exclusion): (Vec<_>, Vec<_>) = with_workaround
+        .into_iter()
+        .partition(|surface_id| {
+            ledger_entries
+                .get(surface_id.as_str())
+                .is_some_and(|entry| outputs_equal_workaround_needs_delta_rerun(paths, entry))
+        });
+
+    OutputsEqualPartitions {
+        without_workaround,
+        with_workaround_needs_rerun: needs_rerun,
+        with_workaround_ready_for_exclusion: ready_for_exclusion,
+    }
+}
+
+/// Evaluate behavior verification status and compute next action.
 fn eval_behavior_verification(ctx: &mut QueueVerificationContext<'_>) -> VerificationEvalOutput {
-    let Some(targets) = scenarios::auto_verification_targets_for_behavior(ctx.plan, ctx.surface)
+    let Some(semantics) = ctx.semantics else {
+        return VerificationEvalOutput::default();
+    };
+    let Some(targets) = scenarios::auto_verification_targets_for_behavior(ctx.plan, ctx.surface, semantics)
     else {
         return VerificationEvalOutput::default();
     };
@@ -1443,55 +1553,35 @@ fn eval_behavior_verification(ctx: &mut QueueVerificationContext<'_>) -> Verific
     let excluded_set: std::collections::BTreeSet<String> =
         behavior_exclusions.excluded_by_id.keys().cloned().collect();
 
-    let mut remaining_ids = Vec::new();
-    let mut behavior_verified_count = 0;
-    for surface_id in required_ids {
-        if excluded_set.contains(surface_id) {
-            continue;
-        }
-        let status = VerificationStatus::from_entry(
-            ledger_entries.get(surface_id),
-            VerificationTier::Behavior,
-        );
-        if status == VerificationStatus::Verified {
-            behavior_verified_count += 1;
-        } else {
-            remaining_ids.push(surface_id.clone());
-            if let Some(entry) = ledger_entries.get(surface_id) {
-                ctx.evidence.extend(entry.evidence.iter().cloned());
-            }
-        }
-    }
-    remaining_ids.sort();
-    remaining_ids.dedup();
+    let partition_result = partition_remaining_ids(required_ids, &excluded_set, ledger_entries);
+    let remaining_ids = partition_result.remaining_ids;
+    let behavior_verified_count = partition_result.verified_count;
+    ctx.evidence.extend(partition_result.collected_evidence);
 
     let remaining_set: std::collections::BTreeSet<String> = remaining_ids.iter().cloned().collect();
     let remaining_preview = preview_ids(&remaining_ids);
     let missing_value_examples =
         collect_missing_value_examples(ctx.surface, &remaining_ids, ledger_entries);
     let needs_apply_ids = needs_apply_ids(&plan_behavior_ids, &remaining_set, ledger_entries);
+    let lookup_ctx = BehaviorLookupContext {
+        remaining_ids: &remaining_set,
+        missing_value_examples: &missing_value_examples,
+        needs_apply_ids: &needs_apply_ids,
+        ledger_entries,
+    };
     let outputs_equal_ids = select_delta_outcome_ids_for_remaining(
         required_ids,
-        &remaining_set,
-        &missing_value_examples,
-        ledger_entries,
+        &lookup_ctx,
         DeltaOutcomeKind::OutputsEqual,
         BEHAVIOR_BATCH_LIMIT,
     );
-    let (outputs_equal_with_workaround, outputs_equal_without_workaround): (Vec<_>, Vec<_>) =
-        outputs_equal_ids
-            .into_iter()
-            .partition(|surface_id| surface_has_requires_argv_hint(ctx.surface, surface_id));
-    let (
-        outputs_equal_with_workaround_needs_rerun,
-        outputs_equal_with_workaround_ready_for_exclusion,
-    ): (Vec<_>, Vec<_>) = outputs_equal_with_workaround
-        .into_iter()
-        .partition(|surface_id| {
-            ledger_entries
-                .get(surface_id.as_str())
-                .is_some_and(|entry| outputs_equal_workaround_needs_delta_rerun(ctx.paths, entry))
-        });
+    let outputs_equal_partitions =
+        partition_outputs_equal(outputs_equal_ids, ctx.surface, ledger_entries, ctx.paths);
+    let outputs_equal_without_workaround = outputs_equal_partitions.without_workaround;
+    let outputs_equal_with_workaround_needs_rerun =
+        outputs_equal_partitions.with_workaround_needs_rerun;
+    let outputs_equal_with_workaround_ready_for_exclusion =
+        outputs_equal_partitions.with_workaround_ready_for_exclusion;
     let verification_progress = load_verification_progress(ctx.paths);
     let outputs_equal_retry_ids = outputs_equal_without_workaround
         .iter()
@@ -1541,19 +1631,15 @@ fn eval_behavior_verification(ctx: &mut QueueVerificationContext<'_>) -> Verific
         stub_blockers_preview: Vec::new(),
     };
 
-    maybe_set_behavior_next_action(
-        ctx,
-        &mut summary,
+    let eval_state = BehaviorEvalState {
         required_ids,
-        &remaining_set,
-        &missing_value_examples,
-        &needs_apply_ids,
-        &outputs_equal_without_workaround,
-        &outputs_equal_with_workaround_needs_rerun,
-        &outputs_equal_with_workaround_ready_for_exclusion,
-        &retry_counts,
-        ledger_entries,
-    );
+        lookup_ctx: &lookup_ctx,
+        outputs_equal_without_workaround: &outputs_equal_without_workaround,
+        outputs_equal_with_workaround_needs_rerun: &outputs_equal_with_workaround_needs_rerun,
+        outputs_equal_with_workaround_ready_for_exclusion: &outputs_equal_with_workaround_ready_for_exclusion,
+        retry_counts: &retry_counts,
+    };
+    maybe_set_behavior_next_action(ctx, &mut summary, &eval_state);
 
     let summary_preview = format!(
         "behavior verification: {} remaining ({})",
@@ -1673,24 +1759,29 @@ pub(super) fn eval_verification_requirement(
         load_verification_inputs(paths, missing_artifacts, &mut missing, &mut local_blockers)?;
     let mut evidence = base_evidence(&inputs);
 
+    // Load semantics for tier targeting (optional - fallback to legacy behavior if unavailable)
+    let semantics = crate::semantics::load_semantics(paths.root()).ok();
+
     if let (Some(surface), Some(plan)) = (inputs.surface.as_ref(), inputs.plan.as_ref()) {
         if inputs.template_path.is_file() && inputs.semantics_path.is_file() {
-            ledger_snapshot = build_verification_ledger_entries(
+            let ledger_inputs = LedgerBuildInputs {
                 binary_name,
                 surface,
                 plan,
                 paths,
-                &inputs.template_path,
-                &mut local_blockers,
-                &inputs.template_evidence,
-            );
+                template_path: &inputs.template_path,
+                template_evidence: &inputs.template_evidence,
+            };
+            ledger_snapshot = build_verification_ledger_entries(&ledger_inputs, &mut local_blockers);
         }
         let ledger_entries = ledger_snapshot.as_ref().map(|snapshot| &snapshot.entries);
 
         ensure_verification_policy(plan, &mut missing, verification_next_action, binary_name);
 
         let behavior_targets = if verification_tier.is_behavior() {
-            scenarios::auto_verification_targets_for_behavior(plan, surface)
+            semantics.as_ref().and_then(|sem| {
+                scenarios::auto_verification_targets_for_behavior(plan, surface, sem)
+            })
         } else {
             None
         };
@@ -1763,6 +1854,7 @@ pub(super) fn eval_verification_requirement(
                 let mut ctx = QueueVerificationContext {
                     plan,
                     surface,
+                    semantics: semantics.as_ref(),
                     ledger_entries,
                     evidence: &mut evidence,
                     local_blockers: &mut local_blockers,

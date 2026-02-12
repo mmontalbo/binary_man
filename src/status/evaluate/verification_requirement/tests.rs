@@ -91,6 +91,8 @@ fn minimal_surface_with_ids(surface_ids: &[&str]) -> surface::SurfaceInventory {
             id: (*surface_id).to_string(),
             display: (*surface_id).to_string(),
             description: None,
+            parent_id: None,
+            context_argv: Vec::new(),
             forms: vec![(*surface_id).to_string()],
             invocation: surface::SurfaceInvocation::default(),
             evidence: Vec::new(),
@@ -119,6 +121,8 @@ fn minimal_surface(surface_id: &str) -> surface::SurfaceInventory {
             id: surface_id.to_string(),
             display: surface_id.to_string(),
             description: None,
+            parent_id: None,
+            context_argv: Vec::new(),
             forms: vec![surface_id.to_string()],
             invocation: surface::SurfaceInvocation::default(),
             evidence: Vec::new(),
@@ -197,6 +201,8 @@ fn outputs_equal_needs_rerun_fixture(
             id: "--color".to_string(),
             display: "--color".to_string(),
             description: None,
+            parent_id: None,
+            context_argv: Vec::new(),
             forms: vec!["--color".to_string()],
             invocation: surface::SurfaceInvocation {
                 requires_argv: vec!["work".to_string()],
@@ -226,12 +232,17 @@ fn outputs_equal_needs_rerun_fixture(
     (root, paths, plan, surface, entries)
 }
 
+fn test_semantics() -> crate::semantics::Semantics {
+    serde_json::from_str(crate::templates::ENRICH_SEMANTICS_JSON).expect("parse test semantics")
+}
+
 fn eval_behavior_next_action(
     plan: &scenarios::ScenarioPlan,
     surface: &surface::SurfaceInventory,
     ledger_entries: &BTreeMap<String, scenarios::VerificationEntry>,
     paths: &enrich::DocPackPaths,
 ) -> enrich::NextAction {
+    let semantics = test_semantics();
     let mut evidence = Vec::new();
     let mut local_blockers = Vec::new();
     let mut verification_next_action = None;
@@ -247,6 +258,7 @@ fn eval_behavior_next_action(
     let mut ctx = QueueVerificationContext {
         plan,
         surface,
+        semantics: Some(&semantics),
         include_full: true,
         ledger_entries: Some(ledger_entries),
         evidence: &mut evidence,
@@ -359,6 +371,7 @@ fn cap_hit_suggestion_uses_command_with_delta_evidence() {
     let ctx = QueueVerificationContext {
         plan: &plan,
         surface: &surface,
+        semantics: None,
         include_full: true,
         ledger_entries: Some(&ledger_entries),
         evidence: &mut evidence,
@@ -435,9 +448,11 @@ fn behavior_priority_repairs_existing_rejections_before_missing_behavior_stubs()
         path: "scenarios/plan.json".to_string(),
         sha256: None,
     };
+    let semantics = test_semantics();
     let mut ctx = QueueVerificationContext {
         plan: &plan,
         surface: &surface,
+        semantics: Some(&semantics),
         include_full: true,
         ledger_entries: Some(&ledger_entries),
         evidence: &mut evidence,
@@ -495,9 +510,11 @@ fn no_scenario_next_action_payload_includes_assertion_starters() {
         path: "scenarios/plan.json".to_string(),
         sha256: None,
     };
+    let semantics = test_semantics();
     let mut ctx = QueueVerificationContext {
         plan: &plan,
         surface: &surface,
+        semantics: Some(&semantics),
         include_full: true,
         ledger_entries: Some(&ledger_entries),
         evidence: &mut evidence,
@@ -566,6 +583,8 @@ fn scenario_error_next_action_includes_edit() {
             id: "--color".to_string(),
             display: "--color".to_string(),
             description: None,
+            parent_id: None,
+            context_argv: Vec::new(),
             forms: vec!["--color=WHEN".to_string()],
             invocation: surface::SurfaceInvocation {
                 value_arity: "required".to_string(),
@@ -598,9 +617,11 @@ fn scenario_error_next_action_includes_edit() {
         path: "scenarios/plan.json".to_string(),
         sha256: None,
     };
+    let semantics = test_semantics();
     let mut ctx = QueueVerificationContext {
         plan: &plan,
         surface: &surface,
+        semantics: Some(&semantics),
         include_full: true,
         ledger_entries: Some(&ledger_entries),
         evidence: &mut evidence,

@@ -5,6 +5,15 @@ use crate::status::verification_policy::{
 };
 use std::collections::BTreeSet;
 
+/// Context for behavior lookup operations.
+/// Bundles commonly-used lookup sets to reduce parameter count.
+pub(super) struct BehaviorLookupContext<'a> {
+    pub remaining_ids: &'a BTreeSet<String>,
+    pub missing_value_examples: &'a BTreeSet<String>,
+    pub needs_apply_ids: &'a BTreeSet<String>,
+    pub ledger_entries: &'a LedgerEntries,
+}
+
 pub(super) fn behavior_scenario_surface_ids(plan: &scenarios::ScenarioPlan) -> BTreeSet<String> {
     let mut ids = BTreeSet::new();
     for scenario in &plan.scenarios {
@@ -42,26 +51,17 @@ pub(super) fn needs_apply_ids(
     needs_apply
 }
 
-pub(super) fn first_matching_id(required_ids: &[String], set: &BTreeSet<String>) -> Option<String> {
-    for surface_id in required_ids {
-        if set.contains(surface_id) {
-            return Some(surface_id.clone());
-        }
-    }
-    None
-}
-
 pub(super) fn first_reason_id(
     required_ids: &[String],
-    remaining_ids: &BTreeSet<String>,
-    missing_value_examples: &BTreeSet<String>,
-    needs_apply_ids: &BTreeSet<String>,
+    ctx: &BehaviorLookupContext<'_>,
 ) -> Option<String> {
     for surface_id in required_ids {
-        if !remaining_ids.contains(surface_id) {
+        if !ctx.remaining_ids.contains(surface_id) {
             continue;
         }
-        if missing_value_examples.contains(surface_id) || needs_apply_ids.contains(surface_id) {
+        if ctx.missing_value_examples.contains(surface_id)
+            || ctx.needs_apply_ids.contains(surface_id)
+        {
             continue;
         }
         return Some(surface_id.clone());
@@ -69,25 +69,26 @@ pub(super) fn first_reason_id(
     None
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn first_reason_id_by_priority(
     required_ids: &[String],
-    remaining_ids: &BTreeSet<String>,
-    missing_value_examples: &BTreeSet<String>,
-    needs_apply_ids: &BTreeSet<String>,
-    ledger_entries: &LedgerEntries,
+    ctx: &BehaviorLookupContext<'_>,
     reason_kinds: &[BehaviorReasonKind],
 ) -> Option<String> {
     for reason_kind in reason_kinds {
         for surface_id in required_ids {
-            if !remaining_ids.contains(surface_id) {
+            if !ctx.remaining_ids.contains(surface_id) {
                 continue;
             }
-            if missing_value_examples.contains(surface_id) || needs_apply_ids.contains(surface_id) {
+            if ctx.missing_value_examples.contains(surface_id)
+                || ctx.needs_apply_ids.contains(surface_id)
+            {
                 continue;
             }
-            let code =
-                behavior_reason_code_for_id(surface_id, missing_value_examples, ledger_entries);
+            let code = behavior_reason_code_for_id(
+                surface_id,
+                ctx.missing_value_examples,
+                ctx.ledger_entries,
+            );
             let candidate = BehaviorReasonKind::from_code(Some(&code));
             if candidate == *reason_kind {
                 return Some(surface_id.clone());
@@ -99,9 +100,7 @@ pub(super) fn first_reason_id_by_priority(
 
 pub(super) fn select_delta_outcome_ids_for_remaining(
     required_ids: &[String],
-    remaining_ids: &BTreeSet<String>,
-    missing_value_examples: &BTreeSet<String>,
-    ledger_entries: &LedgerEntries,
+    ctx: &BehaviorLookupContext<'_>,
     outcome: DeltaOutcomeKind,
     limit: usize,
 ) -> Vec<String> {
@@ -110,13 +109,13 @@ pub(super) fn select_delta_outcome_ids_for_remaining(
         if selected.len() >= limit {
             break;
         }
-        if !remaining_ids.contains(surface_id) {
+        if !ctx.remaining_ids.contains(surface_id) {
             continue;
         }
-        if missing_value_examples.contains(surface_id) {
+        if ctx.missing_value_examples.contains(surface_id) {
             continue;
         }
-        let Some(entry) = ledger_entries.get(surface_id) else {
+        let Some(entry) = ctx.ledger_entries.get(surface_id) else {
             continue;
         };
         if DeltaOutcomeKind::from_code(entry.delta_outcome.as_deref()) != outcome {
@@ -226,6 +225,8 @@ mod tests {
             id: "show".to_string(),
             display: "show".to_string(),
             description: None,
+            parent_id: None,
+            context_argv: Vec::new(),
             forms: vec!["show".to_string()],
             invocation: crate::surface::SurfaceInvocation::default(),
             evidence: Vec::new(),

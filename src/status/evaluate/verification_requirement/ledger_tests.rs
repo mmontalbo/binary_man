@@ -1,4 +1,4 @@
-use super::build_verification_ledger_entries;
+use super::{build_verification_ledger_entries, LedgerBuildInputs};
 use crate::enrich;
 use crate::scenarios;
 use crate::surface;
@@ -33,6 +33,8 @@ fn minimal_surface() -> surface::SurfaceInventory {
             id: "--color".to_string(),
             display: "--color".to_string(),
             description: None,
+            parent_id: None,
+            context_argv: Vec::new(),
             forms: vec!["--color[=WHEN]".to_string()],
             invocation: surface::SurfaceInvocation::default(),
             evidence: Vec::new(),
@@ -60,15 +62,15 @@ fn verification_query_error_reports_missing_include_path() {
     let surface = minimal_surface();
     let mut local_blockers = Vec::new();
 
-    let snapshot = build_verification_ledger_entries(
-        Some("bin"),
-        &surface,
-        &plan,
-        &paths,
-        &template_path,
-        &mut local_blockers,
-        &template_evidence,
-    );
+    let ledger_inputs = LedgerBuildInputs {
+        binary_name: Some("bin"),
+        surface: &surface,
+        plan: &plan,
+        paths: &paths,
+        template_path: &template_path,
+        template_evidence: &template_evidence,
+    };
+    let snapshot = build_verification_ledger_entries(&ledger_inputs, &mut local_blockers);
     let _ = std::fs::remove_dir_all(root);
 
     assert!(

@@ -178,6 +178,8 @@ mod tests {
             id: surface_id.to_string(),
             display: surface_id.to_string(),
             description: None,
+            parent_id: None,
+            context_argv: Vec::new(),
             forms: vec![
                 surface_id.to_string(),
                 format!("{surface_id}=<VALUE>"),
@@ -335,6 +337,7 @@ mod tests {
         let ctx = super::QueueVerificationContext {
             plan: &plan,
             surface: &surface,
+            semantics: None,
             include_full: false,
             ledger_entries: None,
             evidence: &mut evidence,
