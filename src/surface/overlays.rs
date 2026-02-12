@@ -121,6 +121,10 @@ struct SurfaceOverlaysItem {
     display: Option<String>,
     #[serde(default)]
     description: Option<String>,
+    #[serde(default)]
+    parent_id: Option<String>,
+    #[serde(default)]
+    context_argv: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -171,6 +175,8 @@ pub(super) fn apply_surface_overlays(
                     id: item.id.trim().to_string(),
                     display: item.display.unwrap_or_else(|| item.id.trim().to_string()),
                     description: item.description,
+                    parent_id: item.parent_id,
+                    context_argv: item.context_argv,
                     forms: Vec::new(),
                     invocation: SurfaceInvocation::default(),
                     evidence: vec![evidence.clone()],
@@ -194,6 +200,8 @@ pub(super) fn apply_surface_overlays(
                     id: overlay.id.trim().to_string(),
                     display: String::new(),
                     description: None,
+                    parent_id: None,
+                    context_argv: Vec::new(),
                     forms: Vec::new(),
                     invocation: SurfaceInvocation {
                         value_examples: overlay.invocation.value_examples,

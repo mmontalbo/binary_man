@@ -72,6 +72,8 @@ pub(super) fn apply_surface_seed(
                     id: item.id.trim().to_string(),
                     display: item.display.unwrap_or_else(|| item.id.trim().to_string()),
                     description: item.description,
+                    parent_id: None,
+                    context_argv: Vec::new(),
                     forms: Vec::new(),
                     invocation: SurfaceInvocation::default(),
                     evidence: vec![evidence.clone()],
@@ -95,6 +97,8 @@ pub(super) fn apply_surface_seed(
                     id: overlay.id.trim().to_string(),
                     display: String::new(),
                     description: None,
+                    parent_id: None,
+                    context_argv: Vec::new(),
                     forms: Vec::new(),
                     invocation: SurfaceInvocation {
                         value_examples: overlay.invocation.value_examples,

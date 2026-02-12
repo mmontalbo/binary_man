@@ -69,6 +69,10 @@ pub struct SurfaceItem {
     pub display: String,
     #[serde(default)]
     pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub context_argv: Vec<String>,
     #[serde(default)]
     pub forms: Vec<String>,
     #[serde(default)]

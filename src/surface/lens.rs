@@ -151,6 +151,8 @@ pub(super) fn run_surface_lenses(
                             id: id.to_string(),
                             display,
                             description,
+                            parent_id: None,
+                            context_argv: Vec::new(),
                             forms: row.forms.clone(),
                             invocation: row.invocation.clone(),
                             evidence: vec![evidence],
