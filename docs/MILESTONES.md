@@ -7,48 +7,71 @@ that supports iterative static + dynamic passes from portable doc packs.
 
 Current focus: M19 — multi-command CLI validation (git).
 
-## M19 — Subcommand + Options Verification at Scale (git) (current)
+## M19 — Pack-Owned Verification Semantics (current)
 
-Goal: Validate that LM-assisted behavior verification scales to CLIs with
-subcommand hierarchies by running `git config` (a subcommand with rich option
-surface) through the full verification loop.
-
-Hypothesis: The M18 infrastructure works for subcommands without modification.
-If true, M19 is a validation exercise. If false, M19 delivers the fixes.
+Goal: Remove hardcoded option/subcommand verification semantics from the tool.
+Make surface kinds, verification strategies, and auto-scenario generation fully
+pack-owned so LMs can handle arbitrary CLI structures (including multi-level
+subcommand hierarchies like `git config --global`).
 
 Motivation:
-- M18 validated `ls` (single command, 84 options, 92-96% behavior verified).
-- git subcommands have their own option namespaces. `git config` alone has 30+
-  options and doesn't require network/credentials.
-- Testing one subcommand deeply is more valuable than testing 100 shallowly.
+- M18 validated `ls` (single command, flat options). Testing `git config`
+  revealed that the tool bakes in assumptions about what "option" and
+  "subcommand" mean and how to verify each.
+- The tool currently has hardcoded `VerificationTargetKind::Option` and
+  `VerificationTargetKind::Subcommand` with different verification behaviors.
+- Behavior tier only targets options (hardcoded). Subcommands can only reach
+  existence verification.
+- No parent-child relationship support: `git config --global` cannot be modeled
+  as an option belonging to the `config` subcommand.
 
-Approach:
-1. **Subcommand existence** (mechanical): Run `bman apply` to verify all git
-   subcommands exist (help-based, no LM needed). Baseline measurement.
-2. **Single-subcommand deep dive**: Run `bman run "git config"` with LM to
-   verify options for `git config` specifically.
-3. **Assess and iterate**: If (2) works, optionally repeat for 1-2 more
-   subcommands (`git tag`, `git branch`). If blocked, fix infrastructure.
+Design principle: The tool should be a generic executor. Pack-owned artifacts
+(SQL queries, semantics.json, overlays) should define what surface kinds exist,
+how to verify each, and how to generate auto-verification scenarios.
 
 Deliverables:
-1. **Subcommand existence baseline**: All ~150 git subcommands reach existence
-   verified. Measurement: count, time, any failures.
-2. **git-config behavior verification**: `git config` options reach behavior
-   verification parity with `ls` (90%+ verified or explicitly excluded).
-3. **Subcommand-scoped invocation**: If not already working, ensure `bman run`
-   can target `"git config"` as a subcommand (not just top-level binaries).
-4. **Findings documented**: What worked, what didn't, any infrastructure gaps.
+1. **Surface schema v3**: Add optional `parent_id` and `context_argv` fields to
+   surface items, enabling hierarchical relationships.
+   ```json
+   {
+     "kind": "option",
+     "id": "--global",
+     "parent_id": "config",
+     "context_argv": ["config"]
+   }
+   ```
+
+2. **Pack-owned auto-scenario generation**: Move scenario argv construction from
+   Rust to pack SQL. The tool executes `queries/auto_scenarios.sql` to get
+   scenario specs; it doesn't decide how to invoke different kinds.
+
+3. **Pack-owned tier targeting**: Move "which kinds need which tiers" from
+   hardcoded Rust to `enrich/semantics.json`. The tool reads tier requirements
+   from pack config, doesn't hardcode "behavior = options only".
+
+4. **Validation with git config**: Demonstrate that an LM can:
+   - Discover `git config` options via pack SQL (from `git config --help` output)
+   - Add them to surface with `parent_id: "config"`
+   - Behavior-verify them using pack-defined strategies
+
+Approach:
+1. Extend surface schema with `parent_id` and `context_argv` (non-breaking).
+2. Add `queries/auto_scenarios.sql` template; refactor Rust to execute it.
+3. Move `tier_requirements_by_kind` to semantics.json; refactor Rust to read it.
+4. Update default pack templates for backward compatibility with `ls`-style CLIs.
+5. Test with `git config` end-to-end.
 
 Acceptance criteria:
-- Subcommand existence: 100% verified in <5 minutes.
-- `git config` behavior: 90%+ options verified or excluded, <20 minutes.
-- No manual JSON editing required during LM-assisted loop.
+- No `VerificationTargetKind` enum driving behavior in Rust (kinds are strings).
+- Auto-scenario argv construction comes from pack SQL, not Rust.
+- Tier targeting comes from semantics.json, not hardcoded.
+- `git config` options reach behavior verification via LM-driven loop.
+- `ls` pack still works (backward compatible).
 
 Out of scope:
-- Behavior verification for all git subcommands.
-- Subcommands requiring repo context, network, or credentials.
-- Nested subcommand parsing (`git stash list`).
-- CI integration.
+- Full SQL-ification of next_action logic (incremental follow-up).
+- Nested subcommands beyond one level (`git stash list`).
+- `bman run --subcommand` CLI (not needed if pack handles context_argv).
 
 ## M18 — End-to-End LM Agent Validation (done)
 

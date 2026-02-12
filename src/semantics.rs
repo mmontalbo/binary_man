@@ -153,6 +153,10 @@ pub struct VerificationSemantics {
     pub accepted: Vec<VerificationRule>,
     #[serde(default)]
     pub rejected: Vec<VerificationRule>,
+    /// Pack-owned auto-scenario templates per surface kind.
+    #[serde(default)]
+    pub auto_scenarios: Vec<AutoScenarioTemplate>,
+    // Legacy fields - kept for backward compatibility, prefer auto_scenarios.
     #[serde(default)]
     pub option_existence_argv_prefix: Vec<String>,
     #[serde(default)]
@@ -161,6 +165,23 @@ pub struct VerificationSemantics {
     pub subcommand_existence_argv_prefix: Vec<String>,
     #[serde(default)]
     pub subcommand_existence_argv_suffix: Vec<String>,
+}
+
+/// Auto-scenario template defining how to verify a surface kind.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct AutoScenarioTemplate {
+    /// Surface kind this template applies to (e.g. "option", "subcommand").
+    pub kind: String,
+    /// Argv tokens to prepend before the surface id.
+    #[serde(default)]
+    pub argv_prefix: Vec<String>,
+    /// Argv tokens to append after the surface id.
+    #[serde(default)]
+    pub argv_suffix: Vec<String>,
+    /// Verification tiers this kind participates in (e.g. ["accepted", "behavior"]).
+    #[serde(default)]
+    pub tiers: Vec<String>,
 }
 
 /// Normalization rules applied to behavior assertion evaluation.
@@ -402,6 +423,9 @@ pub fn validate_semantics(semantics: &Semantics) -> Result<()> {
         &semantics.verification.subcommand_existence_argv_suffix,
         "verification.subcommand_existence_argv_suffix",
     )?;
+    for (idx, template) in semantics.verification.auto_scenarios.iter().enumerate() {
+        validate_auto_scenario_template(template, &format!("verification.auto_scenarios[{idx}]"))?;
+    }
 
     Ok(())
 }
@@ -472,6 +496,22 @@ fn validate_verification_rule(rule: &VerificationRule, label: &str) -> Result<()
 fn validate_invocation_tokens(tokens: &[String], label: &str) -> Result<()> {
     for (idx, token) in tokens.iter().enumerate() {
         ensure!(!token.trim().is_empty(), "{label}[{idx}] must not be empty");
+    }
+    Ok(())
+}
+
+fn validate_auto_scenario_template(template: &AutoScenarioTemplate, label: &str) -> Result<()> {
+    ensure!(
+        !template.kind.trim().is_empty(),
+        "{label}.kind must not be empty"
+    );
+    validate_invocation_tokens(&template.argv_prefix, &format!("{label}.argv_prefix"))?;
+    validate_invocation_tokens(&template.argv_suffix, &format!("{label}.argv_suffix"))?;
+    for (idx, tier) in template.tiers.iter().enumerate() {
+        ensure!(
+            !tier.trim().is_empty(),
+            "{label}.tiers[{idx}] must not be empty"
+        );
     }
     Ok(())
 }
