@@ -114,6 +114,12 @@ pub(crate) struct VerificationProgress {
     /// Loop tracking for assertion_failed reason code
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(crate) assertion_failed_by_surface: BTreeMap<String, AssertionFailedProgressEntry>,
+    /// Tracks consecutive LM failures per surface to auto-exclude stuck surfaces
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) lm_failures_by_surface: BTreeMap<String, usize>,
+    /// Tracks how many cycles each surface has been targeted by LM without verification progress
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) lm_no_progress_by_surface: BTreeMap<String, usize>,
 }
 
 impl Default for VerificationProgress {
@@ -122,6 +128,8 @@ impl Default for VerificationProgress {
             schema_version: VERIFICATION_PROGRESS_SCHEMA_VERSION,
             outputs_equal_retries_by_surface: BTreeMap::new(),
             assertion_failed_by_surface: BTreeMap::new(),
+            lm_failures_by_surface: BTreeMap::new(),
+            lm_no_progress_by_surface: BTreeMap::new(),
         }
     }
 }

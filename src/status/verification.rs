@@ -14,7 +14,7 @@ pub(crate) struct AutoVerificationState {
 }
 
 pub(crate) struct AutoVerificationKindState {
-    pub(crate) kind: scenarios::VerificationTargetKind,
+    pub(crate) kind: String,
     pub(crate) target_count: usize,
     pub(crate) remaining_ids: Vec<String>,
 }
@@ -41,11 +41,12 @@ pub(crate) fn auto_verification_plan_summary(
     surface: &surface::SurfaceInventory,
     ledger_entries: Option<&BTreeMap<String, scenarios::VerificationEntry>>,
     verification_tier: &str,
+    semantics: &crate::semantics::Semantics,
 ) -> Option<enrich::VerificationPlanSummary> {
     let requested_tier = VerificationTier::from_config(Some(verification_tier));
     let (targets, status_tier) = if requested_tier.is_behavior() {
         (
-            scenarios::auto_verification_targets_for_behavior(plan, surface)?,
+            scenarios::auto_verification_targets_for_behavior(plan, surface, semantics)?,
             VerificationTier::Accepted,
         )
     } else {
@@ -60,7 +61,7 @@ pub(crate) fn auto_verification_plan_summary(
         .remaining_by_kind
         .iter()
         .map(|group| enrich::VerificationKindSummary {
-            kind: group.kind.as_str().to_string(),
+            kind: group.kind.clone(),
             target_count: group.target_count,
             remaining_count: group.remaining_ids.len(),
             remaining_preview: preview_ids(&group.remaining_ids, 10),
@@ -110,7 +111,7 @@ pub(crate) fn auto_verification_state_for_targets(
             }
         }
         remaining_by_kind.push(AutoVerificationKindState {
-            kind: *kind,
+            kind: kind.clone(),
             target_count: group_ids.len(),
             remaining_ids: group_remaining,
         });

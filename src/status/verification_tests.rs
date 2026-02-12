@@ -34,6 +34,8 @@ fn surface_item(
         id: surface_id.to_string(),
         display: surface_id.to_string(),
         description: None,
+        parent_id: None,
+        context_argv: Vec::new(),
         forms: forms.iter().map(|form| (*form).to_string()).collect(),
         invocation,
         evidence: Vec::new(),
@@ -146,6 +148,8 @@ fn minimal_surface(surface_id: &str) -> surface::SurfaceInventory {
             id: surface_id.to_string(),
             display: surface_id.to_string(),
             description: None,
+            parent_id: None,
+            context_argv: Vec::new(),
             forms: vec![surface_id.to_string()],
             invocation: SurfaceInvocation {
                 value_arity: "optional".to_string(),
