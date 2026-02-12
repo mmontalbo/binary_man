@@ -72,8 +72,45 @@ pub(super) struct ScenarioExecution {
     pub(super) index_entry: ScenarioIndexEntry,
 }
 
+/// Tracks auto-verification execution state during scenario runs.
+struct AutoVerificationState {
+    runs_used: usize,
+    total: usize,
+    skipped_cache: usize,
+    skipped_limit: usize,
+    run_limit: usize,
+}
+
+impl AutoVerificationState {
+    fn new(limit: Option<usize>) -> Self {
+        Self {
+            runs_used: 0,
+            total: 0,
+            skipped_cache: 0,
+            skipped_limit: 0,
+            run_limit: limit.unwrap_or(usize::MAX),
+        }
+    }
+
+    fn at_limit(&self) -> bool {
+        self.runs_used >= self.run_limit
+    }
+
+    fn record_run(&mut self) {
+        self.runs_used += 1;
+    }
+}
+
+/// Log cache state when incomplete.
+fn log_incomplete_cache(previous_available: bool, has_existing_index: bool) {
+    let report_state = if previous_available { "present" } else { "missing" };
+    let index_status = if has_existing_index { "present" } else { "missing" };
+    eprintln!(
+        "note: scenario cache incomplete (report {report_state}, index {index_status}); rerunning all scenarios"
+    );
+}
+
 /// Run scenarios and return an examples report snapshot.
-#[allow(clippy::cognitive_complexity)]
 pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<RunScenariosResult> {
     let plan = super::load_plan(args.scenarios_path, args.run_root)?;
     if let Some(plan_binary) = plan.binary.as_deref() {
@@ -127,19 +164,7 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<RunScenariosResult> 
     let mut previous_outcomes = load_previous_outcomes(args.run_root, args.verbose);
     let cache_ready = previous_outcomes.available && has_existing_index;
     if args.verbose && !cache_ready {
-        let report_state = if previous_outcomes.available {
-            "present"
-        } else {
-            "missing"
-        };
-        let index_status = if has_existing_index {
-            "present"
-        } else {
-            "missing"
-        };
-        eprintln!(
-            "note: scenario cache incomplete (report {report_state}, index {index_status}); rerunning all scenarios"
-        );
+        log_incomplete_cache(previous_outcomes.available, has_existing_index);
     }
     let mut outcomes = Vec::new();
     let mut executed_forced_rerun_ids = BTreeSet::new();
@@ -155,11 +180,7 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<RunScenariosResult> 
         None => true,
     });
 
-    let mut auto_runs_used = 0usize;
-    let mut auto_total = 0usize;
-    let mut auto_skipped_cache = 0usize;
-    let mut auto_skipped_limit = 0usize;
-    let auto_run_limit = args.auto_run_limit.unwrap_or(usize::MAX);
+    let mut auto_state = AutoVerificationState::new(args.auto_run_limit);
 
     for scenario in scenarios {
         let run_config = effective_scenario_config(&plan, scenario)?;
@@ -181,11 +202,11 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<RunScenariosResult> 
 
         let is_auto = scenario.id.starts_with(super::AUTO_VERIFY_SCENARIO_PREFIX);
         if is_auto {
-            auto_total += 1;
+            auto_state.total += 1;
         }
         if !should_run {
             if is_auto {
-                auto_skipped_cache += 1;
+                auto_state.skipped_cache += 1;
             }
             if reportable {
                 if let Some(outcome) = previous_outcomes.outcomes.remove(&scenario.id) {
@@ -195,8 +216,8 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<RunScenariosResult> 
             continue;
         }
 
-        if is_auto && auto_runs_used >= auto_run_limit {
-            auto_skipped_limit += 1;
+        if is_auto && auto_state.at_limit() {
+            auto_state.skipped_limit += 1;
             continue;
         }
 
@@ -276,9 +297,9 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<RunScenariosResult> 
         index_entries.insert(scenario.id.clone(), execution.index_entry);
         index_changed = true;
         if is_auto {
-            auto_runs_used += 1;
-            if args.auto_run_limit.is_some() && auto_runs_used.is_multiple_of(25) {
-                eprintln!("auto verification progress: {auto_runs_used} runs executed");
+            auto_state.record_run();
+            if args.auto_run_limit.is_some() && auto_state.runs_used.is_multiple_of(25) {
+                eprintln!("auto verification progress: {} runs executed", auto_state.runs_used);
             }
         }
     }
@@ -290,11 +311,12 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<RunScenariosResult> 
         index_changed,
     )?;
 
-    if has_auto && args.auto_run_limit.is_some() && auto_total > 0 {
-        let mut summary = format!("auto verification: ran {auto_runs_used}");
-        if auto_skipped_cache > 0 || auto_skipped_limit > 0 {
+    if has_auto && args.auto_run_limit.is_some() && auto_state.total > 0 {
+        let mut summary = format!("auto verification: ran {}", auto_state.runs_used);
+        if auto_state.skipped_cache > 0 || auto_state.skipped_limit > 0 {
             summary.push_str(&format!(
-                " (skipped {auto_skipped_cache} cached, {auto_skipped_limit} limit)"
+                " (skipped {} cached, {} limit)",
+                auto_state.skipped_cache, auto_state.skipped_limit
             ));
         }
         summary.push_str("; see bman status --json");
