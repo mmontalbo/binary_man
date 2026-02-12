@@ -234,7 +234,6 @@ mod tests {
     use super::*;
     use crate::scenarios::{
         plan_stub, RunTarget, ScenarioDefaults, ScenarioKind, VerificationPlan,
-        VerificationTargetKind,
     };
     use std::collections::BTreeMap;
 
@@ -395,7 +394,7 @@ mod tests {
         assert_eq!(defaults.snippet_max_bytes, Some(1024));
         assert!(plan.verification.queue.is_empty());
         let policy = plan.verification.policy.as_ref().expect("policy");
-        assert_eq!(policy.kinds, vec![VerificationTargetKind::Option]);
+        assert_eq!(policy.kinds, vec!["option".to_string()]);
         assert_eq!(policy.max_new_runs_per_apply, 50);
     }
 

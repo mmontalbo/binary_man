@@ -177,25 +177,9 @@ pub struct VerificationPlan {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct VerificationPolicy {
-    pub kinds: Vec<VerificationTargetKind>,
+    /// Surface kinds to auto-verify (e.g. ["option", "subcommand"]).
+    pub kinds: Vec<String>,
     pub max_new_runs_per_apply: usize,
-}
-
-/// Supported auto-verification kinds.
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum VerificationTargetKind {
-    Option,
-    Subcommand,
-}
-
-impl VerificationTargetKind {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            VerificationTargetKind::Option => "option",
-            VerificationTargetKind::Subcommand => "subcommand",
-        }
-    }
 }
 
 /// Queue entry describing a surface id to verify or exclude.

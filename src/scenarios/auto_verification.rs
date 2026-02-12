@@ -1,21 +1,18 @@
-//! Auto-verification helpers for option/subcommand existence.
+//! Auto-verification helpers for surface item existence.
 //!
-//! These helpers expand a compact policy into synthetic scenarios without
-//! embedding CLI semantics in Rust.
+//! These helpers expand a compact policy into synthetic scenarios using
+//! pack-owned semantics for argv templates and tier targeting.
 use crate::semantics::Semantics;
 use crate::surface::SurfaceInventory;
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{
-    ScenarioExpect, ScenarioKind, ScenarioPlan, ScenarioSpec, VerificationExcludedEntry,
-    VerificationTargetKind,
-};
+use super::{ScenarioExpect, ScenarioKind, ScenarioPlan, ScenarioSpec, VerificationExcludedEntry};
 
 /// Auto-verification targets derived from the surface inventory.
 pub struct AutoVerificationTargets {
     pub max_new_runs_per_apply: usize,
     pub target_ids: Vec<String>,
-    pub targets: Vec<(VerificationTargetKind, Vec<String>)>,
+    pub targets: Vec<(String, Vec<String>)>,
     pub excluded: Vec<VerificationExcludedEntry>,
     pub excluded_ids: BTreeSet<String>,
 }
@@ -39,7 +36,7 @@ pub fn auto_verification_targets(
             .filter(|id| !excluded_ids.contains(id))
             .collect();
         target_ids.extend(filtered_ids.iter().cloned());
-        targets.push((*kind, filtered_ids));
+        targets.push((kind.clone(), filtered_ids));
     }
 
     Some(AutoVerificationTargets {
@@ -51,23 +48,56 @@ pub fn auto_verification_targets(
     })
 }
 
-/// Collect ids eligible for auto-verification in behavior tier (options only).
+/// Collect ids eligible for auto-verification in behavior tier.
+/// Uses semantics.auto_scenarios to determine which kinds participate in behavior tier.
 pub fn auto_verification_targets_for_behavior(
     plan: &ScenarioPlan,
     surface: &SurfaceInventory,
+    semantics: &Semantics,
 ) -> Option<AutoVerificationTargets> {
     let policy = plan.verification.policy.as_ref()?;
-    let ids = collect_surface_ids(surface, &VerificationTargetKind::Option);
-    let filtered_ids: Vec<String> = ids.into_iter().collect();
-    let target_ids = filtered_ids.clone();
-    let targets = vec![(VerificationTargetKind::Option, filtered_ids)];
+
+    // Collect kinds that participate in behavior tier from semantics
+    let behavior_kinds: BTreeSet<String> = semantics
+        .verification
+        .auto_scenarios
+        .iter()
+        .filter(|template| template.tiers.iter().any(|t| t == "behavior"))
+        .map(|template| template.kind.clone())
+        .collect();
+
+    // Fall back to legacy behavior: only "option" if no auto_scenarios defined
+    let behavior_kinds = if behavior_kinds.is_empty() {
+        let mut fallback = BTreeSet::new();
+        fallback.insert("option".to_string());
+        fallback
+    } else {
+        behavior_kinds
+    };
+
+    let (excluded, excluded_ids) = plan.collect_queue_exclusions();
+    let mut targets = Vec::new();
+    let mut target_ids = Vec::new();
+
+    for kind in &policy.kinds {
+        if !behavior_kinds.contains(kind) {
+            continue;
+        }
+        let ids = collect_surface_ids(surface, kind);
+        let filtered_ids: Vec<String> = ids
+            .into_iter()
+            .filter(|id| !excluded_ids.contains(id))
+            .collect();
+        target_ids.extend(filtered_ids.iter().cloned());
+        targets.push((kind.clone(), filtered_ids));
+    }
 
     Some(AutoVerificationTargets {
         max_new_runs_per_apply: policy.max_new_runs_per_apply,
         target_ids,
         targets,
-        excluded: Vec::new(),
-        excluded_ids: BTreeSet::new(),
+        excluded,
+        excluded_ids,
     })
 }
 
@@ -79,9 +109,9 @@ pub fn auto_verification_scenarios(
     let mut scenarios = Vec::with_capacity(targets.target_ids.len());
     for (kind, group_ids) in &targets.targets {
         for surface_id in group_ids {
-            let argv = existence_argv(semantics, *kind, surface_id);
+            let argv = existence_argv(semantics, kind, surface_id);
             scenarios.push(ScenarioSpec {
-                id: auto_scenario_id(*kind, surface_id),
+                id: auto_scenario_id(kind, surface_id),
                 kind: ScenarioKind::Behavior,
                 publish: false,
                 argv,
@@ -110,13 +140,9 @@ pub fn auto_verification_scenarios(
     scenarios
 }
 
-fn collect_surface_ids(
-    surface: &SurfaceInventory,
-    kind: &VerificationTargetKind,
-) -> BTreeSet<String> {
-    let kind_label = kind.as_str();
+fn collect_surface_ids(surface: &SurfaceInventory, kind: &str) -> BTreeSet<String> {
     let mut ids = BTreeSet::new();
-    for item in surface.items.iter().filter(|item| item.kind == kind_label) {
+    for item in surface.items.iter().filter(|item| item.kind == kind) {
         let id = item.id.trim();
         if id.is_empty() {
             continue;
@@ -126,29 +152,39 @@ fn collect_surface_ids(
     ids
 }
 
-fn auto_scenario_id(kind: VerificationTargetKind, surface_id: &str) -> String {
-    format!(
-        "{}{}::{}",
-        super::AUTO_VERIFY_SCENARIO_PREFIX,
-        kind.as_str(),
-        surface_id
-    )
+fn auto_scenario_id(kind: &str, surface_id: &str) -> String {
+    format!("{}{}::{}", super::AUTO_VERIFY_SCENARIO_PREFIX, kind, surface_id)
 }
 
-fn existence_argv(
-    semantics: &Semantics,
-    kind: VerificationTargetKind,
-    surface_id: &str,
-) -> Vec<String> {
+fn existence_argv(semantics: &Semantics, kind: &str, surface_id: &str) -> Vec<String> {
+    // Try to find template in auto_scenarios first
+    if let Some(template) = semantics
+        .verification
+        .auto_scenarios
+        .iter()
+        .find(|t| t.kind == kind)
+    {
+        let mut argv = Vec::new();
+        argv.extend(template.argv_prefix.iter().cloned());
+        argv.push(surface_id.to_string());
+        argv.extend(template.argv_suffix.iter().cloned());
+        return argv;
+    }
+
+    // Fall back to legacy fields for backward compatibility
     let (prefix, suffix) = match kind {
-        VerificationTargetKind::Option => (
+        "option" => (
             &semantics.verification.option_existence_argv_prefix,
             &semantics.verification.option_existence_argv_suffix,
         ),
-        VerificationTargetKind::Subcommand => (
+        "subcommand" => (
             &semantics.verification.subcommand_existence_argv_prefix,
             &semantics.verification.subcommand_existence_argv_suffix,
         ),
+        _ => {
+            // Unknown kind with no template: just use the surface_id
+            return vec![surface_id.to_string()];
+        }
     };
     let mut argv = Vec::new();
     argv.extend(prefix.iter().cloned());
@@ -175,6 +211,8 @@ mod tests {
                     id: "--color".to_string(),
                     display: "--color".to_string(),
                     description: None,
+                    parent_id: None,
+                    context_argv: Vec::new(),
                     forms: vec!["--color[=WHEN]".to_string()],
                     invocation: crate::surface::SurfaceInvocation::default(),
                     evidence: Vec::new(),
@@ -184,6 +222,8 @@ mod tests {
                     id: "show".to_string(),
                     display: "show".to_string(),
                     description: None,
+                    parent_id: None,
+                    context_argv: Vec::new(),
                     forms: vec!["show".to_string()],
                     invocation: crate::surface::SurfaceInvocation::default(),
                     evidence: Vec::new(),
@@ -203,10 +243,7 @@ mod tests {
             verification: VerificationPlan {
                 queue: Vec::new(),
                 policy: Some(VerificationPolicy {
-                    kinds: vec![
-                        VerificationTargetKind::Option,
-                        VerificationTargetKind::Subcommand,
-                    ],
+                    kinds: vec!["option".to_string(), "subcommand".to_string()],
                     max_new_runs_per_apply: 3,
                 }),
             },
@@ -304,5 +341,62 @@ mod tests {
             .expect("digest B")
             .scenario_digest;
         assert_eq!(digest_a, digest_b);
+    }
+
+    #[test]
+    fn auto_scenarios_template_overrides_legacy_fields() {
+        let plan = plan_with_policy();
+        let surface = surface_with_option_and_subcommand();
+        let targets = auto_verification_targets(&plan, &surface).unwrap();
+
+        let mut semantics: Semantics =
+            serde_json::from_str(crate::templates::ENRICH_SEMANTICS_JSON).unwrap();
+        // Set legacy fields
+        semantics.verification.option_existence_argv_prefix = vec!["legacy".to_string()];
+        semantics.verification.option_existence_argv_suffix = vec!["--legacy".to_string()];
+        // Set auto_scenarios which should take precedence
+        semantics.verification.auto_scenarios = vec![crate::semantics::AutoScenarioTemplate {
+            kind: "option".to_string(),
+            argv_prefix: vec!["new".to_string()],
+            argv_suffix: vec!["--new".to_string()],
+            tiers: vec!["accepted".to_string(), "behavior".to_string()],
+        }];
+
+        let scenarios = auto_verification_scenarios(&targets, &semantics);
+        assert_eq!(
+            scenario_argv_for_id(&scenarios, "auto_verify::option::--color"),
+            vec!["new".to_string(), "--color".to_string(), "--new".to_string()]
+        );
+    }
+
+    #[test]
+    fn behavior_tier_targeting_uses_semantics() {
+        let plan = plan_with_policy();
+        let surface = surface_with_option_and_subcommand();
+
+        let mut semantics: Semantics =
+            serde_json::from_str(crate::templates::ENRICH_SEMANTICS_JSON).unwrap();
+        // Only subcommand participates in behavior tier
+        semantics.verification.auto_scenarios = vec![
+            crate::semantics::AutoScenarioTemplate {
+                kind: "option".to_string(),
+                argv_prefix: Vec::new(),
+                argv_suffix: Vec::new(),
+                tiers: vec!["accepted".to_string()], // NOT in behavior
+            },
+            crate::semantics::AutoScenarioTemplate {
+                kind: "subcommand".to_string(),
+                argv_prefix: Vec::new(),
+                argv_suffix: vec!["--help".to_string()],
+                tiers: vec!["accepted".to_string(), "behavior".to_string()],
+            },
+        ];
+
+        let targets =
+            auto_verification_targets_for_behavior(&plan, &surface, &semantics).unwrap();
+        // Only subcommand should be in targets
+        assert_eq!(targets.target_ids, vec!["show".to_string()]);
+        assert_eq!(targets.targets.len(), 1);
+        assert_eq!(targets.targets[0].0, "subcommand");
     }
 }
