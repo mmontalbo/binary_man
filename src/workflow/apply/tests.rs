@@ -83,6 +83,8 @@ fn setup_outputs_equal_retry_fixture(root: &std::path::Path) -> OutputsEqualFixt
             id: "--color".to_string(),
             display: "--color".to_string(),
             description: None,
+            parent_id: None,
+            context_argv: Vec::new(),
             forms: vec!["--color".to_string()],
             invocation: crate::surface::SurfaceInvocation {
                 requires_argv: vec!["work".to_string()],
@@ -331,6 +333,8 @@ fn setup_assertion_failed_retry_fixture(root: &std::path::Path) -> AssertionFail
             id: "--color".to_string(),
             display: "--color".to_string(),
             description: None,
+            parent_id: None,
+            context_argv: Vec::new(),
             forms: vec!["--color".to_string()],
             invocation: crate::surface::SurfaceInvocation::default(),
             evidence: Vec::new(),

@@ -307,6 +307,7 @@ NOTE: `files` and `symlinks` are OBJECTS (key-value maps), NOT arrays!
   "note": "Brief explanation why this cannot be tested"
 }
 ```
+**IMPORTANT**: The `note` field must be <= 200 characters. Keep it concise.
 Valid reason codes: fixture_gap, assertion_gap, nondeterministic, requires_interactive_tty, unsafe_side_effects
 
 5. **skip**: Skip for now (will retry later)

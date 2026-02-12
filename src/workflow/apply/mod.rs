@@ -60,13 +60,15 @@
 //!
 //! The loop terminates when all items are verified, excluded, or max cycles reached.
 
+mod auto_verify;
 mod cleanup;
 mod ledgers;
+mod lm_apply;
 mod pack;
+mod progress;
 mod rendering;
 
-use super::lm_client::{invoke_lm_for_behavior, LmClientConfig};
-use super::lm_response::validate_responses;
+use super::lm_client::LmClientConfig;
 use super::EnrichContext;
 use crate::cli::ApplyArgs;
 use crate::docpack::ensure_doc_pack_root;
@@ -88,9 +90,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use auto_verify::{auto_verification_progress, auto_verification_scenarios};
 use cleanup::cleanup_txn_dirs;
 use ledgers::{write_ledgers, LedgerArgs};
+use lm_apply::{apply_lm_response, invoke_lm_and_apply};
 use pack::refresh_pack_if_needed;
+use progress::{
+    check_progress, get_excluded_count, get_unverified_count, handle_lm_no_progress_for_targets,
+    process_lm_result, CycleProgress,
+};
 use rendering::{
     load_examples_report_optional, load_surface_for_render, resolve_pack_context_with_cwd,
     scenarios_glob, staged_help_scenario_evidence_available,
@@ -172,7 +180,12 @@ fn run_apply_with_lm_loop(args: &ApplyArgs) -> Result<()> {
     let mut last_unverified_count: Option<usize> = None;
     let mut no_progress_count = 0;
     const MAX_NO_PROGRESS: usize = 3;
+    const MAX_LM_FAILURES_PER_SURFACE: usize = 2;
+    const MAX_LM_NO_PROGRESS_PER_SURFACE: usize = 3;
     let mut rerun_scenario_ids: Vec<String> = Vec::new();
+    let paths = enrich::DocPackPaths::new(doc_pack_root.clone());
+    // Track surfaces that LM has worked on - only increment no-progress after LM processes them
+    let mut lm_processed_surfaces: BTreeSet<String> = BTreeSet::new();
 
     loop {
         cycle += 1;
@@ -212,37 +225,25 @@ fn run_apply_with_lm_loop(args: &ApplyArgs) -> Result<()> {
             break;
         }
 
-        // Get unverified count
-        let unverified_count = summary
-            .requirements
-            .iter()
-            .find(|r| r.id == enrich::RequirementId::Verification)
-            .and_then(|r| r.behavior_unverified_count)
-            .unwrap_or(0);
-
+        // Get unverified count and check progress
+        let unverified_count = get_unverified_count(summary);
         if args.verbose {
             eprintln!("apply: {} options still unverified", unverified_count);
         }
 
-        // Check for progress
-        if let Some(last) = last_unverified_count {
-            if unverified_count >= last {
-                no_progress_count += 1;
-                if args.verbose {
-                    eprintln!(
-                        "apply: no progress ({}/{})",
-                        no_progress_count, MAX_NO_PROGRESS
-                    );
-                }
-                if no_progress_count >= MAX_NO_PROGRESS {
-                    eprintln!(
-                        "apply: stopping after {} cycles with no progress",
-                        no_progress_count
-                    );
-                    break;
-                }
-            } else {
+        match check_progress(unverified_count, last_unverified_count, no_progress_count, MAX_NO_PROGRESS) {
+            CycleProgress::Advanced => {
                 no_progress_count = 0;
+            }
+            CycleProgress::Stalled { count } => {
+                no_progress_count = count;
+                if args.verbose {
+                    eprintln!("apply: no progress ({}/{})", count, MAX_NO_PROGRESS);
+                }
+            }
+            CycleProgress::HitLimit { count } => {
+                eprintln!("apply: stopping after {} cycles with no progress", count);
+                break;
             }
         }
         last_unverified_count = Some(unverified_count);
@@ -277,6 +278,44 @@ fn run_apply_with_lm_loop(args: &ApplyArgs) -> Result<()> {
             continue;
         }
 
+        // Track surfaces that have been processed by LM but remain unverified
+        // Only increment counter for surfaces that LM has ALREADY worked on
+        let current_targets: BTreeSet<String> = payload
+            .target_ids
+            .iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        // Find surfaces that LM has previously processed but are still unverified
+        let still_unverified_after_lm: Vec<String> = lm_processed_surfaces
+            .intersection(&current_targets)
+            .cloned()
+            .collect();
+
+        if !still_unverified_after_lm.is_empty() {
+            let auto_excluded = handle_lm_no_progress_for_targets(
+                &paths,
+                &still_unverified_after_lm,
+                MAX_LM_NO_PROGRESS_PER_SURFACE,
+                args.verbose,
+            );
+            if auto_excluded > 0 {
+                if args.verbose {
+                    eprintln!(
+                        "apply: auto-excluded {} surface(s) after repeated LM targeting without progress",
+                        auto_excluded
+                    );
+                }
+                // Remove excluded surfaces from tracking
+                for s in &still_unverified_after_lm {
+                    lm_processed_surfaces.remove(s);
+                }
+                // Recalculate status and continue to next cycle
+                continue;
+            }
+        }
+
         // Check if LM is configured for edit actions
         let lm_config = match &lm_config {
             Some(cfg) => cfg,
@@ -301,41 +340,30 @@ fn run_apply_with_lm_loop(args: &ApplyArgs) -> Result<()> {
             );
         }
 
-        match invoke_lm_and_apply(&doc_pack_root, lm_config, summary, &payload, args.verbose) {
-            Ok((applied_count, updated_scenario_ids)) => {
-                if args.verbose {
-                    eprintln!("apply: LM applied {} responses", applied_count);
-                }
-                if applied_count == 0 {
-                    no_progress_count += 1;
-                }
-                // Mark updated scenarios for rerun in the next cycle
-                rerun_scenario_ids.extend(updated_scenario_ids);
-            }
-            Err(err) => {
-                eprintln!("apply: LM invocation failed: {}", err);
-                // Continue to next cycle - maybe the error is transient
-            }
+        let lm_result = invoke_lm_and_apply(&doc_pack_root, lm_config, summary, &payload, args.verbose);
+        let processing = process_lm_result(
+            &paths,
+            lm_result,
+            &payload.target_ids,
+            &current_targets,
+            MAX_LM_FAILURES_PER_SURFACE,
+            args.verbose,
+        );
+
+        if processing.increment_no_progress {
+            no_progress_count += 1;
         }
+        for surface in processing.processed_surfaces {
+            lm_processed_surfaces.insert(surface);
+        }
+        rerun_scenario_ids.extend(processing.updated_scenario_ids);
     }
 
     // Final status
-    let final_computation =
-        status_summary_for_doc_pack(doc_pack_root, false, false)?;
+    let final_computation = status_summary_for_doc_pack(doc_pack_root, false, false)?;
     let final_summary = &final_computation.summary;
-    let unverified = final_summary
-        .requirements
-        .iter()
-        .find(|r| r.id == enrich::RequirementId::Verification)
-        .and_then(|r| r.behavior_unverified_count)
-        .unwrap_or(0);
-    let excluded = final_summary
-        .requirements
-        .iter()
-        .find(|r| r.id == enrich::RequirementId::Verification)
-        .and_then(|r| r.verification.as_ref())
-        .map(|v| v.behavior_excluded_count)
-        .unwrap_or(0);
+    let unverified = get_unverified_count(final_summary);
+    let excluded = get_excluded_count(final_summary);
 
     eprintln!(
         "apply: finished after {} cycles ({} unverified, {} excluded)",
@@ -343,154 +371,6 @@ fn run_apply_with_lm_loop(args: &ApplyArgs) -> Result<()> {
     );
 
     Ok(())
-}
-
-/// Invoke LM and apply its responses.
-/// Returns (applied_count, updated_scenario_ids) where updated_scenario_ids
-/// are scenarios that were modified and should be rerun.
-fn invoke_lm_and_apply(
-    doc_pack_root: &Path,
-    lm_config: &LmClientConfig,
-    summary: &enrich::StatusSummary,
-    payload: &enrich::BehaviorNextActionPayload,
-    verbose: bool,
-) -> Result<(usize, Vec<String>)> {
-    // Invoke LM
-    let batch = invoke_lm_for_behavior(lm_config, summary, payload)?;
-
-    if verbose {
-        eprintln!("apply: LM returned {} responses", batch.responses.len());
-    }
-
-    // Load surface inventory for validation
-    let paths = enrich::DocPackPaths::new(doc_pack_root.to_path_buf());
-    let surface_path = paths.surface_path();
-    if !surface_path.is_file() {
-        return Err(anyhow!("surface.json not found"));
-    }
-    let surface_inventory: surface::SurfaceInventory =
-        serde_json::from_str(&fs::read_to_string(&surface_path)?)?;
-    let binary_name = surface_inventory
-        .binary_name
-        .clone()
-        .unwrap_or_else(|| "<binary>".to_string());
-
-    // Build verification ledger for validation
-    let scenarios_path = paths.scenarios_plan_path();
-    let template_path = paths
-        .root()
-        .join(enrich::VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL);
-    let ledger = scenarios::build_verification_ledger(
-        &binary_name,
-        &surface_inventory,
-        paths.root(),
-        &scenarios_path,
-        &template_path,
-        None,
-        Some(paths.root()),
-    )?;
-
-    // Build set of valid unverified surface_ids
-    let valid_surface_ids: BTreeSet<String> = ledger
-        .entries
-        .iter()
-        .filter(|e| e.behavior_status != "verified" && e.behavior_status != "excluded")
-        .map(|e| e.surface_id.clone())
-        .collect();
-
-    // Validate responses
-    let (validated, result) = validate_responses(&batch, &valid_surface_ids);
-
-    if verbose {
-        eprintln!(
-            "apply: validated {} responses ({} skipped, {} errors)",
-            result.valid_count, result.skipped_count, result.errors.len()
-        );
-        for error in &result.errors {
-            eprintln!("  error: {}: {}", error.surface_id, error.message);
-        }
-    }
-
-    if result.valid_count == 0 {
-        return Ok((0, Vec::new()));
-    }
-
-    // Apply scenarios
-    let mut applied_count = 0;
-    let mut updated_scenario_ids = Vec::new();
-    if !validated.scenarios_to_upsert.is_empty() {
-        let plan_path = paths.scenarios_plan_path();
-        let mut plan = scenarios::load_plan(&plan_path, paths.root())?;
-
-        // Ensure baseline scenario exists
-        let needs_baseline = validated
-            .scenarios_to_upsert
-            .iter()
-            .any(|s| s.baseline_scenario_id.as_deref() == Some("baseline"));
-        let has_baseline = plan.scenarios.iter().any(|s| s.id == "baseline");
-
-        if needs_baseline && !has_baseline {
-            let baseline = scenarios::ScenarioSpec {
-                id: "baseline".to_string(),
-                kind: scenarios::ScenarioKind::Behavior,
-                publish: false,
-                argv: Vec::new(),
-                env: BTreeMap::new(),
-                seed_dir: None,
-                seed: None,
-                cwd: None,
-                timeout_seconds: None,
-                net_mode: None,
-                no_sandbox: None,
-                no_strace: None,
-                snippet_max_lines: None,
-                snippet_max_bytes: None,
-                coverage_tier: Some("behavior".to_string()),
-                baseline_scenario_id: None,
-                assertions: Vec::new(),
-                covers: Vec::new(),
-                coverage_ignore: true,
-                expect: scenarios::ScenarioExpect::default(),
-            };
-            plan.scenarios.push(baseline);
-            if verbose {
-                eprintln!("  added baseline scenario");
-            }
-        }
-
-        for scenario in &validated.scenarios_to_upsert {
-            if let Some(existing) = plan.scenarios.iter_mut().find(|s| s.id == scenario.id) {
-                *existing = scenario.clone();
-                if verbose {
-                    eprintln!("  updated scenario: {}", scenario.id);
-                }
-            } else {
-                plan.scenarios.push(scenario.clone());
-                if verbose {
-                    eprintln!("  added scenario: {}", scenario.id);
-                }
-            }
-            updated_scenario_ids.push(scenario.id.clone());
-            applied_count += 1;
-        }
-
-        let plan_json = serde_json::to_string_pretty(&plan)?;
-        fs::write(&plan_path, plan_json.as_bytes())?;
-    }
-
-    // Apply overlays
-    let has_overlays = !validated.value_examples.is_empty()
-        || !validated.requires_argv.is_empty()
-        || !validated.exclusions.is_empty();
-
-    if has_overlays {
-        apply_lm_overlays(&paths, &validated, &ledger)?;
-        applied_count += validated.value_examples.len()
-            + validated.requires_argv.len()
-            + validated.exclusions.len();
-    }
-
-    Ok((applied_count, updated_scenario_ids))
 }
 
 /// Internal single-apply without the loop.
@@ -1169,396 +1049,6 @@ fn update_assertion_failed_progress_after_apply(
     Ok(())
 }
 
-fn auto_verification_progress(
-    plan: &enrich::EnrichPlan,
-    scenario_plan: &scenarios::ScenarioPlan,
-    config: &enrich::EnrichConfig,
-    batch: &AutoVerificationBatch,
-    paths: &enrich::DocPackPaths,
-) -> scenarios::AutoVerificationProgress {
-    if let Some(summary) = plan.verification_plan.as_ref() {
-        return plan_summary_progress(summary, batch.targets.max_new_runs_per_apply);
-    }
-
-    let binary_name = batch
-        .surface
-        .binary_name
-        .clone()
-        .unwrap_or_else(|| "<binary>".to_string());
-    let template_path = paths
-        .root()
-        .join(enrich::VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL);
-    let ledger_entries = scenarios::build_verification_ledger(
-        &binary_name,
-        &batch.surface,
-        paths.root(),
-        &paths.scenarios_plan_path(),
-        &template_path,
-        None,
-        Some(paths.root()),
-    )
-    .ok()
-    .map(|ledger| scenarios::verification_entries_by_surface_id(ledger.entries));
-    let verification_tier = config.verification_tier.as_deref().unwrap_or("behavior");
-    if let Some(summary) = crate::status::auto_verification_plan_summary(
-        scenario_plan,
-        &batch.surface,
-        ledger_entries.as_ref(),
-        verification_tier,
-    ) {
-        return plan_summary_progress(&summary, batch.targets.max_new_runs_per_apply);
-    }
-
-    let remaining_by_kind = batch
-        .targets
-        .targets
-        .iter()
-        .map(|(kind, ids)| scenarios::AutoVerificationKindProgress {
-            kind: kind.as_str().to_string(),
-            remaining_count: ids.len(),
-        })
-        .collect();
-    scenarios::AutoVerificationProgress {
-        remaining_total: Some(batch.targets.target_ids.len()),
-        remaining_by_kind,
-        max_new_runs_per_apply: batch.targets.max_new_runs_per_apply,
-    }
-}
-
-fn plan_summary_progress(
-    summary: &enrich::VerificationPlanSummary,
-    max_new_runs_per_apply: usize,
-) -> scenarios::AutoVerificationProgress {
-    let remaining_by_kind = summary
-        .by_kind
-        .iter()
-        .map(|group| scenarios::AutoVerificationKindProgress {
-            kind: group.kind.clone(),
-            remaining_count: group.remaining_count,
-        })
-        .collect();
-    scenarios::AutoVerificationProgress {
-        remaining_total: Some(summary.remaining_count),
-        remaining_by_kind,
-        max_new_runs_per_apply,
-    }
-}
-
-struct AutoVerificationBatch {
-    scenarios: Vec<scenarios::ScenarioSpec>,
-    max_new_runs_per_apply: usize,
-    targets: scenarios::AutoVerificationTargets,
-    surface: surface::SurfaceInventory,
-}
-
-fn auto_verification_scenarios(
-    plan: &scenarios::ScenarioPlan,
-    doc_pack_root: &Path,
-    staging_root: &Path,
-    verbose: bool,
-    verification_tier: &str,
-) -> Result<Option<AutoVerificationBatch>> {
-    let surface = match load_surface_for_auto(doc_pack_root, staging_root, verbose)? {
-        Some(surface) => surface,
-        None => return Ok(None),
-    };
-    let Some(targets) = (if verification_tier == "behavior" {
-        scenarios::auto_verification_targets_for_behavior(plan, &surface)
-    } else {
-        scenarios::auto_verification_targets(plan, &surface)
-    }) else {
-        return Ok(None);
-    };
-    let semantics = match semantics::load_semantics(doc_pack_root) {
-        Ok(semantics) => semantics,
-        Err(err) => {
-            if verbose {
-                eprintln!("warning: skipping auto verification (load semantics failed: {err})");
-            }
-            return Ok(None);
-        }
-    };
-    let scenarios = scenarios::auto_verification_scenarios(&targets, &semantics);
-    Ok(Some(AutoVerificationBatch {
-        scenarios,
-        max_new_runs_per_apply: targets.max_new_runs_per_apply,
-        targets,
-        surface,
-    }))
-}
-
-fn load_surface_for_auto(
-    doc_pack_root: &Path,
-    staging_root: &Path,
-    verbose: bool,
-) -> Result<Option<surface::SurfaceInventory>> {
-    let staged_surface = staging_root.join("inventory").join("surface.json");
-    let surface_path = if staged_surface.is_file() {
-        staged_surface
-    } else {
-        doc_pack_root.join("inventory").join("surface.json")
-    };
-    if !surface_path.is_file() {
-        return Ok(None);
-    }
-    match surface::load_surface_inventory(&surface_path) {
-        Ok(surface) => Ok(Some(surface)),
-        Err(err) => {
-            if verbose {
-                eprintln!("warning: skipping auto verification (invalid surface inventory: {err})");
-            }
-            Ok(None)
-        }
-    }
-}
-
-/// Apply LM responses to the doc pack before running normal apply.
-fn apply_lm_response(doc_pack: &Path, lm_response_path: &Path) -> Result<()> {
-    use super::lm_response::{load_lm_response, validate_responses};
-
-    let doc_pack_root = crate::docpack::ensure_doc_pack_root(doc_pack, false)?;
-    let paths = enrich::DocPackPaths::new(doc_pack_root);
-
-    // Load LM response
-    let batch = load_lm_response(lm_response_path)?;
-    eprintln!(
-        "lm-response: loaded {} responses from {}",
-        batch.responses.len(),
-        lm_response_path.display()
-    );
-
-    // Load surface inventory
-    let surface_path = paths.surface_path();
-    if !surface_path.is_file() {
-        return Err(anyhow!(
-            "surface.json not found; run `bman apply` first to generate surface inventory"
-        ));
-    }
-    let surface_inventory: surface::SurfaceInventory =
-        serde_json::from_str(&fs::read_to_string(&surface_path).context("read surface inventory")?)
-            .context("parse surface inventory")?;
-    let binary_name = surface_inventory
-        .binary_name
-        .clone()
-        .unwrap_or_else(|| "<binary>".to_string());
-
-    // Load scenarios plan
-    let scenarios_path = paths.scenarios_plan_path();
-    if !scenarios_path.is_file() {
-        return Err(anyhow!(
-            "scenarios/plan.json not found; run `bman apply` first"
-        ));
-    }
-
-    // Build verification ledger on-the-fly
-    let template_path = paths
-        .root()
-        .join(enrich::VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL);
-    let ledger = scenarios::build_verification_ledger(
-        &binary_name,
-        &surface_inventory,
-        paths.root(),
-        &scenarios_path,
-        &template_path,
-        None,
-        Some(paths.root()),
-    )
-    .context("compute verification ledger for LM response validation")?;
-
-    // Build set of valid unverified surface_ids
-    let valid_surface_ids: BTreeSet<String> = ledger
-        .entries
-        .iter()
-        .filter(|e| e.behavior_status != "verified" && e.behavior_status != "excluded")
-        .map(|e| e.surface_id.clone())
-        .collect();
-
-    // Validate responses
-    let (validated, result) = validate_responses(&batch, &valid_surface_ids);
-
-    eprintln!(
-        "lm-response: validated {} responses ({} skipped, {} errors)",
-        result.valid_count,
-        result.skipped_count,
-        result.errors.len()
-    );
-
-    for error in &result.errors {
-        eprintln!("  error: {}: {}", error.surface_id, error.message);
-    }
-
-    if result.valid_count == 0 {
-        if result.errors.is_empty() {
-            eprintln!("lm-response: no actionable responses to apply");
-            return Ok(());
-        }
-        return Err(anyhow!(
-            "all {} responses failed validation",
-            result.errors.len()
-        ));
-    }
-
-    // Apply scenarios to plan.json
-    if !validated.scenarios_to_upsert.is_empty() {
-        let plan_path = paths.scenarios_plan_path();
-        let mut plan = scenarios::load_plan(&plan_path, paths.root())?;
-
-        for scenario in &validated.scenarios_to_upsert {
-            // Upsert: replace existing or add new
-            if let Some(existing) = plan.scenarios.iter_mut().find(|s| s.id == scenario.id) {
-                *existing = scenario.clone();
-                eprintln!("  updated scenario: {}", scenario.id);
-            } else {
-                plan.scenarios.push(scenario.clone());
-                eprintln!("  added scenario: {}", scenario.id);
-            }
-        }
-
-        let plan_json = serde_json::to_string_pretty(&plan).context("serialize plan")?;
-        fs::write(&plan_path, plan_json.as_bytes()).context("write plan.json")?;
-        eprintln!(
-            "lm-response: wrote {} scenario(s) to {}",
-            validated.scenarios_to_upsert.len(),
-            plan_path.display()
-        );
-    }
-
-    // Apply assertion fixes to existing scenarios
-    if !validated.assertion_fixes.is_empty() {
-        let plan_path = paths.scenarios_plan_path();
-        let mut plan = scenarios::load_plan(&plan_path, paths.root())?;
-
-        for (scenario_id, assertions) in &validated.assertion_fixes {
-            if let Some(scenario) = plan.scenarios.iter_mut().find(|s| s.id == *scenario_id) {
-                scenario.assertions = assertions.clone();
-                eprintln!("  fixed assertions in scenario: {}", scenario_id);
-            } else {
-                eprintln!(
-                    "  warning: scenario {} not found for assertion fix",
-                    scenario_id
-                );
-            }
-        }
-
-        let plan_json = serde_json::to_string_pretty(&plan).context("serialize plan")?;
-        fs::write(&plan_path, plan_json.as_bytes()).context("write plan.json")?;
-    }
-
-    // Apply overlays (value_examples, requires_argv, exclusions)
-    let has_overlays = !validated.value_examples.is_empty()
-        || !validated.requires_argv.is_empty()
-        || !validated.exclusions.is_empty();
-
-    if has_overlays {
-        apply_lm_overlays(&paths, &validated, &ledger)?;
-    }
-
-    Ok(())
-}
-
-/// Apply overlay changes from LM responses.
-fn apply_lm_overlays(
-    paths: &enrich::DocPackPaths,
-    validated: &super::lm_response::ValidatedResponses,
-    ledger: &scenarios::VerificationLedger,
-) -> Result<()> {
-    use super::lm_response::ExclusionReasonCode;
-
-    let overlays_path = paths.surface_overlays_path();
-
-    // Load existing overlays or create new structure
-    let mut overlays: serde_json::Value = if overlays_path.is_file() {
-        serde_json::from_str(&fs::read_to_string(&overlays_path)?)?
-    } else {
-        serde_json::json!({
-            "schema_version": 3,
-            "items": [],
-            "overlays": []
-        })
-    };
-
-    let overlays_array = overlays["overlays"]
-        .as_array_mut()
-        .ok_or_else(|| anyhow!("overlays must be an array"))?;
-
-    // Helper to find or create overlay for a surface_id
-    let find_or_create_overlay = |arr: &mut Vec<serde_json::Value>, surface_id: &str| -> usize {
-        if let Some(idx) = arr
-            .iter()
-            .position(|o| o["id"].as_str() == Some(surface_id))
-        {
-            idx
-        } else {
-            arr.push(serde_json::json!({
-                "id": surface_id,
-                "kind": "option",
-                "invocation": {}
-            }));
-            arr.len() - 1
-        }
-    };
-
-    // Apply value_examples
-    for (surface_id, examples) in &validated.value_examples {
-        let idx = find_or_create_overlay(overlays_array, surface_id);
-        overlays_array[idx]["invocation"]["value_examples"] = serde_json::json!(examples);
-        eprintln!("  added value_examples for {}: {:?}", surface_id, examples);
-    }
-
-    // Apply requires_argv
-    for (surface_id, argv) in &validated.requires_argv {
-        let idx = find_or_create_overlay(overlays_array, surface_id);
-        overlays_array[idx]["invocation"]["requires_argv"] = serde_json::json!(argv);
-        eprintln!("  added requires_argv for {}: {:?}", surface_id, argv);
-    }
-
-    // Apply exclusions (only if we have delta evidence)
-    for (surface_id, (reason_code, note)) in &validated.exclusions {
-        // Get delta evidence from ledger for this surface_id
-        let ledger_entry = ledger.entries.iter().find(|e| e.surface_id == *surface_id);
-        let delta_variant_path = ledger_entry
-            .and_then(|e| e.delta_evidence_paths.first().cloned())
-            .filter(|p| !p.is_empty());
-
-        // Skip exclusions without delta evidence - they need to run scenarios first
-        let Some(delta_variant_path) = delta_variant_path else {
-            eprintln!(
-                "  deferred exclusion for {} (no delta evidence yet, will retry after scenario runs)",
-                surface_id
-            );
-            continue;
-        };
-
-        let idx = find_or_create_overlay(overlays_array, surface_id);
-
-        let reason_code_str = match reason_code {
-            ExclusionReasonCode::FixtureGap => "fixture_gap",
-            ExclusionReasonCode::AssertionGap => "assertion_gap",
-            ExclusionReasonCode::Nondeterministic => "nondeterministic",
-            ExclusionReasonCode::RequiresInteractiveTty => "requires_interactive_tty",
-            ExclusionReasonCode::UnsafeSideEffects => "unsafe_side_effects",
-        };
-
-        overlays_array[idx]["behavior_exclusion"] = serde_json::json!({
-            "reason_code": reason_code_str,
-            "note": note,
-            "evidence": {
-                "delta_variant_path": delta_variant_path
-            }
-        });
-        eprintln!(
-            "  added exclusion for {}: {} ({})",
-            surface_id, reason_code_str, note
-        );
-    }
-
-    // Write updated overlays
-    let overlays_json = serde_json::to_string_pretty(&overlays)?;
-    fs::write(&overlays_path, overlays_json.as_bytes())?;
-    eprintln!("lm-response: wrote overlays to {}", overlays_path.display());
-
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests;
