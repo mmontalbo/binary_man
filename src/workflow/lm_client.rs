@@ -59,6 +59,21 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+/// Result of an LM invocation with metadata for logging.
+#[derive(Debug)]
+pub struct LmInvocationResult<T> {
+    /// The parsed result.
+    pub result: T,
+    /// The prompt sent to the LM.
+    pub prompt: String,
+    /// The raw response text from the LM.
+    pub raw_response: String,
+    /// How long the LM call took.
+    #[allow(dead_code)]
+    pub duration: Duration,
+}
 
 /// Configuration for the local LM client.
 #[derive(Debug, Clone)]
@@ -74,15 +89,19 @@ const MAX_LM_RETRIES: usize = 2;
 ///
 /// Automatically retries on parse errors, including the error context
 /// in the retry prompt so the LM can fix its response.
+///
+/// Returns the parsed batch along with prompt/response metadata for logging.
 pub fn invoke_lm_for_behavior(
     config: &LmClientConfig,
     summary: &StatusSummary,
     payload: &BehaviorNextActionPayload,
-) -> Result<LmResponseBatch> {
+) -> Result<LmInvocationResult<LmResponseBatch>> {
     let binary_name = summary.binary_name.as_deref().unwrap_or("<binary>");
+    let start = Instant::now();
 
     let mut last_error: Option<String> = None;
     let mut last_response: Option<String> = None;
+    let mut final_prompt;
 
     for attempt in 0..=MAX_LM_RETRIES {
         // Build prompt - include error context on retry
@@ -100,6 +119,7 @@ pub fn invoke_lm_for_behavior(
                 last_response.as_deref(),
             )
         };
+        final_prompt = prompt.clone();
 
         // Invoke LM
         let response_text = match invoke_lm_command(&config.command, &prompt) {
@@ -116,7 +136,12 @@ pub fn invoke_lm_for_behavior(
                 if attempt > 0 {
                     eprintln!("  LM retry succeeded");
                 }
-                return Ok(batch);
+                return Ok(LmInvocationResult {
+                    result: batch,
+                    prompt: final_prompt,
+                    raw_response: response_text,
+                    duration: start.elapsed(),
+                });
             }
             Err(e) => {
                 last_error = Some(e.to_string());
@@ -642,16 +667,26 @@ struct LmPrereqDefinition {
 }
 
 /// Invoke the LM to infer prereqs for surface items.
+///
+/// Returns the parsed prereqs along with prompt/response metadata for logging.
 pub fn invoke_lm_for_prereqs(
     config: &LmClientConfig,
     binary_name: &str,
     existing_definitions: &BTreeMap<String, PrereqInferenceDefinition>,
     items: &[SurfaceItemInfo],
-) -> Result<PrereqsFile> {
+) -> Result<LmInvocationResult<PrereqsFile>> {
+    let start = Instant::now();
     let prompt = build_prereq_prompt(binary_name, existing_definitions, items);
 
     let response_text = invoke_lm_command(&config.command, &prompt)?;
-    parse_prereq_response(&response_text)
+    let result = parse_prereq_response(&response_text)?;
+
+    Ok(LmInvocationResult {
+        result,
+        prompt,
+        raw_response: response_text,
+        duration: start.elapsed(),
+    })
 }
 
 /// Build prompt for prereq inference.

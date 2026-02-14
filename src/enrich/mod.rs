@@ -35,6 +35,7 @@ pub const ENRICH_AGENT_PROMPT_REL: &str = "enrich/agent_prompt.md";
 mod config;
 mod evidence;
 mod history;
+mod lm_log;
 mod lock;
 mod paths;
 mod prereqs;
@@ -46,6 +47,10 @@ pub use config::{
 };
 pub use evidence::{dedupe_evidence_refs, evidence_from_path, evidence_from_rel};
 pub use history::{append_history, write_report};
+pub use lm_log::{
+    append_lm_log, load_lm_log, next_cycle_number, store_lm_content, LmInvocationKind,
+    LmLogBuilder, LmLogEntry, LmOutcome,
+};
 pub use lock::{build_lock, hash_paths, load_lock, lock_status, now_epoch_ms, write_lock};
 pub use paths::DocPackPaths;
 pub use prereqs::{

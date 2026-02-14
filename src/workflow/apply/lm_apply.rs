@@ -2,7 +2,9 @@
 //!
 //! Functions for invoking LM and applying its responses to doc packs.
 
-use crate::enrich;
+use crate::enrich::{
+    self, append_lm_log, next_cycle_number, store_lm_content, LmInvocationKind, LmLogBuilder,
+};
 use crate::scenarios;
 use crate::surface;
 use crate::workflow::lm_client::{invoke_lm_for_behavior, LmClientConfig};
@@ -22,11 +24,43 @@ pub(super) fn invoke_lm_and_apply(
     payload: &enrich::BehaviorNextActionPayload,
     verbose: bool,
 ) -> Result<(usize, Vec<String>)> {
+    let paths = enrich::DocPackPaths::new(doc_pack_root.to_path_buf());
+    let cycle = next_cycle_number(&paths).unwrap_or(1);
+
+    // Determine if this is a retry based on payload
+    let is_retry = payload.retry_count.unwrap_or(0) > 0;
+    let kind = if is_retry {
+        LmInvocationKind::BehaviorRetry
+    } else {
+        LmInvocationKind::Behavior
+    };
+
+    // Build log entry
+    let log_builder = LmLogBuilder::new(cycle, kind).with_items(payload.target_ids.clone());
+
     // Invoke LM
-    let batch = invoke_lm_for_behavior(lm_config, summary, payload)?;
+    let invocation = match invoke_lm_for_behavior(lm_config, summary, payload) {
+        Ok(inv) => inv,
+        Err(e) => {
+            // Log failure
+            let entry = log_builder.failed(e.to_string());
+            let _ = append_lm_log(&paths, &entry);
+            return Err(e);
+        }
+    };
+
+    let batch = invocation.result;
 
     if verbose {
         eprintln!("apply: LM returned {} responses", batch.responses.len());
+        // Store full prompt/response in verbose mode
+        let _ = store_lm_content(
+            &paths,
+            cycle,
+            kind,
+            &invocation.prompt,
+            &invocation.raw_response,
+        );
     }
 
     // Load surface inventory for validation
@@ -81,6 +115,19 @@ pub(super) fn invoke_lm_and_apply(
     }
 
     if result.valid_count == 0 {
+        // Log partial/failed result
+        let entry = if result.errors.is_empty() {
+            log_builder
+                .with_prompt_preview(&invocation.prompt)
+                .success("no responses to apply")
+        } else {
+            log_builder.with_prompt_preview(&invocation.prompt).partial(
+                0,
+                result.errors.len(),
+                format!("{} validation errors", result.errors.len()),
+            )
+        };
+        let _ = append_lm_log(&paths, &entry);
         return Ok((0, Vec::new()));
     }
 
@@ -163,6 +210,28 @@ pub(super) fn invoke_lm_and_apply(
             );
         }
     }
+
+    // Log success
+    let entry = if result.errors.is_empty() {
+        log_builder
+            .with_prompt_preview(&invocation.prompt)
+            .success(format!(
+                "{} responses applied ({} scenarios)",
+                result.valid_count,
+                validated.scenarios_to_upsert.len()
+            ))
+    } else {
+        log_builder.with_prompt_preview(&invocation.prompt).partial(
+            result.valid_count,
+            result.errors.len(),
+            format!(
+                "{} applied, {} errors",
+                result.valid_count,
+                result.errors.len()
+            ),
+        )
+    };
+    let _ = append_lm_log(&paths, &entry);
 
     Ok((applied_count, updated_scenario_ids))
 }

@@ -4,7 +4,10 @@
 //! descriptions to infer prerequisites. This enables smarter auto-verification
 //! by skipping interactive options and providing appropriate fixtures.
 
-use crate::enrich::{load_prereqs, write_prereqs, DocPackPaths, PrereqsFile};
+use crate::enrich::{
+    append_lm_log, load_prereqs, next_cycle_number, store_lm_content, write_prereqs, DocPackPaths,
+    LmInvocationKind, LmLogBuilder, PrereqsFile,
+};
 use crate::surface::SurfaceInventory;
 use crate::workflow::lm_client::{invoke_lm_for_prereqs, LmClientConfig, SurfaceItemInfo};
 use anyhow::Result;
@@ -84,9 +87,25 @@ pub fn infer_prereqs_for_surface(
         .collect();
 
     let binary_name = surface.binary_name.as_deref().unwrap_or("<binary>");
+    let cycle = next_cycle_number(paths).unwrap_or(1);
+
+    // Build log entry
+    let item_ids: Vec<String> = items.iter().map(|i| i.id.clone()).collect();
+    let log_builder =
+        LmLogBuilder::new(cycle, LmInvocationKind::PrereqInference).with_items(item_ids);
 
     // Invoke LM for prereq inference
-    let inferred = invoke_lm_for_prereqs(lm_config, binary_name, &prereqs.definitions, &items)?;
+    let invocation =
+        match invoke_lm_for_prereqs(lm_config, binary_name, &prereqs.definitions, &items) {
+            Ok(inv) => inv,
+            Err(e) => {
+                let entry = log_builder.failed(e.to_string());
+                let _ = append_lm_log(paths, &entry);
+                return Err(e);
+            }
+        };
+
+    let inferred = invocation.result;
 
     if verbose {
         eprintln!(
@@ -94,7 +113,25 @@ pub fn infer_prereqs_for_surface(
             inferred.definitions.len(),
             inferred.surface_map.len()
         );
+        // Store full prompt/response in verbose mode
+        let _ = store_lm_content(
+            paths,
+            cycle,
+            LmInvocationKind::PrereqInference,
+            &invocation.prompt,
+            &invocation.raw_response,
+        );
     }
+
+    // Log success
+    let entry = log_builder
+        .with_prompt_preview(&invocation.prompt)
+        .success(format!(
+            "{} definitions, {} mappings",
+            inferred.definitions.len(),
+            inferred.surface_map.len()
+        ));
+    let _ = append_lm_log(paths, &entry);
 
     // Merge inferred prereqs
     prereqs.merge(&inferred);

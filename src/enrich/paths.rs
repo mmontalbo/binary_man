@@ -68,6 +68,16 @@ impl DocPackPaths {
         self.enrich_dir().join("history.jsonl")
     }
 
+    /// Return the `enrich/lm_log.jsonl` path.
+    pub fn lm_log_path(&self) -> PathBuf {
+        self.enrich_dir().join("lm_log.jsonl")
+    }
+
+    /// Return the `enrich/lm_log/` directory path for full prompt/response storage.
+    pub fn lm_log_dir(&self) -> PathBuf {
+        self.enrich_dir().join("lm_log")
+    }
+
     /// Return the `enrich/txns` directory path.
     pub fn txns_root(&self) -> PathBuf {
         self.enrich_dir().join("txns")
