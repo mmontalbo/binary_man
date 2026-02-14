@@ -2,6 +2,7 @@
 //!
 //! These helpers expand a compact policy into synthetic scenarios using
 //! pack-owned semantics for argv templates.
+use crate::enrich::PrereqsFile;
 use crate::semantics::Semantics;
 use crate::surface::SurfaceInventory;
 use std::collections::BTreeSet;
@@ -131,26 +132,42 @@ fn matches_template_kind(id: &str, template_kind: &str) -> bool {
 }
 
 /// Build synthetic scenarios for existence verification.
+///
+/// When prereqs is provided, uses prereq seeds for items that have them.
+/// Items with `exclude: true` in prereqs are skipped.
 pub fn auto_verification_scenarios(
     targets: &AutoVerificationTargets,
     semantics: &Semantics,
     surface: &SurfaceInventory,
+    prereqs: Option<&PrereqsFile>,
 ) -> Vec<ScenarioSpec> {
     let mut scenarios = Vec::with_capacity(targets.target_ids.len());
     for surface_id in &targets.target_ids {
+        // Check prereqs for exclusion
+        let resolved = prereqs.map(|p| p.resolve(surface_id));
+        if resolved.as_ref().is_some_and(|r| r.exclude) {
+            continue;
+        }
+
         let item = surface.items.iter().find(|item| &item.id == surface_id);
         let context_argv = item.map(|i| i.context_argv.as_slice()).unwrap_or(&[]);
         let argv = existence_argv(semantics, surface_id, context_argv);
+
+        // Use prereq seed if available, otherwise empty seed
+        let seed = resolved
+            .and_then(|r| r.seed)
+            .unwrap_or_else(|| super::ScenarioSeedSpec {
+                entries: Vec::new(),
+            });
+
         scenarios.push(ScenarioSpec {
             id: auto_scenario_id(surface_id),
             kind: ScenarioKind::Behavior,
             publish: false,
             argv,
             env: std::collections::BTreeMap::new(),
-            // Pin inline empty seed so auto scenarios do not inherit behavior defaults.seed.
-            seed: Some(super::ScenarioSeedSpec {
-                entries: Vec::new(),
-            }),
+            // Use prereq seed or pin inline empty seed
+            seed: Some(seed),
             cwd: None,
             timeout_seconds: None,
             net_mode: None,
@@ -176,7 +193,11 @@ fn auto_scenario_id(surface_id: &str) -> String {
 fn existence_argv(semantics: &Semantics, surface_id: &str, context_argv: &[String]) -> Vec<String> {
     // Determine if this looks like an option based on id shape
     let is_option_like = looks_like_option(surface_id);
-    let template_kind = if is_option_like { "option" } else { "subcommand" };
+    let template_kind = if is_option_like {
+        "option"
+    } else {
+        "subcommand"
+    };
 
     // Try to find template in auto_scenarios first
     if let Some(template) = semantics
@@ -303,8 +324,8 @@ mod tests {
         semantics_b.verification.option_existence_argv_prefix = vec!["inspect".to_string()];
         semantics_b.verification.option_existence_argv_suffix = vec!["--help".to_string()];
 
-        let scenarios_a = auto_verification_scenarios(&targets, &semantics_a, &surface);
-        let scenarios_b = auto_verification_scenarios(&targets, &semantics_b, &surface);
+        let scenarios_a = auto_verification_scenarios(&targets, &semantics_a, &surface, None);
+        let scenarios_b = auto_verification_scenarios(&targets, &semantics_b, &surface, None);
 
         assert_eq!(
             scenario_argv_for_id(&scenarios_a, "auto_verify::--color"),
@@ -331,7 +352,7 @@ mod tests {
         let targets = auto_verification_targets(&base_plan, &surface).unwrap();
         let semantics: Semantics =
             serde_json::from_str(crate::templates::ENRICH_SEMANTICS_JSON).unwrap();
-        let scenarios = auto_verification_scenarios(&targets, &semantics, &surface);
+        let scenarios = auto_verification_scenarios(&targets, &semantics, &surface, None);
         let scenario = scenarios
             .iter()
             .find(|candidate| candidate.id == "auto_verify::--color")
@@ -379,10 +400,14 @@ mod tests {
             tiers: vec!["accepted".to_string(), "behavior".to_string()],
         }];
 
-        let scenarios = auto_verification_scenarios(&targets, &semantics, &surface);
+        let scenarios = auto_verification_scenarios(&targets, &semantics, &surface, None);
         assert_eq!(
             scenario_argv_for_id(&scenarios, "auto_verify::--color"),
-            vec!["new".to_string(), "--color".to_string(), "--new".to_string()]
+            vec![
+                "new".to_string(),
+                "--color".to_string(),
+                "--new".to_string()
+            ]
         );
     }
 
@@ -420,7 +445,7 @@ mod tests {
             tiers: vec!["behavior".to_string()],
         }];
 
-        let scenarios = auto_verification_scenarios(&targets, &semantics, &surface);
+        let scenarios = auto_verification_scenarios(&targets, &semantics, &surface, None);
         // Should be: context_argv + surface_id + suffix = ["config", "--global", "--help"]
         assert_eq!(
             scenario_argv_for_id(&scenarios, "auto_verify::--global"),

@@ -36,7 +36,9 @@ pub(super) fn auto_verification_scenarios(
 
     // Filter surface items by scope_context if set
     if !scope_context.is_empty() {
-        surface.items.retain(|item| item.context_argv.starts_with(scope_context));
+        surface
+            .items
+            .retain(|item| item.context_argv.starts_with(scope_context));
         if verbose && surface.items.is_empty() {
             eprintln!(
                 "warning: no surface items match scope context {:?}",
@@ -61,7 +63,13 @@ pub(super) fn auto_verification_scenarios(
     }) else {
         return Ok(None);
     };
-    let scenarios = scenarios::auto_verification_scenarios(&targets, &semantics, &surface);
+
+    // Load prereqs for seed resolution
+    let paths = enrich::DocPackPaths::new(doc_pack_root.to_path_buf());
+    let prereqs = super::prereq_inference::load_prereqs_for_auto_verify(&paths).ok();
+
+    let scenarios =
+        scenarios::auto_verification_scenarios(&targets, &semantics, &surface, prereqs.as_ref());
     Ok(Some(AutoVerificationBatch {
         scenarios,
         max_new_runs_per_apply: targets.max_new_runs_per_apply,
@@ -183,9 +191,7 @@ pub(super) fn load_surface_for_auto(
         Ok(surface) => Ok(Some(surface)),
         Err(err) => {
             if verbose {
-                eprintln!(
-                    "warning: skipping auto verification (invalid surface inventory: {err})"
-                );
+                eprintln!("warning: skipping auto verification (invalid surface inventory: {err})");
             }
             Ok(None)
         }
