@@ -29,7 +29,6 @@ pub(super) fn build_failed_execution(
         publish: scenario.publish,
         argv,
         env: run_config.env.clone(),
-        seed_dir: run_config.seed_dir.clone(),
         cwd: run_config.cwd.clone(),
         timeout_seconds: run_config.timeout_seconds,
         net_mode: run_config.net_mode.clone(),
@@ -138,7 +137,6 @@ pub(super) fn build_success_execution(
             scenario_id: scenario.id.clone(),
             argv: argv_full,
             env: run_config.env.clone(),
-            seed_dir: context.run_seed_dir.map(|value| value.to_string()),
             cwd: run_config.cwd.clone(),
             timeout_seconds: run_config.timeout_seconds,
             net_mode: run_config.net_mode.clone(),
@@ -189,7 +187,6 @@ pub(super) fn build_success_execution(
         publish: scenario.publish,
         argv: scenario.argv.clone(),
         env: run_config.env.clone(),
-        seed_dir: run_config.seed_dir.clone(),
         cwd: run_config.cwd.clone(),
         timeout_seconds: run_config.timeout_seconds,
         net_mode: run_config.net_mode.clone(),
@@ -281,7 +278,7 @@ pub(super) fn invoke_binary_lens_run(
 
 pub(super) fn build_run_kv_args(
     run_argv0: &str,
-    run_seed_dir: Option<&str>,
+    seed_spec_json: Option<&str>,
     cwd: Option<&str>,
     timeout_seconds: Option<f64>,
     net_mode: Option<&str>,
@@ -290,8 +287,8 @@ pub(super) fn build_run_kv_args(
 ) -> Result<Vec<String>> {
     let mut args = vec![String::from("run=1"), format!("run_argv0={run_argv0}")];
 
-    if let Some(seed_dir) = run_seed_dir {
-        args.push(format!("run_seed_dir={seed_dir}"));
+    if let Some(spec_json) = seed_spec_json {
+        args.push(format!("run_seed_spec={spec_json}"));
     }
     if let Some(cwd) = cwd {
         args.push(format!("run_cwd={cwd}"));

@@ -7,7 +7,7 @@ use super::{BehaviorAssertion, ScenarioDefaults, ScenarioExpect, ScenarioKind, S
 
 pub(crate) fn validate_scenario_defaults(
     defaults: &ScenarioDefaults,
-    doc_pack_root: &Path,
+    _doc_pack_root: &Path,
 ) -> Result<()> {
     if let Some(timeout_seconds) = defaults.timeout_seconds {
         if !timeout_seconds.is_finite() || timeout_seconds < 0.0 {
@@ -16,28 +16,6 @@ pub(crate) fn validate_scenario_defaults(
     }
     if let Some(seed) = defaults.seed.as_ref() {
         validate_seed_spec(seed).context("validate defaults.seed")?;
-    } else if let Some(seed_dir) = defaults.seed_dir.as_deref() {
-        let trimmed = seed_dir.trim();
-        if trimmed.is_empty() {
-            return Err(anyhow!("defaults.seed_dir must not be empty"));
-        }
-        let path = Path::new(trimmed);
-        if path.is_absolute() {
-            return Err(anyhow!("defaults.seed_dir must be a relative path"));
-        }
-        if path
-            .components()
-            .any(|component| matches!(component, std::path::Component::ParentDir))
-        {
-            return Err(anyhow!("defaults.seed_dir must not contain '..'"));
-        }
-        let resolved = doc_pack_root.join(trimmed);
-        if !resolved.is_dir() {
-            return Err(anyhow!(
-                "defaults.seed_dir does not exist at {}",
-                resolved.display()
-            ));
-        }
     }
     if let Some(cwd) = defaults.cwd.as_deref() {
         let trimmed = cwd.trim();
@@ -91,31 +69,12 @@ pub(crate) fn validate_scenario_spec(scenario: &ScenarioSpec) -> Result<()> {
     if id.starts_with("help--") && scenario.kind != ScenarioKind::Help {
         return Err(anyhow!("help-- scenario ids are reserved for kind=help"));
     }
-    if scenario.seed_dir.is_some() && scenario.seed.is_some() {
-        return Err(anyhow!("use only one of seed_dir or seed"));
-    }
     if let Some(seed) = scenario.seed.as_ref() {
         validate_seed_spec(seed)?;
     }
     if let Some(timeout_seconds) = scenario.timeout_seconds {
         if !timeout_seconds.is_finite() || timeout_seconds < 0.0 {
             return Err(anyhow!("timeout_seconds must be >= 0"));
-        }
-    }
-    if let Some(seed_dir) = scenario.seed_dir.as_deref() {
-        let trimmed = seed_dir.trim();
-        if trimmed.is_empty() {
-            return Err(anyhow!("seed_dir must not be empty"));
-        }
-        let path = Path::new(trimmed);
-        if path.is_absolute() {
-            return Err(anyhow!("seed_dir must be a relative path"));
-        }
-        if path
-            .components()
-            .any(|component| matches!(component, std::path::Component::ParentDir))
-        {
-            return Err(anyhow!("seed_dir must not contain '..'"));
         }
     }
     if let Some(cwd) = scenario.cwd.as_deref() {

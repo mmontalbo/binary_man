@@ -11,7 +11,6 @@ use std::collections::BTreeMap;
 pub(super) struct ScenarioRunConfig {
     pub(super) env: BTreeMap<String, String>,
     pub(super) seed: Option<super::ScenarioSeedSpec>,
-    pub(super) seed_dir: Option<String>,
     pub(super) cwd: Option<String>,
     pub(super) timeout_seconds: Option<f64>,
     pub(super) net_mode: Option<String>,
@@ -40,7 +39,6 @@ struct ScenarioSeedSpecDigest {
 struct ScenarioDigestInput {
     argv: Vec<String>,
     expect: ScenarioExpect,
-    seed_dir: Option<String>,
     seed: Option<ScenarioSeedSpecDigest>,
     cwd: Option<String>,
     timeout_seconds: Option<f64>,
@@ -67,21 +65,10 @@ pub(super) fn effective_scenario_config(
     }
     env = merge_env(&env, &scenario.env);
 
-    let seed = if scenario.seed.is_some() {
-        scenario.seed.clone()
-    } else if scenario.seed_dir.is_some() {
-        None
-    } else {
-        defaults.and_then(|value| value.seed.clone())
-    };
-    let seed_dir = if seed.is_some() {
-        None
-    } else {
-        scenario
-            .seed_dir
-            .clone()
-            .or_else(|| defaults.and_then(|value| value.seed_dir.clone()))
-    };
+    let seed = scenario
+        .seed
+        .clone()
+        .or_else(|| defaults.and_then(|value| value.seed.clone()));
 
     let cwd = scenario
         .cwd
@@ -113,7 +100,6 @@ pub(super) fn effective_scenario_config(
         scenario,
         env: &env,
         seed: seed.as_ref(),
-        seed_dir: seed_dir.as_deref(),
         cwd: cwd.as_deref(),
         timeout_seconds,
         net_mode: net_mode.as_deref(),
@@ -126,7 +112,6 @@ pub(super) fn effective_scenario_config(
     Ok(ScenarioRunConfig {
         env,
         seed,
-        seed_dir,
         cwd,
         timeout_seconds,
         net_mode,
@@ -142,7 +127,6 @@ struct ScenarioDigestArgs<'a> {
     scenario: &'a ScenarioSpec,
     env: &'a BTreeMap<String, String>,
     seed: Option<&'a super::ScenarioSeedSpec>,
-    seed_dir: Option<&'a str>,
     cwd: Option<&'a str>,
     timeout_seconds: Option<f64>,
     net_mode: Option<&'a str>,
@@ -156,7 +140,6 @@ fn scenario_digest(args: &ScenarioDigestArgs<'_>) -> Result<String> {
     let scenario = args.scenario;
     let env = args.env;
     let seed = args.seed;
-    let seed_dir = args.seed_dir;
     let cwd = args.cwd;
     let timeout_seconds = args.timeout_seconds;
     let net_mode = args.net_mode;
@@ -201,7 +184,6 @@ fn scenario_digest(args: &ScenarioDigestArgs<'_>) -> Result<String> {
     let payload = ScenarioDigestInput {
         argv: scenario.argv.clone(),
         expect: scenario.expect.clone(),
-        seed_dir: seed_dir.map(|value| value.to_string()),
         seed,
         cwd: cwd.map(|value| value.to_string()),
         timeout_seconds,
@@ -259,7 +241,6 @@ mod tests {
             publish: false,
             argv: vec!["--help".to_string()],
             env: BTreeMap::new(),
-            seed_dir: None,
             seed: None,
             cwd: None,
             timeout_seconds: None,
@@ -314,7 +295,6 @@ mod tests {
         let defaults = ScenarioDefaults {
             env: defaults_env,
             seed: None,
-            seed_dir: Some("fixtures".to_string()),
             cwd: Some("work".to_string()),
             timeout_seconds: Some(3.0),
             net_mode: Some("off".to_string()),
@@ -338,7 +318,6 @@ mod tests {
         assert_eq!(config.snippet_max_lines, 11);
         assert_eq!(config.snippet_max_bytes, 77);
         assert_eq!(config.cwd.as_deref(), Some("work"));
-        assert_eq!(config.seed_dir.as_deref(), Some("fixtures"));
         assert_eq!(config.env.get("LANG").map(String::as_str), Some("C.UTF-8"));
 
         scenario.env.insert("LANG".to_string(), "POSIX".to_string());
@@ -384,7 +363,6 @@ mod tests {
 
     fn assert_plan_stub_defaults(plan: &ScenarioPlan) {
         let defaults = plan.defaults.as_ref().expect("defaults");
-        assert_eq!(defaults.seed_dir.as_deref(), Some("fixtures/empty"));
         assert_eq!(defaults.cwd.as_deref(), Some("."));
         assert_eq!(defaults.timeout_seconds, Some(3.0));
         assert_eq!(defaults.net_mode.as_deref(), Some("off"));
@@ -394,7 +372,6 @@ mod tests {
         assert_eq!(defaults.snippet_max_bytes, Some(1024));
         assert!(plan.verification.queue.is_empty());
         let policy = plan.verification.policy.as_ref().expect("policy");
-        assert_eq!(policy.kinds, vec!["option".to_string()]);
         assert_eq!(policy.max_new_runs_per_apply, 50);
     }
 

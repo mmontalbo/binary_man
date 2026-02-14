@@ -64,7 +64,6 @@ pub struct ScenarioOutcome {
     pub publish: bool,
     pub argv: Vec<String>,
     pub env: BTreeMap<String, String>,
-    pub seed_dir: Option<String>,
     pub cwd: Option<String>,
     pub timeout_seconds: Option<f64>,
     pub net_mode: Option<String>,
@@ -124,8 +123,6 @@ pub struct ScenarioEvidence {
     pub argv: Vec<String>,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
-    #[serde(default)]
-    pub seed_dir: Option<String>,
     #[serde(default)]
     pub cwd: Option<String>,
     pub timeout_seconds: Option<f64>,

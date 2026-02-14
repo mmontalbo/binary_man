@@ -10,7 +10,6 @@
     "GIT_PAGER": "cat"
   },
   "defaults": {
-    "seed_dir": "fixtures/empty",
     "cwd": ".",
     "timeout_seconds": 3.0,
     "net_mode": "off",
@@ -23,9 +22,6 @@
   "verification": {
     "queue": [],
     "policy": {
-      "kinds": [
-        "option"
-      ],
       "max_new_runs_per_apply": 50
     }
   },

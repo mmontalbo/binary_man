@@ -82,8 +82,6 @@ pub struct ScenarioDefaults {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<ScenarioSeedSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub seed_dir: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<f64>,
@@ -173,12 +171,13 @@ pub struct VerificationPlan {
     pub policy: Option<VerificationPolicy>,
 }
 
-/// Auto-verification policy for discovered surface kinds.
+/// Auto-verification policy for surface items.
+///
+/// Auto-verification targets all non-entry-point items (items whose id is not
+/// in their context_argv).
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct VerificationPolicy {
-    /// Surface kinds to auto-verify (e.g. ["option", "subcommand"]).
-    pub kinds: Vec<String>,
     pub max_new_runs_per_apply: usize,
 }
 
@@ -266,8 +265,6 @@ pub struct ScenarioSpec {
     pub argv: Vec<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env: BTreeMap<String, String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub seed_dir: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<ScenarioSeedSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -483,6 +480,12 @@ pub struct VerificationEntry {
     pub behavior_confounded_extra_surface_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<enrich::EvidenceRef>,
+    /// Auto-verify exit code (if auto_verify evidence exists for this surface)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_verify_exit_code: Option<i64>,
+    /// Auto-verify stderr preview (truncated, if auto_verify evidence exists)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_verify_stderr: Option<String>,
 }
 
 #[cfg(test)]

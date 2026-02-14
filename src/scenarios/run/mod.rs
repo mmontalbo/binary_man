@@ -11,7 +11,7 @@ use super::evidence::{
     load_scenario_index_state, read_runs_index, write_scenario_index_if_needed, ExamplesReport,
     ScenarioIndexEntry, ScenarioOutcome,
 };
-use super::seed::materialize_inline_seed;
+use super::seed::to_binary_lens_seed_spec;
 use super::{ScenarioKind, ScenarioRunMode, ScenarioSpec};
 use crate::util::display_path;
 use anyhow::{anyhow, Context, Result};
@@ -63,7 +63,6 @@ pub(super) struct ScenarioRunContext<'a> {
     pub(super) scenario: &'a ScenarioSpec,
     pub(super) run_config: &'a ScenarioRunConfig,
     pub(super) run_argv0: &'a str,
-    pub(super) run_seed_dir: Option<&'a str>,
     pub(super) duration_ms: u128,
 }
 
@@ -229,29 +228,22 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<RunScenariosResult> 
         }
 
         let run_argv0 = args.binary_name.to_string();
-        let materialized_seed = if let Some(seed) = run_config.seed.as_ref() {
-            let staging_root = args.staging_root.ok_or_else(|| {
-                anyhow!(
-                    "inline seed requires a staging root for scenario {}",
-                    scenario.id
-                )
-            })?;
-            Some(materialize_inline_seed(
-                staging_root,
-                args.run_root,
-                &scenario.id,
-                seed,
-            )?)
+
+        // Convert seed spec to JSON for sandbox-side materialization
+        let seed_spec_json = if let Some(seed) = run_config.seed.as_ref() {
+            let seed_spec = to_binary_lens_seed_spec(seed)
+                .with_context(|| format!("convert seed spec for scenario {}", scenario.id))?;
+            Some(
+                serde_json::to_string(&seed_spec)
+                    .with_context(|| format!("serialize seed spec for scenario {}", scenario.id))?,
+            )
         } else {
             None
         };
-        let run_seed_dir = materialized_seed
-            .as_ref()
-            .map(|seed| seed.rel_path.as_str())
-            .or(run_config.seed_dir.as_deref());
+
         let run_kv_args = build_run_kv_args(
             &run_argv0,
-            run_seed_dir,
+            seed_spec_json.as_deref(),
             run_config.cwd.as_deref(),
             run_config.timeout_seconds,
             run_config.net_mode.as_deref(),
@@ -275,7 +267,6 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<RunScenariosResult> 
             scenario,
             run_config: &run_config,
             run_argv0: &run_argv0,
-            run_seed_dir,
             duration_ms,
         };
         let execution = if !status.success() {

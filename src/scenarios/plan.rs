@@ -76,20 +76,6 @@ pub fn validate_plan(plan: &ScenarioPlan, doc_pack_root: &Path) -> Result<()> {
         }
     }
     if let Some(policy) = plan.verification.policy.as_ref() {
-        if policy.kinds.is_empty() {
-            return Err(anyhow!(
-                "verification.policy.kinds must include at least one kind"
-            ));
-        }
-        let mut seen_kinds = std::collections::BTreeSet::new();
-        for kind in &policy.kinds {
-            let kind_str = kind.as_str();
-            if !seen_kinds.insert(kind_str) {
-                return Err(anyhow!(
-                    "verification.policy.kinds contains duplicate kind {kind_str}"
-                ));
-            }
-        }
         if policy.max_new_runs_per_apply == 0 {
             return Err(anyhow!(
                 "verification.policy.max_new_runs_per_apply must be > 0"
@@ -168,13 +154,10 @@ fn effective_seed_paths(
     scenario: &ScenarioSpec,
 ) -> std::collections::BTreeSet<String> {
     let defaults = plan.defaults.as_ref();
-    let seed = if scenario.seed.is_some() {
-        scenario.seed.as_ref()
-    } else if scenario.seed_dir.is_some() {
-        None
-    } else {
-        defaults.and_then(|value| value.seed.as_ref())
-    };
+    let seed = scenario
+        .seed
+        .as_ref()
+        .or_else(|| defaults.and_then(|value| value.seed.as_ref()));
     let mut paths = std::collections::BTreeSet::new();
     if let Some(seed) = seed {
         for entry in &seed.entries {
@@ -217,7 +200,6 @@ mod tests {
             publish: false,
             argv: vec!["work".to_string()],
             env: BTreeMap::new(),
-            seed_dir: None,
             seed: None,
             cwd: None,
             timeout_seconds: None,
@@ -245,7 +227,6 @@ mod tests {
             publish: false,
             argv: vec!["-a".to_string()],
             env: BTreeMap::new(),
-            seed_dir: None,
             seed: None,
             cwd: None,
             timeout_seconds: None,

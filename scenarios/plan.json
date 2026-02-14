@@ -7,6 +7,24 @@
     "TZ": "UTC",
     "COLUMNS": "80"
   },
+  "defaults": {
+    "seed": {
+      "entries": [
+        {"path": "alpha"},
+        {"path": "beta"},
+        {"path": ".hidden"},
+        {"path": "script", "contents": "#!/bin/sh\n", "mode": 493},
+        {"path": "dir", "kind": "dir"},
+        {"path": "dir/child"},
+        {"path": "dir/subdir", "kind": "dir"},
+        {"path": "dir/subdir/leaf"},
+        {"path": "dir2", "kind": "dir"},
+        {"path": "dir2/inner"},
+        {"path": "link_to_alpha", "kind": "symlink", "target": "alpha"},
+        {"path": "link_to_dir", "kind": "symlink", "target": "dir"}
+      ]
+    }
+  },
   "coverage": {
     "blocked": [
       {
@@ -91,7 +109,6 @@
       "id": "fixture-all",
       "publish": true,
       "coverage_tier": "behavior",
-      "seed_dir": "fixtures/ls-basic",
       "cwd": ".",
       "argv": ["-a", "-1", "--color=never", "--hyperlink=never"],
       "timeout_seconds": 3,
@@ -109,7 +126,6 @@
       "id": "fixture-recursive",
       "publish": true,
       "coverage_tier": "behavior",
-      "seed_dir": "fixtures/ls-basic",
       "cwd": ".",
       "argv": ["-R", "-1", "--color=never", "--hyperlink=never", "dir"],
       "timeout_seconds": 3,
@@ -127,7 +143,6 @@
       "id": "fixture-classify",
       "publish": true,
       "coverage_tier": "behavior",
-      "seed_dir": "fixtures/ls-basic",
       "cwd": ".",
       "argv": ["-F", "-1", "--color=never", "--hyperlink=never"],
       "timeout_seconds": 3,

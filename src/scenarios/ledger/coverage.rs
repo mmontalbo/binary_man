@@ -2,7 +2,7 @@
 //!
 //! Coverage is derived from explicit scenario intent to avoid Rust-side
 //! inference and keep semantics pack-owned.
-use super::shared::{is_surface_item_kind, normalize_surface_id};
+use super::shared::{is_entry_point, normalize_surface_id};
 use crate::enrich;
 use crate::scenarios::{load_plan, CoverageItemEntry, CoverageLedger, ScenarioPlan, ScenarioSpec};
 use crate::surface;
@@ -69,11 +69,8 @@ pub fn build_coverage_ledger(
 
 fn init_coverage_items(surface: &surface::SurfaceInventory) -> BTreeMap<String, CoverageState> {
     let mut items = BTreeMap::new();
-    for item in surface
-        .items
-        .iter()
-        .filter(|item| is_surface_item_kind(&item.kind))
-    {
+    // Include all non-entry-point items for coverage tracking
+    for item in surface.items.iter().filter(|item| !is_entry_point(item)) {
         let aliases = if item.display != item.id {
             vec![item.display.clone()]
         } else {
