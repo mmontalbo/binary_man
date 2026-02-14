@@ -50,16 +50,20 @@ fn validate_behavior_exclusions(paths: &enrich::DocPackPaths) -> Result<()> {
         .with_context(|| format!("read {}", surface_path.display()))?;
     surface::validate_surface_inventory(&surface_inventory)
         .with_context(|| format!("validate {}", surface_path.display()))?;
-    let option_ids: BTreeSet<String> = surface_inventory
+    // Behavior exclusions apply to non-entry-point items (options, flags, etc.)
+    let surface_ids: BTreeSet<String> = surface_inventory
         .items
         .iter()
-        .filter(|item| item.kind == "option")
+        .filter(|item| {
+            // Exclude entry points (items whose id is in context_argv)
+            item.context_argv.last().map(|s| s.as_str()) != Some(item.id.as_str())
+        })
         .map(|item| item.id.trim())
         .filter(|id| !id.is_empty())
         .map(|id| id.to_string())
         .collect();
 
-    let _validated = surface::validate_behavior_exclusions(&exclusions, &option_ids)?;
+    let _validated = surface::validate_behavior_exclusions(&exclusions, &surface_ids)?;
 
     Ok(())
 }

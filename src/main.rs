@@ -38,48 +38,27 @@ use anyhow::Result;
 use clap::Parser;
 
 fn main() -> Result<()> {
-    // Check if first arg is a known subcommand; if not, treat it as `bman run <binary>`
+    // Check if first arg is an explicit subcommand or help flag
     let args: Vec<String> = std::env::args().collect();
-    let known_subcommands = [
-        "run",
-        "init",
-        "validate",
-        "plan",
-        "apply",
-        "status",
-        "merge-behavior-edit",
-        "inspect",
-        "help",
-        "-h",
-        "--help",
-        "-V",
-        "--version",
-    ];
+    let explicit_subcommands = ["status", "apply", "inspect", "help"];
+    let root_help_flags = ["-h", "--help", "-V", "--version"];
 
-    let needs_run_prefix = args.len() > 1
-        && !args[1].starts_with('-')
-        && !known_subcommands.contains(&args[1].as_str());
+    let is_explicit_subcommand = args.len() > 1 && {
+        let first = &args[1];
+        explicit_subcommands.contains(&first.as_str()) || root_help_flags.contains(&first.as_str())
+    };
 
-    if needs_run_prefix {
-        // Reparse with "run" inserted
-        let mut modified_args = vec![args[0].clone(), "run".to_string()];
-        modified_args.extend(args.into_iter().skip(1));
-        let root_args = cli::RootArgs::parse_from(modified_args);
-        match root_args.command {
-            cli::Command::Run(run_args) => workflow::run_run(&run_args),
-            _ => unreachable!("inserted run subcommand"),
-        }
-    } else {
+    if is_explicit_subcommand {
+        // Parse as subcommand
         let root_args = cli::RootArgs::parse();
         match root_args.command {
-            cli::Command::Run(args) => workflow::run_run(&args),
-            cli::Command::Init(args) => workflow::run_init(&args),
-            cli::Command::Validate(args) => workflow::run_validate(&args),
-            cli::Command::Plan(args) => workflow::run_plan(&args),
             cli::Command::Apply(args) => workflow::run_apply(&args),
             cli::Command::Status(args) => workflow::run_status(&args),
-            cli::Command::MergeBehaviorEdit(args) => workflow::run_merge_behavior_edit(&args),
             cli::Command::Inspect(args) => inspect::run(&args),
         }
+    } else {
+        // Default: parse as RunArgs directly (bman [OPTIONS] <binary> [entrypoint...])
+        let run_args = cli::RunArgs::parse();
+        workflow::run_run(&run_args)
     }
 }

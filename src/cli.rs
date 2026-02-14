@@ -17,7 +17,7 @@ pub const DEFAULT_LENS_FLAKE: &str = "../binary_lens#binary_lens";
     name = "bman",
     version,
     about = "Doc-pack enrichment workflow for binary man pages",
-    after_help = "Primary workflow:\n  bman <binary>                         Generate comprehensive docs (like man, but auto-enriches)\n  init --doc-pack <dir> --binary <bin>  Bootstrap a doc pack (pack + config)\n  apply --doc-pack <dir>                Apply transactionally (auto-runs validate/plan; writes enrich/report.json)\n  status --doc-pack <dir>               Summarize requirements and deterministic next action\n\nAdvanced/debug commands:\n  validate --doc-pack <dir>             Validate inputs and write enrich/lock.json\n  plan --doc-pack <dir>                 Evaluate requirements and write enrich/plan.out.json\n  merge-behavior-edit --doc-pack <dir>  Apply merge_behavior_scenarios status patch into scenarios/plan.json\n  inspect --doc-pack <dir>              Read-only TUI inspector for doc packs\n\nExamples:\n  bman ls                                Generate docs for ls (runs full enrichment loop)\n  bman init --doc-pack /tmp/ls-docpack --binary ls\n  bman apply --doc-pack /tmp/ls-docpack\n  bman status --doc-pack /tmp/ls-docpack --json\n  bman inspect --doc-pack /tmp/ls-docpack",
+    after_help = "Usage:\n  bman <binary>                        Generate docs (auto-enriches)\n  bman [OPTIONS] <binary> [entrypoint] Scope to an entry point\n  bman status --doc-pack <dir>         Check status\n  bman inspect --doc-pack <dir>        Explore interactively\n\nExamples:\n  bman ls                              Generate docs for ls\n  bman git                             Generate docs for all of git\n  bman git config                      Scope to git config only\n  bman -v --max-cycles 5 git config   With options before command",
     subcommand_required = true,
     arg_required_else_help = true
 )]
@@ -29,28 +29,18 @@ pub struct RootArgs {
 /// Top-level workflow commands.
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Generate comprehensive documentation for a binary (default command).
-    ///
-    /// This is the primary user-facing command. It runs the full enrichment loop
-    /// automatically, similar to how `man` displays documentation.
-    Run(RunArgs),
-    Init(InitArgs),
-    Validate(ValidateArgs),
-    Plan(PlanArgs),
-    Apply(ApplyArgs),
+    /// View enrichment status and next action.
     Status(StatusArgs),
-    MergeBehaviorEdit(MergeBehaviorEditArgs),
+    /// Run a single enrichment cycle (for advanced use).
+    Apply(ApplyArgs),
+    /// Explore a doc pack interactively.
     Inspect(InspectArgs),
 }
 
 /// Run command inputs for the unified enrichment workflow.
 #[derive(Parser, Debug)]
-#[command(about = "Generate comprehensive documentation for a binary")]
+#[command(about = "Generate comprehensive documentation for a binary", trailing_var_arg = true)]
 pub struct RunArgs {
-    /// Binary to document (name or path)
-    #[arg(value_name = "BINARY")]
-    pub binary: String,
-
     /// Doc pack root (defaults to `~/.local/share/bman/packs/<binary>`)
     #[arg(long, value_name = "DIR")]
     pub doc_pack: Option<std::path::PathBuf>,
@@ -75,10 +65,22 @@ pub struct RunArgs {
     #[arg(long, value_name = "REF", default_value = DEFAULT_LENS_FLAKE)]
     pub lens_flake: String,
 
-    /// LM command to invoke for behavior verification (e.g., "llm -m claude-3-haiku")
+    /// LM command to invoke for behavior verification.
+    /// Defaults to BMAN_LM_COMMAND env var, then "claude -p --model haiku".
     /// The prompt is passed via stdin, response expected on stdout as JSON.
     #[arg(long, value_name = "CMD")]
     pub lm: Option<String>,
+
+    /// Entry point(s) to explore for surface discovery (repeatable).
+    /// Generates help scenarios like `<binary> <entry-point> --help` to discover
+    /// surface items not visible in the default help output.
+    /// Example: --explore config --explore remote
+    #[arg(long, value_name = "ENTRY_POINT")]
+    pub explore: Vec<String>,
+
+    /// Command to document: <binary> [entry-point...]
+    #[arg(value_name = "COMMAND", required = true, num_args = 1..)]
+    pub invocation: Vec<String>,
 }
 
 /// Output format for the run command.
@@ -120,28 +122,6 @@ pub struct StatusArgs {
     /// Emit LM-friendly decision list with evidence for unverified items
     #[arg(long)]
     pub decisions: bool,
-}
-
-/// Apply a status-provided behavior merge edit to scenarios/plan.json.
-#[derive(Parser, Debug)]
-#[command(about = "Apply next_action merge_behavior_scenarios edit to scenarios/plan.json")]
-#[command(group(
-    clap::ArgGroup::new("status_input")
-        .required(true)
-        .args(["status_json", "from_stdin"])
-))]
-pub struct MergeBehaviorEditArgs {
-    /// Doc pack root containing scenarios/plan.json
-    #[arg(long, value_name = "DIR")]
-    pub doc_pack: PathBuf,
-
-    /// Path to `bman status --json` output file
-    #[arg(long, value_name = "FILE", conflicts_with = "from_stdin")]
-    pub status_json: Option<PathBuf>,
-
-    /// Read `bman status --json` payload from stdin
-    #[arg(long)]
-    pub from_stdin: bool,
 }
 
 /// Init command inputs for bootstrapping a pack.
@@ -239,6 +219,18 @@ pub struct ApplyArgs {
     /// Override LM command (takes precedence over config and BMAN_LM_COMMAND)
     #[arg(long, value_name = "CMD")]
     pub lm: Option<String>,
+
+    /// Entry point(s) to explore for surface discovery (repeatable).
+    /// Generates help scenarios like `<binary> <entry-point> --help` to discover
+    /// surface items not visible in the default help output.
+    /// Example: --explore config --explore remote
+    #[arg(long, value_name = "ENTRY_POINT")]
+    pub explore: Vec<String>,
+
+    /// Context path for scoped verification (internal, set by run command).
+    /// When set, only verify surfaces with matching context_argv.
+    #[arg(skip)]
+    pub context: Vec<String>,
 }
 
 /// Inspect command inputs for the read-only TUI.
