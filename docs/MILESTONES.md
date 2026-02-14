@@ -5,10 +5,9 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M21 — TUI redesign with LM transparency.
-Next: M22 — Testing and profiling.
+Current focus: M22 — Testing and profiling.
 
-## M21 — TUI Redesign with LM Transparency (current)
+## M21 — TUI Redesign with LM Transparency (done)
 
 Goal: Rebuild the `bman inspect` TUI to match current workflow concepts and
 provide full visibility into LM interactions, enabling users to understand why
