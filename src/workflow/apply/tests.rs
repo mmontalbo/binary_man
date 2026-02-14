@@ -16,6 +16,8 @@ fn apply_args(refresh_pack: bool) -> ApplyArgs {
         lm_response: None,
         max_cycles: 0,
         lm: None,
+        explore: Vec::new(),
+        context: Vec::new(),
     }
 }
 
@@ -58,6 +60,8 @@ fn outputs_equal_verification_entries(
         delta_evidence_paths: vec![delta_rel.to_string()],
         behavior_confounded_scenario_ids: Vec::new(),
         behavior_confounded_extra_surface_ids: Vec::new(),
+        auto_verify_exit_code: None,
+        auto_verify_stderr: None,
         evidence: Vec::new(),
     };
     let mut entries = BTreeMap::new();
@@ -79,7 +83,6 @@ fn setup_outputs_equal_retry_fixture(root: &std::path::Path) -> OutputsEqualFixt
         inputs_hash: None,
         discovery: Vec::new(),
         items: vec![crate::surface::SurfaceItem {
-            kind: "option".to_string(),
             id: "--color".to_string(),
             display: "--color".to_string(),
             description: None,
@@ -308,6 +311,8 @@ fn assertion_failed_verification_entries(
         delta_evidence_paths: vec![delta_rel.to_string()],
         behavior_confounded_scenario_ids: Vec::new(),
         behavior_confounded_extra_surface_ids: Vec::new(),
+        auto_verify_exit_code: None,
+        auto_verify_stderr: None,
         evidence: Vec::new(),
     };
     let mut entries = BTreeMap::new();
@@ -329,7 +334,6 @@ fn setup_assertion_failed_retry_fixture(root: &std::path::Path) -> AssertionFail
         inputs_hash: None,
         discovery: Vec::new(),
         items: vec![crate::surface::SurfaceItem {
-            kind: "option".to_string(),
             id: "--color".to_string(),
             display: "--color".to_string(),
             description: None,

@@ -4,10 +4,21 @@ with
     select
       item.id as surface_id,
       lower(coalesce(item.invocation.value_arity, 'unknown')) as value_arity,
-      coalesce(item.invocation.value_examples, []::VARCHAR[]) as value_examples
-    from read_json_auto('inventory/surface.json') as inv,
+      coalesce(item.invocation.value_examples, []::VARCHAR[]) as value_examples,
+      coalesce(item.context_argv, []::VARCHAR[]) as context_argv
+    from read_json(
+      'inventory/surface.json',
+      columns={
+        'items': 'STRUCT(id VARCHAR, context_argv VARCHAR[], invocation STRUCT(value_arity VARCHAR, value_examples VARCHAR[]))[]'
+      }
+    ) as inv,
       unnest(inv.items) as t(item)
-    where item.kind in ('option', 'command', 'subcommand')
+    -- Include non-entry-point items (items whose id is NOT the last element of context_argv)
+    where coalesce(item.id, '') <> ''
+      and (
+        len(coalesce(item.context_argv, []::VARCHAR[])) = 0
+        or item.context_argv[-1] <> item.id
+      )
   ),
   plan as (
     select * from read_json(
@@ -268,12 +279,36 @@ with
   ),
   auto_scenarios_raw as (
     select
-      scenario_id,
-      argv,
-      regexp_extract(scenario_id, '^auto_verify::(option|subcommand)::(.*)$', 1) as surface_kind,
-      regexp_extract(scenario_id, '^auto_verify::(option|subcommand)::(.*)$', 2) as surface_id
-    from latest_evidence
-    where scenario_id like 'auto_verify::%'
+      e.scenario_id,
+      e.argv,
+      -- New format: auto_verify::surface_id (no kind prefix)
+      regexp_extract(e.scenario_id, '^auto_verify::(.+)$', 1) as surface_id,
+      coalesce(e.timed_out, false) as timed_out
+    from latest_evidence e
+    where e.scenario_id like 'auto_verify::%'
+  ),
+  -- Track surfaces where auto_verify timed out (likely interactive/hanging)
+  auto_verify_timeout as (
+    select distinct surface_id
+    from auto_scenarios_raw
+    where timed_out
+      and surface_id is not null
+      and surface_id <> ''
+  ),
+  -- Extract auto_verify evidence (exit_code, stderr) for each surface
+  auto_verify_evidence as (
+    select
+      a.surface_id,
+      e.exit_code as auto_verify_exit_code,
+      -- Truncate stderr to first 200 chars for preview
+      case
+        when length(coalesce(e.stderr, '')) > 200 then substr(e.stderr, 1, 200) || '...'
+        else e.stderr
+      end as auto_verify_stderr
+    from auto_scenarios_raw a
+    join latest_evidence e on e.scenario_id = a.scenario_id
+    where a.surface_id is not null
+      and a.surface_id <> ''
   ),
   auto_scenarios as (
     select
@@ -288,8 +323,7 @@ with
       cast(null as STRUCT(entries STRUCT(path VARCHAR, kind VARCHAR, contents VARCHAR, target VARCHAR, mode BIGINT)[])) as seed,
       false as expect_has_output_predicate
     from auto_scenarios_raw
-    where surface_kind is not null
-      and surface_id is not null
+    where surface_id is not null
       and surface_id <> ''
   ),
   combined_scenarios as (

@@ -35,6 +35,9 @@ pub(super) fn behavior_recommended_fix(reason_code: &str) -> &'static str {
         BehaviorReasonKind::OutputsEqual => {
             "add workaround hints, rerun, then exclude with evidence if still equal"
         }
+        BehaviorReasonKind::AutoVerifyTimeout => {
+            "deferred (auto_verify timed out, likely interactive command)"
+        }
     }
 }
 
@@ -49,13 +52,18 @@ pub(super) fn build_behavior_unverified_preview(
 ) -> Vec<enrich::BehaviorUnverifiedPreview> {
     preview_ids(remaining_ids)
         .into_iter()
-        .map(|surface_id| enrich::BehaviorUnverifiedPreview {
-            reason_code: behavior_reason_code_for_id(
-                &surface_id,
-                missing_value_examples,
-                ledger_entries,
-            ),
-            surface_id,
+        .map(|surface_id| {
+            let entry = ledger_entries.get(&surface_id);
+            enrich::BehaviorUnverifiedPreview {
+                reason_code: behavior_reason_code_for_id(
+                    &surface_id,
+                    missing_value_examples,
+                    ledger_entries,
+                ),
+                auto_verify_exit_code: entry.and_then(|e| e.auto_verify_exit_code),
+                auto_verify_stderr: entry.and_then(|e| e.auto_verify_stderr.clone()),
+                surface_id,
+            }
         })
         .collect()
 }
@@ -283,6 +291,9 @@ pub(super) fn behavior_unverified_reason(
         BehaviorReasonKind::OutputsEqual => {
             format!("{reason_code}: {fix} for scenario {scenario_id}")
         }
+        BehaviorReasonKind::AutoVerifyTimeout => {
+            format!("{reason_code}: deferred (auto_verify timed out) for {surface_id}")
+        }
     }
 }
 
@@ -315,6 +326,8 @@ mod tests {
             delta_evidence_paths: Vec::new(),
             behavior_confounded_scenario_ids: Vec::new(),
             behavior_confounded_extra_surface_ids: Vec::new(),
+            auto_verify_exit_code: None,
+            auto_verify_stderr: None,
             evidence: Vec::new(),
         }
     }

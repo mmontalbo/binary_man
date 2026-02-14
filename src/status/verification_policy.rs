@@ -38,6 +38,8 @@ impl VerificationTier {
 pub(crate) enum VerificationStatus {
     Verified,
     Excluded,
+    /// Deferred: auto_verify timed out, likely interactive/hanging command
+    Deferred,
     Other,
 }
 
@@ -46,6 +48,7 @@ impl VerificationStatus {
         match raw {
             "verified" => Self::Verified,
             "excluded" => Self::Excluded,
+            "deferred" => Self::Deferred,
             _ => Self::Other,
         }
     }
@@ -67,7 +70,7 @@ impl VerificationStatus {
     }
 
     pub(crate) fn counts_as_unverified(self) -> bool {
-        !matches!(self, Self::Verified | Self::Excluded)
+        !matches!(self, Self::Verified | Self::Excluded | Self::Deferred)
     }
 
     pub(crate) fn requires_follow_up(self) -> bool {
@@ -82,6 +85,8 @@ pub(crate) enum BehaviorReasonKind {
     ScenarioError,
     AssertionFailed,
     OutputsEqual,
+    /// auto_verify timed out (likely interactive/hanging command)
+    AutoVerifyTimeout,
 }
 
 impl BehaviorReasonKind {
@@ -91,6 +96,7 @@ impl BehaviorReasonKind {
             Self::ScenarioError => "scenario_error",
             Self::AssertionFailed => "assertion_failed",
             Self::OutputsEqual => "outputs_equal",
+            Self::AutoVerifyTimeout => "auto_verify_timeout",
         }
     }
 
@@ -100,6 +106,7 @@ impl BehaviorReasonKind {
             "scenario_error" => Self::ScenarioError,
             "assertion_failed" => Self::AssertionFailed,
             "outputs_equal" => Self::OutputsEqual,
+            "auto_verify_timeout" => Self::AutoVerifyTimeout,
             _ => Self::NoScenario,
         }
     }

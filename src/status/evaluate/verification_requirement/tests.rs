@@ -49,6 +49,8 @@ fn verification_entry(delta_path: &str) -> scenarios::VerificationEntry {
         delta_evidence_paths: vec![delta_path.to_string()],
         behavior_confounded_scenario_ids: Vec::new(),
         behavior_confounded_extra_surface_ids: Vec::new(),
+        auto_verify_exit_code: None,
+        auto_verify_stderr: None,
         evidence: Vec::new(),
     }
 }
@@ -79,6 +81,8 @@ fn verification_entry_with_reason(
         delta_evidence_paths: Vec::new(),
         behavior_confounded_scenario_ids: Vec::new(),
         behavior_confounded_extra_surface_ids: Vec::new(),
+        auto_verify_exit_code: None,
+        auto_verify_stderr: None,
         evidence: Vec::new(),
     }
 }
@@ -87,7 +91,6 @@ fn minimal_surface_with_ids(surface_ids: &[&str]) -> surface::SurfaceInventory {
     let items = surface_ids
         .iter()
         .map(|surface_id| surface::SurfaceItem {
-            kind: "option".to_string(),
             id: (*surface_id).to_string(),
             display: (*surface_id).to_string(),
             description: None,
@@ -117,7 +120,6 @@ fn minimal_surface(surface_id: &str) -> surface::SurfaceInventory {
         inputs_hash: None,
         discovery: Vec::new(),
         items: vec![surface::SurfaceItem {
-            kind: "option".to_string(),
             id: surface_id.to_string(),
             display: surface_id.to_string(),
             description: None,
@@ -152,7 +154,6 @@ fn outputs_equal_needs_rerun_fixture(
         publish: false,
         argv: vec!["work".to_string()],
         env: BTreeMap::new(),
-        seed_dir: None,
         seed: None,
         cwd: None,
         timeout_seconds: None,
@@ -174,7 +175,6 @@ fn outputs_equal_needs_rerun_fixture(
         publish: false,
         argv: vec!["--color".to_string(), "work".to_string()],
         env: BTreeMap::new(),
-        seed_dir: None,
         seed: None,
         cwd: None,
         timeout_seconds: None,
@@ -197,7 +197,6 @@ fn outputs_equal_needs_rerun_fixture(
         inputs_hash: None,
         discovery: Vec::new(),
         items: vec![surface::SurfaceItem {
-            kind: "option".to_string(),
             id: "--color".to_string(),
             display: "--color".to_string(),
             description: None,
@@ -556,7 +555,6 @@ fn scenario_error_next_action_includes_edit() {
         publish: false,
         argv: vec!["--color".to_string(), "work".to_string()],
         env: BTreeMap::new(),
-        seed_dir: None,
         seed: None,
         cwd: None,
         timeout_seconds: None,
@@ -579,7 +577,6 @@ fn scenario_error_next_action_includes_edit() {
         inputs_hash: None,
         discovery: Vec::new(),
         items: vec![surface::SurfaceItem {
-            kind: "option".to_string(),
             id: "--color".to_string(),
             display: "--color".to_string(),
             description: None,
@@ -669,7 +666,6 @@ fn scenario_error_scaffold_projects_and_uses_seeded_assertions() {
         publish: false,
         argv: vec!["work".to_string()],
         env: BTreeMap::new(),
-        seed_dir: None,
         seed: None,
         cwd: None,
         timeout_seconds: None,
@@ -691,7 +687,6 @@ fn scenario_error_scaffold_projects_and_uses_seeded_assertions() {
         publish: false,
         argv: vec!["--color".to_string(), "work".to_string()],
         env: BTreeMap::new(),
-        seed_dir: None,
         seed: None,
         cwd: None,
         timeout_seconds: None,
@@ -790,7 +785,6 @@ fn scenario_error_batches_emit_non_empty_assertions_and_validate() {
         publish: false,
         argv: vec!["work".to_string()],
         env: BTreeMap::new(),
-        seed_dir: None,
         seed: None,
         cwd: None,
         timeout_seconds: None,
@@ -817,7 +811,6 @@ fn scenario_error_batches_emit_non_empty_assertions_and_validate() {
             publish: false,
             argv: vec![surface_id.clone(), "work".to_string()],
             env: BTreeMap::new(),
-            seed_dir: None,
             seed: None,
             cwd: None,
             timeout_seconds: None,

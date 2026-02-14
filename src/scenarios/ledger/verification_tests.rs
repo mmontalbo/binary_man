@@ -70,7 +70,7 @@ fn write_verification_query(
   to_json([]::VARCHAR[]) as behavior_confounded_extra_surface_ids
 from read_json_auto('inventory/surface.json') as inv,
   unnest(inv.items) as t(item)
-where item.kind = 'option';"
+where coalesce(item.id, '') <> '';"
     );
     std::fs::write(path, sql).expect("write query");
 }
@@ -119,7 +119,7 @@ fn write_verification_query_with_confounded(
   to_json({confounded_extras_sql}) as behavior_confounded_extra_surface_ids
 from read_json_auto('inventory/surface.json') as inv,
   unnest(inv.items) as t(item)
-where item.kind = 'option';"
+where coalesce(item.id, '') <> '';"
     );
     std::fs::write(path, sql).expect("write query");
 }
@@ -176,7 +176,6 @@ fn ledger_adapter_rejects_duplicate_behavior_exclusions() {
         "items": [],
         "overlays": [
             {
-                "kind": "option",
                 "id": "--color",
                 "invocation": {},
                 "behavior_exclusion": {
@@ -188,7 +187,6 @@ fn ledger_adapter_rejects_duplicate_behavior_exclusions() {
                 }
             },
             {
-                "kind": "option",
                 "id": "--color",
                 "invocation": {},
                 "behavior_exclusion": {
@@ -226,6 +224,8 @@ fn ledger_adapter_rejects_duplicate_behavior_exclusions() {
         delta_evidence_paths: Vec::new(),
         behavior_confounded_scenario_ids: Vec::new(),
         behavior_confounded_extra_surface_ids: Vec::new(),
+        auto_verify_exit_code: None,
+        auto_verify_stderr: None,
     }];
     let surface = surface::SurfaceInventory {
         schema_version: 2,
@@ -234,7 +234,6 @@ fn ledger_adapter_rejects_duplicate_behavior_exclusions() {
         inputs_hash: None,
         discovery: Vec::new(),
         items: vec![surface::SurfaceItem {
-            kind: "option".to_string(),
             id: "--color".to_string(),
             display: "--color".to_string(),
             description: None,
@@ -266,7 +265,6 @@ fn verification_ledger_changes_when_query_template_changes() {
         inputs_hash: None,
         discovery: Vec::new(),
         items: vec![surface::SurfaceItem {
-            kind: "option".to_string(),
             id: "--color".to_string(),
             display: "--color".to_string(),
             description: None,
@@ -347,7 +345,6 @@ fn verification_ledger_maps_required_value_reason_and_confounded_columns() {
         inputs_hash: None,
         discovery: Vec::new(),
         items: vec![surface::SurfaceItem {
-            kind: "option".to_string(),
             id: "--color".to_string(),
             display: "--color".to_string(),
             description: None,

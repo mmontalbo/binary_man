@@ -98,7 +98,9 @@ select
   ) as behavior_confounded_scenario_ids,
   to_json(
     coalesce(behavior_confounded_rollup.extra_surface_ids, []::VARCHAR[])
-  ) as behavior_confounded_extra_surface_ids
+  ) as behavior_confounded_extra_surface_ids,
+  auto_verify_evidence.auto_verify_exit_code as auto_verify_exit_code,
+  auto_verify_evidence.auto_verify_stderr as auto_verify_stderr
 from surface
 left join accepted_status using (surface_id)
 left join behavior_status using (surface_id)
@@ -113,4 +115,5 @@ left join behavior_assertion_scenario_rollup using (surface_id)
 left join behavior_path_rollup using (surface_id)
 left join delta_outcome using (surface_id)
 left join behavior_confounded_rollup using (surface_id)
+left join auto_verify_evidence using (surface_id)
 order by surface.surface_id;

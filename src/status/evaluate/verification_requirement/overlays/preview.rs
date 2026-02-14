@@ -1,4 +1,3 @@
-use super::super::selectors::surface_kind_for_id;
 use super::super::{LedgerEntries, QueueVerificationContext};
 use super::constants::{
     STUB_BLOCKERS_PREVIEW_LIMIT, STUB_DELTA_EVIDENCE_PATHS_LIMIT, STUB_EVIDENCE_PREVIEW_LIMIT,
@@ -52,6 +51,20 @@ pub(crate) fn build_stub_blockers_preview(
     previews
 }
 
+/// Derive kind from surface item using heuristics.
+fn derive_kind(item: &crate::surface::SurfaceItem) -> String {
+    // Entry points (id in context_argv) are commands/subcommands
+    if item.context_argv.last().map(|s| s.as_str()) == Some(item.id.as_str()) {
+        return "subcommand".to_string();
+    }
+    // Items starting with - are options
+    if item.id.starts_with('-') {
+        return "option".to_string();
+    }
+    // Default to option for non-entry-point items
+    "option".to_string()
+}
+
 fn stub_surface_preview(
     surface: &crate::surface::SurfaceInventory,
     surface_id: &str,
@@ -59,7 +72,7 @@ fn stub_surface_preview(
 ) -> enrich::VerificationStubSurfacePreview {
     if let Some(item) = crate::surface::primary_surface_item_by_id(surface, surface_id) {
         return enrich::VerificationStubSurfacePreview {
-            kind: item.kind.clone(),
+            kind: derive_kind(item),
             forms: preview_non_empty_strings(&item.forms, STUB_FORMS_PREVIEW_LIMIT),
             value_arity: item.invocation.value_arity.clone(),
             value_separator: item.invocation.value_separator.clone(),
@@ -76,7 +89,7 @@ fn stub_surface_preview(
     }
 
     enrich::VerificationStubSurfacePreview {
-        kind: surface_kind_for_id(surface, surface_id, fallback_kind),
+        kind: fallback_kind.to_string(),
         forms: Vec::new(),
         value_arity: "unknown".to_string(),
         value_separator: "unknown".to_string(),
@@ -174,7 +187,6 @@ mod tests {
 
     fn make_surface_item(surface_id: &str) -> crate::surface::SurfaceItem {
         crate::surface::SurfaceItem {
-            kind: "option".to_string(),
             id: surface_id.to_string(),
             display: surface_id.to_string(),
             description: None,
@@ -236,6 +248,8 @@ mod tests {
             ],
             behavior_confounded_scenario_ids: Vec::new(),
             behavior_confounded_extra_surface_ids: Vec::new(),
+            auto_verify_exit_code: None,
+            auto_verify_stderr: None,
             evidence: vec![
                 enrich::EvidenceRef {
                     path: format!("inventory/scenarios/{surface_id}-delta-baseline.json"),

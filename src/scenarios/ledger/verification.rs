@@ -2,7 +2,7 @@
 //!
 //! Verification remains pack-owned by delegating invocation matching to SQL
 //! and treating Rust as a mechanical aggregator.
-use super::shared::is_surface_item_kind;
+use super::shared::is_entry_point;
 use crate::enrich;
 use crate::pack;
 use crate::scenarios::{
@@ -71,11 +71,8 @@ pub fn build_verification_ledger(
     let excluded = excluded_entries_from_map(&excluded_map);
 
     let mut surface_evidence_map: BTreeMap<String, Vec<enrich::EvidenceRef>> = BTreeMap::new();
-    for item in surface
-        .items
-        .iter()
-        .filter(|item| is_surface_item_kind(&item.kind))
-    {
+    // Include all non-entry-point items for verification tracking
+    for item in surface.items.iter().filter(|item| !is_entry_point(item)) {
         let id = item.id.trim();
         if id.is_empty() {
             continue;
@@ -174,6 +171,8 @@ pub fn build_verification_ledger(
             behavior_confounded_scenario_ids: row.behavior_confounded_scenario_ids,
             behavior_confounded_extra_surface_ids: row.behavior_confounded_extra_surface_ids,
             evidence,
+            auto_verify_exit_code: row.auto_verify_exit_code,
+            auto_verify_stderr: row.auto_verify_stderr,
         });
     }
 
@@ -287,15 +286,16 @@ fn behavior_exclusion_map(
     _rows: &[VerificationRow],
     exclusions: &[surface::SurfaceBehaviorExclusion],
 ) -> Result<BTreeMap<String, surface::SurfaceBehaviorExclusion>> {
-    let option_ids: BTreeSet<String> = surface
+    // Behavior exclusions apply to non-entry-point items (options, flags, etc.)
+    let surface_ids: BTreeSet<String> = surface
         .items
         .iter()
-        .filter(|item| item.kind == "option")
+        .filter(|item| !is_entry_point(item))
         .map(|item| item.id.trim())
         .filter(|id| !id.is_empty())
         .map(|id| id.to_string())
         .collect();
-    surface::validate_behavior_exclusions(exclusions, &option_ids)
+    surface::validate_behavior_exclusions(exclusions, &surface_ids)
 }
 
 fn excluded_entries_from_map(
@@ -401,7 +401,6 @@ fn prepare_verification_root(
             "\"scenario_id\":null,",
             "\"argv\":[],",
             "\"env\":{{}},",
-            "\"seed_dir\":null,",
             "\"cwd\":null,",
             "\"timeout_seconds\":null,",
             "\"net_mode\":null,",
@@ -501,6 +500,10 @@ struct VerificationRow {
     behavior_confounded_scenario_ids: Vec<String>,
     #[serde(default)]
     behavior_confounded_extra_surface_ids: Vec<String>,
+    #[serde(default)]
+    auto_verify_exit_code: Option<i64>,
+    #[serde(default)]
+    auto_verify_stderr: Option<String>,
 }
 
 struct VerificationQueryRoot {

@@ -186,6 +186,11 @@
     select
       s.surface_id,
       case
+        -- Deferred: auto_verify timed out (likely interactive/hanging command)
+        when exists (
+          select 1 from auto_verify_timeout t
+          where t.surface_id = s.surface_id
+        ) then 'deferred'
         when not exists (
           select 1
           from covers_norm c
@@ -221,6 +226,11 @@
     select
       s.surface_id,
       case
+        -- auto_verify_timeout: auto_verify timed out (likely interactive/hanging)
+        when exists (
+          select 1 from auto_verify_timeout t
+          where t.surface_id = s.surface_id
+        ) then 'auto_verify_timeout'
         -- no_scenario: no behavior scenario covers this surface
         when not exists (
           select 1

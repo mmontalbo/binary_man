@@ -44,6 +44,24 @@ pub(super) fn eval_auto_verification(
         .iter()
         .map(|entry| entry.surface_id.clone())
         .collect::<Vec<_>>();
+    // Build auto_verify evidence preview for unverified items
+    let behavior_unverified_preview: Vec<enrich::BehaviorUnverifiedPreview> =
+        if let Some(ledger_entries) = ctx.ledger_entries {
+            preview_ids(&remaining_ids)
+                .into_iter()
+                .map(|surface_id| {
+                    let entry = ledger_entries.get(&surface_id);
+                    enrich::BehaviorUnverifiedPreview {
+                        reason_code: "no_scenario".to_string(),
+                        auto_verify_exit_code: entry.and_then(|e| e.auto_verify_exit_code),
+                        auto_verify_stderr: entry.and_then(|e| e.auto_verify_stderr.clone()),
+                        surface_id,
+                    }
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
     let summary = enrich::VerificationTriageSummary {
         triaged_unverified_count: remaining_ids.len(),
         triaged_unverified_preview: remaining_preview,
@@ -54,7 +72,7 @@ pub(super) fn eval_auto_verification(
         behavior_excluded_reasons: Vec::new(),
         excluded,
         behavior_unverified_reasons: Vec::new(),
-        behavior_unverified_preview: Vec::new(),
+        behavior_unverified_preview,
         behavior_unverified_diagnostics: Vec::new(),
         behavior_warnings: Vec::new(),
         stub_blockers_preview: Vec::new(),

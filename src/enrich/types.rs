@@ -218,6 +218,12 @@ pub struct VerificationReasonSummary {
 pub struct BehaviorUnverifiedPreview {
     pub surface_id: String,
     pub reason_code: String,
+    /// Auto-verify exit code (helps LM understand why auto_verify failed)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_verify_exit_code: Option<i64>,
+    /// Auto-verify stderr preview (helps LM discover fixture requirements)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_verify_stderr: Option<String>,
 }
 
 /// Rich behavior diagnostic for a single unverified surface id.

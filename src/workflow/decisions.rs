@@ -61,6 +61,14 @@ pub struct DecisionItem {
     /// Evidence paths from delta reruns.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub delta_evidence_paths: Vec<String>,
+
+    /// Auto-verify exit code (helps understand why auto_verify failed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_verify_exit_code: Option<i64>,
+
+    /// Auto-verify stderr preview (helps discover fixture requirements).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_verify_stderr: Option<String>,
 }
 
 /// Output container for the decisions list.
@@ -110,8 +118,16 @@ pub fn build_decisions(
 
         // Get surface item data
         let surface_item = surface_map.get(entry.surface_id.as_str());
+        // Derive kind from item structure
         let kind = surface_item
-            .map(|item| item.kind.clone())
+            .map(|item| {
+                // Entry points (id in context_argv) are commands/subcommands
+                if item.context_argv.last().map(|s| s.as_str()) == Some(item.id.as_str()) {
+                    "subcommand".to_string()
+                } else {
+                    "option".to_string()
+                }
+            })
             .unwrap_or_else(|| "unknown".to_string());
         let description = surface_item.and_then(|item| item.description.clone());
         let forms = surface_item
@@ -142,6 +158,8 @@ pub fn build_decisions(
             assertion_token: entry.behavior_unverified_assertion_token.clone(),
             delta_outcome: entry.delta_outcome.clone(),
             delta_evidence_paths: entry.delta_evidence_paths.clone(),
+            auto_verify_exit_code: entry.auto_verify_exit_code,
+            auto_verify_stderr: entry.auto_verify_stderr.clone(),
         };
 
         *summary.entry(reason_code.to_string()).or_insert(0) += 1;

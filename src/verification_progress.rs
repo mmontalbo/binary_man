@@ -353,6 +353,8 @@ mod tests {
             delta_evidence_paths: vec![delta_path.to_string()],
             behavior_confounded_scenario_ids: Vec::new(),
             behavior_confounded_extra_surface_ids: Vec::new(),
+            auto_verify_exit_code: None,
+            auto_verify_stderr: None,
             evidence: Vec::new(),
         }
     }
@@ -379,6 +381,8 @@ mod tests {
             delta_evidence_paths: vec![format!("inventory/scenarios/{scenario_id}-100.json")],
             behavior_confounded_scenario_ids: Vec::new(),
             behavior_confounded_extra_surface_ids: Vec::new(),
+            auto_verify_exit_code: None,
+            auto_verify_stderr: None,
             evidence: Vec::new(),
         }
     }
