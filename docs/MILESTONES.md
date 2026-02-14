@@ -182,36 +182,391 @@ General:
 - Syntax highlighting for JSON/prompt content
 - Search within file content (only file name search in Browse)
 
-## M22 — Testing and Profiling (draft)
+## M22 — Testing Infrastructure (draft)
 
-Goal: Improve test coverage and add profiling to catch integration bugs and
-performance regressions before they ship.
+Goal: Enable both fast deterministic testing (mock LM) and real LM regression
+testing to catch orchestration bugs and prompt/model regressions.
 
 Motivation:
-- M21 uncovered an integration bug where prereq exclusions weren't coordinated
-  with stuck detection. This slipped through because there's no integration test
-  covering the prereq → auto-verify → stuck-detection → LM-escalation flow.
-- LM invocations are expensive but we have no visibility into per-cycle timing
-  or token usage. Hard to optimize what we can't measure.
-- Manual E2E testing is slow and easy to skip. Automated regression tests would
-  catch these issues.
+- M21 uncovered an integration bug (prereq exclusions vs stuck detection) that
+  slipped through because there's no test covering the full orchestration flow.
+- Real LM calls take 5-10s each and are non-deterministic, making E2E tests slow
+  and flaky. Most bugs are in orchestration logic, not LM response parsing.
+- We already capture prompts/responses in `lm_log/` — these can be replay fixtures.
+- Prompt changes or model updates could regress LM behavior; need regression tests.
 
-Potential scope:
-- **Integration tests**: Test feature interactions (prereqs + auto-verify,
-  overlays + verification, LM responses + scenario generation).
-- **E2E test harness**: Mock LM responses to test full `bman run` cycles without
-  actual LM calls. Validate state transitions and artifact generation.
-- **Performance profiling**: Per-phase timing (lens, scenarios, LM calls).
-  Optional `--profile` flag to emit timing breakdown.
-- **Token tracking**: Log input/output token counts per LM call. Surface in
-  `bman status` or TUI Log tab.
-- **Regression suite**: Capture known-good doc pack states. CI validates that
-  enrichment produces expected artifacts.
+Two LM backends, same tests:
 
-Out of scope (for now):
+| Backend | Purpose | Speed | When to Run |
+|---------|---------|-------|-------------|
+| **Mock** | Test orchestration logic | Fast (<5s) | Every commit |
+| **Real LM** | Test LM produces good results | Slow (minutes) | Nightly/release |
+
+Design principles:
+- **LM-agnostic tests**: Test code doesn't know about mock vs real.
+- **Backend injection**: Harness resolves LM command from env or mock responses.
+- **Adaptive assertions**: Exact for mock (deterministic), loose for real LM.
+- **Sequential mock**: Stateful script returns responses in order.
+- **Parallel-safe**: Each test gets isolated state via temp directory.
+
+---
+
+## Deliverables
+
+### Deliverable 1: Mock LM Script
+
+A simple shell script replaces the real LM command:
+
+```bash
+#!/bin/bash
+# tests/mock-lm.sh - Stateful mock that returns responses sequentially
+FIXTURE_DIR="$1"
+STATE_FILE="${BMAN_MOCK_STATE_DIR:-.}/.mock_cycle"
+CYCLE=$(cat "$STATE_FILE" 2>/dev/null || echo 1)
+
+# Check for injected failure
+ERROR_FILE="$FIXTURE_DIR/responses/$(printf '%03d' $CYCLE)_error.txt"
+if [[ -f "$ERROR_FILE" ]]; then
+    cat "$ERROR_FILE" >&2
+    echo $((CYCLE + 1)) > "$STATE_FILE"
+    exit 1
+fi
+
+# Return response and advance cycle
+RESPONSE="$FIXTURE_DIR/responses/$(printf '%03d' $CYCLE).txt"
+if [[ -f "$RESPONSE" ]]; then
+    cat "$RESPONSE"
+    echo $((CYCLE + 1)) > "$STATE_FILE"
+else
+    echo "mock-lm: no response for cycle $CYCLE" >&2
+    exit 1
+fi
+```
+
+Usage:
+```bash
+BMAN_LM_COMMAND="./tests/mock-lm.sh tests/fixtures/git-config" bman git config
+```
+
+Key design decisions:
+- **No prompt parsing**: Responses returned in fixed order regardless of prompt content
+- **State via file**: Each invocation reads/increments cycle counter
+- **Parallel isolation**: `BMAN_MOCK_STATE_DIR` env var points to test's temp directory
+- **Failure injection**: `003_error.txt` simulates LM failure at cycle 3
+- **No Rust code**: ~20 lines of bash instead of new subcommand
+
+### Deliverable 2: Test Fixture Format
+
+Fixtures are directories with numbered response files:
+
+```
+tests/fixtures/git-config/
+├── fixture.json              # Metadata + expected outcomes
+├── lm_log.jsonl              # For documentation/debugging (not used by mock)
+└── responses/
+    ├── 001.txt               # Cycle 1: prereq_inference response
+    ├── 002.txt               # Cycle 2: behavior response
+    ├── 003.txt               # Cycle 3: behavior response
+    ├── 004.txt               # Cycle 4: behavior response
+    └── 005.txt               # Cycle 5: behavior response
+```
+
+`fixture.json` schema:
+```json
+{
+  "fixture_version": 1,
+  "binary": "git",
+  "context": ["config"],
+  "timeout_secs": 300
+}
+```
+
+Fixture directory structure:
+```
+tests/fixtures/git-config/
+├── fixture.json
+└── responses/
+    ├── 001.txt
+    ├── 002.txt
+    └── ...
+```
+
+### Deliverable 3: Test Harness
+
+Test harness in `tests/common.rs` (shared by all integration tests):
+
+```rust
+// tests/common.rs
+use std::process::{Command, Stdio};
+use std::path::PathBuf;
+use std::env;
+use serde::Deserialize;
+use tempfile::tempdir;
+
+pub struct TestFixture {
+    pub name: String,
+    pub fixture_dir: PathBuf,
+    pub binary: String,
+    pub context: Vec<String>,
+}
+
+pub struct TestResult {
+    pub decision: String,           // "complete" | "incomplete" | "blocked"
+    pub behavior_verified_count: u32,
+    pub excluded_count: u32,
+    pub surface_count: u32,
+    pub is_stuck: bool,
+    pub excluded_items: Vec<String>,
+    pub stuck_items: Vec<String>,
+}
+
+impl TestFixture {
+    pub fn load(name: &str) -> Result<Self> {
+        // Load from tests/fixtures/{name}/fixture.json
+    }
+
+    pub fn run(&self) -> TestResult {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let doc_pack = temp_dir.path().join("doc-pack");
+
+        // Set mock state dir for parallel isolation
+        env::set_var("BMAN_MOCK_STATE_DIR", temp_dir.path());
+
+        // Resolve LM command
+        let lm_cmd = self.resolve_lm_command();
+        env::set_var("BMAN_LM_COMMAND", &lm_cmd);
+
+        // Run bman with binary and context
+        let mut args = vec![
+            "--doc-pack".to_string(),
+            doc_pack.display().to_string(),
+        ];
+        args.push(self.binary.clone());
+        args.extend(self.context.clone());
+
+        let output = Command::new("cargo")
+            .args(["run", "--release", "--"])
+            .args(&args)
+            .output()
+            .expect("Failed to run bman");
+
+        if !output.status.success() {
+            panic!("bman failed: {}", String::from_utf8_lossy(&output.stderr));
+        }
+
+        // Get status
+        let status_output = Command::new("cargo")
+            .args(["run", "--release", "--", "status", "--json"])
+            .arg("--doc-pack")
+            .arg(&doc_pack)
+            .output()
+            .expect("Failed to get status");
+
+        serde_json::from_slice(&status_output.stdout)
+            .expect("Failed to parse status JSON")
+    }
+
+    fn resolve_lm_command(&self) -> String {
+        if let Ok(cmd) = env::var("BMAN_LM_COMMAND") {
+            return cmd;  // Real LM
+        }
+        if self.has_mock_responses() {
+            // Use absolute path for fixture dir
+            let abs_fixture = self.fixture_dir.canonicalize()
+                .expect("Fixture dir must exist");
+            return format!("./tests/mock-lm.sh {}", abs_fixture.display());
+        }
+        panic!("No LM: set BMAN_LM_COMMAND or add responses/");
+    }
+
+    fn has_mock_responses(&self) -> bool {
+        self.fixture_dir.join("responses").exists()
+    }
+
+    pub fn skip_if_binary_missing(&self) -> bool {
+        let missing = Command::new(&self.binary)
+            .arg("--help")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_err();
+        if missing {
+            eprintln!("Skipping: {} not available", self.binary);
+        }
+        missing
+    }
+}
+
+// Fixture JSON deserialization
+#[derive(Deserialize)]
+struct FixtureConfig {
+    fixture_version: u32,
+    binary: String,
+    #[serde(default)]
+    context: Vec<String>,
+    #[serde(default = "default_timeout")]
+    timeout_secs: u64,
+}
+
+fn default_timeout() -> u64 { 300 }
+
+// TestResult parsed from `bman status --json`
+#[derive(Deserialize)]
+pub struct TestResult {
+    pub decision: String,
+    pub behavior_verified_count: u32,
+    pub excluded_count: u32,
+    pub surface_count: u32,
+    pub is_stuck: bool,
+    #[serde(default)]
+    pub excluded_items: Vec<String>,
+    #[serde(default)]
+    pub stuck_items: Vec<String>,
+}
+```
+
+Test isolation:
+- Each test gets fresh temp directory for doc pack AND mock state
+- Fixtures are read-only, shared across parallel tests
+- `BMAN_MOCK_STATE_DIR` prevents state file conflicts
+
+### Deliverable 4: Initial Test Suite
+
+Two comprehensive tests covering real binary surface areas:
+
+**Test 1: `ls`** (~84 options)
+**Test 2: `git config`** (~34 options)
+
+Both tests verify the same invariants:
+- `decision == "complete"`
+- `is_stuck == false`
+- All surface items accounted for: `verified + excluded == surface_count`
+
+```rust
+// tests/ls.rs
+mod common;
+use common::TestFixture;
+
+#[test]
+fn test_ls() {
+    let fixture = TestFixture::load("ls").unwrap();
+    if fixture.skip_if_binary_missing() { return; }
+
+    let result = fixture.run();
+
+    assert_eq!(result.decision, "complete");
+    assert!(!result.is_stuck);
+    assert_eq!(
+        result.behavior_verified_count + result.excluded_count,
+        result.surface_count,
+        "All surface items must be verified or excluded"
+    );
+}
+
+// tests/git_config.rs
+mod common;
+use common::TestFixture;
+
+#[test]
+fn test_git_config() {
+    let fixture = TestFixture::load("git-config").unwrap();
+    if fixture.skip_if_binary_missing() { return; }
+
+    let result = fixture.run();
+
+    // Core assertions
+    assert_eq!(result.decision, "complete");
+    assert!(!result.is_stuck);
+    assert_eq!(
+        result.behavior_verified_count + result.excluded_count,
+        result.surface_count
+    );
+
+    // M21 regression: prereq-excluded items must not be stuck
+    assert!(result.excluded_items.contains(&"--edit".into()));
+    assert!(!result.stuck_items.contains(&"--edit".into()));
+}
+```
+
+Known exclusions (verified via prereq inference, not hardcoded):
+- `ls`: `-w` (terminal width), `-Z` (SELinux)
+- `git config`: `--edit`, `-e` (interactive editor)
+
+### Deliverable 5: Fixture Creation Workflow
+
+Creating a new fixture from successful E2E:
+
+```bash
+# 1. Run real E2E with verbose logging
+BMAN_LM_COMMAND="claude -p --model haiku" \
+  bman --verbose --doc-pack /tmp/bman-fixture-git-config git config
+
+# 2. Create fixture directory
+mkdir -p tests/fixtures/git-config/responses
+
+# 3. Copy response files (for mock mode)
+for f in /tmp/bman-fixture-git-config/enrich/lm_log/cycle_*_response.txt; do
+  n=$(echo "$f" | grep -oP 'cycle_\K\d+')
+  cp "$f" "tests/fixtures/git-config/responses/$(printf '%03d' $n).txt"
+done
+
+# 4. Create fixture.json
+cat > tests/fixtures/git-config/fixture.json << 'EOF'
+{
+  "fixture_version": 1,
+  "binary": "git",
+  "context": ["config"],
+  "timeout_secs": 300
+}
+EOF
+```
+
+Running tests:
+```bash
+# With mock backend (fast, uses responses/)
+cargo test
+
+# With real LM backend (slow, uses BMAN_LM_COMMAND)
+BMAN_LM_COMMAND="claude -p --model haiku" cargo test
+
+# Same tests, different backend - no code changes needed
+```
+
+---
+
+### Files to Create/Modify
+
+| File | Description |
+|------|-------------|
+| `tests/mock-lm.sh` | Stateful mock script (~20 lines bash) |
+| `tests/common.rs` | TestFixture, TestResult, LM backend resolution |
+| `tests/ls.rs` | `test_ls` |
+| `tests/git_config.rs` | `test_git_config` (includes M21 regression check) |
+| `tests/fixtures/ls/fixture.json` | Fixture metadata |
+| `tests/fixtures/ls/responses/*.txt` | Mock LM responses |
+| `tests/fixtures/git-config/fixture.json` | Fixture metadata |
+| `tests/fixtures/git-config/responses/*.txt` | Mock LM responses |
+
+### Acceptance Criteria
+
+| Criterion | Validation |
+|-----------|------------|
+| `ls` test passes | `decision=complete`, all ~84 options accounted for |
+| `git config` test passes | `decision=complete`, all ~34 options accounted for |
+| M21 regression covered | `git config` test asserts excluded items not stuck |
+| Tests are LM-agnostic | Same test works with mock or real LM backend |
+| Mock backend fast | < 5s with mock responses |
+| Real LM backend works | `BMAN_LM_COMMAND=... cargo test` reaches complete |
+| Parallel isolation | Multiple tests can run concurrently |
+
+### Out of Scope (Deferred)
+
+- Phase timing/profiling (M23 if needed)
+- Token counting
+- User-facing fixture commands
 - Property-based testing / fuzzing
-- Benchmark suite with historical tracking
-- Coverage enforcement gates
+- Fixture auto-generation tooling
+- Automatic baseline updates from passing runs
 
 ## M20 — LM-Driven Prereq and Fixture Generation (done)
 
