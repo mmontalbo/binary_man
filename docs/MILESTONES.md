@@ -5,9 +5,9 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M20 — LM-driven prereq and fixture generation.
+Current focus: Post-M20 — exploring next directions.
 
-## M20 — LM-Driven Prereq and Fixture Generation (current)
+## M20 — LM-Driven Prereq and Fixture Generation (done)
 
 Goal: Enable LMs to define prerequisite requirements from documentation and
 synthesize appropriate fixtures, with tool support for suggestion and validation
@@ -28,6 +28,30 @@ Design principles:
   specific knowledge. Tool provides structure, not vocabulary.
 - **No automation loops**: Tool suggests prereqs from stderr patterns; LM
   decides whether to act. Tool doesn't automatically retry with fixtures.
+
+Delivered:
+- **Prereq schema in semantics.json**: Extended schema (v6) with `prereqs` map
+  (category, description, seed, exclude_from_auto_verify) and `prereq_suggestions`
+  array for stderr pattern matching.
+- **Prereq inference pipeline**: After surface discovery, LM analyzes surface
+  item descriptions to classify prereqs (filesystem, interactive, network, etc.)
+  and generate appropriate seed fixtures. Results cached in `enrich/prereqs.json`.
+- **Auto-verify integration**: Auto-verification reads inferred prereqs to skip
+  excluded items (interactive, network, privilege) and use prereq seeds as
+  fixtures for remaining scenarios.
+- **Scope-aware inference**: Prereq inference respects `--context` scoping so
+  `bman git config` only infers prereqs for config options, not all git surfaces.
+- **FlatSeed format**: Simplified seed format (dirs, files, symlinks, executables)
+  for LM responses, converted to canonical ScenarioSeedSpec internally.
+- **Prereq suggestions in decisions**: `suggested_prereq` field appears in
+  decisions output when auto-verify stderr matches prereq_suggestions patterns.
+- **Agent prompt guidance**: Updated `enrich/agent_prompt.md` with prereq
+  workflow documentation (discovery → define → annotate → author).
+
+Known limitations (deferred):
+- User override via `surface.overlays.json` prereq_override field is wired in
+  schema but not read by auto-verify (can be added when needed).
+- No automated E2E regression test (manual E2E validated).
 
 ### Prereq Model
 
