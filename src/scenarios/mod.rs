@@ -33,6 +33,7 @@ pub(crate) use plan::load_plan_if_exists;
 pub use plan::{load_plan, plan_stub, validate_plan};
 pub(crate) use seed::{default_behavior_seed, DEFAULT_BEHAVIOR_SEED_DIR};
 
+#[allow(unused_imports)] // ScenarioIndexEntry used in tests
 pub use evidence::{
     publishable_examples_report, ExamplesReport, ScenarioIndex, ScenarioIndexEntry,
 };

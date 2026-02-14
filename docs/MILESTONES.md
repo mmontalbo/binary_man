@@ -6,6 +6,7 @@ validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
 Current focus: M21 — TUI redesign with LM transparency.
+Next: M22 — Testing and profiling.
 
 ## M21 — TUI Redesign with LM Transparency (current)
 
@@ -181,6 +182,37 @@ General:
 - Real-time updates during enrichment (manual refresh only)
 - Syntax highlighting for JSON/prompt content
 - Search within file content (only file name search in Browse)
+
+## M22 — Testing and Profiling (draft)
+
+Goal: Improve test coverage and add profiling to catch integration bugs and
+performance regressions before they ship.
+
+Motivation:
+- M21 uncovered an integration bug where prereq exclusions weren't coordinated
+  with stuck detection. This slipped through because there's no integration test
+  covering the prereq → auto-verify → stuck-detection → LM-escalation flow.
+- LM invocations are expensive but we have no visibility into per-cycle timing
+  or token usage. Hard to optimize what we can't measure.
+- Manual E2E testing is slow and easy to skip. Automated regression tests would
+  catch these issues.
+
+Potential scope:
+- **Integration tests**: Test feature interactions (prereqs + auto-verify,
+  overlays + verification, LM responses + scenario generation).
+- **E2E test harness**: Mock LM responses to test full `bman run` cycles without
+  actual LM calls. Validate state transitions and artifact generation.
+- **Performance profiling**: Per-phase timing (lens, scenarios, LM calls).
+  Optional `--profile` flag to emit timing breakdown.
+- **Token tracking**: Log input/output token counts per LM call. Surface in
+  `bman status` or TUI Log tab.
+- **Regression suite**: Capture known-good doc pack states. CI validates that
+  enrichment produces expected artifacts.
+
+Out of scope (for now):
+- Property-based testing / fuzzing
+- Benchmark suite with historical tracking
+- Coverage enforcement gates
 
 ## M20 — LM-Driven Prereq and Fixture Generation (done)
 
