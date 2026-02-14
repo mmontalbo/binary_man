@@ -12,9 +12,12 @@ pub(super) struct App {
     summary: enrich::StatusSummary,
     data: InspectData,
     tab: Tab,
-    evidence_filter: super::EvidenceFilter,
-    selection: [usize; 4],
-    show_all: [bool; 4],
+    selection: [usize; 3],
+    show_all: [bool; 3],
     message: Option<String>,
     show_help: bool,
+    detail_view: bool,
+    detail_scroll: u16,
+    /// When true, browse tab has focus on preview pane (right side)
+    browse_preview_focus: bool,
 }

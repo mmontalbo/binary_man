@@ -1,6 +1,14 @@
 //! Read-only doc-pack inspector entrypoint.
 //!
 //! Inspect is a TUI view over status and artifacts without side effects.
+//!
+//! ## Tab Structure (M21)
+//!
+//! | Tab | Question | Content |
+//! |-----|----------|---------|
+//! | Work | "What needs attention?" | Items grouped by status: needs_scenario, needs_fix, excluded |
+//! | Log | "What did the LM do?" | Chronological LM invocations with outcomes |
+//! | Browse | "What exists?" | File tree of doc pack artifacts |
 mod app;
 mod data;
 mod external;
@@ -13,88 +21,62 @@ use crate::docpack::doc_pack_root_for_status;
 use anyhow::Result;
 use std::io::{self, IsTerminal};
 
-const PREVIEW_LIMIT: usize = 10;
+const PREVIEW_LIMIT: usize = 20;
 const PREVIEW_MAX_LINES: usize = 2;
 const PREVIEW_MAX_CHARS: usize = 160;
 const EVENT_POLL_MS: u64 = 200;
 
+/// Main tabs for the inspector TUI.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum Tab {
-    Intent,
-    Evidence,
-    Outputs,
-    History,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum EvidenceFilter {
-    All,
-    Help,
-    Auto,
-    Manual,
-}
-
-impl EvidenceFilter {
-    const DISPLAY: [EvidenceFilter; 4] = [
-        EvidenceFilter::All,
-        EvidenceFilter::Help,
-        EvidenceFilter::Auto,
-        EvidenceFilter::Manual,
-    ];
-
-    fn label(self) -> &'static str {
-        match self {
-            EvidenceFilter::All => "All",
-            EvidenceFilter::Help => "Help",
-            EvidenceFilter::Auto => "Auto",
-            EvidenceFilter::Manual => "Manual",
-        }
-    }
-
-    fn from_scenario_id(scenario_id: &str) -> EvidenceFilter {
-        if scenario_id.starts_with("help--") {
-            EvidenceFilter::Help
-        } else if scenario_id.starts_with("auto_verify::") {
-            EvidenceFilter::Auto
-        } else {
-            EvidenceFilter::Manual
-        }
-    }
-
-    fn matches(self, scenario_id: &str) -> bool {
-        match self {
-            EvidenceFilter::All => true,
-            _ => EvidenceFilter::from_scenario_id(scenario_id) == self,
-        }
-    }
-
-    fn next(self) -> EvidenceFilter {
-        let idx = EvidenceFilter::DISPLAY
-            .iter()
-            .position(|candidate| *candidate == self)
-            .unwrap_or(0);
-        EvidenceFilter::DISPLAY[(idx + 1) % EvidenceFilter::DISPLAY.len()]
-    }
+    /// "What needs attention?" - Shows unverified items grouped by status.
+    Work,
+    /// "What did the LM do?" - Shows LM invocation history.
+    Log,
+    /// "What exists?" - File tree browser.
+    Browse,
 }
 
 impl Tab {
-    const ALL: [Tab; 4] = [Tab::Intent, Tab::Evidence, Tab::Outputs, Tab::History];
+    const ALL: [Tab; 3] = [Tab::Work, Tab::Log, Tab::Browse];
 
     fn index(self) -> usize {
         match self {
-            Tab::Intent => 0,
-            Tab::Evidence => 1,
-            Tab::Outputs => 2,
-            Tab::History => 3,
+            Tab::Work => 0,
+            Tab::Log => 1,
+            Tab::Browse => 2,
         }
     }
 
     fn label(self) -> &'static str {
         match self {
-            Tab::Intent => "Intent",
-            Tab::Evidence => "Evidence",
-            Tab::Outputs => "Outputs",
-            Tab::History => "History/Audit",
+            Tab::Work => "Work",
+            Tab::Log => "Log",
+            Tab::Browse => "Browse",
+        }
+    }
+}
+
+/// Work queue item categories.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum WorkCategory {
+    /// No scenario exists for this surface item.
+    NeedsScenario,
+    /// Scenario exists but verification failed.
+    NeedsFix,
+    /// Item excluded from verification (interactive, network, etc.).
+    Excluded,
+    /// Item successfully verified.
+    Verified,
+}
+
+impl WorkCategory {
+    fn label(self) -> &'static str {
+        match self {
+            WorkCategory::NeedsScenario => "NEEDS SCENARIO",
+            WorkCategory::NeedsFix => "NEEDS FIX",
+            WorkCategory::Excluded => "EXCLUDED",
+            WorkCategory::Verified => "VERIFIED",
         }
     }
 }

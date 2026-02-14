@@ -1,13 +1,14 @@
+//! Text-based output for inspect (non-TUI mode).
+
 use super::data::load_state;
 use super::format::{gate_label, next_action_summary};
-use super::EvidenceFilter;
 use crate::enrich;
 use anyhow::Result;
 use std::path::Path;
 
 pub(super) fn run_text_summary(doc_pack_root: &Path) -> Result<()> {
-    let show_all = [false; 4];
-    let (summary, data) = load_state(doc_pack_root, &show_all, EvidenceFilter::All)?;
+    let show_all = [false; 3];
+    let (summary, data) = load_state(doc_pack_root, &show_all)?;
     print_text_summary(doc_pack_root, &summary, &data)
 }
 
@@ -33,73 +34,64 @@ fn print_text_summary(
     println!("next_action: {next_action}");
     println!();
 
-    let intent_preview = data
-        .intent
+    // Work tab summary
+    let work_preview = data
+        .work
+        .flat_items()
+        .iter()
+        .take(3)
+        .filter_map(|(_, item)| item.map(|i| i.surface_id.as_str()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    println!(
+        "work: {} items (preview: {})",
+        data.work
+            .flat_items()
+            .iter()
+            .filter(|(_, i)| i.is_some())
+            .count(),
+        if work_preview.is_empty() {
+            "none"
+        } else {
+            &work_preview
+        }
+    );
+
+    // Log tab summary
+    let log_preview = data
+        .log
+        .iter()
+        .take(3)
+        .map(|entry| format!("cycle{}", entry.cycle))
+        .collect::<Vec<_>>()
+        .join(", ");
+    println!(
+        "log: {} entries (preview: {})",
+        data.log.len(),
+        if log_preview.is_empty() {
+            "none"
+        } else {
+            &log_preview
+        }
+    );
+
+    // Browse tab summary
+    let browse_preview = data
+        .browse
         .iter()
         .take(3)
         .map(|entry| entry.rel_path.as_str())
         .collect::<Vec<_>>()
         .join(", ");
     println!(
-        "intent: {} items (preview: {})",
-        data.intent.len(),
-        if intent_preview.is_empty() {
+        "browse: {} items (preview: {})",
+        data.browse.len(),
+        if browse_preview.is_empty() {
             "none"
         } else {
-            &intent_preview
+            &browse_preview
         }
     );
 
-    let evidence_preview = data
-        .evidence
-        .entries
-        .iter()
-        .take(3)
-        .map(|entry| entry.scenario_id.as_str())
-        .collect::<Vec<_>>()
-        .join(", ");
-    println!(
-        "evidence: {} scenarios (preview: {})",
-        data.evidence.total_count,
-        if evidence_preview.is_empty() {
-            "none"
-        } else {
-            &evidence_preview
-        }
-    );
-
-    let outputs_preview = data
-        .outputs
-        .iter()
-        .take(3)
-        .map(|entry| entry.rel_path.as_str())
-        .collect::<Vec<_>>()
-        .join(", ");
-    println!(
-        "outputs: {} items (preview: {})",
-        data.outputs.len(),
-        if outputs_preview.is_empty() {
-            "none"
-        } else {
-            &outputs_preview
-        }
-    );
-
-    let history_preview = data
-        .history
-        .iter()
-        .take(2)
-        .map(|entry| entry.rel_path.as_str())
-        .collect::<Vec<_>>()
-        .join(", ");
-    println!(
-        "history: {} items (preview: {})",
-        data.history.len(),
-        if history_preview.is_empty() {
-            "none"
-        } else {
-            &history_preview
-        }
-    );
     Ok(())
 }
