@@ -102,8 +102,16 @@ impl AutoVerificationState {
 
 /// Log cache state when incomplete.
 fn log_incomplete_cache(previous_available: bool, has_existing_index: bool) {
-    let report_state = if previous_available { "present" } else { "missing" };
-    let index_status = if has_existing_index { "present" } else { "missing" };
+    let report_state = if previous_available {
+        "present"
+    } else {
+        "missing"
+    };
+    let index_status = if has_existing_index {
+        "present"
+    } else {
+        "missing"
+    };
     eprintln!(
         "note: scenario cache incomplete (report {report_state}, index {index_status}); rerunning all scenarios"
     );
@@ -290,7 +298,10 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<RunScenariosResult> 
         if is_auto {
             auto_state.record_run();
             if args.auto_run_limit.is_some() && auto_state.runs_used.is_multiple_of(25) {
-                eprintln!("auto verification progress: {} runs executed", auto_state.runs_used);
+                eprintln!(
+                    "auto verification progress: {} runs executed",
+                    auto_state.runs_used
+                );
             }
         }
     }

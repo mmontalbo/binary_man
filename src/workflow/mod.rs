@@ -17,6 +17,6 @@ pub(crate) use apply::run_apply;
 pub(crate) use context::{load_manifest_optional, EnrichContext};
 pub(crate) use init::run_init;
 pub(crate) use plan::run_plan;
-pub(crate) use validate::run_validate;
 pub use run::run_run;
 pub use status::{run_status, status_summary_for_doc_pack};
+pub(crate) use validate::run_validate;

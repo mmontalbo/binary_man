@@ -158,8 +158,7 @@ pub fn apply_surface_discovery(args: &SurfaceDiscoveryArgs<'_>) -> Result<()> {
         )?;
 
         // Find entry points (subcommands) that need help discovery
-        let explored =
-            load_help_discovery_scenario_ids(args.doc_pack_root, args.staging_root);
+        let explored = load_help_discovery_scenario_ids(args.doc_pack_root, args.staging_root);
         let needs_help = find_entry_points_needing_help(&state, &explored, args.scope_context);
 
         if needs_help.is_empty() {

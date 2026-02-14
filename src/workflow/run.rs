@@ -6,8 +6,8 @@
 use crate::cli::{ApplyArgs, InitArgs, OutputFormat, RunArgs};
 use crate::enrich::Decision;
 use crate::util::resolve_flake_ref;
-use crate::workflow::{run_apply, run_init};
 use crate::workflow::status::status_summary_for_doc_pack;
+use crate::workflow::{run_apply, run_init};
 use anyhow::{anyhow, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -37,7 +37,13 @@ pub fn run_run(args: &RunArgs) -> Result<()> {
     }
 
     // Ensure doc pack is initialized
-    ensure_doc_pack_initialized(&doc_pack_root, &binary_name, &lens_flake, args.refresh, args.verbose)?;
+    ensure_doc_pack_initialized(
+        &doc_pack_root,
+        &binary_name,
+        &lens_flake,
+        args.refresh,
+        args.verbose,
+    )?;
 
     // Build explore hints: explicit --explore flags + entry point path from invocation
     let mut explore_hints = args.explore.clone();

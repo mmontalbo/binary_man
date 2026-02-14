@@ -39,7 +39,10 @@ pub enum Command {
 
 /// Run command inputs for the unified enrichment workflow.
 #[derive(Parser, Debug)]
-#[command(about = "Generate comprehensive documentation for a binary", trailing_var_arg = true)]
+#[command(
+    about = "Generate comprehensive documentation for a binary",
+    trailing_var_arg = true
+)]
 pub struct RunArgs {
     /// Doc pack root (defaults to `~/.local/share/bman/packs/<binary>`)
     #[arg(long, value_name = "DIR")]

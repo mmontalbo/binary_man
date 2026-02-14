@@ -2,11 +2,11 @@
 //!
 //! Functions for invoking LM and applying its responses to doc packs.
 
-use crate::workflow::lm_response::validate_responses;
 use crate::enrich;
 use crate::scenarios;
 use crate::surface;
 use crate::workflow::lm_client::{invoke_lm_for_behavior, LmClientConfig};
+use crate::workflow::lm_response::validate_responses;
 use anyhow::{anyhow, Context, Result};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -71,7 +71,9 @@ pub(super) fn invoke_lm_and_apply(
     if verbose {
         eprintln!(
             "apply: validated {} responses ({} skipped, {} errors)",
-            result.valid_count, result.skipped_count, result.errors.len()
+            result.valid_count,
+            result.skipped_count,
+            result.errors.len()
         );
         for error in &result.errors {
             eprintln!("  error: {}: {}", error.surface_id, error.message);

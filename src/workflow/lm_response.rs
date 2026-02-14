@@ -466,7 +466,10 @@ pub fn validate_responses(
 
 /// Validate a scenario specification.
 fn validate_scenario(scenario: &ScenarioSpec, surface_id: &str) -> Result<()> {
-    ensure!(!scenario.id.trim().is_empty(), "scenario id must not be empty");
+    ensure!(
+        !scenario.id.trim().is_empty(),
+        "scenario id must not be empty"
+    );
     ensure!(!scenario.argv.is_empty(), "scenario argv must not be empty");
     ensure!(
         scenario.covers.iter().any(|c| c == surface_id),

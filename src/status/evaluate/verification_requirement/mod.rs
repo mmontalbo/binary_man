@@ -1277,8 +1277,10 @@ fn maybe_set_behavior_next_action(
                 true,
             );
             let scenario_ids = {
-                let ids =
-                    rerun_scenario_ids_for_surface_ids(&needs_rerun, state.lookup_ctx.ledger_entries);
+                let ids = rerun_scenario_ids_for_surface_ids(
+                    &needs_rerun,
+                    state.lookup_ctx.ledger_entries,
+                );
                 if ids.is_empty() {
                     normalize_target_ids(&needs_rerun)
                         .into_iter()
@@ -1321,9 +1323,14 @@ fn maybe_set_behavior_next_action(
         return;
     }
 
-    if !state.outputs_equal_with_workaround_ready_for_exclusion.is_empty() {
+    if !state
+        .outputs_equal_with_workaround_ready_for_exclusion
+        .is_empty()
+    {
         let (cap_hit, ready_for_exclusion) = partition_cap_hit(
-            state.outputs_equal_with_workaround_ready_for_exclusion.to_vec(),
+            state
+                .outputs_equal_with_workaround_ready_for_exclusion
+                .to_vec(),
             state.retry_counts,
         );
         if !set_outputs_equal_plateau_next_action(
@@ -1494,9 +1501,8 @@ fn partition_outputs_equal(
         .into_iter()
         .partition(|surface_id| surface_has_requires_argv_hint(surface, surface_id));
 
-    let (needs_rerun, ready_for_exclusion): (Vec<_>, Vec<_>) = with_workaround
-        .into_iter()
-        .partition(|surface_id| {
+    let (needs_rerun, ready_for_exclusion): (Vec<_>, Vec<_>) =
+        with_workaround.into_iter().partition(|surface_id| {
             ledger_entries
                 .get(surface_id.as_str())
                 .is_some_and(|entry| outputs_equal_workaround_needs_delta_rerun(paths, entry))
@@ -1514,7 +1520,8 @@ fn eval_behavior_verification(ctx: &mut QueueVerificationContext<'_>) -> Verific
     let Some(semantics) = ctx.semantics else {
         return VerificationEvalOutput::default();
     };
-    let Some(targets) = scenarios::auto_verification_targets_for_behavior(ctx.plan, ctx.surface, semantics)
+    let Some(targets) =
+        scenarios::auto_verification_targets_for_behavior(ctx.plan, ctx.surface, semantics)
     else {
         return VerificationEvalOutput::default();
     };
@@ -1635,7 +1642,8 @@ fn eval_behavior_verification(ctx: &mut QueueVerificationContext<'_>) -> Verific
         lookup_ctx: &lookup_ctx,
         outputs_equal_without_workaround: &outputs_equal_without_workaround,
         outputs_equal_with_workaround_needs_rerun: &outputs_equal_with_workaround_needs_rerun,
-        outputs_equal_with_workaround_ready_for_exclusion: &outputs_equal_with_workaround_ready_for_exclusion,
+        outputs_equal_with_workaround_ready_for_exclusion:
+            &outputs_equal_with_workaround_ready_for_exclusion,
         retry_counts: &retry_counts,
     };
     maybe_set_behavior_next_action(ctx, &mut summary, &eval_state);
@@ -1698,10 +1706,7 @@ fn modified_epoch_ms(path: &std::path::Path) -> Option<u128> {
 /// Check if auto verification is stuck: all remaining IDs have auto_verify scenarios
 /// that ran but are still unverified. This happens for binaries like `grep` that require
 /// positional arguments - auto_verify runs `grep -a` which fails with usage errors.
-fn auto_verification_is_stuck(
-    remaining_ids: &[String],
-    paths: &enrich::DocPackPaths,
-) -> bool {
+fn auto_verification_is_stuck(remaining_ids: &[String], paths: &enrich::DocPackPaths) -> bool {
     if remaining_ids.is_empty() {
         return false;
     }
@@ -1771,7 +1776,8 @@ pub(super) fn eval_verification_requirement(
                 template_path: &inputs.template_path,
                 template_evidence: &inputs.template_evidence,
             };
-            ledger_snapshot = build_verification_ledger_entries(&ledger_inputs, &mut local_blockers);
+            ledger_snapshot =
+                build_verification_ledger_entries(&ledger_inputs, &mut local_blockers);
         }
         let ledger_entries = ledger_snapshot.as_ref().map(|snapshot| &snapshot.entries);
 
