@@ -7,6 +7,7 @@
 
 use crate::enrich::{self, load_lm_log, DocPackPaths, LmLogEntry};
 use crate::scenarios;
+use crate::semantics::{load_semantics, PrereqSuggestion};
 use crate::surface::SurfaceInventory;
 use crate::workflow;
 use anyhow::Result;
@@ -287,6 +288,12 @@ fn build_work_queue(
         })
         .unwrap_or_default();
 
+    // Load prereq suggestions from semantics.json
+    let prereq_suggestions: Vec<PrereqSuggestion> = load_semantics(&paths.semantics_path())
+        .ok()
+        .map(|s| s.verification.prereq_suggestions)
+        .unwrap_or_default();
+
     // Load verification ledger
     let binary_name = summary.binary_name.as_deref().unwrap_or("<binary>");
     let scenarios_path = paths.scenarios_plan_path();
@@ -339,6 +346,14 @@ fn build_work_queue(
                 WorkCategory::NeedsFix
             };
 
+            // Match stderr against prereq suggestions
+            let suggested_prereq = entry.auto_verify_stderr.as_ref().and_then(|stderr| {
+                prereq_suggestions
+                    .iter()
+                    .find(|s| stderr.contains(&s.stderr_contains))
+                    .map(|s| s.suggest.clone())
+            });
+
             let work_item = WorkItem {
                 surface_id: entry.surface_id.clone(),
                 category,
@@ -347,7 +362,7 @@ fn build_work_queue(
                 forms: surface_item.map(|s| s.forms.clone()).unwrap_or_default(),
                 exit_code: entry.auto_verify_exit_code,
                 stderr_preview: entry.auto_verify_stderr.as_ref().map(|s| preview_text(s)),
-                suggested_prereq: None, // TODO: prereq lookup
+                suggested_prereq,
                 scenario_id: entry.behavior_unverified_scenario_id.clone(),
             };
 
