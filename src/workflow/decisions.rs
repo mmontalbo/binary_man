@@ -4,6 +4,7 @@
 //! interpretation, making it easier for an LM to provide scenario edits.
 use crate::enrich::DocPackPaths;
 use crate::scenarios::{VerificationEntry, VerificationLedger};
+use crate::semantics::Semantics;
 use crate::surface::SurfaceInventory;
 use anyhow::Result;
 use serde::Serialize;
@@ -69,6 +70,10 @@ pub struct DecisionItem {
     /// Auto-verify stderr preview (helps discover fixture requirements).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_verify_stderr: Option<String>,
+
+    /// Suggested prereq based on stderr pattern match (from semantics.json.verification.prereq_suggestions).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggested_prereq: Option<String>,
 }
 
 /// Output container for the decisions list.
@@ -90,6 +95,7 @@ pub fn build_decisions(
     binary_name: Option<&str>,
     ledger: &VerificationLedger,
     surface: &SurfaceInventory,
+    semantics: Option<&Semantics>,
 ) -> Result<DecisionsOutput> {
     let surface_map: BTreeMap<&str, &crate::surface::SurfaceItem> = surface
         .items
@@ -101,6 +107,12 @@ pub fn build_decisions(
         .map(|name| paths.man_page_path(name))
         .filter(|p| p.is_file())
         .and_then(|p| fs::read_to_string(&p).ok());
+
+    // Extract prereq suggestions from semantics for pattern matching
+    let empty_suggestions = Vec::new();
+    let prereq_suggestions = semantics
+        .map(|s| &s.verification.prereq_suggestions)
+        .unwrap_or(&empty_suggestions);
 
     let mut decisions = Vec::new();
     let mut summary: BTreeMap<String, usize> = BTreeMap::new();
@@ -144,6 +156,14 @@ pub fn build_decisions(
         let current_scenario_id = entry.behavior_unverified_scenario_id.clone();
         let baseline_scenario_id = find_baseline_scenario_id(entry);
 
+        // Match stderr against prereq suggestions
+        let suggested_prereq = entry.auto_verify_stderr.as_ref().and_then(|stderr| {
+            prereq_suggestions
+                .iter()
+                .find(|s| stderr.contains(&s.stderr_contains))
+                .map(|s| s.suggest.clone())
+        });
+
         let item = DecisionItem {
             surface_id: entry.surface_id.clone(),
             kind,
@@ -160,6 +180,7 @@ pub fn build_decisions(
             delta_evidence_paths: entry.delta_evidence_paths.clone(),
             auto_verify_exit_code: entry.auto_verify_exit_code,
             auto_verify_stderr: entry.auto_verify_stderr.clone(),
+            suggested_prereq,
         };
 
         *summary.entry(reason_code.to_string()).or_insert(0) += 1;

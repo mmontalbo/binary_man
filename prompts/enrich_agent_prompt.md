@@ -219,13 +219,81 @@ Notes:
 }
 ```
 
-### Creating fixtures for verification
-When auto-verification fails due to environment requirements (e.g., "not a git repository"), check scenario evidence:
-1. Read `inventory/scenarios/auto_verify::*.json` to see stderr/exit_code patterns
-2. If failures show environment-specific errors, create an appropriate fixture:
-   - For other tools: create fixtures matching the tool's requirements
-3. Alternatively, update `enrich/semantics.json.verification.accepted` to recognize the error pattern as "option accepted but environment missing"
-4. Use `prereqs: ["needs_repo"]` exclusions only when fixture creation is impractical
+### Prerequisites and fixtures for verification
+
+When options fail auto-verification, analyze the failure pattern to determine the right fix.
+
+**Failure categories** (ordered by how to fix):
+1. **Argument issues** — option needs a value or action; fix by adjusting scenario argv
+2. **Environment issues** — needs filesystem context; fix by adding seed fixture
+3. **Capability issues** — needs interactive/network/privilege; exclude with prereq
+
+**Prereq workflow** (documentation-first):
+
+1. **Analyze documentation**: Read help/man to understand what context an option requires:
+   - Does it mention "project", "repository", "workspace"? → needs project structure
+   - Does it say "opens editor", "interactive", "prompt"? → needs interactive, exclude
+   - Does it require a config file, manifest, or input file? → needs filesystem seed
+
+2. **Classify the failure**: Check `auto_verify_stderr` in decisions output:
+   - Error mentions missing file/directory → `filesystem` prereq, create seed
+   - Error says "requires value" or "no action" → not a prereq issue, fix argv
+   - Command would wait for input → `interactive` prereq, exclude
+
+3. **Define prereqs** in `enrich/semantics.json` (binary-specific):
+```json
+{
+  "prereqs": {
+    "project_root": {
+      "category": "filesystem",
+      "description": "Minimal project structure for this tool",
+      "seed": { "entries": [ /* tool-specific files */ ] }
+    },
+    "interactive_mode": {
+      "category": "interactive",
+      "description": "Requires user interaction",
+      "exclude_reason": "Cannot simulate interaction in sandbox"
+    }
+  }
+}
+```
+
+4. **Annotate surface items** in `inventory/surface.overlays.json`:
+```json
+{
+  "overlays": [
+    { "id": "--edit", "prereqs": ["interactive_mode"] },
+    { "id": "--config", "prereqs": ["project_root"] }
+  ]
+}
+```
+
+5. **Author scenarios** with appropriate seeds copied from prereq definitions.
+
+**Prereq categories** (use for consistency):
+- `filesystem` — needs files/directories to exist
+- `config` — needs configuration values
+- `state` — needs prior state (history, installed packages)
+- `interactive` — requires user input (exclude)
+- `network` — requires network access (exclude)
+- `privilege` — requires elevated permissions (exclude)
+
+**Decision tree**:
+```
+auto_verify failed
+  ├─ stderr mentions missing file/directory?
+  │    └─ Yes → create seed with required structure
+  ├─ stderr says "requires value" or similar?
+  │    └─ Yes → fix scenario argv, not a prereq issue
+  ├─ option documented as interactive/editor?
+  │    └─ Yes → exclude with interactive prereq
+  └─ otherwise → analyze stderr, define appropriate prereq
+```
+
+**When to exclude vs fix**:
+- **Exclude**: `interactive`, `network`, `privilege` — cannot be simulated in sandbox
+- **Fix with seed**: `filesystem`, `config` — create the required structure
+- **Fix with argv**: argument/value issues — add required tokens to scenario
 
 ## Finish
 When complete:

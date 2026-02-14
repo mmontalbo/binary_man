@@ -10,7 +10,7 @@ use std::fs;
 use std::path::Path;
 
 /// Current schema version for `enrich/semantics.json`.
-pub const SEMANTICS_SCHEMA_VERSION: u32 = 5;
+pub const SEMANTICS_SCHEMA_VERSION: u32 = 6;
 
 fn default_true() -> bool {
     true
@@ -156,6 +156,12 @@ pub struct VerificationSemantics {
     /// Pack-owned auto-scenario templates per surface kind.
     #[serde(default)]
     pub auto_scenarios: Vec<AutoScenarioTemplate>,
+    /// LM-authored prerequisite definitions for fixture generation.
+    #[serde(default)]
+    pub prereqs: std::collections::BTreeMap<String, PrereqDefinition>,
+    /// Stderr patterns that suggest a prereq when auto-verify fails.
+    #[serde(default)]
+    pub prereq_suggestions: Vec<PrereqSuggestion>,
     // Legacy fields - kept for backward compatibility, prefer auto_scenarios.
     #[serde(default)]
     pub option_existence_argv_prefix: Vec<String>,
@@ -165,6 +171,35 @@ pub struct VerificationSemantics {
     pub subcommand_existence_argv_prefix: Vec<String>,
     #[serde(default)]
     pub subcommand_existence_argv_suffix: Vec<String>,
+}
+
+/// LM-authored prerequisite definition for fixture generation.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct PrereqDefinition {
+    /// Category for grouping: filesystem, config, state, interactive, network, privilege.
+    pub category: String,
+    /// Human-readable description of what this prereq provides.
+    pub description: String,
+    /// Seed template to use when this prereq is needed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<crate::scenarios::ScenarioSeedSpec>,
+    /// If true, options with this prereq should be excluded from auto-verify.
+    #[serde(default)]
+    pub exclude_from_auto_verify: bool,
+    /// Reason for exclusion (required if exclude_from_auto_verify is true).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exclude_reason: Option<String>,
+}
+
+/// Stderr pattern that suggests a prereq when matched.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct PrereqSuggestion {
+    /// Substring to match in stderr.
+    pub stderr_contains: String,
+    /// Prereq key to suggest (must exist in prereqs map).
+    pub suggest: String,
 }
 
 /// Auto-scenario template defining how to verify a surface kind.
@@ -426,6 +461,16 @@ pub fn validate_semantics(semantics: &Semantics) -> Result<()> {
     for (idx, template) in semantics.verification.auto_scenarios.iter().enumerate() {
         validate_auto_scenario_template(template, &format!("verification.auto_scenarios[{idx}]"))?;
     }
+    for (key, prereq) in semantics.verification.prereqs.iter() {
+        validate_prereq_definition(prereq, &format!("verification.prereqs[{key}]"))?;
+    }
+    for (idx, suggestion) in semantics.verification.prereq_suggestions.iter().enumerate() {
+        validate_prereq_suggestion(
+            suggestion,
+            &semantics.verification.prereqs,
+            &format!("verification.prereq_suggestions[{idx}]"),
+        )?;
+    }
 
     Ok(())
 }
@@ -513,6 +558,63 @@ fn validate_auto_scenario_template(template: &AutoScenarioTemplate, label: &str)
             "{label}.tiers[{idx}] must not be empty"
         );
     }
+    Ok(())
+}
+
+const VALID_PREREQ_CATEGORIES: &[&str] = &[
+    "filesystem",
+    "config",
+    "state",
+    "interactive",
+    "network",
+    "privilege",
+];
+
+fn validate_prereq_definition(prereq: &PrereqDefinition, label: &str) -> Result<()> {
+    ensure!(
+        !prereq.category.trim().is_empty(),
+        "{label}.category must not be empty"
+    );
+    ensure!(
+        VALID_PREREQ_CATEGORIES.contains(&prereq.category.as_str()),
+        "{label}.category must be one of: {}",
+        VALID_PREREQ_CATEGORIES.join(", ")
+    );
+    ensure!(
+        !prereq.description.trim().is_empty(),
+        "{label}.description must not be empty"
+    );
+    if prereq.exclude_from_auto_verify {
+        ensure!(
+            prereq
+                .exclude_reason
+                .as_ref()
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false),
+            "{label}.exclude_reason is required when exclude_from_auto_verify is true"
+        );
+    }
+    Ok(())
+}
+
+fn validate_prereq_suggestion(
+    suggestion: &PrereqSuggestion,
+    prereqs: &std::collections::BTreeMap<String, PrereqDefinition>,
+    label: &str,
+) -> Result<()> {
+    ensure!(
+        !suggestion.stderr_contains.trim().is_empty(),
+        "{label}.stderr_contains must not be empty"
+    );
+    ensure!(
+        !suggestion.suggest.trim().is_empty(),
+        "{label}.suggest must not be empty"
+    );
+    ensure!(
+        prereqs.contains_key(&suggestion.suggest),
+        "{label}.suggest references unknown prereq '{}'; define it in verification.prereqs first",
+        suggestion.suggest
+    );
     Ok(())
 }
 
