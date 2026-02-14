@@ -4,19 +4,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) fn validate_behavior_exclusions(
     exclusions: &[SurfaceBehaviorExclusion],
-    option_ids: &BTreeSet<String>,
+    surface_ids: &BTreeSet<String>,
 ) -> Result<BTreeMap<String, SurfaceBehaviorExclusion>> {
     let mut validated = BTreeMap::new();
     for exclusion in exclusions {
-        let kind = exclusion.kind.trim();
         let surface_id = exclusion.surface_id.trim();
-        if kind != "option" {
-            return Err(anyhow!(
-                "behavior_exclusion only supports option overlays (got kind={} for {})",
-                kind,
-                surface_id
-            ));
-        }
         if surface_id.is_empty() {
             return Err(anyhow!("behavior_exclusion surface_id must not be empty"));
         }
@@ -24,9 +16,9 @@ pub(crate) fn validate_behavior_exclusions(
             .exclusion
             .validate_shape(surface_id)
             .with_context(|| format!("validate behavior_exclusion for {surface_id}"))?;
-        if !option_ids.contains(surface_id) {
+        if !surface_ids.contains(surface_id) {
             return Err(anyhow!(
-                "behavior_exclusion surface_id {} missing from inventory/surface.json options",
+                "behavior_exclusion surface_id {} missing from inventory/surface.json",
                 surface_id
             ));
         }
@@ -53,7 +45,6 @@ mod tests {
         evidence: BehaviorExclusionEvidence,
     ) -> SurfaceBehaviorExclusion {
         SurfaceBehaviorExclusion {
-            kind: "option".to_string(),
             surface_id: surface_id.to_string(),
             exclusion: BehaviorExclusion {
                 reason_code: BehaviorExclusionReasonCode::AssertionGap,
@@ -63,7 +54,7 @@ mod tests {
         }
     }
 
-    fn option_ids(surface_id: &str) -> BTreeSet<String> {
+    fn surface_ids(surface_id: &str) -> BTreeSet<String> {
         [surface_id.to_string()].into_iter().collect()
     }
 
@@ -78,7 +69,7 @@ mod tests {
             },
         )];
 
-        let mapped = validate_behavior_exclusions(&exclusions, &option_ids(surface_id))
+        let mapped = validate_behavior_exclusions(&exclusions, &surface_ids(surface_id))
             .expect("valid exclusion");
 
         assert_eq!(mapped.len(), 1);
@@ -105,7 +96,7 @@ mod tests {
             ),
         ];
 
-        let err = validate_behavior_exclusions(&exclusions, &option_ids(surface_id))
+        let err = validate_behavior_exclusions(&exclusions, &surface_ids(surface_id))
             .expect_err("duplicates must fail");
 
         assert!(err

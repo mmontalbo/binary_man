@@ -17,7 +17,17 @@ use std::path::{Path, PathBuf};
 /// This is equivalent to running `bman init` followed by `bman apply --max-cycles N --lm CMD`.
 pub fn run_run(args: &RunArgs) -> Result<()> {
     let lens_flake = resolve_flake_ref(&args.lens_flake)?;
-    let binary_name = resolve_binary_name(&args.binary)?;
+
+    // Parse invocation: first element is binary, rest is entry point path (scope)
+    let binary_name = args
+        .invocation
+        .first()
+        .map(|s| resolve_binary_name(s))
+        .transpose()?
+        .ok_or_else(|| anyhow!("invocation requires at least a binary name"))?;
+
+    let entry_point_path: Vec<String> = args.invocation.iter().skip(1).cloned().collect();
+
     let doc_pack_root = resolve_doc_pack_root(args.doc_pack.as_deref(), &binary_name)?;
 
     // Print path-only output early if requested
@@ -28,6 +38,16 @@ pub fn run_run(args: &RunArgs) -> Result<()> {
 
     // Ensure doc pack is initialized
     ensure_doc_pack_initialized(&doc_pack_root, &binary_name, &lens_flake, args.refresh, args.verbose)?;
+
+    // Build explore hints: explicit --explore flags + entry point path from invocation
+    let mut explore_hints = args.explore.clone();
+    if !entry_point_path.is_empty() {
+        // Add the entry point path as an explore hint (e.g., "config" for "bman git config")
+        let entry_point_str = entry_point_path.join(" ");
+        if !explore_hints.contains(&entry_point_str) {
+            explore_hints.push(entry_point_str);
+        }
+    }
 
     // Run apply with the LM loop
     let apply_args = ApplyArgs {
@@ -40,7 +60,9 @@ pub fn run_run(args: &RunArgs) -> Result<()> {
         lens_flake,
         lm_response: None,
         max_cycles: args.max_cycles,
-        lm: args.lm.clone(),
+        lm: resolve_lm_command(args.lm.as_deref()),
+        explore: explore_hints,
+        context: entry_point_path,
     };
     run_apply(&apply_args)?;
 
@@ -66,7 +88,7 @@ pub fn run_run(args: &RunArgs) -> Result<()> {
     // Output based on format
     match args.output {
         OutputFormat::Man => {
-            match render_man_output(&doc_pack_root) {
+            match render_man_output(&doc_pack_root, &binary_name) {
                 Ok(()) => {}
                 Err(_) if !matches!(summary.decision, Decision::Complete) => {
                     // Man page not available and not complete - show status summary instead
@@ -140,8 +162,16 @@ fn ensure_doc_pack_initialized(
     Ok(())
 }
 
-fn render_man_output(doc_pack_root: &Path) -> Result<()> {
-    let man_page_path = doc_pack_root.join("outputs").join("man_page.md");
+/// Resolve LM command with fallback: explicit arg > env var > default.
+fn resolve_lm_command(explicit: Option<&str>) -> Option<String> {
+    explicit
+        .map(|s| s.to_string())
+        .or_else(|| std::env::var("BMAN_LM_COMMAND").ok())
+        .or_else(|| Some("claude -p --model haiku".to_string()))
+}
+
+fn render_man_output(doc_pack_root: &Path, binary_name: &str) -> Result<()> {
+    let man_page_path = doc_pack_root.join("man").join(format!("{binary_name}.1"));
 
     if !man_page_path.is_file() {
         return Err(anyhow!(

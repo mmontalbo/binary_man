@@ -1,6 +1,6 @@
 use super::types::SurfaceInvocation;
 use super::{
-    is_supported_surface_kind, merge_surface_item, SurfaceDiscovery, SurfaceItem, SurfaceState,
+    merge_surface_item, SurfaceDiscovery, SurfaceItem, SurfaceState,
     SURFACE_OVERLAYS_SCHEMA_VERSION,
 };
 use crate::enrich;
@@ -97,7 +97,6 @@ impl BehaviorExclusion {
 
 #[derive(Debug, Clone)]
 pub(crate) struct SurfaceBehaviorExclusion {
-    pub kind: String,
     pub surface_id: String,
     pub exclusion: BehaviorExclusion,
 }
@@ -115,7 +114,6 @@ pub(crate) struct SurfaceOverlays {
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 struct SurfaceOverlaysItem {
-    kind: String,
     id: String,
     #[serde(default)]
     display: Option<String>,
@@ -128,9 +126,7 @@ struct SurfaceOverlaysItem {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
 struct SurfaceOverlaysOverlay {
-    kind: String,
     id: String,
     #[serde(default)]
     invocation: SurfaceOverlaysInvocationOverlay,
@@ -164,14 +160,11 @@ pub(super) fn apply_surface_overlays(
                 evidence: vec![evidence.clone()],
                 message: None,
             });
-            let mut has_invalid_items = false;
             for item in overlays.items {
-                if !is_supported_surface_kind(&item.kind) || item.id.trim().is_empty() {
-                    has_invalid_items = true;
+                if item.id.trim().is_empty() {
                     continue;
                 }
                 let surface_item = SurfaceItem {
-                    kind: item.kind,
                     id: item.id.trim().to_string(),
                     display: item.display.unwrap_or_else(|| item.id.trim().to_string()),
                     description: item.description,
@@ -184,19 +177,16 @@ pub(super) fn apply_surface_overlays(
                 merge_surface_item(&mut state.items, &mut state.seen, surface_item);
             }
             let mut missing_overlays = Vec::new();
-            let mut has_invalid_overlays = false;
             for overlay in overlays.overlays {
-                if !is_supported_surface_kind(&overlay.kind) || overlay.id.trim().is_empty() {
-                    has_invalid_overlays = true;
+                if overlay.id.trim().is_empty() {
                     continue;
                 }
-                let key = format!("{}:{}", overlay.kind, overlay.id.trim());
+                let key = overlay.id.trim().to_string();
                 if !state.seen.contains_key(&key) {
                     missing_overlays.push(overlay.id.trim().to_string());
                     continue;
                 }
                 let surface_item = SurfaceItem {
-                    kind: overlay.kind,
                     id: overlay.id.trim().to_string(),
                     display: String::new(),
                     description: None,
@@ -212,18 +202,10 @@ pub(super) fn apply_surface_overlays(
                 };
                 merge_surface_item(&mut state.items, &mut state.seen, surface_item);
             }
-            if has_invalid_items {
+            if !missing_overlays.is_empty() {
                 state.blockers.push(enrich::Blocker {
-                    code: "surface_overlays_items_invalid".to_string(),
-                    message: "surface overlays contain unsupported items".to_string(),
-                    evidence: vec![evidence.clone()],
-                    next_action: Some("fix inventory/surface.overlays.json".to_string()),
-                });
-            }
-            if has_invalid_overlays {
-                state.blockers.push(enrich::Blocker {
-                    code: "surface_overlays_invalid".to_string(),
-                    message: "surface overlays contain unsupported entries".to_string(),
+                    code: "surface_overlays_missing_targets".to_string(),
+                    message: format!("surface overlays reference unknown items: {:?}", missing_overlays),
                     evidence: vec![evidence.clone()],
                     next_action: Some("fix inventory/surface.overlays.json".to_string()),
                 });
@@ -283,7 +265,6 @@ pub(crate) fn collect_behavior_exclusions(
             continue;
         };
         exclusions.push(SurfaceBehaviorExclusion {
-            kind: overlay.kind.trim().to_string(),
             surface_id: overlay.id.trim().to_string(),
             exclusion: behavior_exclusion,
         });

@@ -1,7 +1,5 @@
 use super::types::SurfaceInvocation;
-use super::{
-    is_supported_surface_kind, merge_surface_item, SurfaceDiscovery, SurfaceItem, SurfaceState,
-};
+use super::{merge_surface_item, SurfaceDiscovery, SurfaceItem, SurfaceState};
 use crate::enrich;
 use crate::pack;
 use anyhow::{Context, Result};
@@ -12,11 +10,14 @@ use std::path::{Path, PathBuf};
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SurfaceLensRow {
-    kind: String,
     id: String,
     display: String,
     #[serde(default)]
     description: Option<String>,
+    #[serde(default)]
+    parent_id: Option<String>,
+    #[serde(default)]
+    context_argv: Vec<String>,
     forms: Vec<String>,
     invocation: SurfaceInvocation,
     scenario_path: String,
@@ -123,15 +124,8 @@ pub(super) fn run_surface_lenses(
                             state.subcommand_hint_evidence.push(evidence.clone());
                             found_any = true;
                         }
-                        let kind = row.kind.trim();
                         let id = row.id.trim();
-                        if kind.is_empty() || id.is_empty() {
-                            continue;
-                        }
-                        if !is_supported_surface_kind(kind) {
-                            query_errors.push(format!(
-                                "unsupported surface kind {kind:?} (template {template_rel})"
-                            ));
+                        if id.is_empty() {
                             continue;
                         }
                         let display_value = row.display.trim();
@@ -146,13 +140,18 @@ pub(super) fn run_surface_lenses(
                             .map(str::trim)
                             .filter(|desc| !desc.is_empty())
                             .map(|desc| desc.to_string());
+                        let parent_id = row
+                            .parent_id
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|p| !p.is_empty())
+                            .map(|p| p.to_string());
                         let item = SurfaceItem {
-                            kind: kind.to_string(),
                             id: id.to_string(),
                             display,
                             description,
-                            parent_id: None,
-                            context_argv: Vec::new(),
+                            parent_id,
+                            context_argv: row.context_argv.clone(),
                             forms: row.forms.clone(),
                             invocation: row.invocation.clone(),
                             evidence: vec![evidence],
@@ -207,22 +206,25 @@ pub(super) fn run_surface_lenses(
     Ok(())
 }
 
-pub(super) fn add_subcommand_missing_blocker(state: &mut SurfaceState) {
+pub(super) fn add_entry_point_missing_blocker(state: &mut SurfaceState) {
     if state.subcommand_hint_evidence.is_empty() {
         return;
     }
-    let has_subcommands = state.items.iter().any(|item| item.kind == "subcommand");
-    if has_subcommands {
+    // Entry points are items where context_argv includes their own id
+    let has_entry_points = state
+        .items
+        .iter()
+        .any(|item| item.context_argv.last().map(|s| s.as_str()) == Some(item.id.as_str()));
+    if has_entry_points {
         return;
     }
     enrich::dedupe_evidence_refs(&mut state.subcommand_hint_evidence);
     state.blockers.push(enrich::Blocker {
-        code: "surface_subcommands_missing".to_string(),
-        message: "multi-command usage detected but no subcommands extracted".to_string(),
+        code: "surface_entry_points_missing".to_string(),
+        message: "multi-command usage detected but no entry points extracted".to_string(),
         evidence: std::mem::take(&mut state.subcommand_hint_evidence),
         next_action: Some(
-            "add help scenarios in scenarios/plan.json or adjust queries/subcommands_from_scenarios.sql"
-                .to_string(),
+            "add help scenarios in scenarios/plan.json or adjust surface lens queries".to_string(),
         ),
     });
 }

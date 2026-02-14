@@ -61,10 +61,9 @@ impl Default for SurfaceInvocation {
     }
 }
 
-/// Single surface item (option, command, subcommand).
+/// Single surface item discovered from help output.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct SurfaceItem {
-    pub kind: String,
     pub id: String,
     pub display: String,
     #[serde(default)]

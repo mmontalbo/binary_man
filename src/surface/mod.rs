@@ -12,9 +12,15 @@ use crate::pack;
 use crate::scenarios;
 use crate::staging::{collect_files_recursive, write_staged_bytes};
 use anyhow::{anyhow, Context, Result};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+/// Maximum number of discovery rounds to prevent infinite loops.
+const MAX_DISCOVERY_ROUNDS: usize = 10;
+
+/// Prefix for help discovery scenarios (subcommand help).
+const HELP_DISCOVERY_SCENARIO_PREFIX: &str = "help::";
 
 pub(crate) use behavior_exclusion::validate_behavior_exclusions;
 pub(crate) use overlays::{
@@ -24,6 +30,20 @@ pub use types::{SurfaceDiscovery, SurfaceInventory, SurfaceInvocation, SurfaceIt
 
 const SURFACE_SCHEMA_VERSION: u32 = 2;
 const SURFACE_OVERLAYS_SCHEMA_VERSION: u32 = 3;
+
+/// Arguments for surface discovery.
+pub struct SurfaceDiscoveryArgs<'a> {
+    pub doc_pack_root: &'a Path,
+    pub staging_root: &'a Path,
+    pub inputs_hash: Option<&'a str>,
+    pub manifest: Option<&'a pack::PackManifest>,
+    pub lens_flake: &'a str,
+    pub verbose: bool,
+    /// Entry points to explicitly explore (e.g., `["config"]` for `git config`).
+    pub explore_hints: &'a [String],
+    /// Limits discovery to entry points under specified context path.
+    pub scope_context: &'a [String],
+}
 
 #[derive(Default)]
 pub(super) struct SurfaceState {
@@ -42,15 +62,8 @@ struct PlanState {
 }
 
 /// Run surface discovery and stage `inventory/surface.json`.
-pub fn apply_surface_discovery(
-    doc_pack_root: &Path,
-    staging_root: &Path,
-    inputs_hash: Option<&str>,
-    manifest: Option<&pack::PackManifest>,
-    lens_flake: &str,
-    verbose: bool,
-) -> Result<()> {
-    let paths = enrich::DocPackPaths::new(doc_pack_root.to_path_buf());
+pub fn apply_surface_discovery(args: &SurfaceDiscoveryArgs<'_>) -> Result<()> {
+    let paths = enrich::DocPackPaths::new(args.doc_pack_root.to_path_buf());
     let mut state = SurfaceState::default();
 
     let plan_state = load_plan_state(&paths, &mut state)?;
@@ -64,47 +77,166 @@ pub fn apply_surface_discovery(
     }
 
     let pack_scenarios = paths.inventory_scenarios_dir();
-    let staging_scenarios = staging_root.join("inventory").join("scenarios");
+    let staging_scenarios = args.staging_root.join("inventory").join("scenarios");
     let pack_has_scenarios = has_scenario_files(&pack_scenarios)?;
-    let staging_has_scenarios = has_scenario_files(&staging_scenarios)?;
-    let staging_has_scenarios = maybe_auto_run_help_scenarios(AutoRunHelpScenariosArgs {
-        doc_pack_root,
-        staging_root,
+    let mut staging_has_scenarios = has_scenario_files(&staging_scenarios)?;
+
+    // Run initial help scenarios from plan.json
+    staging_has_scenarios = maybe_auto_run_help_scenarios(AutoRunHelpScenariosArgs {
+        doc_pack_root: args.doc_pack_root,
+        staging_root: args.staging_root,
         paths: &paths,
         plan_state: &plan_state,
-        manifest,
-        lens_flake,
-        verbose,
+        manifest: args.manifest,
+        lens_flake: args.lens_flake,
+        verbose: args.verbose,
         pack_has_scenarios,
         staging_has_scenarios,
         state: &mut state,
     })?;
 
-    lens::run_surface_lenses(
-        doc_pack_root,
-        staging_root,
-        pack_has_scenarios,
-        staging_has_scenarios,
-        &paths,
-        &mut state,
-    )?;
+    // Run help scenarios for explicit explore hints (e.g., --explore config)
+    if !args.explore_hints.is_empty() {
+        if let Some(manifest) = args.manifest {
+            let binary_path = PathBuf::from(&manifest.binary_path);
+            if binary_path.is_file() && paths.pack_root().is_dir() {
+                let explored =
+                    load_help_discovery_scenario_ids(args.doc_pack_root, args.staging_root);
+                let extra_scenarios: Vec<scenarios::ScenarioSpec> = args
+                    .explore_hints
+                    .iter()
+                    .filter(|hint| {
+                        let id = help_discovery_scenario_id(&[hint.to_string()]);
+                        !explored.contains(&id)
+                    })
+                    .map(|hint| build_help_discovery_scenario(std::slice::from_ref(hint)))
+                    .collect();
+
+                if !extra_scenarios.is_empty() {
+                    if args.verbose {
+                        eprintln!(
+                            "explore: running {} entry point help scenario(s): {}",
+                            extra_scenarios.len(),
+                            args.explore_hints.join(", ")
+                        );
+                    }
+
+                    let _report = scenarios::run_scenarios(&scenarios::RunScenariosArgs {
+                        pack_root: &paths.pack_root(),
+                        run_root: args.doc_pack_root,
+                        binary_name: &manifest.binary_name,
+                        scenarios_path: &plan_state.plan_path,
+                        lens_flake: args.lens_flake,
+                        display_root: Some(args.doc_pack_root),
+                        staging_root: Some(args.staging_root),
+                        kind_filter: Some(scenarios::ScenarioKind::Help),
+                        run_mode: scenarios::ScenarioRunMode::Default,
+                        forced_rerun_scenario_ids: Vec::new(),
+                        extra_scenarios,
+                        auto_run_limit: None,
+                        auto_progress: None,
+                        verbose: args.verbose,
+                    })?;
+
+                    staging_has_scenarios =
+                        has_scenario_files(&args.staging_root.join("inventory").join("scenarios"))?;
+                }
+            }
+        }
+    }
+
+    // Recursive discovery loop: discover entry point help recursively
+    for round in 0..MAX_DISCOVERY_ROUNDS {
+        // Run surface lenses to extract items from current evidence
+        lens::run_surface_lenses(
+            args.doc_pack_root,
+            args.staging_root,
+            pack_has_scenarios,
+            staging_has_scenarios,
+            &paths,
+            &mut state,
+        )?;
+
+        // Find entry points (subcommands) that need help discovery
+        let explored =
+            load_help_discovery_scenario_ids(args.doc_pack_root, args.staging_root);
+        let needs_help = find_entry_points_needing_help(&state, &explored, args.scope_context);
+
+        if needs_help.is_empty() {
+            break;
+        }
+
+        // Run help scenarios for discovered subcommands
+        if let Some(manifest) = args.manifest {
+            let binary_path = PathBuf::from(&manifest.binary_path);
+            if binary_path.is_file() && paths.pack_root().is_dir() {
+                let extra_scenarios: Vec<scenarios::ScenarioSpec> = needs_help
+                    .iter()
+                    .map(|argv| build_help_discovery_scenario(argv))
+                    .collect();
+
+                if args.verbose {
+                    eprintln!(
+                        "discovery round {}: running {} subcommand help scenario(s)",
+                        round + 1,
+                        extra_scenarios.len()
+                    );
+                }
+
+                let _report = scenarios::run_scenarios(&scenarios::RunScenariosArgs {
+                    pack_root: &paths.pack_root(),
+                    run_root: args.doc_pack_root,
+                    binary_name: &manifest.binary_name,
+                    scenarios_path: &plan_state.plan_path,
+                    lens_flake: args.lens_flake,
+                    display_root: Some(args.doc_pack_root),
+                    staging_root: Some(args.staging_root),
+                    kind_filter: Some(scenarios::ScenarioKind::Help),
+                    run_mode: scenarios::ScenarioRunMode::Default,
+                    forced_rerun_scenario_ids: Vec::new(),
+                    extra_scenarios,
+                    auto_run_limit: None,
+                    auto_progress: None,
+                    verbose: args.verbose,
+                })?;
+
+                staging_has_scenarios =
+                    has_scenario_files(&args.staging_root.join("inventory").join("scenarios"))?;
+
+                // Reset state for next lens run (keep discovery records)
+                let discovery = std::mem::take(&mut state.discovery);
+                let blockers = std::mem::take(&mut state.blockers);
+                state = SurfaceState::default();
+                state.discovery = discovery;
+                state.blockers = blockers;
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
     overlays::apply_surface_overlays(&paths, &mut state)?;
-    lens::add_subcommand_missing_blocker(&mut state);
+    lens::add_entry_point_missing_blocker(&mut state);
 
     let surface = SurfaceInventory {
         schema_version: SURFACE_SCHEMA_VERSION,
         generated_at_epoch_ms: enrich::now_epoch_ms()?,
-        binary_name: manifest.map(|m| m.binary_name.clone()),
-        inputs_hash: inputs_hash.map(|hash| hash.to_string()),
+        binary_name: args.manifest.map(|m| m.binary_name.clone()),
+        inputs_hash: args.inputs_hash.map(|hash| hash.to_string()),
         discovery: state.discovery,
         items: state.items,
         blockers: state.blockers,
     };
     let bytes = serde_json::to_vec_pretty(&surface).context("serialize surface")?;
-    write_staged_bytes(staging_root, "inventory/surface.json", &bytes)?;
+    write_staged_bytes(args.staging_root, "inventory/surface.json", &bytes)?;
 
-    if verbose {
-        eprintln!("staged surface inventory under {}", staging_root.display());
+    if args.verbose {
+        eprintln!(
+            "staged surface inventory under {}",
+            args.staging_root.display()
+        );
     }
 
     Ok(())
@@ -268,9 +400,6 @@ pub fn validate_surface_inventory(surface: &SurfaceInventory) -> Result<()> {
         ));
     }
     for item in &surface.items {
-        if !is_supported_surface_kind(item.kind.as_str()) {
-            return Err(anyhow!("unsupported surface item kind {:?}", item.kind));
-        }
         if item.id.trim().is_empty() {
             return Err(anyhow!("surface item id must not be empty"));
         }
@@ -278,20 +407,19 @@ pub fn validate_surface_inventory(surface: &SurfaceInventory) -> Result<()> {
     Ok(())
 }
 
-/// Count meaningful surface items (options/commands/subcommands).
+/// Count meaningful surface items.
 pub fn meaningful_surface_items(surface: &SurfaceInventory) -> usize {
     surface
         .items
         .iter()
-        .filter(|item| is_supported_surface_kind(item.kind.as_str()))
         .filter(|item| !item.id.trim().is_empty())
         .count()
 }
 
 /// Return the preferred surface item for a given id.
 ///
-/// If multiple items share an id, option entries win because verification stubs
-/// and overlays are option-centric.
+/// If multiple items share an id, prefer non-entry-point items (those where
+/// context_argv does not include the item's id).
 pub(crate) fn primary_surface_item_by_id<'a>(
     surface: &'a SurfaceInventory,
     surface_id: &str,
@@ -301,7 +429,9 @@ pub(crate) fn primary_surface_item_by_id<'a>(
         if item.id.trim() != surface_id {
             continue;
         }
-        if item.kind == "option" {
+        // Prefer non-entry-point items
+        let is_entry_point = item.context_argv.last().map(|s| s.as_str()) == Some(&item.id);
+        if !is_entry_point {
             return Some(item);
         }
         if fallback.is_none() {
@@ -432,9 +562,142 @@ fn merge_value_separator(current: &str, incoming: &str) -> String {
 }
 
 fn surface_item_key(item: &SurfaceItem) -> String {
-    format!("{}:{}", item.kind, item.id)
+    item.id.clone()
 }
 
-fn is_supported_surface_kind(kind: &str) -> bool {
-    matches!(kind, "option" | "command" | "subcommand")
+/// Load existing help discovery scenario IDs from evidence files.
+fn load_help_discovery_scenario_ids(doc_pack_root: &Path, staging_root: &Path) -> HashSet<String> {
+    let mut ids = HashSet::new();
+
+    // Check both pack and staging locations
+    let locations = [
+        doc_pack_root.join("inventory").join("scenarios"),
+        staging_root.join("inventory").join("scenarios"),
+    ];
+
+    for scenarios_dir in locations {
+        if !scenarios_dir.is_dir() {
+            continue;
+        }
+        if let Ok(entries) = fs::read_dir(&scenarios_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                    continue;
+                }
+                // Extract scenario_id from filename
+                // Filenames are: {scenario_id}-{timestamp}.json (e.g., help::commit-1771001173672.json)
+                // Or: {scenario_id}.json for some legacy files
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    // Try to extract scenario_id by finding the last dash followed by digits
+                    let scenario_id = extract_scenario_id_from_stem(stem);
+                    if scenario_id.starts_with(HELP_DISCOVERY_SCENARIO_PREFIX)
+                        || scenario_id.starts_with("help--")
+                    {
+                        ids.insert(scenario_id.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    ids
+}
+
+/// Extract scenario_id from file stem by stripping timestamp suffix.
+fn extract_scenario_id_from_stem(stem: &str) -> &str {
+    // Filename format: {scenario_id}-{timestamp} where timestamp is all digits
+    // e.g., "help::commit-1771001173672" -> "help::commit"
+    if let Some(dash_pos) = stem.rfind('-') {
+        let suffix = &stem[dash_pos + 1..];
+        if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+            return &stem[..dash_pos];
+        }
+    }
+    stem
+}
+
+/// Find entry points (subcommands) that need help discovery.
+///
+/// When `scope_context` is set, only discovers entry points that are under the
+/// specified context path. For example, if scope_context is `["config"]`, only
+/// entry points like `["config"]` or `["config", "subsubcommand"]` are discovered.
+fn find_entry_points_needing_help(
+    state: &SurfaceState,
+    explored: &HashSet<String>,
+    scope_context: &[String],
+) -> Vec<Vec<String>> {
+    let mut needs_help = Vec::new();
+
+    for item in &state.items {
+        // Entry points: items where context_argv ends with their id
+        let is_entry_point = item.context_argv.last().map(|s| s.as_str()) == Some(item.id.as_str());
+        if !is_entry_point {
+            continue;
+        }
+
+        // Skip root (empty context_argv) - already covered by help--help etc.
+        if item.context_argv.is_empty() {
+            continue;
+        }
+
+        // Scope filtering: when context is set, only discover entry points under that context
+        if !scope_context.is_empty() {
+            // Entry point must start with the scope context
+            if !item.context_argv.starts_with(scope_context) {
+                continue;
+            }
+        }
+
+        // Depth limit: only discover up to 3 levels deep
+        if item.context_argv.len() > 3 {
+            continue;
+        }
+
+        let scenario_id = help_discovery_scenario_id(&item.context_argv);
+        if explored.contains(&scenario_id) {
+            continue;
+        }
+
+        needs_help.push(item.context_argv.clone());
+    }
+
+    needs_help
+}
+
+/// Build a scenario ID for help discovery.
+fn help_discovery_scenario_id(context_argv: &[String]) -> String {
+    format!(
+        "{}{}",
+        HELP_DISCOVERY_SCENARIO_PREFIX,
+        context_argv.join("::")
+    )
+}
+
+/// Build a help discovery scenario for a subcommand.
+fn build_help_discovery_scenario(context_argv: &[String]) -> scenarios::ScenarioSpec {
+    let mut argv = context_argv.to_vec();
+    argv.push("--help".to_string());
+
+    scenarios::ScenarioSpec {
+        id: help_discovery_scenario_id(context_argv),
+        kind: scenarios::ScenarioKind::Help,
+        publish: false,
+        argv,
+        env: std::collections::BTreeMap::new(),
+        seed: None,
+        cwd: None,
+        timeout_seconds: None,
+        net_mode: None,
+        no_sandbox: None,
+        no_strace: None,
+        snippet_max_lines: None,
+        snippet_max_bytes: None,
+        coverage_tier: None,
+        baseline_scenario_id: None,
+        assertions: Vec::new(),
+        covers: Vec::new(),
+        coverage_ignore: false,
+        expect: scenarios::ScenarioExpect::default(),
+    }
 }

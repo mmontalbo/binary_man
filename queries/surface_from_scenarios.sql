@@ -1,21 +1,128 @@
--- Extract options from scenario stdout (help output).
+-- Extract surface items from scenario stdout (help output).
+-- Handles two formats:
+-- 1. Dash-prefixed options (e.g., "-a, --all    description")
+-- 2. Indented command lists (e.g., "   clone    Clone a repository")
 with
-  scenarios as (
+  scenario_context as (
     select
       regexp_extract(replace(filename, '\\', '/'), '(inventory/scenarios/.*)', 1) as scenario_path,
-      stdout
+      argv,
+      stdout,
+      -- Entry point chain: argv minus binary (first) and help flag (last)
+      -- ["git", "config", "--help"] → ["config"]
+      -- ["git", "--help"] → []
+      case
+        when len(argv) > 2 then list_slice(argv, 2, len(argv) - 1)
+        else []::VARCHAR[]
+      end as entry_point_chain
     from read_json_auto('inventory/scenarios/*.json', filename=true)
     where coalesce(stdout, '') <> ''
-      and scenario_id like 'help--%'
+      and (scenario_id like 'help--%' or scenario_id like 'help::%')
+  ),
+  scenarios as (
+    select
+      scenario_path,
+      stdout,
+      entry_point_chain,
+      case
+        when len(entry_point_chain) > 0 then entry_point_chain[-1]
+        else null
+      end as parent_id
+    from scenario_context
   ),
   lines as (
     select
       scenario_path,
       idx as line_no,
-      list_extract(str_split(stdout, chr(10)), idx) as line
+      -- Strip ANSI escape codes (e.g., \e[1m for bold) before processing
+      regexp_replace(
+        list_extract(str_split(stdout, chr(10)), idx),
+        '\x1b\[[0-9;]*[a-zA-Z]',
+        '',
+        'g'
+      ) as line
     from scenarios,
       range(1, list_count(str_split(stdout, chr(10))) + 1) as t(idx)
   ),
+
+  -- ==========================================================================
+  -- Entry point extraction (indented command lists like git subcommands)
+  -- ==========================================================================
+  usage_hint as (
+    select scenario_path
+    from lines
+    group by scenario_path
+    having
+      bool_or(regexp_matches(line, '(?i)^\s*usage:'))
+      and bool_or(regexp_matches(line, '(?i)<command>'))
+  ),
+  entry_point_candidates as (
+    select
+      lines.scenario_path,
+      regexp_extract(line, '^\s*([a-z][a-z0-9-]*)\s{2,}(.+)$', 1) as item_id,
+      regexp_extract(line, '^\s*([a-z][a-z0-9-]*)\s{2,}(.+)$', 2) as description
+    from lines
+    join usage_hint using (scenario_path)
+    where regexp_matches(line, '^\s+[a-z][a-z0-9-]*\s{2,}\S')
+  ),
+  entry_point_dedup as (
+    select
+      scenario_path,
+      item_id,
+      description,
+      row_number() over (
+        partition by scenario_path, item_id
+        order by length(description) desc nulls last
+      ) as rk
+    from entry_point_candidates
+    where item_id is not null and item_id <> ''
+  ),
+  entry_point_items as (
+    select
+      item_id as id,
+      item_id as display,
+      description,
+      scenarios.parent_id as parent_id,
+      -- Entry points include their own id in context_argv
+      to_json(list_append(scenarios.entry_point_chain, item_id)) as context_argv,
+      to_json([]::VARCHAR[]) as forms,
+      to_json(struct_pack(
+        value_arity := 'unknown',
+        value_separator := 'unknown',
+        value_placeholder := null,
+        value_examples := []::VARCHAR[],
+        requires_argv := []::VARCHAR[]
+      )) as invocation,
+      entry_point_dedup.scenario_path,
+      true as multi_command_hint
+    from entry_point_dedup
+    left join scenarios on entry_point_dedup.scenario_path = scenarios.scenario_path
+    where rk = 1
+  ),
+  -- Emit multi_command_hint marker for scenarios with usage hint
+  multi_command_markers as (
+    select
+      '' as id,
+      '' as display,
+      null as description,
+      null as parent_id,
+      to_json([]::VARCHAR[]) as context_argv,
+      to_json([]::VARCHAR[]) as forms,
+      to_json(struct_pack(
+        value_arity := 'unknown',
+        value_separator := 'unknown',
+        value_placeholder := null,
+        value_examples := []::VARCHAR[],
+        requires_argv := []::VARCHAR[]
+      )) as invocation,
+      scenario_path,
+      true as multi_command_hint
+    from usage_hint
+  ),
+
+  -- ==========================================================================
+  -- Option extraction (dash-prefixed lines like "-a, --all")
+  -- ==========================================================================
   classified as (
     select
       scenario_path,
@@ -286,7 +393,7 @@ with
       value_example
     from adjusted
   ),
-  descriptions as (
+  option_descriptions as (
     select
       scenario_path,
       option_id,
@@ -296,28 +403,42 @@ with
         order by length(description) desc nulls last
       ) as rk
     from parsed_filtered
+  ),
+  option_items as (
+    select
+      dedup_forms.option_id as id,
+      dedup_forms.option_id as display,
+      option_descriptions.description as description,
+      scenarios.parent_id as parent_id,
+      to_json(scenarios.entry_point_chain) as context_argv,
+      to_json([dedup_forms.raw_form]) as forms,
+      to_json(struct_pack(
+        value_arity := dedup_forms.value_arity,
+        value_separator := dedup_forms.value_separator,
+        value_placeholder := nullif(dedup_forms.value_placeholder, ''),
+        value_examples := case
+          when dedup_forms.value_example is not null and dedup_forms.value_example <> ''
+            then [dedup_forms.value_example]
+          else []::VARCHAR[]
+        end,
+        requires_argv := []::VARCHAR[]
+      )) as invocation,
+      dedup_forms.scenario_path as scenario_path,
+      false as multi_command_hint
+    from dedup_forms
+    left join option_descriptions
+      on dedup_forms.scenario_path = option_descriptions.scenario_path
+      and dedup_forms.option_id = option_descriptions.option_id
+      and option_descriptions.rk = 1
+    left join scenarios
+      on dedup_forms.scenario_path = scenarios.scenario_path
   )
-select
-  'option' as kind,
-  dedup_forms.option_id as id,
-  dedup_forms.option_id as display,
-  descriptions.description as description,
-  to_json([dedup_forms.raw_form]) as forms,
-  to_json(struct_pack(
-    value_arity := dedup_forms.value_arity,
-    value_separator := dedup_forms.value_separator,
-    value_placeholder := nullif(dedup_forms.value_placeholder, ''),
-    value_examples := case
-      when dedup_forms.value_example is not null and dedup_forms.value_example <> ''
-        then [dedup_forms.value_example]
-      else []::VARCHAR[]
-    end,
-    requires_argv := []::VARCHAR[]
-  )) as invocation,
-  dedup_forms.scenario_path as scenario_path,
-  false as multi_command_hint
-from dedup_forms
-left join descriptions
-  on dedup_forms.scenario_path = descriptions.scenario_path
-  and dedup_forms.option_id = descriptions.option_id
-  and descriptions.rk = 1;
+
+-- ==========================================================================
+-- Final output: combine entry points, options, and multi-command markers
+-- ==========================================================================
+select * from entry_point_items
+union all
+select * from option_items
+union all
+select * from multi_command_markers;

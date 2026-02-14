@@ -96,15 +96,8 @@ fn install_query_templates(
     write_doc_pack_file(
         &paths
             .root()
-            .join(enrich::SUBCOMMANDS_FROM_SCENARIOS_TEMPLATE_REL),
-        templates::SUBCOMMANDS_FROM_SCENARIOS_SQL,
-        force,
-    )?;
-    write_doc_pack_file(
-        &paths
-            .root()
-            .join(enrich::OPTIONS_FROM_SCENARIOS_TEMPLATE_REL),
-        templates::OPTIONS_FROM_SCENARIOS_SQL,
+            .join(enrich::SURFACE_FROM_SCENARIOS_TEMPLATE_REL),
+        templates::SURFACE_FROM_SCENARIOS_SQL,
         force,
     )?;
     write_doc_pack_file(

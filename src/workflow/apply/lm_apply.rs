@@ -103,7 +103,6 @@ pub(super) fn invoke_lm_and_apply(
                 publish: false,
                 argv: Vec::new(),
                 env: BTreeMap::new(),
-                seed_dir: None,
                 seed: None,
                 cwd: None,
                 timeout_seconds: None,

@@ -18,17 +18,33 @@ pub(super) struct AutoVerificationBatch {
 }
 
 /// Generate auto-verification scenarios for the given plan.
+///
+/// When `scope_context` is set, only surfaces with matching `context_argv` are
+/// included in verification targets.
 pub(super) fn auto_verification_scenarios(
     plan: &scenarios::ScenarioPlan,
     doc_pack_root: &Path,
     staging_root: &Path,
     verbose: bool,
     verification_tier: &str,
+    scope_context: &[String],
 ) -> Result<Option<AutoVerificationBatch>> {
-    let surface = match load_surface_for_auto(doc_pack_root, staging_root, verbose)? {
+    let mut surface = match load_surface_for_auto(doc_pack_root, staging_root, verbose)? {
         Some(surface) => surface,
         None => return Ok(None),
     };
+
+    // Filter surface items by scope_context if set
+    if !scope_context.is_empty() {
+        surface.items.retain(|item| item.context_argv.starts_with(scope_context));
+        if verbose && surface.items.is_empty() {
+            eprintln!(
+                "warning: no surface items match scope context {:?}",
+                scope_context
+            );
+        }
+    }
+
     let semantics = match semantics::load_semantics(doc_pack_root) {
         Ok(semantics) => semantics,
         Err(err) => {
@@ -45,7 +61,7 @@ pub(super) fn auto_verification_scenarios(
     }) else {
         return Ok(None);
     };
-    let scenarios = scenarios::auto_verification_scenarios(&targets, &semantics);
+    let scenarios = scenarios::auto_verification_scenarios(&targets, &semantics, &surface);
     Ok(Some(AutoVerificationBatch {
         scenarios,
         max_new_runs_per_apply: targets.max_new_runs_per_apply,
@@ -98,15 +114,29 @@ pub(super) fn auto_verification_progress(
         }
     }
 
-    let remaining_by_kind = batch
-        .targets
-        .targets
-        .iter()
-        .map(|(kind, ids)| scenarios::AutoVerificationKindProgress {
-            kind: kind.clone(),
-            remaining_count: ids.len(),
-        })
-        .collect();
+    // Group by derived kind based on id shape
+    let mut options_count = 0usize;
+    let mut other_count = 0usize;
+    for id in &batch.targets.target_ids {
+        if id.starts_with('-') {
+            options_count += 1;
+        } else {
+            other_count += 1;
+        }
+    }
+    let mut remaining_by_kind = Vec::new();
+    if options_count > 0 {
+        remaining_by_kind.push(scenarios::AutoVerificationKindProgress {
+            kind: "option".to_string(),
+            remaining_count: options_count,
+        });
+    }
+    if other_count > 0 {
+        remaining_by_kind.push(scenarios::AutoVerificationKindProgress {
+            kind: "other".to_string(),
+            remaining_count: other_count,
+        });
+    }
     scenarios::AutoVerificationProgress {
         remaining_total: Some(batch.targets.target_ids.len()),
         remaining_by_kind,

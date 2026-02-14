@@ -209,6 +209,8 @@ fn run_apply_with_lm_loop(args: &ApplyArgs) -> Result<()> {
             lm_response: args.lm_response.clone(),
             max_cycles: 0,
             lm: args.lm.clone(),
+            explore: args.explore.clone(),
+            context: args.context.clone(),
         };
         run_apply_single(&single_apply_args)?;
 
@@ -664,14 +666,16 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<ApplyPlanActionsResult
     let scenarios_path = ctx.paths.scenarios_plan_path();
 
     if wants_surface {
-        apply_surface_discovery(
-            ctx.paths.root(),
+        apply_surface_discovery(&crate::surface::SurfaceDiscoveryArgs {
+            doc_pack_root: ctx.paths.root(),
             staging_root,
-            Some(plan.lock.inputs_hash.as_str()),
+            inputs_hash: Some(plan.lock.inputs_hash.as_str()),
             manifest,
             lens_flake,
-            args.verbose,
-        )?;
+            verbose: args.verbose,
+            explore_hints: &args.explore,
+            scope_context: &args.context,
+        })?;
     }
 
     if wants_scenarios {
@@ -700,6 +704,7 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<ApplyPlanActionsResult
             staging_root,
             args.verbose,
             verification_tier,
+            &args.context,
         )? {
             auto_run_limit = Some(batch.max_new_runs_per_apply);
             auto_progress = Some(auto_verification_progress(
