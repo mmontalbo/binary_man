@@ -65,6 +65,7 @@ mod cleanup;
 mod ledgers;
 mod lm_apply;
 mod pack;
+mod prereq_inference;
 mod progress;
 mod rendering;
 
@@ -95,6 +96,7 @@ use cleanup::cleanup_txn_dirs;
 use ledgers::{write_ledgers, LedgerArgs};
 use lm_apply::{apply_lm_response, invoke_lm_and_apply};
 use pack::refresh_pack_if_needed;
+use prereq_inference::infer_prereqs_for_surface;
 use progress::{
     check_progress, get_excluded_count, get_unverified_count, handle_lm_no_progress_for_targets,
     process_lm_result, CycleProgress,
@@ -215,8 +217,7 @@ fn run_apply_with_lm_loop(args: &ApplyArgs) -> Result<()> {
         run_apply_single(&single_apply_args)?;
 
         // Check status
-        let computation =
-            status_summary_for_doc_pack(doc_pack_root.clone(), false, false)?;
+        let computation = status_summary_for_doc_pack(doc_pack_root.clone(), false, false)?;
         let summary = &computation.summary;
 
         // Check if complete
@@ -233,7 +234,12 @@ fn run_apply_with_lm_loop(args: &ApplyArgs) -> Result<()> {
             eprintln!("apply: {} options still unverified", unverified_count);
         }
 
-        match check_progress(unverified_count, last_unverified_count, no_progress_count, MAX_NO_PROGRESS) {
+        match check_progress(
+            unverified_count,
+            last_unverified_count,
+            no_progress_count,
+            MAX_NO_PROGRESS,
+        ) {
             CycleProgress::Advanced => {
                 no_progress_count = 0;
             }
@@ -268,7 +274,10 @@ fn run_apply_with_lm_loop(args: &ApplyArgs) -> Result<()> {
         // (it will run more scenarios on the next cycle)
         let Some(payload) = payload else {
             if args.verbose {
-                eprintln!("apply: next action is {} with no payload, continuing", action_kind);
+                eprintln!(
+                    "apply: next action is {} with no payload, continuing",
+                    action_kind
+                );
             }
             continue;
         };
@@ -342,7 +351,8 @@ fn run_apply_with_lm_loop(args: &ApplyArgs) -> Result<()> {
             );
         }
 
-        let lm_result = invoke_lm_and_apply(&doc_pack_root, lm_config, summary, &payload, args.verbose);
+        let lm_result =
+            invoke_lm_and_apply(&doc_pack_root, lm_config, summary, &payload, args.verbose);
         let processing = process_lm_result(
             &paths,
             lm_result,
@@ -454,6 +464,13 @@ fn run_apply_core(args: &ApplyArgs) -> Result<()> {
     let staging_root = ctx.paths.txn_staging_root(&txn_id);
     fs::create_dir_all(&staging_root).context("create staging dir")?;
 
+    // Resolve LM config for prereq inference
+    let lm_command = args
+        .lm
+        .clone()
+        .or_else(|| enrich::resolve_lm_command(&ctx.config));
+    let lm_config = lm_command.map(|cmd| LmClientConfig { command: cmd });
+
     let apply_inputs = ApplyInputs {
         ctx: &ctx,
         planned_actions: planned_actions.as_slice(),
@@ -463,6 +480,7 @@ fn run_apply_core(args: &ApplyArgs) -> Result<()> {
         binary_name: binary_name.as_deref(),
         staging_root: &staging_root,
         args,
+        lm_config: lm_config.as_ref(),
     };
     let apply_result = apply_plan_actions(&apply_inputs);
 
@@ -603,6 +621,7 @@ struct ApplyInputs<'a> {
     binary_name: Option<&'a str>,
     staging_root: &'a Path,
     args: &'a ApplyArgs,
+    lm_config: Option<&'a LmClientConfig>,
 }
 
 #[derive(Debug, Default)]
@@ -676,6 +695,25 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<ApplyPlanActionsResult
             explore_hints: &args.explore,
             scope_context: &args.context,
         })?;
+
+        // Run prereq inference after surface discovery
+        // Load surface from staging (where it was just written)
+        let staged_surface_path = staging_root.join("inventory").join("surface.json");
+        if staged_surface_path.is_file() {
+            if let Ok(surface) = surface::load_surface_inventory(&staged_surface_path) {
+                if let Err(err) = infer_prereqs_for_surface(
+                    &ctx.paths,
+                    &surface,
+                    inputs.lm_config,
+                    &args.context,
+                    args.verbose,
+                ) {
+                    if args.verbose {
+                        eprintln!("prereq_inference: skipped ({})", err);
+                    }
+                }
+            }
+        }
     }
 
     if wants_scenarios {
@@ -1053,7 +1091,6 @@ fn update_assertion_failed_progress_after_apply(
 
     Ok(())
 }
-
 
 #[cfg(test)]
 mod tests;

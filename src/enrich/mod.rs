@@ -37,6 +37,7 @@ mod evidence;
 mod history;
 mod lock;
 mod paths;
+mod prereqs;
 mod types;
 
 pub use config::{
@@ -47,4 +48,8 @@ pub use evidence::{dedupe_evidence_refs, evidence_from_path, evidence_from_rel};
 pub use history::{append_history, write_report};
 pub use lock::{build_lock, hash_paths, load_lock, lock_status, now_epoch_ms, write_lock};
 pub use paths::DocPackPaths;
+pub use prereqs::{
+    load_prereqs, write_prereqs, FlatSeed, PrereqInferenceDefinition, PrereqsFile,
+    PREREQS_SCHEMA_VERSION,
+};
 pub use types::*;

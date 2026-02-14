@@ -4,6 +4,7 @@ use super::{
     SURFACE_OVERLAYS_SCHEMA_VERSION,
 };
 use crate::enrich;
+use crate::scenarios::ScenarioSeedSpec;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -101,9 +102,21 @@ pub(crate) struct SurfaceBehaviorExclusion {
     pub exclusion: BehaviorExclusion,
 }
 
+/// User override for inferred prereqs on a surface item.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct PrereqOverride {
+    /// If true, exclude this item from auto-verify.
+    #[serde(default)]
+    pub exclude: bool,
+    /// Custom seed to use instead of inferred seed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<ScenarioSeedSpec>,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct SurfaceOverlays {
+pub struct SurfaceOverlays {
     schema_version: u32,
     #[serde(default)]
     items: Vec<SurfaceOverlaysItem>,
@@ -132,6 +145,12 @@ struct SurfaceOverlaysOverlay {
     invocation: SurfaceOverlaysInvocationOverlay,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     behavior_exclusion: Option<BehaviorExclusion>,
+    /// LM-authored prereqs for this surface item (references keys in semantics.json.verification.prereqs).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    prereqs: Vec<String>,
+    /// User override for inferred prereqs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    prereq_override: Option<PrereqOverride>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -205,7 +224,10 @@ pub(super) fn apply_surface_overlays(
             if !missing_overlays.is_empty() {
                 state.blockers.push(enrich::Blocker {
                     code: "surface_overlays_missing_targets".to_string(),
-                    message: format!("surface overlays reference unknown items: {:?}", missing_overlays),
+                    message: format!(
+                        "surface overlays reference unknown items: {:?}",
+                        missing_overlays
+                    ),
                     evidence: vec![evidence.clone()],
                     next_action: Some("fix inventory/surface.overlays.json".to_string()),
                 });

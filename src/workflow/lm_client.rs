@@ -49,9 +49,14 @@
 //! 2. `lm_command` in `enrich/config.json`
 //! 3. `BMAN_LM_COMMAND` environment variable
 
-use crate::enrich::{BehaviorNextActionPayload, StatusSummary};
+use crate::enrich::{
+    BehaviorNextActionPayload, FlatSeed, PrereqInferenceDefinition, PrereqsFile, StatusSummary,
+    PREREQS_SCHEMA_VERSION,
+};
 use crate::workflow::lm_response::LmResponseBatch;
 use anyhow::{anyhow, Context, Result};
+use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::process::{Command, Stdio};
 
@@ -572,15 +577,13 @@ fn sanitize_lm_response(batch: &mut LmResponseBatch, binary_name: &str) {
                 seed.entries.retain(|entry| {
                     let path = entry.path.trim();
                     // Remove empty paths, ".", "..", or paths starting with ".."
-                    !path.is_empty()
-                        && path != "."
-                        && path != ".."
-                        && !path.starts_with("../")
+                    !path.is_empty() && path != "." && path != ".." && !path.starts_with("../")
                 });
 
                 // Remove duplicate paths (keep first occurrence)
                 let mut seen_paths = std::collections::HashSet::new();
-                seed.entries.retain(|entry| seen_paths.insert(entry.path.clone()));
+                seed.entries
+                    .retain(|entry| seen_paths.insert(entry.path.clone()));
 
                 // Fix mode values - LMs often use "644" meaning octal 0o644
                 // but JSON parses it as decimal 644. Convert common patterns.
@@ -588,14 +591,14 @@ fn sanitize_lm_response(batch: &mut LmResponseBatch, binary_name: &str) {
                     if let Some(mode) = entry.mode {
                         let fixed_mode = match mode {
                             // Common "octal-looking" modes that are actually decimal
-                            644 => 0o644,  // rw-r--r--
-                            755 => 0o755,  // rwxr-xr-x
-                            777 => 0o777,  // rwxrwxrwx
-                            666 => 0o666,  // rw-rw-rw-
-                            600 => 0o600,  // rw-------
-                            700 => 0o700,  // rwx------
-                            444 => 0o444,  // r--r--r--
-                            555 => 0o555,  // r-xr-xr-x
+                            644 => 0o644,               // rw-r--r--
+                            755 => 0o755,               // rwxr-xr-x
+                            777 => 0o777,               // rwxrwxrwx
+                            666 => 0o666,               // rw-rw-rw-
+                            600 => 0o600,               // rw-------
+                            700 => 0o700,               // rwx------
+                            444 => 0o444,               // r--r--r--
+                            555 => 0o555,               // r-xr-xr-x
                             _ if mode > 0o777 => 0o755, // Fallback
                             _ => mode,
                         };
@@ -605,6 +608,174 @@ fn sanitize_lm_response(batch: &mut LmResponseBatch, binary_name: &str) {
             }
         }
     }
+}
+
+// ============================================================================
+// Prereq Inference
+// ============================================================================
+
+/// Surface item info passed to prereq inference.
+#[derive(Debug, Clone)]
+pub struct SurfaceItemInfo {
+    pub id: String,
+    pub description: Option<String>,
+    pub forms: Vec<String>,
+}
+
+/// LM response format for prereq inference.
+#[derive(Debug, Deserialize)]
+struct LmPrereqResponse {
+    #[serde(default)]
+    definitions: BTreeMap<String, LmPrereqDefinition>,
+    #[serde(default)]
+    surface_map: BTreeMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LmPrereqDefinition {
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    seed: Option<FlatSeed>,
+    #[serde(default)]
+    exclude: bool,
+}
+
+/// Invoke the LM to infer prereqs for surface items.
+pub fn invoke_lm_for_prereqs(
+    config: &LmClientConfig,
+    binary_name: &str,
+    existing_definitions: &BTreeMap<String, PrereqInferenceDefinition>,
+    items: &[SurfaceItemInfo],
+) -> Result<PrereqsFile> {
+    let prompt = build_prereq_prompt(binary_name, existing_definitions, items);
+
+    let response_text = invoke_lm_command(&config.command, &prompt)?;
+    parse_prereq_response(&response_text)
+}
+
+/// Build prompt for prereq inference.
+fn build_prereq_prompt(
+    binary_name: &str,
+    existing_definitions: &BTreeMap<String, PrereqInferenceDefinition>,
+    items: &[SurfaceItemInfo],
+) -> String {
+    let mut prompt = String::new();
+
+    prompt.push_str(&format!(
+        r#"You are helping determine prerequisites for testing `{binary_name}` command options.
+
+## Task
+Analyze each option's documentation and determine what prerequisites it needs for auto-verification.
+
+## Categories
+- **filesystem**: needs specific directory/file structure (provide seed)
+- **config**: needs config files present (provide seed)
+- **state**: needs existing state like commits, staged files (provide seed)
+- **interactive**: requires TTY/editor (exclude from auto-verify)
+- **network**: requires network access (exclude from auto-verify)
+- **privilege**: requires elevated permissions (exclude from auto-verify)
+- **null**: no special requirements
+
+"#
+    ));
+
+    // Add existing definitions as context
+    if !existing_definitions.is_empty() {
+        prompt.push_str("## Existing Prereq Definitions (reference these when applicable)\n");
+        for (key, def) in existing_definitions {
+            let desc = def.description.as_deref().unwrap_or("no description");
+            prompt.push_str(&format!("- `{key}`: {desc}\n"));
+        }
+        prompt.push('\n');
+    }
+
+    // Add surface items to analyze
+    prompt.push_str("## Surface Items to Analyze\n");
+    for item in items {
+        let desc = item.description.as_deref().unwrap_or("no description");
+        let forms = if item.forms.is_empty() {
+            String::new()
+        } else {
+            format!(" (forms: {})", item.forms.join(", "))
+        };
+        prompt.push_str(&format!("`{}`{}: {}\n", item.id, forms, desc));
+    }
+
+    prompt.push_str(
+        r#"
+## Output Format
+Return a JSON object with:
+1. `definitions`: New prereq definitions (only if no existing one fits)
+2. `surface_map`: Mapping from option id to prereq keys (or empty array for no prereqs)
+
+```json
+{
+  "definitions": {
+    "git_repo": {
+      "description": "git repository with .git directory",
+      "seed": {"dirs": [".git"]},
+      "exclude": false
+    },
+    "interactive": {
+      "description": "requires interactive TTY",
+      "seed": null,
+      "exclude": true
+    }
+  },
+  "surface_map": {
+    "--edit": ["interactive"],
+    "--local": ["git_repo"],
+    "--global": []
+  }
+}
+```
+
+**Seed format:**
+- `dirs`: Array of directory paths, e.g. `["dir1", "dir2"]`
+- `files`: Object mapping path to content, e.g. `{"file.txt": "content"}`
+- `symlinks`: Object mapping path to target, e.g. `{"link": "file.txt"}`
+- `executables`: Object mapping path to content (mode 755), e.g. `{"run.sh": "echo hi"}`
+
+**Rules:**
+- Reference existing definitions when they apply
+- Define new prereqs only when no existing one fits
+- Use `exclude: true` for interactive, network, and privilege categories
+- Empty array `[]` means no prereqs needed
+- Keep descriptions concise
+
+Respond ONLY with the JSON object, no other text.
+"#,
+    );
+
+    prompt
+}
+
+/// Parse LM prereq response into PrereqsFile.
+fn parse_prereq_response(text: &str) -> Result<PrereqsFile> {
+    let json_text = extract_json(text);
+    let response: LmPrereqResponse = serde_json::from_str(json_text)
+        .with_context(|| format!("parse prereq response: {}", &text[..text.len().min(500)]))?;
+
+    let mut prereqs = PrereqsFile {
+        schema_version: PREREQS_SCHEMA_VERSION,
+        definitions: BTreeMap::new(),
+        surface_map: response.surface_map,
+    };
+
+    // Convert LM definitions to PrereqInferenceDefinition
+    for (key, def) in response.definitions {
+        prereqs.definitions.insert(
+            key,
+            PrereqInferenceDefinition {
+                description: def.description,
+                seed: def.seed.map(|flat| flat.to_seed_spec()),
+                exclude: def.exclude,
+            },
+        );
+    }
+
+    Ok(prereqs)
 }
 
 /// Extract JSON from text that might have markdown code fences.
