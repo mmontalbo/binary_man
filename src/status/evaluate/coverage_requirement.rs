@@ -109,11 +109,11 @@ pub(super) fn eval_coverage_requirement(
         }
 
         let mut surface_evidence_map: BTreeMap<String, Vec<enrich::EvidenceRef>> = BTreeMap::new();
-        for item in surface
-            .items
-            .iter()
-            .filter(|item| matches!(item.kind.as_str(), "option" | "command" | "subcommand"))
-        {
+        // Include all non-entry-point items for coverage tracking
+        for item in surface.items.iter().filter(|item| {
+            // Entry points have their own id in context_argv
+            item.context_argv.last().map(|s| s.as_str()) != Some(item.id.as_str())
+        }) {
             let normalized = scenarios::normalize_surface_id(&item.id);
             if normalized.is_empty() {
                 continue;

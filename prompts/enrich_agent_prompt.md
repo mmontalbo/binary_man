@@ -98,7 +98,6 @@ Prefer setting shared runner defaults once in `scenarios/plan.json` under `defau
 - `no_sandbox: false`
 - `no_strace: true`
 - `snippet_max_lines` / `snippet_max_bytes` (if you want tighter output)
-- `cwd`, `env`, `seed_dir` when common across scenarios
 - `seed` when you want a shared inline fixture for many scenarios:
   - Put the seed entries under `defaults.seed`.
   - Omit per-scenario `seed` so baseline + variants inherit the same fixture.
@@ -143,7 +142,6 @@ If `enrich/config.json.requirements` includes `"verification"` (default for new 
 - Missing `invocation.value_examples` does not block first-pass behavior authoring; surface overlays remain optional refinement.
 - Behavior tier uses a shared inline fixture under `scenarios/plan.json.defaults.seed` for baseline + variants.
 - Auto verification is controlled by `scenarios/plan.json.verification.policy`:
-  - `kinds`: ordered list of auto targets (`"option"`, `"subcommand"`).
   - `max_new_runs_per_apply`: batch size per apply.
 - Exclusions (accepted tier only) are `scenarios/plan.json.verification.queue[]` entries with `intent: "exclude"` + non-empty `prereqs[]` (enum tags: `needs_arg_value`, `needs_seed_fs`, `needs_repo`, `needs_network`, `needs_interactive`, `needs_privilege`) and an optional reason.
 - Exclusions are only for concrete blockers; if you do not want to verify something yet, leave it unqueued.
@@ -220,6 +218,14 @@ Notes:
   ]
 }
 ```
+
+### Creating fixtures for verification
+When auto-verification fails due to environment requirements (e.g., "not a git repository"), check scenario evidence:
+1. Read `inventory/scenarios/auto_verify::*.json` to see stderr/exit_code patterns
+2. If failures show environment-specific errors, create an appropriate fixture:
+   - For other tools: create fixtures matching the tool's requirements
+3. Alternatively, update `enrich/semantics.json.verification.accepted` to recognize the error pattern as "option accepted but environment missing"
+4. Use `prereqs: ["needs_repo"]` exclusions only when fixture creation is impractical
 
 ## Finish
 When complete:

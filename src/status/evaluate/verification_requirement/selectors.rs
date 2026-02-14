@@ -155,13 +155,27 @@ fn invocation_needs_value_examples(invocation: &crate::surface::SurfaceInvocatio
     invocation.value_arity.trim() == "required"
 }
 
+/// Derive kind from surface item using heuristics.
+fn derive_kind_from_item(item: &crate::surface::SurfaceItem) -> String {
+    // Entry points (id in context_argv) are commands/subcommands
+    if item.context_argv.last().map(|s| s.as_str()) == Some(item.id.as_str()) {
+        return "subcommand".to_string();
+    }
+    // Items starting with - are options
+    if item.id.starts_with('-') {
+        return "option".to_string();
+    }
+    // Default to option for non-entry-point items
+    "option".to_string()
+}
+
 pub(super) fn surface_kind_for_id(
     surface: &crate::surface::SurfaceInventory,
     surface_id: &str,
     fallback_kind: &str,
 ) -> String {
     if let Some(item) = crate::surface::primary_surface_item_by_id(surface, surface_id) {
-        return item.kind.clone();
+        return derive_kind_from_item(item);
     }
     fallback_kind.to_string()
 }
@@ -218,20 +232,37 @@ mod tests {
     }
 
     #[test]
-    fn surface_kind_for_id_prefers_inventory_kind_when_present() {
+    fn surface_kind_for_id_derives_subcommand_from_context_argv() {
         let mut surface = empty_surface();
+        // An entry point: context_argv contains the item's id
         surface.items.push(crate::surface::SurfaceItem {
-            kind: "subcommand".to_string(),
             id: "show".to_string(),
             display: "show".to_string(),
             description: None,
             parent_id: None,
-            context_argv: Vec::new(),
+            context_argv: vec!["show".to_string()],
             forms: vec!["show".to_string()],
             invocation: crate::surface::SurfaceInvocation::default(),
             evidence: Vec::new(),
         });
         let kind = surface_kind_for_id(&surface, "show", "option");
         assert_eq!(kind, "subcommand");
+    }
+
+    #[test]
+    fn surface_kind_for_id_derives_option_from_dash_prefix() {
+        let mut surface = empty_surface();
+        surface.items.push(crate::surface::SurfaceItem {
+            id: "--verbose".to_string(),
+            display: "--verbose".to_string(),
+            description: None,
+            parent_id: None,
+            context_argv: Vec::new(),
+            forms: vec!["--verbose".to_string()],
+            invocation: crate::surface::SurfaceInvocation::default(),
+            evidence: Vec::new(),
+        });
+        let kind = surface_kind_for_id(&surface, "--verbose", "subcommand");
+        assert_eq!(kind, "option");
     }
 }

@@ -26,12 +26,8 @@ fn write_required_inputs(root: &std::path::Path, config: &enrich::EnrichConfig) 
         templates::USAGE_FROM_SCENARIOS_SQL,
     );
     write_file(
-        &root.join(enrich::SUBCOMMANDS_FROM_SCENARIOS_TEMPLATE_REL),
-        templates::SUBCOMMANDS_FROM_SCENARIOS_SQL,
-    );
-    write_file(
-        &root.join(enrich::OPTIONS_FROM_SCENARIOS_TEMPLATE_REL),
-        templates::OPTIONS_FROM_SCENARIOS_SQL,
+        &root.join(enrich::SURFACE_FROM_SCENARIOS_TEMPLATE_REL),
+        templates::SURFACE_FROM_SCENARIOS_SQL,
     );
     write_file(
         &root.join(enrich::VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL),

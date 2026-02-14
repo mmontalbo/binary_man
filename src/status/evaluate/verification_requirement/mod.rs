@@ -681,7 +681,6 @@ fn minimal_behavior_baseline_scenario(id: &str) -> scenarios::ScenarioSpec {
         publish: false,
         argv: vec![scenarios::DEFAULT_BEHAVIOR_SEED_DIR.to_string()],
         env: std::collections::BTreeMap::new(),
-        seed_dir: None,
         seed: None,
         cwd: None,
         timeout_seconds: None,
@@ -1719,10 +1718,10 @@ fn auto_verification_is_stuck(
         .scenarios
         .iter()
         .filter_map(|entry| {
-            // auto_verify scenario IDs have format: auto_verify::option::--flag
+            // auto_verify scenario IDs have format: auto_verify::--flag
             entry
                 .scenario_id
-                .strip_prefix("auto_verify::option::")
+                .strip_prefix("auto_verify::")
                 .map(str::to_string)
         })
         .collect();

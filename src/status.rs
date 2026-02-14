@@ -450,12 +450,7 @@ mod tests {
         )
         .unwrap();
         fs::write(
-            root.join("queries").join("options_from_scenarios.sql"),
-            "-- test\n".as_bytes(),
-        )
-        .unwrap();
-        fs::write(
-            root.join("queries").join("subcommands_from_scenarios.sql"),
+            root.join("queries").join("surface_from_scenarios.sql"),
             "-- test\n".as_bytes(),
         )
         .unwrap();
@@ -506,7 +501,6 @@ mod tests {
             publish: false,
             argv: vec!["--help".to_string()],
             env: BTreeMap::new(),
-            seed_dir: None,
             seed: None,
             cwd: None,
             timeout_seconds: None,
@@ -555,7 +549,6 @@ mod tests {
             scenario_id: "fail".to_string(),
             argv: vec!["bin".to_string(), "--help".to_string()],
             env: BTreeMap::new(),
-            seed_dir: None,
             cwd: None,
             timeout_seconds: None,
             net_mode: None,

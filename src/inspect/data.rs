@@ -59,7 +59,6 @@ impl EvidenceCounts {
 #[derive(Debug, Clone)]
 pub(super) struct VerificationPolicySummary {
     pub(super) max_new_runs_per_apply: usize,
-    pub(super) kinds: Vec<String>,
     pub(super) excludes_count: usize,
 }
 
@@ -428,15 +427,9 @@ fn load_verification_policy(paths: &DocPackPaths) -> Option<VerificationPolicySu
         _ => return None,
     };
     let policy = plan.verification.policy.as_ref()?;
-    let kinds = policy
-        .kinds
-        .iter()
-        .map(|kind| kind.as_str().to_string())
-        .collect();
     let (_excluded_entries, excluded_ids) = plan.collect_queue_exclusions();
     Some(VerificationPolicySummary {
         max_new_runs_per_apply: policy.max_new_runs_per_apply,
-        kinds,
         excludes_count: excluded_ids.len(),
     })
 }

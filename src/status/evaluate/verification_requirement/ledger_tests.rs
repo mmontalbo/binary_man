@@ -29,7 +29,6 @@ fn minimal_surface() -> surface::SurfaceInventory {
         inputs_hash: None,
         discovery: Vec::new(),
         items: vec![surface::SurfaceItem {
-            kind: "option".to_string(),
             id: "--color".to_string(),
             display: "--color".to_string(),
             description: None,

@@ -349,14 +349,9 @@ impl App {
         }
 
         if let Some(policy) = self.data.verification_policy.as_ref() {
-            let kinds = if policy.kinds.is_empty() {
-                "none".to_string()
-            } else {
-                policy.kinds.join(", ")
-            };
             lines.push(Line::from(format!(
-                "Batch: {} | Kinds: {} | Queue excludes: {}",
-                policy.max_new_runs_per_apply, kinds, policy.excludes_count
+                "Batch: {} | Queue excludes: {}",
+                policy.max_new_runs_per_apply, policy.excludes_count
             )));
         }
 

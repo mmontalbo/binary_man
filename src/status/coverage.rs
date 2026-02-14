@@ -15,17 +15,17 @@ pub(crate) fn coverage_stub_from_plan(
     }
     let mut updated = plan.clone();
     let stub_id = coverage_stub_id(&updated);
-    let target_kind = surface::primary_surface_item_by_id(surface, target_id)
-        .map(|item| item.kind.as_str())
-        .unwrap_or("option");
-    let argv = coverage_stub_argv(target_id, target_kind, semantics);
+    // Use id shape heuristic: ids starting with - are option-like
+    let looks_like_option = target_id.starts_with('-');
+    let item = surface::primary_surface_item_by_id(surface, target_id);
+    let context_argv = item.map(|i| i.context_argv.as_slice()).unwrap_or(&[]);
+    let argv = coverage_stub_argv(target_id, looks_like_option, context_argv, semantics);
     updated.scenarios.push(scenarios::ScenarioSpec {
         id: stub_id,
         kind: scenarios::ScenarioKind::Behavior,
         publish: false,
         argv,
         env: BTreeMap::new(),
-        seed_dir: None,
         seed: None,
         cwd: None,
         timeout_seconds: None,
@@ -46,12 +46,13 @@ pub(crate) fn coverage_stub_from_plan(
 
 fn coverage_stub_argv(
     target_id: &str,
-    target_kind: &str,
+    looks_like_option: bool,
+    context_argv: &[String],
     semantics: Option<&semantics::Semantics>,
 ) -> Vec<String> {
     let mut argv = Vec::new();
     if let Some(semantics) = semantics {
-        let (prefix, suffix) = if target_kind == "option" {
+        let (prefix, suffix) = if looks_like_option {
             (
                 &semantics.verification.option_existence_argv_prefix,
                 &semantics.verification.option_existence_argv_suffix,
@@ -63,11 +64,15 @@ fn coverage_stub_argv(
             )
         };
         argv.extend(prefix.iter().cloned());
+        argv.extend(context_argv.iter().cloned());
         argv.push(target_id.to_string());
         argv.extend(suffix.iter().cloned());
         return argv;
     }
-    vec![target_id.to_string()]
+    let mut argv = Vec::new();
+    argv.extend(context_argv.iter().cloned());
+    argv.push(target_id.to_string());
+    argv
 }
 
 fn coverage_stub_id(plan: &scenarios::ScenarioPlan) -> String {

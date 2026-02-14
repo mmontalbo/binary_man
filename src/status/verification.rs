@@ -97,23 +97,48 @@ pub(crate) fn auto_verification_state_for_targets(
     verification_tier: VerificationTier,
 ) -> AutoVerificationState {
     let mut remaining_ids = Vec::new();
-    let mut remaining_by_kind = Vec::new();
-    for (kind, group_ids) in &targets.targets {
-        let mut group_remaining = Vec::new();
-        for surface_id in group_ids {
-            let status = VerificationStatus::from_entry(
-                ledger_entries.and_then(|entries| entries.get(surface_id)),
-                verification_tier,
-            );
-            if status.requires_follow_up() {
-                group_remaining.push(surface_id.clone());
-                remaining_ids.push(surface_id.clone());
+
+    // Group targets by derived kind for display purposes
+    let mut options_remaining = Vec::new();
+    let mut other_remaining = Vec::new();
+    let mut options_count = 0usize;
+    let mut other_count = 0usize;
+
+    for surface_id in &targets.target_ids {
+        let is_option = surface_id.starts_with('-');
+        if is_option {
+            options_count += 1;
+        } else {
+            other_count += 1;
+        }
+
+        let status = VerificationStatus::from_entry(
+            ledger_entries.and_then(|entries| entries.get(surface_id)),
+            verification_tier,
+        );
+        if status.requires_follow_up() {
+            remaining_ids.push(surface_id.clone());
+            if is_option {
+                options_remaining.push(surface_id.clone());
+            } else {
+                other_remaining.push(surface_id.clone());
             }
         }
+    }
+
+    let mut remaining_by_kind = Vec::new();
+    if options_count > 0 {
         remaining_by_kind.push(AutoVerificationKindState {
-            kind: kind.clone(),
-            target_count: group_ids.len(),
-            remaining_ids: group_remaining,
+            kind: "option".to_string(),
+            target_count: options_count,
+            remaining_ids: options_remaining,
+        });
+    }
+    if other_count > 0 {
+        remaining_by_kind.push(AutoVerificationKindState {
+            kind: "other".to_string(),
+            target_count: other_count,
+            remaining_ids: other_remaining,
         });
     }
 
@@ -331,7 +356,6 @@ fn behavior_scenario_spec(id: String, argv: Vec<String>) -> scenarios::ScenarioS
         publish: false,
         argv,
         env: BTreeMap::new(),
-        seed_dir: None,
         seed: None,
         cwd: None,
         timeout_seconds: None,

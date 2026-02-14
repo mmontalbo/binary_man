@@ -15,10 +15,8 @@ pub const HISTORY_SCHEMA_VERSION: u32 = 1;
 
 /// Default usage lens for scenario-only evidence.
 pub const SCENARIO_USAGE_LENS_TEMPLATE_REL: &str = "queries/usage_from_scenarios.sql";
-/// Default subcommand lens for scenario-only evidence.
-pub const SUBCOMMANDS_FROM_SCENARIOS_TEMPLATE_REL: &str = "queries/subcommands_from_scenarios.sql";
-/// Default options lens for scenario-only evidence.
-pub const OPTIONS_FROM_SCENARIOS_TEMPLATE_REL: &str = "queries/options_from_scenarios.sql";
+/// Default surface lens for scenario-only evidence (extracts options and entry points).
+pub const SURFACE_FROM_SCENARIOS_TEMPLATE_REL: &str = "queries/surface_from_scenarios.sql";
 /// Default verification lens for scenario-only evidence.
 pub const VERIFICATION_FROM_SCENARIOS_TEMPLATE_REL: &str =
     "queries/verification_from_scenarios.sql";
@@ -29,11 +27,8 @@ pub const VERIFICATION_FROM_SCENARIOS_SECTION_TEMPLATE_RELS: [&str; 4] = [
     "queries/verification_from_scenarios/20_coverage_reasoning.sql",
     "queries/verification_from_scenarios/30_rollups_output.sql",
 ];
-/// Default surface lenses (options + subcommands) for scenario-only evidence.
-pub const SURFACE_LENS_TEMPLATE_RELS: [&str; 2] = [
-    OPTIONS_FROM_SCENARIOS_TEMPLATE_REL,
-    SUBCOMMANDS_FROM_SCENARIOS_TEMPLATE_REL,
-];
+/// Default surface lenses for scenario-only evidence.
+pub const SURFACE_LENS_TEMPLATE_RELS: [&str; 1] = [SURFACE_FROM_SCENARIOS_TEMPLATE_REL];
 /// Pack-owned prompt guidance installed during init.
 pub const ENRICH_AGENT_PROMPT_REL: &str = "enrich/agent_prompt.md";
 

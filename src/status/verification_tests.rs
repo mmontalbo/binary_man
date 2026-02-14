@@ -30,7 +30,6 @@ fn surface_item(
     forms: &[&str],
 ) -> surface::SurfaceItem {
     surface::SurfaceItem {
-        kind: "option".to_string(),
         id: surface_id.to_string(),
         display: surface_id.to_string(),
         description: None,
@@ -118,8 +117,8 @@ fn behavior_argv_uses_form_hint_when_separator_is_either() {
 #[test]
 fn behavior_argv_for_non_option_id_stays_generic() {
     let baseline = vec!["work".to_string()];
-    let mut item = surface_item("show", invocation("unknown", "unknown", &[]), &["show"]);
-    item.kind = "subcommand".to_string();
+    // Test with a non-dashed id that's a non-entry-point (context_argv is empty)
+    let item = surface_item("show", invocation("unknown", "unknown", &[]), &["show"]);
     let argv = build_behavior_argv(&item, &baseline).unwrap();
     assert_eq!(argv, vec!["show".to_string(), "work".to_string()]);
 }
@@ -144,7 +143,6 @@ fn minimal_surface(surface_id: &str) -> surface::SurfaceInventory {
         inputs_hash: None,
         discovery: Vec::new(),
         items: vec![surface::SurfaceItem {
-            kind: "option".to_string(),
             id: surface_id.to_string(),
             display: surface_id.to_string(),
             description: None,
@@ -201,7 +199,6 @@ fn behavior_variant_stub_omits_expect_defaults() {
             publish: false,
             argv: vec!["work".to_string()],
             env: BTreeMap::new(),
-            seed_dir: None,
             seed: None,
             cwd: None,
             timeout_seconds: None,
@@ -301,7 +298,6 @@ fn behavior_scenario_stub_scopes_payload_to_single_scenario() {
         publish: false,
         argv: vec!["--color=auto".to_string(), "work".to_string()],
         env: BTreeMap::new(),
-        seed_dir: None,
         seed: None,
         cwd: None,
         timeout_seconds: None,
