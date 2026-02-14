@@ -1730,10 +1730,27 @@ fn auto_verification_is_stuck(remaining_ids: &[String], paths: &enrich::DocPackP
                 .map(str::to_string)
         })
         .collect();
-    // Check if ALL remaining IDs have auto_verify scenarios that ran
-    remaining_ids
-        .iter()
-        .all(|surface_id| auto_verify_surface_ids.contains(surface_id))
+
+    // Load prereqs to find items excluded from auto-verify (e.g., interactive)
+    let prereq_excluded_ids: std::collections::BTreeSet<String> =
+        if let Ok(Some(prereqs)) = enrich::load_prereqs(&paths.prereqs_path()) {
+            prereqs
+                .surface_map
+                .iter()
+                .filter(|(_, keys)| {
+                    keys.iter()
+                        .any(|key| prereqs.definitions.get(key).is_some_and(|def| def.exclude))
+                })
+                .map(|(id, _)| id.clone())
+                .collect()
+        } else {
+            std::collections::BTreeSet::new()
+        };
+
+    // Check if ALL remaining IDs (excluding prereq-excluded) have auto_verify scenarios
+    remaining_ids.iter().all(|surface_id| {
+        prereq_excluded_ids.contains(surface_id) || auto_verify_surface_ids.contains(surface_id)
+    })
 }
 
 pub(super) fn eval_verification_requirement(
