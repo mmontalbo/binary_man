@@ -5,9 +5,133 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M19 — multi-command CLI validation (git).
+Current focus: M20 — LM-driven prereq and fixture generation.
 
-## M19 — Pack-Owned Verification Semantics (current)
+## M20 — LM-Driven Prereq and Fixture Generation (current)
+
+Goal: Enable LMs to define prerequisite requirements from documentation and
+synthesize appropriate fixtures, with tool support for suggestion and validation
+but not automation of the creative/semantic work.
+
+Motivation:
+- M19 achieved ~74% behavior verification for `git config` (25/34 options).
+- Remaining options fail due to environment requirements (repo context, config
+  keys, interactive editors) that the LM doesn't address.
+- The tool surfaces `auto_verify_exit_code` and `auto_verify_stderr` but the LM
+  needs structured guidance to act on this evidence.
+- Fixture generation must generalize beyond git to any CLI tool.
+
+Design principles:
+- **Documentation-first**: LM infers prereqs from help text and man pages, not
+  just from error messages. Errors confirm/refine, not discover.
+- **LM-owned semantics**: Prereqs are LM-authored definitions encoding binary-
+  specific knowledge. Tool provides structure, not vocabulary.
+- **No automation loops**: Tool suggests prereqs from stderr patterns; LM
+  decides whether to act. Tool doesn't automatically retry with fixtures.
+
+### Prereq Model
+
+**Categories** (fixed set for consistency):
+- `filesystem` — needs files/directories to exist
+- `config` — needs configuration values
+- `state` — needs prior state (history, packages, etc.)
+- `interactive` — requires user input
+- `network` — requires network access
+- `privilege` — requires elevated permissions
+
+**Prereq definitions** (LM-authored in `enrich/semantics.json`):
+```json
+{
+  "prereqs": {
+    "git_repository": {
+      "category": "filesystem",
+      "description": "Minimal git repository structure",
+      "seed": {
+        "entries": [
+          { "path": ".git/HEAD", "content": "ref: refs/heads/main\n" },
+          { "path": ".git/config", "content": "[core]\nbare = false\n" }
+        ]
+      },
+      "auto_verify": "retry_with_seed"
+    },
+    "interactive_editor": {
+      "category": "interactive",
+      "description": "Opens external editor for input",
+      "auto_verify": "exclude",
+      "exclude_reason": "Cannot simulate editor interaction in sandbox"
+    }
+  },
+  "prereq_suggestions": [
+    { "stderr_contains": "not in a git directory", "suggest": "git_repository" },
+    { "stderr_contains": "not a git repository", "suggest": "git_repository" }
+  ]
+}
+```
+
+**Surface prereqs** (LM-authored in `inventory/surface.overlays.json`):
+```json
+{
+  "overlays": [
+    { "id": "--edit", "prereqs": ["interactive_editor"] },
+    { "id": "--get", "prereqs": ["git_repository"] }
+  ]
+}
+```
+
+**Scenario prereqs**: Scenarios inherit prereqs from surface overlays or specify
+explicitly. Seed can use prereq template or override with inline seed.
+
+### LM Workflow
+
+1. **Documentation analysis**: LM reads help/man, identifies environmental
+   requirements, creates prereq definitions in semantics.json.
+
+2. **Surface annotation**: LM updates surface overlays to tag options with
+   prereqs based on documentation understanding.
+
+3. **Auto-verify runs**: Tool runs scenarios, records stderr. If stderr matches
+   `prereq_suggestions`, adds `suggested_prereq` to decisions output.
+
+4. **Scenario authoring**: LM uses prereq definitions to build seeds for
+   scenarios that verify behavior.
+
+### Deliverables
+
+1. **Prereq schema in semantics.json**: Category, description, seed template,
+   auto_verify policy (retry_with_seed | exclude | default).
+
+2. **Surface prereqs in overlays**: Per-option prereq annotations as source of
+   truth for what options need.
+
+3. **Prereq suggestions via stderr patterns**: LM-authored patterns in
+   `semantics.json.prereq_suggestions`. Tool matches failures, adds
+   `suggested_prereq` to decisions output. Suggestion only, no automatic action.
+
+4. **Scenario prereq inheritance**: Scenarios can specify prereq explicitly or
+   inherit from surface overlay. Inline seed overrides prereq's seed template.
+
+5. **Agent prompt: prereq workflow**: Document the discovery→define→annotate→
+   author flow with examples.
+
+### Acceptance Criteria
+
+| Item | Outcome |
+|------|---------|
+| LM defines prereqs from documentation | Prereq definitions in semantics.json |
+| LM annotates surface items with prereqs | Surface overlays updated |
+| Auto-verify failure suggests prereq | Decisions shows `suggested_prereq` |
+| LM authors scenario with prereq seed | Scenario verifies successfully |
+| Interactive options excluded via prereq | `interactive_editor` with exclude policy |
+| Pattern generalizes beyond git | Documented approach for other CLIs |
+
+### Out of Scope
+
+- Automatic retry with prereq seeds (tool suggests, LM acts)
+- Complex seed composition/merging (scenarios override completely or use as-is)
+- Cross-binary prereq libraries (each pack defines its own)
+- Complex stateful fixtures (commit history, installed packages)
+
+## M19 — Pack-Owned Verification Semantics (done)
 
 Goal: Remove hardcoded option/subcommand verification semantics from the tool.
 Make surface kinds, verification strategies, and auto-scenario generation fully
@@ -25,53 +149,28 @@ Motivation:
 - No parent-child relationship support: `git config --global` cannot be modeled
   as an option belonging to the `config` subcommand.
 
-Design principle: The tool should be a generic executor. Pack-owned artifacts
-(SQL queries, semantics.json, overlays) should define what surface kinds exist,
-how to verify each, and how to generate auto-verification scenarios.
+Delivered:
+- **Surface schema v3**: Added `parent_id` and `context_argv` fields to surface
+  items, enabling hierarchical option→subcommand relationships.
+- **Pack-owned auto-scenario generation**: `queries/auto_scenarios.sql` now
+  constructs verification argv; Rust executes but doesn't interpret.
+- **Kind derivation**: Removed stored `kind` field; derived from context_argv
+  (entry points = subcommands) and id prefix (dash = option).
+- **Auto-verify evidence exposure**: Added `auto_verify_exit_code` and
+  `auto_verify_stderr` to decisions output, enabling LMs to diagnose failures.
+- **Recursive subcommand discovery**: Help scenarios for discovered subcommands
+  enable multi-level surface discovery (`git config` options from `git config --help`).
+- **Simplified seed handling**: Removed `seed_dir` in favor of inline seed specs
+  via `binary_lens run_seed_spec`.
+- **CLI cleanup**: Removed `merge_behavior_edit` command; simplified interface.
+- **git config validation**: Achieved ~74% behavior verification (25/34 options);
+  remaining options blocked on fixture requirements (repo context, interactive).
+- **ls backward compatibility**: Confirmed working with all changes.
 
-Deliverables:
-1. **Surface schema v3**: Add optional `parent_id` and `context_argv` fields to
-   surface items, enabling hierarchical relationships.
-   ```json
-   {
-     "kind": "option",
-     "id": "--global",
-     "parent_id": "config",
-     "context_argv": ["config"]
-   }
-   ```
-
-2. **Pack-owned auto-scenario generation**: Move scenario argv construction from
-   Rust to pack SQL. The tool executes `queries/auto_scenarios.sql` to get
-   scenario specs; it doesn't decide how to invoke different kinds.
-
-3. **Pack-owned tier targeting**: Move "which kinds need which tiers" from
-   hardcoded Rust to `enrich/semantics.json`. The tool reads tier requirements
-   from pack config, doesn't hardcode "behavior = options only".
-
-4. **Validation with git config**: Demonstrate that an LM can:
-   - Discover `git config` options via pack SQL (from `git config --help` output)
-   - Add them to surface with `parent_id: "config"`
-   - Behavior-verify them using pack-defined strategies
-
-Approach:
-1. Extend surface schema with `parent_id` and `context_argv` (non-breaking).
-2. Add `queries/auto_scenarios.sql` template; refactor Rust to execute it.
-3. Move `tier_requirements_by_kind` to semantics.json; refactor Rust to read it.
-4. Update default pack templates for backward compatibility with `ls`-style CLIs.
-5. Test with `git config` end-to-end.
-
-Acceptance criteria:
-- No `VerificationTargetKind` enum driving behavior in Rust (kinds are strings).
-- Auto-scenario argv construction comes from pack SQL, not Rust.
-- Tier targeting comes from semantics.json, not hardcoded.
-- `git config` options reach behavior verification via LM-driven loop.
-- `ls` pack still works (backward compatible).
-
-Out of scope:
-- Full SQL-ification of next_action logic (incremental follow-up).
-- Nested subcommands beyond one level (`git stash list`).
-- `bman run --subcommand` CLI (not needed if pack handles context_argv).
+Known limitations (deferred to M20):
+- Options requiring git repo context (e.g., `--edit`) fail auto-verification
+  with "not in a git directory" but LM doesn't synthesize fixtures from this.
+- Interactive options timeout but aren't recognized as "verified via timeout".
 
 ## M18 — End-to-End LM Agent Validation (done)
 
