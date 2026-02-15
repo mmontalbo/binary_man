@@ -181,16 +181,14 @@ If `enrich/config.json.requirements` includes `"verification"` (default for new 
 - For short/ambiguous `stdout_token` values (<= 2 chars or mostly punctuation), prefer `*_stdout_has_line` / `*_stdout_not_has_line` to avoid substring matches.
 - Example (directory listing): `seed_path: "work/file.txt", stdout_token: "file.txt"`.
 - Assertion kinds: `baseline_stdout_not_contains_seed_path`, `baseline_stdout_contains_seed_path`, `variant_stdout_contains_seed_path`, `variant_stdout_not_contains_seed_path`, `baseline_stdout_has_line`, `baseline_stdout_not_has_line`, `variant_stdout_has_line`, `variant_stdout_not_has_line`, `variant_stdout_differs_from_baseline` (diff-only is insufficient).
-- Example (--all exact-line match for dot entries):
+- Example (exact-line match for short tokens):
 ```json
 {
-  "argv": ["--all", "work"],
+  "argv": ["--option", "work"],
   "baseline_scenario_id": "baseline",
   "assertions": [
-    { "kind": "baseline_stdout_not_has_line", "seed_path": "work/file1.txt", "stdout_token": "." },
-    { "kind": "variant_stdout_has_line", "seed_path": "work/file1.txt", "stdout_token": "." },
-    { "kind": "baseline_stdout_not_has_line", "seed_path": "work/file1.txt", "stdout_token": ".." },
-    { "kind": "variant_stdout_has_line", "seed_path": "work/file1.txt", "stdout_token": ".." }
+    { "kind": "baseline_stdout_not_has_line", "seed_path": "work/file.txt", "stdout_token": "X" },
+    { "kind": "variant_stdout_has_line", "seed_path": "work/file.txt", "stdout_token": "X" }
   ]
 }
 ```

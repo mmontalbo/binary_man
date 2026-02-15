@@ -85,6 +85,32 @@ pub struct LmClientConfig {
 /// Maximum number of retry attempts for LM invocation.
 const MAX_LM_RETRIES: usize = 2;
 
+// Prompt templates loaded at compile time
+const BEHAVIOR_BASE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/prompts/behavior_base.md"
+));
+const REASON_NO_SCENARIO: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/prompts/behavior_reason_no_scenario.md"
+));
+const REASON_OUTPUTS_EQUAL: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/prompts/behavior_reason_outputs_equal.md"
+));
+const REASON_OUTPUTS_EQUAL_RETRY: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/prompts/behavior_reason_outputs_equal_retry.md"
+));
+const REASON_ASSERTION_FAILED: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/prompts/behavior_reason_assertion_failed.md"
+));
+const PREREQ_INFERENCE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/prompts/prereq_inference.md"
+));
+
 /// Invoke the LM to generate responses for behavior verification.
 ///
 /// Automatically retries on parse errors, including the error context
@@ -162,221 +188,65 @@ pub fn invoke_lm_for_behavior(
 /// Build the prompt for behavior verification.
 fn build_behavior_prompt(summary: &StatusSummary, payload: &BehaviorNextActionPayload) -> String {
     let binary_name = summary.binary_name.as_deref().unwrap_or("<binary>");
-
     let reason_code = payload.reason_code.as_deref().unwrap_or("unknown");
 
-    let mut prompt = String::new();
-
-    // System context
-    prompt.push_str(&format!(
-        r#"You are helping verify behavior documentation for the `{binary_name}` command.
-
-## Task
-Generate test scenarios or exclusions for the following unverified options.
-
-## Reason Code: {reason_code}
-"#
-    ));
-
-    // Add reason-specific guidance
-    match reason_code {
-        "no_scenario" => {
-            prompt.push_str(r#"
-These options have no test scenario. For each option, either:
-1. Create a scenario that demonstrates the option's behavior, OR
-2. Add an exclusion if the option cannot be tested (e.g., requires interactive TTY, has unsafe side effects)
-
-When creating scenarios:
-- Use realistic argument values based on the option's description
-- Include assertions that verify the option changes the output
-- The scenario should have a `covers` array including the option id
-"#);
-        }
+    // Select reason-specific section
+    let reason_section = match reason_code {
+        "no_scenario" => REASON_NO_SCENARIO.to_string(),
         "outputs_equal" => {
-            // Check if this is a retry (workarounds already attempted)
             let retry_count = payload.retry_count.unwrap_or(0);
             if retry_count > 0 {
-                prompt.push_str(&format!(
-                    r#"
-These options still produce identical output after {} retry attempts.
-Analyze the option description to determine what fixtures are needed. Common fixes:
-
-1. **Update scenario with seed fixtures** - create files/dirs/symlinks that demonstrate the behavior
-2. **Add exclusion** if the option cannot be tested (requires interactive TTY, system changes, etc.)
-
-Use seed fixtures when the option's behavior depends on specific file types or contents.
-"#,
-                    retry_count
-                ));
+                REASON_OUTPUTS_EQUAL_RETRY.replace("{retry_count}", &retry_count.to_string())
             } else {
-                prompt.push_str(
-                    r#"
-These options produce identical output to the baseline. Analyze the option description to determine why:
-
-1. **Option needs specific fixture files**: Update scenario with a `seed` field containing
-   files, directories, or symlinks that demonstrate the behavioral difference.
-
-2. **Option needs a specific value**: Add value_examples based on the option description.
-
-3. **Option needs other flags**: Add requires_argv if the option only works with other options.
-
-4. **Option effect not visible in text output**: Add exclusion with appropriate reason_code.
-
-Prefer updating the scenario with seed fixtures before excluding.
-"#,
-                );
+                REASON_OUTPUTS_EQUAL.to_string()
             }
         }
-        "assertion_failed" => {
-            prompt.push_str(
-                r#"
-These scenarios have failing assertions. Either:
-1. Fix the assertions to match actual behavior
-2. Add an exclusion if the behavior is not reliably testable
-"#,
-            );
-        }
-        _ => {
-            prompt.push_str(&format!(
-                "\nHandle these items based on the reason code: {reason_code}\n"
-            ));
-        }
-    }
+        "assertion_failed" => REASON_ASSERTION_FAILED.to_string(),
+        _ => format!("Handle these items based on the reason code: {reason_code}"),
+    };
 
-    // Add scaffold context if available
+    // Build context section (scaffold hints, value requirements)
+    let context_section = build_context_section(payload);
+
+    // Build target list
+    let targets = payload
+        .target_ids
+        .iter()
+        .map(|id| format!("- `{id}`"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // Assemble prompt from template
+    BEHAVIOR_BASE
+        .replace("{binary_name}", binary_name)
+        .replace("{reason_code}", reason_code)
+        .replace("{reason_section}", &reason_section)
+        .replace("{context_section}", &context_section)
+        .replace("{targets}", &targets)
+}
+
+/// Build the context section with scaffold hints and value requirements.
+fn build_context_section(payload: &BehaviorNextActionPayload) -> String {
+    let mut context = String::new();
+
     if let Some(ctx) = &payload.scaffold_context {
         if let Some(guidance) = &ctx.guidance {
-            prompt.push_str(&format!("\n## Guidance\n{guidance}\n"));
+            context.push_str(&format!("## Guidance\n{guidance}\n\n"));
         }
 
         if !ctx.value_required.is_empty() {
-            prompt.push_str("\n## Options Requiring Values\n");
+            context.push_str("## Options Requiring Values\n");
             for hint in &ctx.value_required {
-                prompt.push_str(&format!(
+                context.push_str(&format!(
                     "- `{}` (placeholder: {}): {}\n",
                     hint.option_id, hint.placeholder, hint.description
                 ));
             }
+            context.push('\n');
         }
     }
 
-    // Add target IDs
-    prompt.push_str("\n## Target Options\n");
-    for id in &payload.target_ids {
-        prompt.push_str(&format!("- `{id}`\n"));
-    }
-
-    // Note: assertion_starters are available but currently omitted from prompt
-    // as they can confuse the LM into using invalid assertion kinds.
-    // The outputs_differ assertion is sufficient for most cases.
-
-    // Response format
-    prompt.push_str(
-        r#"
-## Response Format
-Respond with a JSON object containing a `responses` array. Each response must have:
-- `surface_id`: The option id (e.g., "--verbose")
-- `action`: One of the action types below
-
-### Action Types
-
-1. **add_behavior_scenario**: Create a test scenario (PREFERRED - simplified format)
-
-Only specify `argv` and optionally `seed`. Everything else is auto-generated.
-
-**Basic scenario (no fixtures):**
-```json
-{
-  "kind": "add_behavior_scenario",
-  "argv": ["--option-name"]
-}
-```
-
-**Scenario with seed fixtures:**
-```json
-{
-  "kind": "add_behavior_scenario",
-  "argv": ["--all"],
-  "seed": {
-    "files": {".hidden": "secret", "visible.txt": "hello"},
-    "dirs": ["subdir"],
-    "symlinks": {"link": "visible.txt"}
-  }
-}
-```
-
-**IMPORTANT seed format:**
-- `files`: Object mapping filename to content, e.g. `{"file.txt": "content"}`
-- `dirs`: Array of directory names, e.g. `["dir1", "dir2"]`
-- `symlinks`: Object mapping link name to target, e.g. `{"link": "file.txt"}`
-- `executables`: Object mapping filename to content, e.g. `{"run.sh": "echo hi"}`
-
-NOTE: `files` and `symlinks` are OBJECTS (key-value maps), NOT arrays!
-
-2. **add_value_examples**: Specify valid values for an option
-```json
-{
-  "kind": "add_value_examples",
-  "value_examples": ["value1", "value2", "value3"]
-}
-```
-
-3. **add_requires_argv**: Specify prerequisite flags
-```json
-{
-  "kind": "add_requires_argv",
-  "requires_argv": ["-l"]
-}
-```
-
-4. **add_exclusion**: Mark as untestable with reason
-```json
-{
-  "kind": "add_exclusion",
-  "reason_code": "fixture_gap",
-  "note": "Brief explanation why this cannot be tested"
-}
-```
-**IMPORTANT**: The `note` field must be <= 200 characters. Keep it concise.
-Valid reason codes: fixture_gap, assertion_gap, nondeterministic, requires_interactive_tty, unsafe_side_effects
-
-5. **skip**: Skip for now (will retry later)
-```json
-{
-  "kind": "skip",
-  "reason": "Need more context"
-}
-```
-
-## Example Response
-```json
-{
-  "schema_version": 1,
-  "responses": [
-    {
-      "surface_id": "--color",
-      "action": {
-        "kind": "add_value_examples",
-        "value_examples": ["always", "never", "auto"]
-      }
-    },
-    {
-      "surface_id": "--interactive",
-      "action": {
-        "kind": "add_exclusion",
-        "reason_code": "requires_interactive_tty",
-        "note": "Requires TTY for prompts"
-      }
-    }
-  ]
-}
-```
-
-Respond ONLY with the JSON object, no other text.
-"#,
-    );
-
-    prompt
+    context
 }
 
 /// Build a retry prompt that includes the error from the previous attempt.
@@ -695,95 +565,39 @@ fn build_prereq_prompt(
     existing_definitions: &BTreeMap<String, PrereqInferenceDefinition>,
     items: &[SurfaceItemInfo],
 ) -> String {
-    let mut prompt = String::new();
-
-    prompt.push_str(&format!(
-        r#"You are helping determine prerequisites for testing `{binary_name}` command options.
-
-## Task
-Analyze each option's documentation and determine what prerequisites it needs for auto-verification.
-
-## Categories
-- **filesystem**: needs specific directory/file structure (provide seed)
-- **config**: needs config files present (provide seed)
-- **state**: needs existing state like commits, staged files (provide seed)
-- **interactive**: requires TTY/editor (exclude from auto-verify)
-- **network**: requires network access (exclude from auto-verify)
-- **privilege**: requires elevated permissions (exclude from auto-verify)
-- **null**: no special requirements
-
-"#
-    ));
-
-    // Add existing definitions as context
-    if !existing_definitions.is_empty() {
-        prompt.push_str("## Existing Prereq Definitions (reference these when applicable)\n");
+    // Build existing definitions section
+    let existing_defs = if existing_definitions.is_empty() {
+        String::new()
+    } else {
+        let mut section =
+            String::from("## Existing Prereq Definitions (reference these when applicable)\n");
         for (key, def) in existing_definitions {
             let desc = def.description.as_deref().unwrap_or("no description");
-            prompt.push_str(&format!("- `{key}`: {desc}\n"));
+            section.push_str(&format!("- `{key}`: {desc}\n"));
         }
-        prompt.push('\n');
-    }
+        section.push('\n');
+        section
+    };
 
-    // Add surface items to analyze
-    prompt.push_str("## Surface Items to Analyze\n");
-    for item in items {
-        let desc = item.description.as_deref().unwrap_or("no description");
-        let forms = if item.forms.is_empty() {
-            String::new()
-        } else {
-            format!(" (forms: {})", item.forms.join(", "))
-        };
-        prompt.push_str(&format!("`{}`{}: {}\n", item.id, forms, desc));
-    }
+    // Build surface items section
+    let surface_items = items
+        .iter()
+        .map(|item| {
+            let desc = item.description.as_deref().unwrap_or("no description");
+            let forms = if item.forms.is_empty() {
+                String::new()
+            } else {
+                format!(" (forms: {})", item.forms.join(", "))
+            };
+            format!("`{}`{}: {}", item.id, forms, desc)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
 
-    prompt.push_str(
-        r#"
-## Output Format
-Return a JSON object with:
-1. `definitions`: New prereq definitions (only if no existing one fits)
-2. `surface_map`: Mapping from option id to prereq keys (or empty array for no prereqs)
-
-```json
-{
-  "definitions": {
-    "git_repo": {
-      "description": "git repository with .git directory",
-      "seed": {"dirs": [".git"]},
-      "exclude": false
-    },
-    "interactive": {
-      "description": "requires interactive TTY",
-      "seed": null,
-      "exclude": true
-    }
-  },
-  "surface_map": {
-    "--edit": ["interactive"],
-    "--local": ["git_repo"],
-    "--global": []
-  }
-}
-```
-
-**Seed format:**
-- `dirs`: Array of directory paths, e.g. `["dir1", "dir2"]`
-- `files`: Object mapping path to content, e.g. `{"file.txt": "content"}`
-- `symlinks`: Object mapping path to target, e.g. `{"link": "file.txt"}`
-- `executables`: Object mapping path to content (mode 755), e.g. `{"run.sh": "echo hi"}`
-
-**Rules:**
-- Reference existing definitions when they apply
-- Define new prereqs only when no existing one fits
-- Use `exclude: true` for interactive, network, and privilege categories
-- Empty array `[]` means no prereqs needed
-- Keep descriptions concise
-
-Respond ONLY with the JSON object, no other text.
-"#,
-    );
-
-    prompt
+    PREREQ_INFERENCE
+        .replace("{binary_name}", binary_name)
+        .replace("{existing_definitions}", &existing_defs)
+        .replace("{surface_items}", &surface_items)
 }
 
 /// Parse LM prereq response into PrereqsFile.
