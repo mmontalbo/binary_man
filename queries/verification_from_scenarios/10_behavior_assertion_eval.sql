@@ -16,7 +16,8 @@
       base.normalized_stdout as baseline_stdout,
       var.normalized_stdout is not null
         and base.normalized_stdout is not null
-        and var.normalized_stdout = base.normalized_stdout as outputs_equal
+        and var.normalized_stdout = base.normalized_stdout as outputs_equal,
+      var.files_checked as variant_files_checked
     from combined_scenarios s
     left join normalized_evidence var
       on var.scenario_id = s.scenario_id
@@ -36,13 +37,16 @@
       coalesce(a.token, a.seed_path) as match_token,
       a.run as run_target,
       coalesce(a.exact_line, false) as exact_line,
+      a.path as file_path,
+      a.pattern as file_pattern,
       a.kind in ('stdout_contains', 'stdout_lacks') as uses_seed_path_assertion,
+      a.kind in ('file_exists', 'file_missing', 'dir_exists', 'dir_missing', 'file_contains') as is_file_assertion,
+      -- Normalize stdout_contains/lacks based on run target, pass through others
       case
         when a.kind = 'stdout_contains' and a.run = 'baseline' then 'baseline_contains'
         when a.kind = 'stdout_contains' and a.run = 'variant' then 'variant_contains'
         when a.kind = 'stdout_lacks' and a.run = 'baseline' then 'baseline_lacks'
         when a.kind = 'stdout_lacks' and a.run = 'variant' then 'variant_lacks'
-        when a.kind = 'outputs_differ' then 'outputs_differ'
         else a.kind
       end as normalized_kind
     from combined_scenarios s,
@@ -51,7 +55,9 @@
         seed_path VARCHAR,
         token VARCHAR,
         run VARCHAR,
-        exact_line BOOLEAN
+        exact_line BOOLEAN,
+        path VARCHAR,
+        pattern VARCHAR
       )[])) as t(a)
     where s.coverage_tier = 'behavior'
   ),
@@ -64,13 +70,17 @@
       b.seed_path,
       b.match_token,
       b.exact_line,
+      b.file_path,
+      b.file_pattern,
       b.uses_seed_path_assertion,
+      b.is_file_assertion,
       b.variant_last_pass,
       b.baseline_last_pass,
       b.seed_signature_match,
       b.variant_stdout,
       b.baseline_stdout,
       b.outputs_equal,
+      b.variant_files_checked,
       b.seed_path_in_variant,
       b.seed_path_in_baseline,
       b.seed_path_missing,
@@ -134,6 +144,54 @@
             when b.variant_stdout <> b.baseline_stdout then 1
             else 0
           end
+        -- File exists assertion
+        when b.normalized_kind = 'file_exists' then
+          case
+            when b.assertion_ready = 0 then 0
+            when b.variant_files_checked is null then 0
+            when b.file_path is null or b.file_path = '' then 0
+            when json_extract(b.variant_files_checked, '$."' || b.file_path || '".exists') = true
+              and coalesce(json_extract(b.variant_files_checked, '$."' || b.file_path || '".is_dir')::boolean, false) = false
+              then 1
+            else 0
+          end
+        -- File/dir missing assertion (path should NOT exist)
+        when b.normalized_kind in ('file_missing', 'dir_missing') then
+          case
+            when b.assertion_ready = 0 then 0
+            when b.variant_files_checked is null then 0
+            when b.file_path is null or b.file_path = '' then 0
+            when json_extract(b.variant_files_checked, '$."' || b.file_path || '".exists') = false then 1
+            else 0
+          end
+        -- Dir exists assertion
+        when b.normalized_kind = 'dir_exists' then
+          case
+            when b.assertion_ready = 0 then 0
+            when b.variant_files_checked is null then 0
+            when b.file_path is null or b.file_path = '' then 0
+            when json_extract(b.variant_files_checked, '$."' || b.file_path || '".exists') = true
+              and json_extract(b.variant_files_checked, '$."' || b.file_path || '".is_dir') = true
+              then 1
+            else 0
+          end
+        -- File contains assertion
+        when b.normalized_kind = 'file_contains' then
+          case
+            when b.assertion_ready = 0 then 0
+            when b.variant_files_checked is null then 0
+            when b.file_path is null or b.file_path = '' then 0
+            when b.file_pattern is null or b.file_pattern = '' then 0
+            when json_extract(b.variant_files_checked, '$."' || b.file_path || '".exists') = true
+              and position(
+                b.file_pattern in coalesce(
+                  json_extract_string(b.variant_files_checked, '$."' || b.file_path || '".content_preview'),
+                  ''
+                )
+              ) > 0
+              then 1
+            else 0
+          end
         else 0
       end as assertion_pass
     from (
@@ -145,13 +203,17 @@
         b.seed_path,
         b.match_token,
         b.exact_line,
+        b.file_path,
+        b.file_pattern,
         b.uses_seed_path_assertion,
+        b.is_file_assertion,
         ctx.variant_last_pass,
         ctx.baseline_last_pass,
         ctx.seed_signature_match,
         ctx.variant_stdout,
         ctx.baseline_stdout,
         ctx.outputs_equal,
+        ctx.variant_files_checked,
         case
           when b.uses_seed_path_assertion
             and b.seed_path is not null
@@ -221,6 +283,8 @@
         end as seeded_assertion,
         case
           when not coalesce(ctx.variant_last_pass, false) then 0
+          -- File assertions only need variant to pass (no baseline required)
+          when b.is_file_assertion then 1
           when not coalesce(ctx.baseline_last_pass, false) then 0
           when b.uses_seed_path_assertion
             and (b.seed_path is null or b.seed_path = '') then 0
@@ -302,7 +366,10 @@
       min(case when assertion_pass = 1 then 1 else 0 end) as all_pass_int,
       -- Using normalized_kind to match both legacy and new format
       max(case when normalized_kind = 'outputs_differ' then 1 else 0 end) as diff_assertion_present,
-      max(case when normalized_kind = 'outputs_differ' and assertion_pass = 1 then 1 else 0 end) as diff_assertion_pass
+      max(case when normalized_kind = 'outputs_differ' and assertion_pass = 1 then 1 else 0 end) as diff_assertion_pass,
+      -- File assertion tracking
+      sum(case when is_file_assertion then 1 else 0 end) as file_assertion_count,
+      sum(case when is_file_assertion and assertion_pass = 1 then 1 else 0 end) as file_assertion_pass_count
     from behavior_assertion_detail
     group by scenario_id
   ),
@@ -330,16 +397,28 @@
         coalesce(a.diff_assertion_present, 0) = 1
         or coalesce(dp.delta_pair_present, 0) = 1
       ) as delta_assertion_present,
+      -- File assertion tracking
+      coalesce(a.file_assertion_count, 0) as file_assertion_count,
+      coalesce(a.file_assertion_pass_count, 0) as file_assertion_pass_count,
+      coalesce(a.file_assertion_count, 0) > 0 as file_assertion_present,
+      coalesce(a.file_assertion_count, 0) > 0
+        and coalesce(a.file_assertion_count, 0) = coalesce(a.assertion_count, 0) as file_assertion_only,
+      coalesce(a.file_assertion_count, 0) > 0
+        and coalesce(a.file_assertion_count, 0) = coalesce(a.file_assertion_pass_count, 0) as file_assertion_pass,
       coalesce(s.expect_has_output_predicate, false) as expect_has_output_predicate,
+      -- Semantic predicate includes file assertions
       (
         coalesce(s.expect_has_output_predicate, false)
         or coalesce(a.diff_assertion_present, 0) = 1
         or coalesce(dp.delta_pair_present, 0) = 1
+        or coalesce(a.file_assertion_count, 0) > 0
       ) as semantic_predicate_present,
       (
         coalesce(s.expect_has_output_predicate, false)
         or coalesce(a.diff_assertion_pass, 0) = 1
         or coalesce(dp.delta_pair_pass, 0) = 1
+        or (coalesce(a.file_assertion_count, 0) > 0
+            and coalesce(a.file_assertion_count, 0) = coalesce(a.file_assertion_pass_count, 0))
       ) as semantic_predicate_pass,
       coalesce(ctx.seed_signature_match, false) as seed_signature_match,
       coalesce(ctx.variant_last_pass, false) as variant_last_pass,
@@ -465,6 +544,10 @@
       coalesce(b.seed_signature_match, false) as seed_signature_match,
       coalesce(b.variant_last_pass, false) as variant_last_pass,
       coalesce(b.baseline_last_pass, false) as baseline_last_pass,
+      -- File assertion fields
+      coalesce(b.file_assertion_present, false) as file_assertion_present,
+      coalesce(b.file_assertion_only, false) as file_assertion_only,
+      coalesce(b.file_assertion_pass, false) as file_assertion_pass,
       e.scenario_id is not null as has_evidence,
       e.last_pass as last_pass,
       case

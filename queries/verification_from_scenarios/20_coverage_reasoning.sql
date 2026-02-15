@@ -25,6 +25,9 @@
       variant_last_pass,
       baseline_last_pass,
       last_pass,
+      file_assertion_present,
+      file_assertion_only,
+      file_assertion_pass,
       argv,
       trim(cover) as cover_raw
     from scenario_eval,
@@ -57,6 +60,9 @@
       variant_last_pass,
       baseline_last_pass,
       last_pass,
+      file_assertion_present,
+      file_assertion_only,
+      file_assertion_pass,
       argv,
       cover_raw as surface_id
     from covers_raw
@@ -92,19 +98,29 @@
       max(case when coverage_tier = 'behavior' then 1 else 0 end) as has_behavior,
       max(case when coverage_tier = 'behavior'
         and variant_last_pass
-        and baseline_last_pass
-        and (seeded_assertion_count = 0 or seed_signature_match)
-        and (seeded_assertion_count > 0 or delta_assertion_present)
-        and assertions_pass
-        and delta_proof_pass
-        and semantic_predicate_pass then 1 else 0 end) as is_verified,
+        and (
+          -- File-only assertions: don't require baseline or delta checks
+          (file_assertion_only and assertions_pass and file_assertion_pass)
+          -- Standard assertions: require baseline and delta checks
+          or (
+            not file_assertion_only
+            and baseline_last_pass
+            and (seeded_assertion_count = 0 or seed_signature_match)
+            and (seeded_assertion_count > 0 or delta_assertion_present)
+            and assertions_pass
+            and delta_proof_pass
+            and semantic_predicate_pass
+          )
+        ) then 1 else 0 end) as is_verified,
       max(case when coverage_tier = 'behavior' and has_evidence then 1 else 0 end) as has_evidence,
       max(case when coverage_tier = 'behavior' and delta_assertion_present and outputs_equal then 1 else 0 end) as has_outputs_equal,
       max(case when coverage_tier = 'behavior'
         and has_evidence
         and variant_last_pass
-        and baseline_last_pass
-        and (not assertions_pass or not delta_proof_pass) then 1 else 0 end) as has_assertion_failed
+        and (
+          (file_assertion_only and not file_assertion_pass)
+          or (not file_assertion_only and baseline_last_pass and (not assertions_pass or not delta_proof_pass))
+        ) then 1 else 0 end) as has_assertion_failed
     from covers_norm
     group by surface_id
   ),
