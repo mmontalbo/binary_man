@@ -5,9 +5,9 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M26 (File-Based Assertions).
+Current focus: M27 (TBD).
 
-## M26 — File-Based Assertions (in progress)
+## M26 — File-Based Assertions (done)
 
 Goal: Enable verification of binaries that produce file-based side effects
 rather than stdout changes. Start with `touch` and `mkdir`.
@@ -174,12 +174,24 @@ not stdout output.
 5. **LM generates correctly:** LM produces valid file assertions for touch
 6. **Validation works:** Invalid paths (absolute, `..`) rejected at plan load
 
+### Validation Results
+
+Tested with LM (haiku model):
+
+| Binary | Verified | Assertions Used |
+|--------|----------|-----------------|
+| touch | 12/15 | `file_exists` |
+| mkdir | 10/10 | `dir_exists` |
+| rmdir | 7/7 | `dir_missing`, `dir_exists` |
+| rm | 11/17 | `file_missing`, `dir_missing` |
+| cp | 13/51 | `file_exists`, `file_contains`, `dir_exists` |
+| mv | 6/26 | `file_exists`, `file_contains` |
+
 ### Deferred to M27
 
 - `tee` verification (needs both stdout AND file assertions)
 - `FileMode { path, mode }` - permission checking
 - `FileMatches { path, content }` - exact content match
-- `cp`, `mv` verification (need source file in seed)
 - Recursive directory assertions
 
 ---
