@@ -11,6 +11,11 @@
         "pattern": "^\\s*or:\\s*(.+)$",
         "capture_group": 1,
         "case_sensitive": false
+      },
+      {
+        "pattern": "^\\s+(\\S+\\s+\\[.+\\].*)$",
+        "capture_group": 1,
+        "case_sensitive": false
       }
     ],
     "prefer_rules": []
