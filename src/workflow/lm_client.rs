@@ -343,6 +343,7 @@ fn invoke_lm_command(command: &str, prompt: &str) -> Result<String> {
         return Err(anyhow!("LM command is empty"));
     }
 
+    let start = Instant::now();
     let mut child = Command::new(&args[0])
         .args(&args[1..])
         .stdin(Stdio::piped())
@@ -359,6 +360,14 @@ fn invoke_lm_command(command: &str, prompt: &str) -> Result<String> {
     }
 
     let output = child.wait_with_output().context("wait for LM command")?;
+    let elapsed_ms = start.elapsed().as_millis();
+
+    tracing::info!(
+        elapsed_ms,
+        prompt_bytes = prompt.len(),
+        response_bytes = output.stdout.len(),
+        "lm invoke complete"
+    );
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

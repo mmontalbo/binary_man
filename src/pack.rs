@@ -7,6 +7,7 @@ use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::time::Instant;
 
 /// Hashes recorded for the analyzed binary.
 #[derive(Deserialize, Clone)]
@@ -255,12 +256,21 @@ fn facts_relative_path(pack_root: &Path, file_name: &str) -> Result<String> {
 }
 
 pub(crate) fn run_duckdb_query(sql: &str, cwd: &Path) -> Result<Vec<u8>> {
+    let start = Instant::now();
     let output = Command::new("nix")
         .args(["run", "nixpkgs#duckdb", "--", "-json", "-c"])
         .arg(sql)
         .current_dir(cwd)
         .output()
         .context("run duckdb query")?;
+    let elapsed_ms = start.elapsed().as_millis();
+
+    tracing::info!(
+        elapsed_ms,
+        sql_bytes = sql.len(),
+        stdout_bytes = output.stdout.len(),
+        "duckdb query complete"
+    );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stderr_trimmed = stderr.trim();

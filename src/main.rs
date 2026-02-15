@@ -36,8 +36,15 @@ mod workflow;
 
 use anyhow::Result;
 use clap::Parser;
+use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<()> {
+    // Initialize tracing with RUST_LOG env filter (default: warn)
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .with_target(false)
+        .init();
+
     // Check if first arg is an explicit subcommand or help flag
     let args: Vec<String> = std::env::args().collect();
     let explicit_subcommands = ["status", "apply", "inspect", "help"];
