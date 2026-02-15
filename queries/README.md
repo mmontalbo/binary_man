@@ -51,5 +51,3 @@ Cache hits return in ~4ms vs ~400ms for query execution.
 
 - `usage_from_scenarios.sql` - Extract usage/synopsis from help evidence
 - `surface_from_scenarios.sql` - Extract surface items (options, subcommands)
-- `options_from_scenarios.sql` - Legacy option extraction
-- `subcommands_from_scenarios.sql` - Subcommand extraction
