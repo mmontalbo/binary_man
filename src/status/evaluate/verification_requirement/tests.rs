@@ -1,8 +1,9 @@
 use super::{
-    eval_behavior_verification, load_behavior_retry_counts,
-    outputs_equal_workaround_needs_delta_rerun, suggested_exclusion_only_next_action,
-    QueueVerificationContext, BEHAVIOR_RERUN_CAP,
+    eval_behavior_verification, outputs_equal_workaround_needs_delta_rerun,
+    QueueVerificationContext,
 };
+use super::next_action::suggested_exclusion_only_next_action;
+use super::retry::{load_behavior_retry_counts, BEHAVIOR_RERUN_CAP};
 use crate::enrich;
 use crate::scenarios;
 use crate::surface;
