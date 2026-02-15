@@ -182,7 +182,7 @@ General:
 - Syntax highlighting for JSON/prompt content
 - Search within file content (only file name search in Browse)
 
-## M22 — Testing Infrastructure (draft)
+## M22 — Testing Infrastructure (done)
 
 Goal: Enable both fast deterministic testing (mock LM) and real LM regression
 testing to catch orchestration bugs and prompt/model regressions.
@@ -558,6 +558,12 @@ BMAN_LM_COMMAND="claude -p --model haiku" cargo test
 | Mock backend fast | < 5s with mock responses |
 | Real LM backend works | `BMAN_LM_COMMAND=... cargo test` reaches complete |
 | Parallel isolation | Multiple tests can run concurrently |
+| Performance baselines | Tests assert LM cycles and scenario counts within limits |
+
+### Delivered (beyond original scope)
+
+- **Performance regression testing**: `fixture.json` includes `baseline.max_lm_cycles` and
+  `baseline.max_scenarios`; tests assert metrics stay within bounds.
 
 ### Out of Scope (Deferred)
 
@@ -566,7 +572,6 @@ BMAN_LM_COMMAND="claude -p --model haiku" cargo test
 - User-facing fixture commands
 - Property-based testing / fuzzing
 - Fixture auto-generation tooling
-- Automatic baseline updates from passing runs
 
 ## M20 — LM-Driven Prereq and Fixture Generation (done)
 
