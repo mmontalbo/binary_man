@@ -49,7 +49,7 @@ Seed fields (all optional):
 `{"kind": "add_exclusion", "reason_code": "fixture_gap", "note": "Why untestable (max 200 chars)"}`
 
 Valid reason codes:
-- `fixture_gap` - needs complex fixtures we can't easily create, OR behavior is timing/side-effect based with no stdout to verify (e.g., `sleep NUMBER` affects timing, not output)
+- `fixture_gap` - needs complex fixtures we can't easily create
 - `assertion_gap` - output varies in ways we can't assert on
 - `nondeterministic` - output changes between runs
 - `requires_interactive_tty` - needs TTY/terminal interaction
@@ -58,7 +58,12 @@ Valid reason codes:
 
 Use `blocks_indefinitely` for options like `--follow`, `-f` that wait for file changes or stdin.
 
-Use `fixture_gap` for behaviors that are timing-based (e.g., `sleep`, `timeout`) or produce side effects without stdout changes (e.g., file creation with `touch`, permission changes). Note these in the exclusion for future assertion support.
+**File assertions are now available** for commands that create files/directories instead of producing stdout output. Use file assertions instead of `fixture_gap` for:
+- `touch` - creates files → use `file_exists` assertion
+- `mkdir` - creates directories → use `dir_exists` assertion
+- Commands that write to files → use `file_contains` assertion
+
+See "File assertions" section below for syntax.
 
 **5. skip**: Skip for now.
 `{"kind": "skip", "reason": "Need more context"}`
@@ -74,5 +79,72 @@ Use `fixture_gap` for behaviors that are timing-based (e.g., `sleep`, `timeout`)
   ]
 }
 ```
+
+## File Assertions
+
+For commands that create files/directories instead of producing stdout output, use file assertions:
+
+**Assertion kinds:**
+- `file_exists` - verify a file was created (not a directory)
+- `file_missing` - verify a file does NOT exist (use for rm)
+- `dir_exists` - verify a directory was created
+- `dir_missing` - verify a directory does NOT exist (use for rmdir)
+- `file_contains` - verify a file contains a pattern (requires `pattern` field)
+
+**Example: touch command**
+```json
+{
+  "kind": "add_behavior_scenario",
+  "argv": ["newfile.txt"],
+  "assertions": [
+    {"kind": "file_exists", "path": "newfile.txt"}
+  ]
+}
+```
+
+**Example: mkdir command**
+```json
+{
+  "kind": "add_behavior_scenario",
+  "argv": ["-p", "parent/child"],
+  "assertions": [
+    {"kind": "dir_exists", "path": "parent"},
+    {"kind": "dir_exists", "path": "parent/child"}
+  ]
+}
+```
+
+**Example: file_contains**
+```json
+{
+  "kind": "add_behavior_scenario",
+  "argv": ["-o", "output.txt"],
+  "assertions": [
+    {"kind": "file_exists", "path": "output.txt"},
+    {"kind": "file_contains", "path": "output.txt", "pattern": "expected content"}
+  ]
+}
+```
+
+**Example: rmdir command (verify deletion)**
+```json
+{
+  "kind": "add_behavior_scenario",
+  "argv": ["-p", "parent/child"],
+  "seed": {"dirs": ["parent/child"]},
+  "assertions": [
+    {"kind": "dir_missing", "path": "parent/child"},
+    {"kind": "dir_missing", "path": "parent"}
+  ]
+}
+```
+
+**Rules:**
+- Paths must be relative (no `/tmp` or `/home/...`)
+- Paths must not contain `..`
+- File assertions are variant-only (no baseline comparison needed)
+- Use `file_exists` when the command should create a regular file
+- Use `dir_exists` when the command should create a directory
+- Use `file_missing` to verify deletion or that a file was NOT created
 
 Respond ONLY with JSON.

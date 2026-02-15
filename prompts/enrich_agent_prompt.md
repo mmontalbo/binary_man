@@ -180,7 +180,9 @@ If `enrich/config.json.requirements` includes `"verification"` (default for new 
 - `stdout_token` is an optional verbatim stdout/stderr match token; when omitted, matching uses `seed_path`. `*_stdout_has_line`/`*_stdout_not_has_line` treat it as an exact line token (not substring).
 - For short/ambiguous `stdout_token` values (<= 2 chars or mostly punctuation), prefer `*_stdout_has_line` / `*_stdout_not_has_line` to avoid substring matches.
 - Example (directory listing): `seed_path: "work/file.txt", stdout_token: "file.txt"`.
-- Assertion kinds: `baseline_stdout_not_contains_seed_path`, `baseline_stdout_contains_seed_path`, `variant_stdout_contains_seed_path`, `variant_stdout_not_contains_seed_path`, `baseline_stdout_has_line`, `baseline_stdout_not_has_line`, `variant_stdout_has_line`, `variant_stdout_not_has_line`, `variant_stdout_differs_from_baseline` (diff-only is insufficient).
+- Assertion kinds:
+  - **Stdout assertions**: `baseline_stdout_not_contains_seed_path`, `baseline_stdout_contains_seed_path`, `variant_stdout_contains_seed_path`, `variant_stdout_not_contains_seed_path`, `baseline_stdout_has_line`, `baseline_stdout_not_has_line`, `variant_stdout_has_line`, `variant_stdout_not_has_line`, `variant_stdout_differs_from_baseline` (diff-only is insufficient).
+  - **File assertions** (variant-only, for commands that create/remove files/directories): `file_exists` (file was created), `file_missing` (file does NOT exist), `dir_exists` (directory was created), `dir_missing` (directory does NOT exist), `file_contains` (file contains pattern, requires `pattern` field). Use relative paths without `..`.
 - Example (exact-line match for short tokens):
 ```json
 {
@@ -203,6 +205,43 @@ If `enrich/config.json.requirements` includes `"verification"` (default for new 
 ### Behavior expectation patterns
 - Prefer line-anchored regex with stable tokens (e.g., `(?m)^NAME\\b`); avoid column spacing or layout-sensitive matches.
 - Use seed-grounded delta pairs for explicit adds/removes semantics (see the delta pair rules above).
+
+### File assertions (for side-effect commands)
+Use file assertions when a command's primary output is filesystem changes, not stdout:
+- `touch`, `mkdir`, `cp`, `mv` — use `file_exists`, `dir_exists`
+- `rm` — use `file_missing`
+- `rmdir` — use `dir_missing`
+- Commands that write to files — use `file_contains` with a `pattern` to match
+
+Example (touch command):
+```json
+{
+  "id": "touch-creates-file",
+  "coverage_tier": "behavior",
+  "covers": ["FILE"],
+  "argv": ["newfile.txt"],
+  "assertions": [
+    { "kind": "file_exists", "path": "newfile.txt" }
+  ]
+}
+```
+
+Example (mkdir -p):
+```json
+{
+  "id": "mkdir-p-creates-parents",
+  "coverage_tier": "behavior",
+  "covers": ["-p"],
+  "argv": ["-p", "a/b/c"],
+  "assertions": [
+    { "kind": "dir_exists", "path": "a" },
+    { "kind": "dir_exists", "path": "a/b" },
+    { "kind": "dir_exists", "path": "a/b/c" }
+  ]
+}
+```
+
+File assertions are variant-only (no baseline comparison needed). The `path` must be relative and cannot contain `..`.
 
 ### Inline seed example (for behavior assertions)
 Notes:
