@@ -401,11 +401,26 @@ fn write_real_verification_query_templates(root: &std::path::Path) {
     std::fs::create_dir_all(&sections_dir).expect("create queries dirs");
 
     let templates = [
-        ("verification_from_scenarios.sql", crate::templates::VERIFICATION_FROM_SCENARIOS_SQL),
-        ("verification_from_scenarios/00_inputs_normalization.sql", crate::templates::VERIFICATION_FROM_SCENARIOS_00_INPUTS_NORMALIZATION_SQL),
-        ("verification_from_scenarios/10_behavior_assertion_eval.sql", crate::templates::VERIFICATION_FROM_SCENARIOS_10_BEHAVIOR_ASSERTION_EVAL_SQL),
-        ("verification_from_scenarios/20_coverage_reasoning.sql", crate::templates::VERIFICATION_FROM_SCENARIOS_20_COVERAGE_REASONING_SQL),
-        ("verification_from_scenarios/30_rollups_output.sql", crate::templates::VERIFICATION_FROM_SCENARIOS_30_ROLLUPS_OUTPUT_SQL),
+        (
+            "verification_from_scenarios.sql",
+            crate::templates::VERIFICATION_FROM_SCENARIOS_SQL,
+        ),
+        (
+            "verification_from_scenarios/00_inputs_normalization.sql",
+            crate::templates::VERIFICATION_FROM_SCENARIOS_00_INPUTS_NORMALIZATION_SQL,
+        ),
+        (
+            "verification_from_scenarios/10_behavior_assertion_eval.sql",
+            crate::templates::VERIFICATION_FROM_SCENARIOS_10_BEHAVIOR_ASSERTION_EVAL_SQL,
+        ),
+        (
+            "verification_from_scenarios/20_coverage_reasoning.sql",
+            crate::templates::VERIFICATION_FROM_SCENARIOS_20_COVERAGE_REASONING_SQL,
+        ),
+        (
+            "verification_from_scenarios/30_rollups_output.sql",
+            crate::templates::VERIFICATION_FROM_SCENARIOS_30_ROLLUPS_OUTPUT_SQL,
+        ),
     ];
     for (name, content) in templates {
         std::fs::write(queries_dir.join(name), content).expect("write query template");
@@ -463,7 +478,8 @@ fn verification_query_performance_smoke_test() {
         std::fs::write(
             scenarios_dir.join(format!("evidence_{i}.json")),
             serde_json::to_vec(&evidence).unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
     }
     std::fs::write(
         scenarios_dir.join("index.json"),
@@ -474,8 +490,10 @@ fn verification_query_performance_smoke_test() {
                 "last_pass": true,
                 "evidence_paths": [format!("inventory/scenarios/evidence_{i}.json")]
             })).collect::<Vec<_>>()
-        })).unwrap(),
-    ).unwrap();
+        }))
+        .unwrap(),
+    )
+    .unwrap();
 
     // Measure query time
     let start = Instant::now();
