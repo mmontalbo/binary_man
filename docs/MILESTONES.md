@@ -5,23 +5,186 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M26 (TBD - continue coreutils or explore new direction).
+Current focus: M26 (File-Based Assertions).
+
+## M26 — File-Based Assertions (in progress)
+
+Goal: Enable verification of binaries that produce file-based side effects
+rather than stdout changes. Start with `touch` and `mkdir`.
+
+### Design Decisions
+
+**Assertion semantics:**
+- `FileExists { path }` - verify file exists after variant run
+- `FileMissing { path }` - verify file does NOT exist after variant run
+- `DirExists { path }` - verify directory exists after variant run
+- `FileContains { path, pattern }` - verify file contains substring
+
+**Key constraints:**
+- File assertions verify variant run only (no baseline comparison)
+- Paths are relative to scenario working directory
+- Evidence captures only paths referenced in assertions (not all files)
+- Pattern matching is literal substring (like `StdoutContains`)
+
+**Why not "creates":**
+We verify state, not action. `FileExists` is clearer than `CreatesFile` when
+the file might have existed in the seed already.
+
+### Implementation Phases
+
+#### Phase 0: Investigate Execution Model (done)
+
+**Findings:**
+- `binary_lens` runs scenarios via bwrap sandbox
+- Work directory: `{pack_root}/runs/{run_id}/work/`
+- Seeds materialized in: `{work_dir}/seed/`
+- **Work directory persists after execution** ✓
+- Manifest contains `cwd_host`: exact host path to scenario's working directory
+
+**Decision:** Capture file state in bman (not binary_lens)
+- All changes stay in one repo
+- bman has access to `pack_root`, `run_id`, and `cwd_host` from manifest
+- Implementation in `src/scenarios/run/exec.rs::build_success_execution()`
+
+#### Phase 1: Evidence Capture
+Extend `ScenarioEvidence` to include file state:
+
+```json
+{
+  "scenario_id": "touch--date",
+  "exit_code": 0,
+  "stdout": "",
+  "files_checked": {
+    "output.txt": {"exists": true, "is_dir": false, "size": 0},
+    "missing.txt": {"exists": false}
+  }
+}
+```
+
+**Scoped capture:** Only check paths declared in scenario assertions. Don't
+enumerate entire working directory.
+
+**Backwards compatibility:** Missing `files_checked` field means "not captured"
+(old evidence). Assertion evaluates to "unknown" (fails).
+
+#### Phase 2: Assertion Types
+Add to `BehaviorAssertion` enum:
+
+```rust
+pub enum BehaviorAssertion {
+    // Existing
+    StdoutContains { run, seed_path, token, exact_line },
+    StdoutLacks { run, seed_path, token, exact_line },
+    OutputsDiffer {},
+
+    // New - file state (variant only)
+    FileExists { path: String },
+    FileMissing { path: String },
+    DirExists { path: String },
+    FileContains { path: String, pattern: String },
+}
+```
+
+**Validation:**
+- Path must be relative (no leading `/` or `..`)
+- Path must not be empty
+- Pattern must not be empty for `FileContains`
+
+#### Phase 3: SQL Evaluation
+Add to `10_behavior_assertion_eval.sql`:
+
+```sql
+-- Parse files_checked from evidence
+scenario_files_checked as (
+  select
+    e.scenario_id,
+    f.key as path,
+    f.value->>'exists' = 'true' as exists,
+    f.value->>'is_dir' = 'true' as is_dir
+  from latest_evidence e,
+    json_each(coalesce(e.files_checked, '{}')) f
+),
+
+-- Evaluate file assertions
+when b.normalized_kind = 'file_exists' then
+  case
+    when sf.path is null then 0  -- not captured
+    when sf.exists and not sf.is_dir then 1
+    else 0
+  end
+when b.normalized_kind = 'file_missing' then
+  case
+    when sf.path is null then 0  -- not captured
+    when not sf.exists then 1
+    else 0
+  end
+```
+
+#### Phase 4: Prompt Update
+Add to `prompts/behavior_base.md`:
+
+```markdown
+**File Assertions** (for commands that create/modify files):
+
+Use file assertions when the command's PRIMARY purpose is file manipulation,
+not stdout output.
+
+`{"kind": "file_exists", "path": "output.txt"}`
+`{"kind": "file_missing", "path": "should_not_exist.txt"}`
+`{"kind": "dir_exists", "path": "new_directory"}`
+`{"kind": "file_contains", "path": "output.txt", "pattern": "expected content"}`
+
+**Important:**
+- Paths are relative to working directory (no leading `/`)
+- File assertions verify variant run only (no baseline comparison)
+- Prefer stdout assertions when possible; use file assertions only when needed
+```
+
+#### Phase 5: Manual Testing
+1. Create `touch` pack manually with `file_exists` assertion
+2. Create `mkdir` pack manually with `dir_exists` assertion
+3. Verify SQL evaluation produces correct results
+4. Verify existing packs (ls, wc, cat) still pass (regression check)
+
+#### Phase 6: LM Integration
+1. Run `bman touch` with updated prompts
+2. Verify LM generates `file_exists` assertions
+3. Run `bman mkdir` with updated prompts
+4. Verify full cycle works end-to-end
+
+### Files to Modify
+
+| File | Changes |
+|------|---------|
+| `src/scenarios/types.rs` | Add `FileExists`, `FileMissing`, `DirExists`, `FileContains` variants |
+| `src/scenarios/evidence.rs` | Add `files_checked` field to ScenarioEvidence |
+| `src/scenarios/run/exec.rs` | Capture file state for assertion paths after execution |
+| `src/scenarios/validate.rs` | Validate assertion path format (relative, non-empty) |
+| `queries/.../10_behavior_assertion_eval.sql` | Add file assertion evaluation |
+| `prompts/behavior_base.md` | Document file assertions with examples |
+| `src/workflow/lm_response.rs` | Parse new assertion kinds from LM |
+| `src/workflow/apply/lm_apply.rs` | Handle new assertion kinds in apply |
+
+### Acceptance Criteria
+
+1. **touch verified:** `touch output.txt` scenario with `file_exists` passes
+2. **mkdir verified:** `mkdir newdir` scenario with `dir_exists` passes
+3. **SQL evaluation correct:** File assertions evaluate to pass/fail correctly
+4. **No regression:** Existing ls, wc, cat, nl packs still verify
+5. **LM generates correctly:** LM produces valid file assertions for touch
+6. **Validation works:** Invalid paths (absolute, `..`) rejected at plan load
+
+### Deferred to M27
+
+- `tee` verification (needs both stdout AND file assertions)
+- `FileMode { path, mode }` - permission checking
+- `FileMatches { path, content }` - exact content match
+- `cp`, `mv` verification (need source file in seed)
+- Recursive directory assertions
+
+---
 
 ## Future Considerations
-
-### File-Based Assertions (higher priority)
-
-Many binaries produce side effects rather than stdout changes:
-- `touch`, `mkdir`, `cp`, `mv` - file/directory creation
-- `chmod`, `chown` - permission changes
-- `tee` - simultaneous stdout and file output
-
-Potential assertion kinds:
-- `creates_file: "path"` - verify file exists after scenario
-- `file_contains: {path, content}` - verify file content
-- `file_mode: {path, mode}` - verify permissions
-
-This would enable verification of file-manipulating coreutils.
 
 ### Timing Assertions (lower priority)
 
