@@ -1,0 +1,36 @@
+```json
+{
+  "schema_version": 1,
+  "responses": [
+    {
+      "surface_id": "-h",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-h"]
+      }
+    },
+    {
+      "surface_id": "-n",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-n"],
+        "seed": {
+          "files": {"file1.txt": "content1", "file2.txt": "content2"},
+          "dirs": ["dir1"]
+        }
+      }
+    },
+    {
+      "surface_id": "-s",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-s"],
+        "seed": {
+          "files": {"small.txt": "x", "large.txt": "content content content content content"},
+          "dirs": ["subdir"]
+        }
+      }
+    }
+  ]
+}
+```

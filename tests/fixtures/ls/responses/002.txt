@@ -1,0 +1,157 @@
+```json
+{
+  "schema_version": 1,
+  "responses": [
+    {
+      "surface_id": "--all",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--all"],
+        "seed": {
+          "files": {".hidden": "secret", "visible.txt": "hello"}
+        }
+      }
+    },
+    {
+      "surface_id": "--context",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--context"],
+        "seed": {
+          "files": {"file1.txt": "content1", "file2.txt": "content2"}
+        }
+      }
+    },
+    {
+      "surface_id": "--no-group",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-l", "--no-group"],
+        "seed": {
+          "files": {"test.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "--show-control-chars",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--show-control-chars"],
+        "seed": {
+          "files": {"file\twith\ttabs.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "--time-style",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-l", "--time-style=long-iso"],
+        "seed": {
+          "files": {"test.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "-1",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-1"],
+        "seed": {
+          "files": {"file1.txt": "a", "file2.txt": "b", "file3.txt": "c"}
+        }
+      }
+    },
+    {
+      "surface_id": "-C",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-C"],
+        "seed": {
+          "files": {"file1.txt": "a", "file2.txt": "b", "file3.txt": "c"}
+        }
+      }
+    },
+    {
+      "surface_id": "-D",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-D"],
+        "seed": {
+          "files": {"test.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "-I",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-I", "*.o"],
+        "seed": {
+          "files": {"program.c": "code", "program.o": "object"}
+        }
+      }
+    },
+    {
+      "surface_id": "-T",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-l", "-T", "4"],
+        "seed": {
+          "files": {"test.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "-a",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-a"],
+        "seed": {
+          "files": {".hidden": "secret", "visible.txt": "hello"}
+        }
+      }
+    },
+    {
+      "surface_id": "-p",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-p"],
+        "seed": {
+          "dirs": ["mydir"]
+        }
+      }
+    },
+    {
+      "surface_id": "-r",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-r"],
+        "seed": {
+          "files": {"file1.txt": "a", "file2.txt": "b", "file3.txt": "c"}
+        }
+      }
+    },
+    {
+      "surface_id": "-v",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-v"],
+        "seed": {
+          "files": {"file1.txt": "a", "file10.txt": "b", "file2.txt": "c"}
+        }
+      }
+    },
+    {
+      "surface_id": "-w",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-w", "40"],
+        "seed": {
+          "files": {"file1.txt": "a", "file2.txt": "b", "file3.txt": "c"}
+        }
+      }
+    }
+  ]
+}
+```

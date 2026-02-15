@@ -1,0 +1,151 @@
+```json
+{
+  "schema_version": 1,
+  "responses": [
+    {
+      "surface_id": "--author",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-l", "--author"],
+        "seed": {
+          "files": {"test.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "--dereference",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-l", "--dereference"],
+        "seed": {
+          "files": {"target.txt": "content"},
+          "symlinks": {"link": "target.txt"}
+        }
+      }
+    },
+    {
+      "surface_id": "--dereference-command-line",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-l", "--dereference-command-line"],
+        "seed": {
+          "files": {"target.txt": "content"},
+          "symlinks": {"link": "target.txt"}
+        }
+      }
+    },
+    {
+      "surface_id": "--dereference-command-line-symlink-to-dir",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-l", "--dereference-command-line-symlink-to-dir"],
+        "seed": {
+          "dirs": ["targetdir"],
+          "symlinks": {"link": "targetdir"}
+        }
+      }
+    },
+    {
+      "surface_id": "--escape",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--escape"],
+        "seed": {
+          "files": {"file with spaces.txt": "content", "file\twith\ttab.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "--full-time",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-l", "--full-time"],
+        "seed": {
+          "files": {"test.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "--human-readable",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-l", "--human-readable"],
+        "seed": {
+          "files": {"large.bin": "x"}
+        }
+      }
+    },
+    {
+      "surface_id": "--indicator-style",
+      "action": {
+        "kind": "add_value_examples",
+        "value_examples": ["none", "slash", "file-type", "classify"]
+      }
+    },
+    {
+      "surface_id": "--quote-name",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--quote-name"],
+        "seed": {
+          "files": {"file with spaces.txt": "content", "normal.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "--time",
+      "action": {
+        "kind": "add_value_examples",
+        "value_examples": ["atime", "access", "use", "ctime", "status", "mtime", "modification", "birth", "creation"]
+      }
+    },
+    {
+      "surface_id": "--version",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--version"]
+      }
+    },
+    {
+      "surface_id": "--zero",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--zero"],
+        "seed": {
+          "files": {"file1.txt": "content", "file2.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "-G",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-G"],
+        "seed": {
+          "files": {".hidden": "secret", "visible.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "-c",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-l", "-c"],
+        "seed": {
+          "files": {"test.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "-t",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-l", "-t"],
+        "seed": {
+          "files": {"file1.txt": "content", "file2.txt": "content"}
+        }
+      }
+    }
+  ]
+}
+```

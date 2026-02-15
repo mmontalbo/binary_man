@@ -1,0 +1,166 @@
+```json
+{
+  "schema_version": 1,
+  "responses": [
+    {
+      "surface_id": "--color",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--color"],
+        "seed": {
+          "files": {"file.txt": "content"},
+          "dirs": ["directory"]
+        }
+      }
+    },
+    {
+      "surface_id": "--file-type",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--file-type"],
+        "seed": {
+          "files": {"regular.txt": "content"},
+          "dirs": ["subdir"],
+          "symlinks": {"link": "regular.txt"},
+          "executables": {"script.sh": "#!/bin/sh\necho test"}
+        }
+      }
+    },
+    {
+      "surface_id": "--format",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--format", "long"],
+        "seed": {
+          "files": {"file1.txt": "content1", "file2.txt": "content2"},
+          "dirs": ["dir1", "dir2"]
+        }
+      }
+    },
+    {
+      "surface_id": "--hide-control-chars",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--hide-control-chars"],
+        "seed": {
+          "files": {"normal.txt": "content", "special.txt": "file"}
+        }
+      }
+    },
+    {
+      "surface_id": "--ignore-backups",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--ignore-backups"],
+        "seed": {
+          "files": {"file.txt": "content", "file.txt~": "backup", "file.bak": "backup"}
+        }
+      }
+    },
+    {
+      "surface_id": "--indicator-style",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--indicator-style", "slash"],
+        "seed": {
+          "files": {"file.txt": "content"},
+          "dirs": ["directory"],
+          "executables": {"script.sh": "#!/bin/sh\necho test"}
+        }
+      }
+    },
+    {
+      "surface_id": "--reverse",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--reverse"],
+        "seed": {
+          "files": {"aaa.txt": "content", "zzz.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "--time",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--time", "mtime"],
+        "seed": {
+          "files": {"file1.txt": "content", "file2.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "--width",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--width", "80"],
+        "seed": {
+          "files": {"file1.txt": "content", "file2.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "-F",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-F"],
+        "seed": {
+          "files": {"file.txt": "content"},
+          "dirs": ["directory"],
+          "executables": {"script.sh": "#!/bin/sh\necho test"}
+        }
+      }
+    },
+    {
+      "surface_id": "-U",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-U"],
+        "seed": {
+          "files": {"file1.txt": "content", "file2.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "-Z",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-Z"],
+        "seed": {
+          "files": {"file.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "-b",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-b"],
+        "seed": {
+          "files": {"normal.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "-k",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-k"],
+        "seed": {
+          "files": {"file.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "-q",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-q"],
+        "seed": {
+          "files": {"normal.txt": "content"}
+        }
+      }
+    }
+  ]
+}
+```

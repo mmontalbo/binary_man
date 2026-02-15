@@ -1,0 +1,35 @@
+```json
+{
+  "schema_version": 1,
+  "responses": [
+    {
+      "surface_id": "--quoting-style",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--quoting-style", "shell", "-1"],
+        "seed": {
+          "files": {
+            "normal-file.txt": "content",
+            "file with spaces.txt": "content",
+            "file-with-dashes": "content"
+          }
+        }
+      }
+    },
+    {
+      "surface_id": "--sort",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--sort", "size", "-S"],
+        "seed": {
+          "files": {
+            "large.txt": "This is a larger file with more content inside",
+            "small.txt": "s",
+            "medium.txt": "medium size content"
+          }
+        }
+      }
+    }
+  ]
+}
+```

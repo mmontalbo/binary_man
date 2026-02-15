@@ -1,0 +1,133 @@
+```json
+{
+  "schema_version": 1,
+  "responses": [
+    {
+      "surface_id": "--almost-all",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-l", "--almost-all"],
+        "seed": {
+          "files": {"visible.txt": "content"},
+          "dirs": [".hidden_dir"]
+        }
+      }
+    },
+    {
+      "surface_id": "--classify",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--classify"],
+        "seed": {
+          "files": {"regular.txt": "content"},
+          "dirs": ["directory"],
+          "symlinks": {"link": "regular.txt"},
+          "executables": {"script.sh": "#!/bin/sh\necho hi"}
+        }
+      }
+    },
+    {
+      "surface_id": "--group-directories-first",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-l", "--group-directories-first"],
+        "seed": {
+          "files": {"afile.txt": "a", "zfile.txt": "z"},
+          "dirs": ["bdir", "ydir"]
+        }
+      }
+    },
+    {
+      "surface_id": "--help",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--help"]
+      }
+    },
+    {
+      "surface_id": "--ignore",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--ignore", "*.txt"],
+        "seed": {
+          "files": {"file.txt": "hidden", "file.md": "visible"}
+        }
+      }
+    },
+    {
+      "surface_id": "--kibibytes",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-l", "--kibibytes"],
+        "seed": {
+          "files": {"file.bin": "this is content for size testing"}
+        }
+      }
+    },
+    {
+      "surface_id": "--quoting-style",
+      "action": {
+        "kind": "add_value_examples",
+        "value_examples": ["literal", "locale", "shell", "shell-always", "shell-escape", "shell-escape-always", "c", "escape"]
+      }
+    },
+    {
+      "surface_id": "--si",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-l", "--si"],
+        "seed": {
+          "files": {"largefile.bin": "x"}
+        }
+      }
+    },
+    {
+      "surface_id": "--sort",
+      "action": {
+        "kind": "add_value_examples",
+        "value_examples": ["none", "size", "time", "version", "extension", "width"]
+      }
+    },
+    {
+      "surface_id": "-g",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-g"],
+        "seed": {
+          "files": {"file.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "-h",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-lh"],
+        "seed": {
+          "files": {"file.bin": "this is some content"}
+        }
+      }
+    },
+    {
+      "surface_id": "-n",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-ln"],
+        "seed": {
+          "files": {"file.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "-s",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-ls"],
+        "seed": {
+          "files": {"file.txt": "content"}
+        }
+      }
+    }
+  ]
+}
+```

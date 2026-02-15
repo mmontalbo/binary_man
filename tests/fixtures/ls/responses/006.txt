@@ -1,0 +1,161 @@
+```json
+{
+  "schema_version": 1,
+  "responses": [
+    {
+      "surface_id": "--dired",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--dired"],
+        "seed": {
+          "files": {"file1.txt": "content1", "file2.txt": "content2"},
+          "dirs": ["dir1"]
+        }
+      }
+    },
+    {
+      "surface_id": "--help",
+      "action": {
+        "kind": "add_exclusion",
+        "reason_code": "fixture_gap",
+        "note": "Prints help text which doesn't relate to file listing behavior; not testable with file fixtures"
+      }
+    },
+    {
+      "surface_id": "--hyperlink",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--hyperlink"],
+        "seed": {
+          "files": {"file.txt": "content"},
+          "dirs": ["directory"]
+        }
+      }
+    },
+    {
+      "surface_id": "--inode",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--inode"],
+        "seed": {
+          "files": {"file1": "data1", "file2": "data2"}
+        }
+      }
+    },
+    {
+      "surface_id": "--numeric-uid-gid",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-l", "--numeric-uid-gid"],
+        "seed": {
+          "files": {"file.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "--size",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--size"],
+        "seed": {
+          "files": {"small.txt": "a", "large.txt": "large file content here"}
+        }
+      }
+    },
+    {
+      "surface_id": "-H",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-H"],
+        "seed": {
+          "files": {"regular.txt": "content"},
+          "symlinks": {"link": "regular.txt"}
+        }
+      }
+    },
+    {
+      "surface_id": "-L",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-L"],
+        "seed": {
+          "files": {"file.txt": "content"},
+          "symlinks": {"link": "file.txt"}
+        }
+      }
+    },
+    {
+      "surface_id": "-N",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-N"],
+        "seed": {
+          "files": {"normal.txt": "content", "special\nname.txt": "special"}
+        }
+      }
+    },
+    {
+      "surface_id": "-Q",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-Q"],
+        "seed": {
+          "files": {"normal.txt": "content", "special name.txt": "special"}
+        }
+      }
+    },
+    {
+      "surface_id": "-X",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-X"],
+        "seed": {
+          "files": {"file.txt": "content", "image.jpg": "data", "document.pdf": "data"}
+        }
+      }
+    },
+    {
+      "surface_id": "-d",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-d"],
+        "seed": {
+          "dirs": ["dir1", "dir2"],
+          "files": {"file.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "-l",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-l"],
+        "seed": {
+          "files": {"file1.txt": "content1", "file2.txt": "content2"},
+          "dirs": ["directory"]
+        }
+      }
+    },
+    {
+      "surface_id": "-m",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-m"],
+        "seed": {
+          "files": {"file1.txt": "content", "file2.txt": "content", "file3.txt": "content"}
+        }
+      }
+    },
+    {
+      "surface_id": "-o",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-o"],
+        "seed": {
+          "files": {"file.txt": "content"}
+        }
+      }
+    }
+  ]
+}
+```
