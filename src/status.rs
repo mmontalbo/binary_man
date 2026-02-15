@@ -562,6 +562,7 @@ mod tests {
             duration_ms: 1,
             stdout: String::new(),
             stderr: String::new(),
+            files_checked: BTreeMap::new(),
         };
         let evidence_path = root.join("inventory").join("scenarios").join("fail-1.json");
         fs::write(

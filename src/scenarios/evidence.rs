@@ -32,6 +32,15 @@ pub(crate) struct RunIndexEntry {
 pub(crate) struct RunManifest {
     #[serde(default)]
     pub(crate) result: RunResult,
+    #[serde(default)]
+    pub(crate) scenario: RunManifestScenario,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct RunManifestScenario {
+    /// Host path to the scenario's working directory.
+    #[serde(default)]
+    pub(crate) cwd_host: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -113,6 +122,18 @@ pub fn publishable_examples_report(mut report: ExamplesReport) -> Option<Example
     Some(report)
 }
 
+/// Result of checking a file path for file-based assertions.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct FileCheckResult {
+    pub exists: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_dir: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_preview: Option<String>,
+}
+
 /// Evidence blob captured for a scenario run.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ScenarioEvidence {
@@ -137,6 +158,10 @@ pub struct ScenarioEvidence {
     pub duration_ms: u128,
     pub stdout: String,
     pub stderr: String,
+    /// File state captured for file-based assertions.
+    /// Keys are relative paths from scenario working directory.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub files_checked: BTreeMap<String, FileCheckResult>,
 }
 
 /// Index summarizing scenario runs for quick status checks.

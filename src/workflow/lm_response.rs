@@ -133,13 +133,18 @@ pub enum LmAction {
     },
 
     /// Add a behavior scenario with simplified format.
-    /// Boilerplate (id, kind, coverage_tier, baseline, covers, assertions) is auto-generated.
+    /// Boilerplate (id, kind, coverage_tier, baseline, covers) is auto-generated.
+    /// If assertions are provided, they are used; otherwise OutputsDiffer is used.
     AddBehaviorScenario {
         /// Command-line arguments (without binary name).
         argv: Vec<String>,
         /// Optional seed fixtures in flat format.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         seed: Option<FlatSeed>,
+        /// Optional assertions (file_exists, file_missing, etc.).
+        /// If not provided, defaults to [{"kind": "outputs_differ"}].
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        assertions: Vec<BehaviorAssertion>,
     },
 
     /// Fix assertions in an existing scenario.
@@ -300,7 +305,11 @@ pub fn validate_responses(
                 result.valid_count += 1;
             }
 
-            LmAction::AddBehaviorScenario { argv, seed } => {
+            LmAction::AddBehaviorScenario {
+                argv,
+                seed,
+                assertions,
+            } => {
                 // Validate argv is not empty
                 if argv.is_empty() {
                     result.errors.push(ValidationError {
@@ -312,6 +321,13 @@ pub fn validate_responses(
 
                 // Convert flat seed to scenario seed spec
                 let seed_spec = seed.as_ref().map(flat_seed_to_seed_spec);
+
+                // Resolve assertions first - default to OutputsDiffer if empty
+                let final_assertions = if assertions.is_empty() {
+                    vec![BehaviorAssertion::OutputsDiffer {}]
+                } else {
+                    assertions.clone()
+                };
 
                 // Generate the full scenario with boilerplate
                 let scenario = ScenarioSpec {
@@ -329,8 +345,13 @@ pub fn validate_responses(
                     snippet_max_lines: None,
                     snippet_max_bytes: None,
                     coverage_tier: Some("behavior".to_string()),
-                    baseline_scenario_id: Some("baseline".to_string()),
-                    assertions: vec![BehaviorAssertion::OutputsDiffer {}],
+                    baseline_scenario_id: if final_assertions.iter().all(|a| !a.requires_baseline()) {
+                        // File assertions don't need a baseline
+                        None
+                    } else {
+                        Some("baseline".to_string())
+                    },
+                    assertions: final_assertions,
                     covers: vec![surface_id.to_string()],
                     coverage_ignore: false,
                     expect: crate::scenarios::ScenarioExpect::default(),

@@ -8,9 +8,11 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::scenarios::evidence::{
-    read_json, read_ref_bytes, resolve_new_run, stage_scenario_evidence, RunIndexEntry,
-    RunManifest, ScenarioEvidence, ScenarioIndexEntry, ScenarioOutcome,
+    read_json, read_ref_bytes, resolve_new_run, stage_scenario_evidence, FileCheckResult,
+    RunIndexEntry, RunManifest, ScenarioEvidence, ScenarioIndexEntry, ScenarioOutcome,
 };
+use crate::scenarios::BehaviorAssertion;
+use std::collections::BTreeMap;
 
 pub(super) fn build_failed_execution(
     context: &ScenarioRunContext<'_>,
@@ -102,6 +104,12 @@ pub(super) fn build_success_execution(
     let observed_exit_signal = run_manifest.result.exit_signal;
     let observed_timed_out = run_manifest.result.timed_out;
 
+    // Check file paths for file-based assertions
+    let files_checked = check_file_assertion_paths(
+        run_manifest.scenario.cwd_host.as_deref(),
+        &scenario.assertions,
+    );
+
     let mut evidence_paths = Vec::new();
     let mut evidence_epoch_ms = None;
     if let Some(staging_root) = staging_root {
@@ -150,6 +158,7 @@ pub(super) fn build_success_execution(
             duration_ms: context.duration_ms,
             stdout,
             stderr,
+            files_checked,
         };
         let rel = stage_scenario_evidence(staging_root, &evidence)?;
         evidence_paths.push(rel);
@@ -366,6 +375,81 @@ fn exit_status_string(status: &std::process::ExitStatus) -> String {
     } else {
         "terminated by signal".to_string()
     }
+}
+
+/// Maximum bytes to capture for file content preview in FileContains assertions.
+const FILE_CONTENT_PREVIEW_MAX_BYTES: usize = 4096;
+
+/// Check file paths for file-based assertions.
+///
+/// Returns a map of relative paths to their check results.
+fn check_file_assertion_paths(
+    cwd_host: Option<&str>,
+    assertions: &[BehaviorAssertion],
+) -> BTreeMap<String, FileCheckResult> {
+    let mut results = BTreeMap::new();
+
+    let cwd_path = match cwd_host {
+        Some(cwd) if !cwd.is_empty() => std::path::Path::new(cwd),
+        _ => return results,
+    };
+
+    for assertion in assertions {
+        let (path, needs_content) = match assertion {
+            BehaviorAssertion::FileExists { path } => (path.as_str(), false),
+            BehaviorAssertion::FileMissing { path } => (path.as_str(), false),
+            BehaviorAssertion::DirExists { path } => (path.as_str(), false),
+            BehaviorAssertion::DirMissing { path } => (path.as_str(), false),
+            BehaviorAssertion::FileContains { path, .. } => (path.as_str(), true),
+            _ => continue,
+        };
+
+        let trimmed = path.trim();
+        if trimmed.is_empty() || results.contains_key(trimmed) {
+            continue;
+        }
+
+        let full_path = cwd_path.join(trimmed);
+        let metadata = std::fs::metadata(&full_path);
+
+        let result = match metadata {
+            Ok(meta) => {
+                let is_dir = meta.is_dir();
+                let size = if is_dir { None } else { Some(meta.len()) };
+                let content_preview = if needs_content && !is_dir {
+                    read_file_preview(&full_path, FILE_CONTENT_PREVIEW_MAX_BYTES)
+                } else {
+                    None
+                };
+                FileCheckResult {
+                    exists: true,
+                    is_dir,
+                    size,
+                    content_preview,
+                }
+            }
+            Err(_) => FileCheckResult {
+                exists: false,
+                is_dir: false,
+                size: None,
+                content_preview: None,
+            },
+        };
+
+        results.insert(trimmed.to_string(), result);
+    }
+
+    results
+}
+
+/// Read the first N bytes of a file as UTF-8, or None on error.
+fn read_file_preview(path: &std::path::Path, max_bytes: usize) -> Option<String> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut buffer = vec![0u8; max_bytes];
+    let bytes_read = file.read(&mut buffer).ok()?;
+    buffer.truncate(bytes_read);
+    String::from_utf8(buffer).ok()
 }
 
 fn format_command_line(binary_name: &str, argv: &[String]) -> String {

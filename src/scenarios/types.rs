@@ -372,6 +372,16 @@ pub enum BehaviorAssertion {
     },
     /// Variant stdout should differ from baseline stdout.
     OutputsDiffer {},
+    /// File should exist after scenario run (variant only).
+    FileExists { path: String },
+    /// File should NOT exist after scenario run (variant only).
+    FileMissing { path: String },
+    /// Directory should exist after scenario run (variant only).
+    DirExists { path: String },
+    /// Directory should NOT exist after scenario run (variant only).
+    DirMissing { path: String },
+    /// File should contain the given pattern (variant only).
+    FileContains { path: String, pattern: String },
 }
 
 impl BehaviorAssertion {
@@ -380,7 +390,29 @@ impl BehaviorAssertion {
         match self {
             BehaviorAssertion::StdoutContains { seed_path, .. }
             | BehaviorAssertion::StdoutLacks { seed_path, .. } => Some(seed_path),
-            BehaviorAssertion::OutputsDiffer {} => None,
+            BehaviorAssertion::OutputsDiffer {}
+            | BehaviorAssertion::FileExists { .. }
+            | BehaviorAssertion::FileMissing { .. }
+            | BehaviorAssertion::DirExists { .. }
+            | BehaviorAssertion::DirMissing { .. }
+            | BehaviorAssertion::FileContains { .. } => None,
+        }
+    }
+
+    /// Check if this assertion requires a baseline scenario for comparison.
+    /// File-based assertions are variant-only and don't need a baseline.
+    pub fn requires_baseline(&self) -> bool {
+        match self {
+            // File assertions are variant-only
+            BehaviorAssertion::FileExists { .. }
+            | BehaviorAssertion::FileMissing { .. }
+            | BehaviorAssertion::DirExists { .. }
+            | BehaviorAssertion::DirMissing { .. }
+            | BehaviorAssertion::FileContains { .. } => false,
+            // Stdout assertions and OutputsDiffer require baseline comparison
+            BehaviorAssertion::StdoutContains { .. }
+            | BehaviorAssertion::StdoutLacks { .. }
+            | BehaviorAssertion::OutputsDiffer {} => true,
         }
     }
 }

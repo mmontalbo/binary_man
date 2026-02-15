@@ -167,14 +167,19 @@ fn validate_plan_scenarios(plan: &ScenarioPlan) -> Result<()> {
         if scenario.kind != super::ScenarioKind::Behavior || scenario.assertions.is_empty() {
             continue;
         }
+        // Check if any assertion requires a baseline (file assertions don't)
+        let needs_baseline = scenario
+            .assertions
+            .iter()
+            .any(|a| a.requires_baseline());
         let baseline_id = scenario.baseline_scenario_id.as_deref().unwrap_or("");
-        if baseline_id.trim().is_empty() {
+        if needs_baseline && baseline_id.trim().is_empty() {
             return Err(anyhow!(
                 "scenario {} assertions require baseline_scenario_id",
                 scenario.id
             ));
         }
-        if !scenario_ids.contains(baseline_id) {
+        if !baseline_id.trim().is_empty() && !scenario_ids.contains(baseline_id) {
             return Err(anyhow!(
                 "scenario {} baseline_scenario_id {} does not exist in plan",
                 scenario.id,

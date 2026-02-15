@@ -196,6 +196,40 @@ fn validate_behavior_assertion(assertion: &BehaviorAssertion) -> Result<()> {
             }
         }
         BehaviorAssertion::OutputsDiffer {} => {}
+        BehaviorAssertion::FileExists { path }
+        | BehaviorAssertion::FileMissing { path }
+        | BehaviorAssertion::DirExists { path }
+        | BehaviorAssertion::DirMissing { path } => {
+            validate_file_assertion_path(path)?;
+        }
+        BehaviorAssertion::FileContains { path, pattern } => {
+            validate_file_assertion_path(path)?;
+            if pattern.is_empty() {
+                return Err(anyhow!("file_contains pattern must not be empty"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_file_assertion_path(path: &str) -> Result<()> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow!("file assertion path must not be empty"));
+    }
+    let path_obj = Path::new(trimmed);
+    if path_obj.is_absolute() {
+        return Err(anyhow!(
+            "file assertion path must be relative (got {trimmed:?})"
+        ));
+    }
+    if path_obj
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err(anyhow!(
+            "file assertion path must not contain '..' (got {trimmed:?})"
+        ));
     }
     Ok(())
 }
