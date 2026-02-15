@@ -209,13 +209,41 @@ impl PrereqsFile {
     }
 }
 
-/// Merge seed entries, deduplicating by path.
+/// Merge seed entries, deduplicating by path and filtering invalid paths.
 fn merge_seed_entries(target: &mut Vec<ScenarioSeedEntry>, source: &[ScenarioSeedEntry]) {
     for entry in source {
+        // Skip entries with invalid paths (e.g., ".", "..", absolute paths)
+        if !is_valid_seed_path(&entry.path) {
+            continue;
+        }
         if !target.iter().any(|e| e.path == entry.path) {
             target.push(entry.clone());
         }
     }
+}
+
+/// Check if a seed path is valid (relative, non-empty after normalization, no parent refs).
+fn is_valid_seed_path(path: &str) -> bool {
+    use std::path::Path;
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let normalized = trimmed.replace('\\', "/");
+    let path = Path::new(&normalized);
+    if path.is_absolute() {
+        return false;
+    }
+    let mut has_normal_component = false;
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(_) => has_normal_component = true,
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => return false,
+            _ => return false,
+        }
+    }
+    has_normal_component
 }
 
 /// Load the prereqs file from disk, returning None if it doesn't exist.
