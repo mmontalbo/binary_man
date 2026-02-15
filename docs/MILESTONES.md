@@ -5,182 +5,181 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M22 — Testing and profiling.
+Current focus: M23 — Prompt Consolidation.
 
-## M21 — TUI Redesign with LM Transparency (done)
+## M23 — Prompt Consolidation (draft)
 
-Goal: Rebuild the `bman inspect` TUI to match current workflow concepts and
-provide full visibility into LM interactions, enabling users to understand why
-enrichment isn't complete and what the LM attempted.
+Goal: Move LM prompt text from Rust code into markdown files for clearer
+ownership, easier review, and reduced binary-specific coupling.
 
 Motivation:
-- The existing TUI was built during M11 (Side Quest) and hasn't been updated
-  since. It reflects outdated concepts (Intent/Evidence/Outputs/History tabs)
-  that don't map to the current workflow.
-- Users running `bman <binary>` have no visibility into what the LM is doing.
-  The enrichment process is a black box until it succeeds or fails.
-- M20 added prereqs as a first-class concept, but the TUI doesn't surface them.
-- Debugging verification failures requires manually reading JSON files in
-  `inventory/scenarios/`. The TUI should make this navigable.
-- The current TUI shows file existence (present/missing) rather than answering
-  the user's actual question: "what needs work and why?"
+- LM prompts are split between `prompts/*.md` (300 lines) and embedded strings
+  in `lm_client.rs` (~400 lines across 3 functions). Code review is harder when
+  prompt text is interleaved with string formatting logic.
+- Prompts contain binary-specific examples (ls, git) that should be generic.
+- Prompt files are easier to diff, review, and version control than Rust strings.
+- M22 established baselines to detect regressions from prompt changes.
 
-Design principles:
-- **One question per view**: Each tab answers a single question clearly.
-  Work = "what needs attention?", Log = "what did the LM do?", Browse = "what
-  exists?"
-- **Full-screen views**: No split panes. Each view takes the whole screen.
-  Detail views are modal (Enter to open, Esc to close).
-- **LM transparency**: Every LM invocation is logged with prompt preview,
-  items processed, outcome, and optional full prompt/response storage.
-- **Actionable output**: Every view shows something useful to copy (the next
-  command to run, a scenario ID, an error message).
-- **Minimal state**: Current tab + selection index + optional detail view.
-  No complex navigation stacks.
+Non-goal (deferred to M24):
+- DuckDB optimization (separate concern, measure need first)
+- Runtime template loading (compile-time embedding is sufficient)
 
-### LM Log Storage
+---
 
-New artifact: `enrich/lm_log.jsonl` (append-only, durable)
+## Deliverables
 
-```jsonl
-{"ts":1707900000,"cycle":1,"kind":"prereq_inference","duration_ms":4200,"items_count":34,"outcome":"success","summary":"10 definitions, 34 mappings, 3 excluded"}
-{"ts":1707900060,"cycle":2,"kind":"behavior","duration_ms":3100,"items":["--blob","--comment","--url"],"outcome":"partial","succeeded":2,"failed":1,"error":"--url: parse error at line 15"}
-```
+### Deliverable 1: Extract Embedded Prompts to Files
 
-Optional full content (enabled by `--verbose` or config):
+Move prompts from `lm_client.rs` to `prompts/` directory:
 
 ```
-enrich/lm_log/
-├── cycle_001_prereq_prompt.txt
-├── cycle_001_prereq_response.txt
-├── cycle_002_behavior_prompt.txt
-└── cycle_002_behavior_response.txt
+prompts/
+├── enrich_agent_prompt.md     # Existing (for Claude Code agent)
+├── behavior.md                # NEW: from build_behavior_prompt()
+└── prereq_inference.md        # NEW: from build_prereq_prompt()
 ```
 
-### Tab Structure
-
-| Tab | Question | Content |
-|-----|----------|---------|
-| Work | "What needs attention?" | Items grouped by status: needs_scenario, needs_fix, excluded |
-| Log | "What did the LM do?" | Chronological LM invocations with outcomes |
-| Browse | "What exists?" | File tree of doc pack artifacts |
-
-### Work Tab
-
-Shows only items needing action, grouped by what's wrong:
-
-- **NEEDS SCENARIO**: Items with no scenario (never run)
-- **NEEDS FIX**: Items that ran but failed (outputs_equal, assertion_failed, etc.)
-- **EXCLUDED**: Items excluded via prereqs (interactive, network, privilege)
-
-Each item shows: surface_id, reason code, last run time, exit code.
-
-Selecting an item and pressing Enter shows detail view with:
-- Description and forms from surface.json
-- Prereqs with seed preview
-- Status explanation (why it's in this category)
-- Last run evidence (argv, exit, stdout/stderr preview)
-
-### Log Tab
-
-Shows LM invocation history, newest first:
-
-- Cycle number, timestamp, kind (prereq_inference, behavior, behavior_retry)
-- Items processed, outcome (success/partial/failed), duration
-- Error preview if failed
-
-Selecting a cycle and pressing Enter shows:
-- Full item list
-- Outcome per item (succeeded/failed with reason)
-- Prompt preview (first ~500 chars)
-- Links to view full prompt/response (if stored)
-
-### Browse Tab
-
-Simple file tree of doc pack:
-- enrich/ (config, semantics, prereqs, lm_log)
-- inventory/ (surface, scenarios)
-- scenarios/ (plan)
-- man/ (rendered output)
-
-Selecting a file and pressing Enter opens in pager. Press `o` to open in editor.
-
-### Keybindings
+Template structure with separate files for reason-specific content:
 
 ```
-Navigation:
-  Tab         Next tab
-  Shift+Tab   Previous tab
-  j/k ↑/↓     Move selection
-  Enter       View detail / expand
-  Esc         Back / close detail
-  /           Search (in Browse tab)
-
-Actions:
-  o           Open in $EDITOR
-  c           Copy (command, path, or error)
-  r           Refresh
-  m           Open man page (if exists)
-
-General:
-  q           Quit
-  ?           Help
+prompts/
+├── enrich_agent_prompt.md        # Existing (for Claude Code agent)
+├── behavior_base.md              # Main structure + response format
+├── behavior_reason_no_scenario.md
+├── behavior_reason_outputs_equal.md
+├── behavior_reason_assertion_failed.md
+└── prereq_inference.md
 ```
 
-### Deliverables
+Rust concatenates the appropriate pieces:
+```rust
+const BEHAVIOR_BASE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"), "/prompts/behavior_base.md"
+));
+const REASON_NO_SCENARIO: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"), "/prompts/behavior_reason_no_scenario.md"
+));
+// ... other reason constants
 
-1. **LM log storage**: Add `lm_log.jsonl` append during LM invocations. Add
-   optional full prompt/response storage in `lm_log/` directory.
+fn build_behavior_prompt(summary: &StatusSummary, payload: &Payload) -> String {
+    let reason_section = match payload.reason_code.as_deref() {
+        Some("no_scenario") => REASON_NO_SCENARIO,
+        Some("outputs_equal") => REASON_OUTPUTS_EQUAL,
+        Some("assertion_failed") => REASON_ASSERTION_FAILED,
+        _ => "",
+    };
 
-2. **Work tab**: Rewrite data loading to group surface items by verification
-   status. Add detail view with prereqs, evidence preview.
+    let binary_name = summary.binary_name.as_deref().unwrap_or("<binary>");
+    let targets = format_targets(&payload.target_ids);
+    let context = format_scaffold_context(payload); // value hints, guidance
 
-3. **Log tab**: New view showing LM invocation history from `lm_log.jsonl`.
-   Detail view shows per-item outcomes and prompt/response access.
+    format!("{}\n\n{}\n\n## Target Options\n{}\n\n{}",
+            BEHAVIOR_BASE.replace("{binary_name}", binary_name),
+            reason_section,
+            targets,
+            context)
+}
+```
 
-4. **Browse tab**: Simplified file tree replacing old Intent/Outputs/History
-   tabs. No artifact existence checks—just show what's there.
+This avoids complex parsing — just string concatenation and simple `replace()`.
 
-5. **Remove old tabs**: Delete Intent, Evidence, Outputs, History tab code.
-   Delete associated data loading logic.
+**Note**: `build_retry_prompt()` stays in Rust — it wraps `build_behavior_prompt()`
+with error context, no separate template needed.
 
-6. **Header simplification**: Keep status line (decision, next action) but
-   remove gate labels (lock/plan fresh/stale). Those belong in `status --json`.
+### Deliverable 2: Generalize and Reduce Prompts
 
-### Files to Modify
+Edit all prompt files to remove binary-specific content and redundancy:
+
+**Generalization**:
+| Current | Replacement |
+|---------|-------------|
+| `ls --all` | `--option` |
+| `--color always\|never\|auto` | `--mode value1\|value2` |
+| `.hidden`, `visible.txt` | `file1.txt`, `file2.txt` |
+| git config references | (removed) |
+
+**Redundancy reduction**:
+1. Consolidate seed format docs (currently in 3 places → 1 canonical section)
+2. Compress JSON examples to single-line
+3. Remove "IMPORTANT:", "NOTE:" emphasis markers
+
+**Before** (~15 lines):
+```markdown
+**Scenario with seed fixtures:**
+```json
+{
+  "kind": "add_behavior_scenario",
+  "argv": ["--all"],
+  "seed": {
+    "files": {".hidden": "secret", "visible.txt": "hello"},
+    "dirs": ["subdir"]
+  }
+}
+```
+**IMPORTANT seed format:**
+- `files`: Object mapping filename to content
+- `dirs`: Array of directory names
+NOTE: `files` is an OBJECT, not an array!
+```
+
+**After** (~3 lines):
+```markdown
+Scenario with seed:
+`{"kind": "add_behavior_scenario", "argv": ["--opt"], "seed": {"files": {"f.txt": "x"}, "dirs": ["d"]}}`
+```
+
+---
+
+## Files to Modify
 
 | File | Changes |
 |------|---------|
-| `src/inspect.rs` | New Tab enum (Work, Log, Browse), remove old types |
-| `src/inspect/data.rs` | Rewrite for Work/Log/Browse data models |
-| `src/inspect/app/view.rs` | Rewrite all draw_* methods for new tabs |
-| `src/inspect/app/state.rs` | Simplify state, add detail view mode |
-| `src/inspect/app/actions.rs` | Update for new navigation model |
-| `src/workflow/lm_client.rs` | Add LM log appending |
-| `src/workflow/apply/prereq_inference.rs` | Add LM log for prereq cycles |
-| `src/enrich/paths.rs` | Add `lm_log_path()`, `lm_log_dir()` |
-| `src/enrich/lm_log.rs` | NEW: LmLogEntry type, append/load functions |
+| `prompts/behavior_base.md` | NEW: main structure + response format |
+| `prompts/behavior_reason_no_scenario.md` | NEW: no_scenario guidance |
+| `prompts/behavior_reason_outputs_equal.md` | NEW: outputs_equal guidance |
+| `prompts/behavior_reason_assertion_failed.md` | NEW: assertion_failed guidance |
+| `prompts/prereq_inference.md` | NEW: prereq classification prompt |
+| `prompts/enrich_agent_prompt.md` | Generalize examples, reduce redundancy |
+| `src/workflow/lm_client.rs` | Use include_str!, format!() concatenation |
 
-### Acceptance Criteria
+---
+
+## Pre-work Measurement
+
+Before starting, capture baseline metrics:
+```bash
+# Total lines in prompt-building functions (approximate)
+grep -n "^fn build_" src/workflow/lm_client.rs  # note line numbers
+# Then count lines between each function start and its closing brace
+
+# Total prompt file lines
+wc -l prompts/*.md
+
+# Binary-specific references
+grep -rn "ls \|--all\|\.hidden\|git config" prompts/ src/workflow/lm_client.rs
+```
+
+## Acceptance Criteria
 
 | Criterion | Validation |
 |-----------|------------|
-| Work tab shows unverified items | Run `bman git config`, open inspect, see --blob etc. in NEEDS FIX |
-| Work detail shows prereqs | Select item with prereq, see seed preview |
-| Log tab shows LM cycles | After enrichment, see prereq_inference and behavior cycles |
-| Log detail shows outcomes | Select cycle, see which items succeeded/failed |
-| Full prompt viewable | With --verbose, press `p` in log detail to see prompt |
-| Browse shows prereqs.json | New M20 artifact appears in tree |
-| Copy works | Press `c` on Work tab, paste shows `bman apply --doc-pack ...` |
-| Old tabs removed | No Intent/Evidence/Outputs/History in codebase |
+| Prompts in files | All prompt text in `prompts/`, Rust only does selection + interpolation |
+| Generalized | `grep -rE "\bls\b|--all|\.hidden|git config" prompts/` returns no matches |
+| Reduced | Total `prompts/*.md` lines < (pre-work prompts + embedded) |
+| Compiles | `cargo build` succeeds |
+| Baselines maintained | ls: ≤ 12 cycles, git-config: ≤ 8 cycles |
+| Mock tests pass | `cargo test --release` green |
+| Real LM validation | Manual: `BMAN_LM_COMMAND="claude -p" cargo test --release` |
 
-### Out of Scope
+---
 
-- In-TUI editing (remains read-only)
-- Running apply from within TUI
-- Real-time updates during enrichment (manual refresh only)
-- Syntax highlighting for JSON/prompt content
-- Search within file content (only file name search in Browse)
+## Out of Scope (Deferred)
+
+- DuckDB crate integration (M24 if measured need)
+- Query result caching
+- Token counting / cost tracking
+- Runtime template loading (compile-time embedding is sufficient)
+- Prompt A/B testing framework
 
 ## M22 — Testing Infrastructure (done)
 
@@ -572,6 +571,181 @@ BMAN_LM_COMMAND="claude -p --model haiku" cargo test
 - User-facing fixture commands
 - Property-based testing / fuzzing
 - Fixture auto-generation tooling
+
+## M21 — TUI Redesign with LM Transparency (done)
+
+Goal: Rebuild the `bman inspect` TUI to match current workflow concepts and
+provide full visibility into LM interactions, enabling users to understand why
+enrichment isn't complete and what the LM attempted.
+
+Motivation:
+- The existing TUI was built during M11 (Side Quest) and hasn't been updated
+  since. It reflects outdated concepts (Intent/Evidence/Outputs/History tabs)
+  that don't map to the current workflow.
+- Users running `bman <binary>` have no visibility into what the LM is doing.
+  The enrichment process is a black box until it succeeds or fails.
+- M20 added prereqs as a first-class concept, but the TUI doesn't surface them.
+- Debugging verification failures requires manually reading JSON files in
+  `inventory/scenarios/`. The TUI should make this navigable.
+- The current TUI shows file existence (present/missing) rather than answering
+  the user's actual question: "what needs work and why?"
+
+Design principles:
+- **One question per view**: Each tab answers a single question clearly.
+  Work = "what needs attention?", Log = "what did the LM do?", Browse = "what
+  exists?"
+- **Full-screen views**: No split panes. Each view takes the whole screen.
+  Detail views are modal (Enter to open, Esc to close).
+- **LM transparency**: Every LM invocation is logged with prompt preview,
+  items processed, outcome, and optional full prompt/response storage.
+- **Actionable output**: Every view shows something useful to copy (the next
+  command to run, a scenario ID, an error message).
+- **Minimal state**: Current tab + selection index + optional detail view.
+  No complex navigation stacks.
+
+### LM Log Storage
+
+New artifact: `enrich/lm_log.jsonl` (append-only, durable)
+
+```jsonl
+{"ts":1707900000,"cycle":1,"kind":"prereq_inference","duration_ms":4200,"items_count":34,"outcome":"success","summary":"10 definitions, 34 mappings, 3 excluded"}
+{"ts":1707900060,"cycle":2,"kind":"behavior","duration_ms":3100,"items":["--blob","--comment","--url"],"outcome":"partial","succeeded":2,"failed":1,"error":"--url: parse error at line 15"}
+```
+
+Optional full content (enabled by `--verbose` or config):
+
+```
+enrich/lm_log/
+├── cycle_001_prereq_prompt.txt
+├── cycle_001_prereq_response.txt
+├── cycle_002_behavior_prompt.txt
+└── cycle_002_behavior_response.txt
+```
+
+### Tab Structure
+
+| Tab | Question | Content |
+|-----|----------|---------|
+| Work | "What needs attention?" | Items grouped by status: needs_scenario, needs_fix, excluded |
+| Log | "What did the LM do?" | Chronological LM invocations with outcomes |
+| Browse | "What exists?" | File tree of doc pack artifacts |
+
+### Work Tab
+
+Shows only items needing action, grouped by what's wrong:
+
+- **NEEDS SCENARIO**: Items with no scenario (never run)
+- **NEEDS FIX**: Items that ran but failed (outputs_equal, assertion_failed, etc.)
+- **EXCLUDED**: Items excluded via prereqs (interactive, network, privilege)
+
+Each item shows: surface_id, reason code, last run time, exit code.
+
+Selecting an item and pressing Enter shows detail view with:
+- Description and forms from surface.json
+- Prereqs with seed preview
+- Status explanation (why it's in this category)
+- Last run evidence (argv, exit, stdout/stderr preview)
+
+### Log Tab
+
+Shows LM invocation history, newest first:
+
+- Cycle number, timestamp, kind (prereq_inference, behavior, behavior_retry)
+- Items processed, outcome (success/partial/failed), duration
+- Error preview if failed
+
+Selecting a cycle and pressing Enter shows:
+- Full item list
+- Outcome per item (succeeded/failed with reason)
+- Prompt preview (first ~500 chars)
+- Links to view full prompt/response (if stored)
+
+### Browse Tab
+
+Simple file tree of doc pack:
+- enrich/ (config, semantics, prereqs, lm_log)
+- inventory/ (surface, scenarios)
+- scenarios/ (plan)
+- man/ (rendered output)
+
+Selecting a file and pressing Enter opens in pager. Press `o` to open in editor.
+
+### Keybindings
+
+```
+Navigation:
+  Tab         Next tab
+  Shift+Tab   Previous tab
+  j/k ↑/↓     Move selection
+  Enter       View detail / expand
+  Esc         Back / close detail
+  /           Search (in Browse tab)
+
+Actions:
+  o           Open in $EDITOR
+  c           Copy (command, path, or error)
+  r           Refresh
+  m           Open man page (if exists)
+
+General:
+  q           Quit
+  ?           Help
+```
+
+### Deliverables
+
+1. **LM log storage**: Add `lm_log.jsonl` append during LM invocations. Add
+   optional full prompt/response storage in `lm_log/` directory.
+
+2. **Work tab**: Rewrite data loading to group surface items by verification
+   status. Add detail view with prereqs, evidence preview.
+
+3. **Log tab**: New view showing LM invocation history from `lm_log.jsonl`.
+   Detail view shows per-item outcomes and prompt/response access.
+
+4. **Browse tab**: Simplified file tree replacing old Intent/Outputs/History
+   tabs. No artifact existence checks—just show what's there.
+
+5. **Remove old tabs**: Delete Intent, Evidence, Outputs, History tab code.
+   Delete associated data loading logic.
+
+6. **Header simplification**: Keep status line (decision, next action) but
+   remove gate labels (lock/plan fresh/stale). Those belong in `status --json`.
+
+### Files to Modify
+
+| File | Changes |
+|------|---------|
+| `src/inspect.rs` | New Tab enum (Work, Log, Browse), remove old types |
+| `src/inspect/data.rs` | Rewrite for Work/Log/Browse data models |
+| `src/inspect/app/view.rs` | Rewrite all draw_* methods for new tabs |
+| `src/inspect/app/state.rs` | Simplify state, add detail view mode |
+| `src/inspect/app/actions.rs` | Update for new navigation model |
+| `src/workflow/lm_client.rs` | Add LM log appending |
+| `src/workflow/apply/prereq_inference.rs` | Add LM log for prereq cycles |
+| `src/enrich/paths.rs` | Add `lm_log_path()`, `lm_log_dir()` |
+| `src/enrich/lm_log.rs` | NEW: LmLogEntry type, append/load functions |
+
+### Acceptance Criteria
+
+| Criterion | Validation |
+|-----------|------------|
+| Work tab shows unverified items | Run `bman git config`, open inspect, see --blob etc. in NEEDS FIX |
+| Work detail shows prereqs | Select item with prereq, see seed preview |
+| Log tab shows LM cycles | After enrichment, see prereq_inference and behavior cycles |
+| Log detail shows outcomes | Select cycle, see which items succeeded/failed |
+| Full prompt viewable | With --verbose, press `p` in log detail to see prompt |
+| Browse shows prereqs.json | New M20 artifact appears in tree |
+| Copy works | Press `c` on Work tab, paste shows `bman apply --doc-pack ...` |
+| Old tabs removed | No Intent/Evidence/Outputs/History in codebase |
+
+### Out of Scope
+
+- In-TUI editing (remains read-only)
+- Running apply from within TUI
+- Real-time updates during enrichment (manual refresh only)
+- Syntax highlighting for JSON/prompt content
+- Search within file content (only file name search in Browse)
 
 ## M20 — LM-Driven Prereq and Fixture Generation (done)
 
