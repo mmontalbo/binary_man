@@ -57,6 +57,8 @@ pub struct AutoVerificationKindProgress {
 pub struct RunScenariosResult {
     pub report: ExamplesReport,
     pub executed_forced_rerun_scenario_ids: Vec<String>,
+    /// Scenarios that were skipped due to validation errors (e.g., invalid seed paths).
+    pub skipped_scenarios: Vec<crate::enrich::SkippedScenario>,
 }
 
 pub(super) struct ScenarioRunContext<'a> {
@@ -119,7 +121,9 @@ fn log_incomplete_cache(previous_available: bool, has_existing_index: bool) {
 
 /// Run scenarios and return an examples report snapshot.
 pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<RunScenariosResult> {
-    let plan = super::load_plan(args.scenarios_path, args.run_root)?;
+    let loaded = super::load_plan_with_filtering(args.scenarios_path, args.run_root)?;
+    let plan = loaded.plan;
+    let skipped_scenarios = loaded.skipped;
     if let Some(plan_binary) = plan.binary.as_deref() {
         if plan_binary != args.binary_name {
             return Err(anyhow!(
@@ -361,6 +365,7 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<RunScenariosResult> 
             scenarios: outcomes,
         },
         executed_forced_rerun_scenario_ids: executed_forced_rerun_ids.into_iter().collect(),
+        skipped_scenarios,
     })
 }
 

@@ -490,6 +490,7 @@ fn run_apply_core(args: &ApplyArgs) -> Result<()> {
         outputs_hash,
         executed_forced_rerun_scenario_ids,
         verification_entries,
+        skipped_scenarios,
     } = match apply_result {
         Ok(result) => result,
         Err(err) => {
@@ -581,6 +582,7 @@ fn run_apply_core(args: &ApplyArgs) -> Result<()> {
         next_action,
         last_run: Some(last_run.clone()),
         force_used,
+        skipped_scenarios,
     };
     enrich::write_report(ctx.paths.root(), &report)?;
 
@@ -630,6 +632,7 @@ struct ApplyPlanActionsResult {
     outputs_hash: Option<String>,
     executed_forced_rerun_scenario_ids: Vec<String>,
     verification_entries: Option<BTreeMap<String, scenarios::VerificationEntry>>,
+    skipped_scenarios: Vec<enrich::SkippedScenario>,
 }
 
 fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<ApplyPlanActionsResult> {
@@ -682,6 +685,7 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<ApplyPlanActionsResult
 
     let mut examples_report = None;
     let mut executed_forced_rerun_scenario_ids = Vec::new();
+    let mut skipped_scenarios = Vec::new();
     let scenarios_path = ctx.paths.scenarios_plan_path();
 
     if wants_surface {
@@ -771,6 +775,7 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<ApplyPlanActionsResult
             verbose: args.verbose,
         })?;
         executed_forced_rerun_scenario_ids = run_result.executed_forced_rerun_scenario_ids;
+        skipped_scenarios = run_result.skipped_scenarios;
         examples_report = Some(run_result.report);
     } else if wants_render {
         examples_report = load_examples_report_optional(&ctx.paths)?;
@@ -852,6 +857,7 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<ApplyPlanActionsResult
         outputs_hash,
         executed_forced_rerun_scenario_ids,
         verification_entries: ledger_result.verification_entries,
+        skipped_scenarios,
     })
 }
 

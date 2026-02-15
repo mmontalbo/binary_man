@@ -1,7 +1,9 @@
 //! Scenario plan loading and validation.
 //!
 //! Plans are strictly validated to keep scenario execution deterministic and
-//! pack-owned.
+//! pack-owned. Invalid scenarios (e.g., with absolute seed paths) are skipped
+//! rather than failing the entire load.
+use crate::enrich::SkippedScenario;
 use crate::templates;
 use anyhow::{anyhow, Context, Result};
 use std::fs;
@@ -11,13 +13,58 @@ use super::validate::{validate_scenario_defaults, validate_scenario_spec};
 use super::SCENARIO_PLAN_SCHEMA_VERSION;
 use super::{BehaviorAssertion, ScenarioPlan, ScenarioSpec, VerificationIntent};
 
+/// Result of loading a plan with potential skipped scenarios.
+#[derive(Debug)]
+pub struct LoadedPlan {
+    pub plan: ScenarioPlan,
+    pub skipped: Vec<SkippedScenario>,
+}
+
 /// Load and validate a scenario plan from disk.
 pub fn load_plan(path: &Path, doc_pack_root: &Path) -> Result<ScenarioPlan> {
+    let loaded = load_plan_with_filtering(path, doc_pack_root)?;
+    Ok(loaded.plan)
+}
+
+/// Load a scenario plan, filtering out invalid scenarios instead of failing.
+///
+/// Returns the valid plan and a list of skipped scenarios with reasons.
+pub fn load_plan_with_filtering(path: &Path, doc_pack_root: &Path) -> Result<LoadedPlan> {
     let bytes =
         fs::read(path).with_context(|| format!("read scenarios plan {}", path.display()))?;
-    let plan: ScenarioPlan = serde_json::from_slice(&bytes).context("parse scenarios plan JSON")?;
-    validate_plan(&plan, doc_pack_root)?;
-    Ok(plan)
+    let mut plan: ScenarioPlan =
+        serde_json::from_slice(&bytes).context("parse scenarios plan JSON")?;
+
+    // Validate plan-level constraints (these are fatal)
+    validate_plan_structure(&plan, doc_pack_root)?;
+
+    // Filter scenarios, collecting skipped ones
+    let mut skipped = Vec::new();
+    let mut valid_scenarios = Vec::new();
+
+    for scenario in plan.scenarios.drain(..) {
+        match validate_scenario_spec(&scenario) {
+            Ok(()) => valid_scenarios.push(scenario),
+            Err(err) => {
+                eprintln!(
+                    "warning: skipping scenario {} ({})",
+                    scenario.id,
+                    err.root_cause()
+                );
+                skipped.push(SkippedScenario {
+                    id: scenario.id.clone(),
+                    reason: format!("{:#}", err),
+                });
+            }
+        }
+    }
+
+    plan.scenarios = valid_scenarios;
+
+    // Validate cross-scenario constraints (baseline refs, etc.)
+    validate_plan_scenarios(&plan)?;
+
+    Ok(LoadedPlan { plan, skipped })
 }
 
 pub(crate) fn load_plan_if_exists(
@@ -32,6 +79,19 @@ pub(crate) fn load_plan_if_exists(
 
 /// Validate a scenario plan against schema and filesystem constraints.
 pub fn validate_plan(plan: &ScenarioPlan, doc_pack_root: &Path) -> Result<()> {
+    validate_plan_structure(plan, doc_pack_root)?;
+    // Validate each scenario individually
+    for scenario in &plan.scenarios {
+        validate_scenario_spec(scenario)
+            .with_context(|| format!("validate scenario {}", scenario.id))?;
+    }
+    validate_plan_scenarios(plan)?;
+    Ok(())
+}
+
+/// Validate plan-level structure (schema version, coverage, verification queue, defaults).
+/// These are fatal errors that prevent plan loading.
+fn validate_plan_structure(plan: &ScenarioPlan, doc_pack_root: &Path) -> Result<()> {
     if plan.schema_version != SCENARIO_PLAN_SCHEMA_VERSION {
         return Err(anyhow!(
             "unsupported scenarios plan schema_version {}",
@@ -82,10 +142,13 @@ pub fn validate_plan(plan: &ScenarioPlan, doc_pack_root: &Path) -> Result<()> {
             ));
         }
     }
+    Ok(())
+}
+
+/// Validate cross-scenario constraints (duplicate IDs, baseline refs, assertion seed paths).
+fn validate_plan_scenarios(plan: &ScenarioPlan) -> Result<()> {
     let mut scenario_ids = std::collections::BTreeSet::new();
     for scenario in &plan.scenarios {
-        validate_scenario_spec(scenario)
-            .with_context(|| format!("validate scenario {}", scenario.id))?;
         if !scenario_ids.insert(scenario.id.clone()) {
             return Err(anyhow!(
                 "duplicate scenario.id {} in scenarios/plan.json",

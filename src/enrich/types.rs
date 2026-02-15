@@ -622,6 +622,13 @@ pub struct EnrichPlan {
     pub verification_plan: Option<VerificationPlanSummary>,
 }
 
+/// Scenario that was skipped due to validation errors.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct SkippedScenario {
+    pub id: String,
+    pub reason: String,
+}
+
 /// Report emitted after `bman apply` completes.
 #[derive(Debug, Serialize, Clone)]
 pub struct EnrichReport {
@@ -637,6 +644,9 @@ pub struct EnrichReport {
     pub next_action: NextAction,
     pub last_run: Option<EnrichRunSummary>,
     pub force_used: bool,
+    /// Scenarios skipped due to validation errors (e.g., invalid seed paths).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped_scenarios: Vec<SkippedScenario>,
 }
 
 #[cfg(test)]

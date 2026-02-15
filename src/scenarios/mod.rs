@@ -30,7 +30,7 @@ pub use auto_verification::{
 pub(crate) use ledger::verification_query_template_failure_path;
 pub use ledger::{build_coverage_ledger, build_verification_ledger, normalize_surface_id};
 pub(crate) use plan::load_plan_if_exists;
-pub use plan::{load_plan, plan_stub, validate_plan};
+pub use plan::{load_plan, load_plan_with_filtering, plan_stub, validate_plan};
 pub(crate) use seed::{default_behavior_seed, DEFAULT_BEHAVIOR_SEED_DIR};
 
 #[allow(unused_imports)] // ScenarioIndexEntry used in tests
