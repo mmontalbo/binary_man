@@ -5,7 +5,101 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M25 (next milestone TBD).
+Current focus: M26 (TBD - continue coreutils or explore new direction).
+
+## Future Considerations
+
+### File-Based Assertions (higher priority)
+
+Many binaries produce side effects rather than stdout changes:
+- `touch`, `mkdir`, `cp`, `mv` - file/directory creation
+- `chmod`, `chown` - permission changes
+- `tee` - simultaneous stdout and file output
+
+Potential assertion kinds:
+- `creates_file: "path"` - verify file exists after scenario
+- `file_contains: {path, content}` - verify file content
+- `file_mode: {path, mode}` - verify permissions
+
+This would enable verification of file-manipulating coreutils.
+
+### Timing Assertions (lower priority)
+
+Some binaries are timing-based with no stdout to verify:
+- `sleep NUMBER` - delays execution
+- `timeout DURATION COMMAND` - time-limited execution
+
+Potential assertion kinds:
+- `min_duration_ms: N` - scenario must take at least N ms
+- `max_duration_ms: N` - scenario must complete within N ms
+
+Lower priority because few binaries need this and timing can be flaky.
+
+### Current Workaround
+
+Use `fixture_gap` exclusion with descriptive notes for timing/side-effect
+behaviors that can't be verified with current stdout-based assertions.
+
+## M25 — Coreutils Validation (done)
+
+Goal: Validate enrichment generalizes beyond `ls` by running 10 stdin-capable
+coreutils. Catalog failure patterns to decide: continue breadth or invest in
+prereq inference.
+
+### Initial Results (before fixes)
+
+**10 binaries attempted, 4 verified, 6 failed.**
+
+Primary failure pattern: LM created seed files but didn't include them in argv.
+For example, scenario creates `input.txt` but runs `tac -b` instead of `tac -b input.txt`.
+
+### Fixes Applied
+
+1. **Prompt fix**: Updated `prompts/behavior_base.md` to explicitly instruct LM
+   to include seed file paths in argv when creating scenarios.
+
+2. **Code fix**: Added `blocks_indefinitely` exclusion reason code for options
+   like `tail --follow` that wait forever.
+
+3. **Template fix**: Added synopsis extraction rule for util-linux style help
+   where "Usage:" appears on a separate line from the actual usage pattern.
+
+### Final Results (after fixes)
+
+**10 binaries attempted, 9 verified, 1 partial.**
+
+| Binary | Surfaces | Behavior | Status | Notes |
+|--------|----------|----------|--------|-------|
+| wc | 14 | 14 | verified | All options work with stdin |
+| cat | 19 | 2 | verified | outputs_equal for most |
+| head | 13 | 4 | verified | Similar to cat |
+| tr | 4 | 2 | verified | Small surface count |
+| tac | 8 | 8 | verified | Fixed with prompt improvement |
+| base64 | 8 | 4 | verified | Fixed with prompt improvement |
+| nl | 24 | 24 | verified | All surfaces verified |
+| cut | 12 | 16 | verified | Fixed with prompt improvement |
+| rev | 4 | 4 | verified | Fixed with synopsis extraction rule |
+| tail | 18 | 14 | partial | --follow/-f block indefinitely |
+
+### Remaining Issue
+
+**tail**: `--follow` and `-f` block indefinitely waiting for file changes. The
+`blocks_indefinitely` exclusion reason code was added but the LM needs to detect
+these from the option descriptions.
+
+### Decision
+
+9 verified + 1 partial meets target. The fixes resolved both fixture generation
+and synopsis extraction issues without requiring complex prereq inference.
+
+Next milestone options: continue with more coreutils (Tier 1 file-reading or
+Tier 2 filesystem-aware), or improve blocking option detection.
+
+### Tracking
+
+Full results in `docs/coreutils-validation.json`.
+
+---
 
 ## M24 — DuckDB Performance (done)
 

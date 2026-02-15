@@ -1,0 +1,191 @@
+{
+  "milestone": "M25",
+  "target": 10,
+  "pivot_threshold": 4,
+  "binaries": {
+    "wc": {
+      "surfaces": 14,
+      "behavior_verified": 14,
+      "status": "verified",
+      "notes": "All options work with stdin"
+    },
+    "cat": {
+      "surfaces": 19,
+      "behavior_verified": 2,
+      "behavior_excluded": 17,
+      "status": "verified",
+      "notes": "outputs_equal for most (need file content)"
+    },
+    "head": {
+      "surfaces": 13,
+      "behavior_verified": 4,
+      "behavior_excluded": 9,
+      "status": "verified",
+      "notes": "Similar to cat"
+    },
+    "tr": {
+      "surfaces": 4,
+      "behavior_verified": 2,
+      "status": "verified",
+      "notes": "Small surface count"
+    },
+    "tac": {
+      "surfaces": 8,
+      "behavior_verified": 8,
+      "status": "verified",
+      "notes": "Fixed with seed-in-argv prompt"
+    },
+    "base64": {
+      "surfaces": 8,
+      "behavior_verified": 4,
+      "status": "verified",
+      "notes": "Fixed with seed-in-argv prompt"
+    },
+    "nl": {
+      "surfaces": 24,
+      "behavior_verified": 24,
+      "status": "verified",
+      "notes": "Fixed with seed-in-argv prompt"
+    },
+    "cut": {
+      "surfaces": 12,
+      "behavior_verified": 16,
+      "status": "verified",
+      "notes": "Fixed with seed-in-argv prompt"
+    },
+    "rev": {
+      "surfaces": 4,
+      "behavior_verified": 4,
+      "status": "verified",
+      "notes": "Fixed with util-linux synopsis extraction rule"
+    },
+    "tail": {
+      "surfaces": 18,
+      "behavior_verified": 14,
+      "behavior_unverified": 3,
+      "behavior_excluded": 4,
+      "status": "partial",
+      "failures": ["--follow", "-f", "-s"],
+      "notes": "--follow/-f block indefinitely, -s needs value"
+    },
+    "seq": {
+      "surfaces": 8,
+      "behavior_verified": 8,
+      "status": "verified",
+      "notes": "All options verified"
+    },
+    "fold": {
+      "surfaces": 8,
+      "behavior_verified": 8,
+      "status": "verified",
+      "notes": "All options verified"
+    },
+    "expand": {
+      "surfaces": 6,
+      "behavior_verified": 6,
+      "status": "verified",
+      "notes": "All options verified"
+    },
+    "uniq": {
+      "surfaces": 21,
+      "behavior_verified": 21,
+      "status": "verified",
+      "notes": "All options verified"
+    },
+    "paste": {
+      "surfaces": 8,
+      "behavior_verified": 8,
+      "status": "verified",
+      "notes": "All options verified"
+    },
+    "comm": {
+      "surfaces": 11,
+      "behavior_verified": 11,
+      "status": "verified",
+      "notes": "All options verified"
+    },
+    "basename": {
+      "surfaces": 8,
+      "behavior_verified": 8,
+      "status": "verified",
+      "notes": "All options verified"
+    },
+    "dirname": {
+      "surfaces": 4,
+      "behavior_verified": 4,
+      "status": "verified",
+      "notes": "All options verified"
+    },
+    "printf": {
+      "surfaces": 2,
+      "behavior_verified": 2,
+      "status": "verified",
+      "notes": "All options verified"
+    },
+    "env": {
+      "surfaces": 20,
+      "behavior_verified": 20,
+      "status": "verified",
+      "notes": "All options verified"
+    },
+    "od": {
+      "surfaces": 27,
+      "behavior_verified": 20,
+      "behavior_unverified": 7,
+      "status": "partial",
+      "notes": "Some complex format options unverified"
+    },
+    "sort": {
+      "surfaces": 52,
+      "behavior_verified": 20,
+      "behavior_unverified": 30,
+      "behavior_excluded": 2,
+      "status": "partial",
+      "notes": "Complex binary with many options"
+    },
+    "yes": {
+      "surfaces": 2,
+      "behavior_verified": 0,
+      "behavior_unverified": 2,
+      "status": "blocked",
+      "notes": "Outputs infinitely, blocks indefinitely"
+    },
+    "realpath": {
+      "surfaces": 19,
+      "behavior_verified": 15,
+      "behavior_unverified": 4,
+      "status": "partial",
+      "notes": "Some symlink-related options unverified"
+    },
+    "pwd": {
+      "surfaces": 6,
+      "behavior_verified": 6,
+      "status": "verified",
+      "notes": "Fixed with scenario filtering (skip invalid, retry)"
+    }
+  },
+  "fixes_applied": [
+    "Prompt: Include seed file paths in argv when creating scenarios",
+    "Code: Added blocks_indefinitely exclusion reason code",
+    "Template: Added util-linux style synopsis extraction rule",
+    "Code: Filter invalid seed paths in prereq merge",
+    "Prompt: Explicit guidance that seed paths must be relative",
+    "Code: Scenario filtering - skip invalid scenarios at load time, track in report.json"
+  ],
+  "failure_patterns": {
+    "outputs_equal": "Option produces identical output without specific input",
+    "timeout": "Option waits indefinitely (tail --follow)",
+    "synopsis_missing": "Help format differs from expected pattern (fixed)",
+    "absolute_paths": "LM generates absolute paths in seeds (fixed: skip invalid, retry)"
+  },
+  "summary": {
+    "attempted": 25,
+    "verified": 20,
+    "partial": 4,
+    "blocked": 1,
+    "verified_binaries": ["wc", "cat", "head", "tr", "tac", "base64", "nl", "cut", "rev", "seq", "fold", "expand", "uniq", "paste", "comm", "basename", "dirname", "printf", "env", "pwd"],
+    "partial_binaries": ["tail", "od", "sort", "realpath"],
+    "blocked_binaries": ["yes"]
+  },
+  "decision": "20 verified + 4 partial far exceeds original target of 10. Only yes remains blocked (infinite output)."
+}
