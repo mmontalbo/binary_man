@@ -503,6 +503,7 @@ pub(super) fn apply_lm_overlays(
             ExclusionReasonCode::Nondeterministic => "nondeterministic",
             ExclusionReasonCode::RequiresInteractiveTty => "requires_interactive_tty",
             ExclusionReasonCode::UnsafeSideEffects => "unsafe_side_effects",
+            ExclusionReasonCode::BlocksIndefinitely => "blocks_indefinitely",
         };
 
         overlays_array[idx]["behavior_exclusion"] = serde_json::json!({

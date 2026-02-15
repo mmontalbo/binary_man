@@ -18,6 +18,7 @@ pub(crate) enum BehaviorExclusionReasonCode {
     AssertionGap,
     Nondeterministic,
     RequiresInteractiveTty,
+    BlocksIndefinitely,
 }
 
 impl BehaviorExclusionReasonCode {
@@ -28,6 +29,7 @@ impl BehaviorExclusionReasonCode {
             BehaviorExclusionReasonCode::AssertionGap => "assertion_gap",
             BehaviorExclusionReasonCode::Nondeterministic => "nondeterministic",
             BehaviorExclusionReasonCode::RequiresInteractiveTty => "requires_interactive_tty",
+            BehaviorExclusionReasonCode::BlocksIndefinitely => "blocks_indefinitely",
         }
     }
 }

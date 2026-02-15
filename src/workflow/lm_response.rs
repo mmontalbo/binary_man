@@ -200,6 +200,8 @@ pub enum ExclusionReasonCode {
     RequiresInteractiveTty,
     /// Has unsafe side effects that cannot be tested in sandbox.
     UnsafeSideEffects,
+    /// Blocks indefinitely waiting for input (e.g., tail --follow).
+    BlocksIndefinitely,
 }
 
 /// Result of validating an LM response batch.
