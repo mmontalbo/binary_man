@@ -5,7 +5,140 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M23 — Prompt Consolidation.
+Current focus: M24 — DuckDB Performance.
+
+## M24 — DuckDB Performance (draft)
+
+Goal: Measure query execution overhead, then optimize if significant.
+
+Motivation:
+- Each DuckDB query spawns a process via `nix run nixpkgs#duckdb` (3 queries per status)
+- No caching: queries recompute even when inputs unchanged
+- E2E tests take 5-10 minutes - unclear how much is queries vs LM calls
+
+Approach: Measure first, then decide which optimizations are worth the complexity.
+
+Non-goals (deferred):
+- Embedded DuckDB via duckdb-rs crate (significant integration work)
+- Query rewriting/optimization (current SQL is correct)
+- Preprocessing scenarios in Rust (adds complexity)
+
+---
+
+## Deliverables
+
+### Deliverable 1: Timing Instrumentation
+
+Add timing logs to measure where time is spent.
+
+```rust
+// src/pack.rs
+pub(crate) fn run_duckdb_query(sql: &str, cwd: &Path) -> Result<Vec<u8>> {
+    let start = Instant::now();
+    let output = Command::new("nix")...;
+    tracing::info!(
+        elapsed_ms = start.elapsed().as_millis(),
+        sql_bytes = sql.len(),
+        "duckdb query complete"
+    );
+    // ...
+}
+```
+
+Also add timing around LM calls in `lm_client.rs` for comparison.
+
+Files:
+- `src/pack.rs`: add timing to `run_duckdb_query()`
+- `src/workflow/lm_client.rs`: add timing to `invoke_lm()`
+
+### Deliverable 2: Direct DuckDB Binary (if queries >10% of time)
+
+Only implement if Deliverable 1 shows queries are a significant portion of time.
+
+Use `BMAN_DUCKDB_PATH` env var with fallback to `nix run`:
+
+```rust
+fn duckdb_command() -> Command {
+    if let Ok(path) = std::env::var("BMAN_DUCKDB_PATH") {
+        if Path::new(&path).exists() {
+            return Command::new(path);
+        }
+    }
+    let mut cmd = Command::new("nix");
+    cmd.args(["run", "nixpkgs#duckdb", "--"]);
+    cmd
+}
+```
+
+Files:
+- `src/pack.rs`: add `duckdb_command()` helper
+- `flake.nix`: set `BMAN_DUCKDB_PATH` in devShell
+
+### Deliverable 3: Verification Caching (if queries >10% of time)
+
+Only implement if Deliverable 1 shows queries are significant.
+
+Cache verification result keyed by hash of:
+- Scenario evidence files (from existing lock system)
+- Query SQL content (detect query changes)
+
+```rust
+fn load_or_compute_ledger(paths: &DocPackPaths) -> Result<VerificationLedger> {
+    let cache_path = paths.inventory_dir().join("verification_cache.json");
+    let inputs_hash = compute_inputs_hash(paths)?;
+
+    if let Ok(cached) = try_load_cache(&cache_path, &inputs_hash) {
+        tracing::info!("verification cache hit");
+        return Ok(cached);
+    }
+
+    let result = run_verification_query(paths)?;
+    let _ = save_cache(&cache_path, &inputs_hash, &result);
+    Ok(result)
+}
+```
+
+Files:
+- `src/scenarios/ledger/verification.rs`: add cache layer
+
+---
+
+## Acceptance Criteria
+
+| Criterion | Validation |
+|-----------|------------|
+| Timing instrumentation | `RUST_LOG=info bman status` shows per-query and per-LM-call times |
+| Data-driven decision | Document whether queries are >10% of E2E time |
+| Tests pass | `cargo test --release` green |
+| No regressions | E2E tests pass with same cycle counts |
+
+**Conditional (if queries >10% of time):**
+
+| Criterion | Validation |
+|-----------|------------|
+| Direct binary works | `BMAN_DUCKDB_PATH=... bman status` succeeds |
+| Caching works | Second `bman status` logs "cache hit" |
+| Cache fallback | Corrupted cache triggers recompute, not error |
+
+---
+
+## Decision Gate After Deliverable 1
+
+After adding timing instrumentation, run E2E tests and analyze:
+
+```bash
+RUST_LOG=info cargo test --release test_ls_verification_progress 2>&1 | tee timing.log
+
+# Extract timing breakdown
+grep -E "duckdb query|lm invoke" timing.log | head -20
+```
+
+**If query time < 10% of total**: Mark M24 done with instrumentation only.
+Optimizations are not worth the complexity.
+
+**If query time >= 10%**: Proceed with Deliverables 2 and 3.
+
+---
 
 ## M23 — Prompt Consolidation (done)
 
