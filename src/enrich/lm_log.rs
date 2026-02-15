@@ -313,52 +313,6 @@ pub fn next_cycle_number(paths: &DocPackPaths) -> Result<u32> {
     Ok(max_cycle + 1)
 }
 
-/// Check if full content exists for a cycle.
-#[allow(dead_code)]
-pub fn has_full_content(paths: &DocPackPaths, cycle: u32, kind: LmInvocationKind) -> bool {
-    let log_dir = paths.lm_log_dir();
-    let prompt_path = log_dir.join(format!("cycle_{:03}_{}_prompt.txt", cycle, kind));
-    prompt_path.exists()
-}
-
-/// Load full prompt for a cycle (if stored).
-#[allow(dead_code)]
-pub fn load_prompt(
-    paths: &DocPackPaths,
-    cycle: u32,
-    kind: LmInvocationKind,
-) -> Result<Option<String>> {
-    let log_dir = paths.lm_log_dir();
-    let prompt_path = log_dir.join(format!("cycle_{:03}_{}_prompt.txt", cycle, kind));
-
-    if !prompt_path.exists() {
-        return Ok(None);
-    }
-
-    let content = fs::read_to_string(&prompt_path)
-        .with_context(|| format!("read prompt: {}", prompt_path.display()))?;
-    Ok(Some(content))
-}
-
-/// Load full response for a cycle (if stored).
-#[allow(dead_code)]
-pub fn load_response(
-    paths: &DocPackPaths,
-    cycle: u32,
-    kind: LmInvocationKind,
-) -> Result<Option<String>> {
-    let log_dir = paths.lm_log_dir();
-    let response_path = log_dir.join(format!("cycle_{:03}_{}_response.txt", cycle, kind));
-
-    if !response_path.exists() {
-        return Ok(None);
-    }
-
-    let content = fs::read_to_string(&response_path)
-        .with_context(|| format!("read response: {}", response_path.display()))?;
-    Ok(Some(content))
-}
-
 /// Get current epoch time in milliseconds.
 fn now_epoch_ms() -> u64 {
     std::time::SystemTime::now()
@@ -446,7 +400,7 @@ mod tests {
     }
 
     #[test]
-    fn test_store_and_load_content() {
+    fn test_store_content_writes_files() {
         let root = test_paths("bman-lm-log-content");
         let paths = DocPackPaths::new(root);
 
@@ -455,13 +409,14 @@ mod tests {
 
         store_lm_content(&paths, 1, LmInvocationKind::Behavior, prompt, response).unwrap();
 
-        assert!(has_full_content(&paths, 1, LmInvocationKind::Behavior));
-        assert!(!has_full_content(&paths, 2, LmInvocationKind::Behavior));
+        // Verify files were written
+        let log_dir = paths.lm_log_dir();
+        let prompt_path = log_dir.join("cycle_001_behavior_prompt.txt");
+        let response_path = log_dir.join("cycle_001_behavior_response.txt");
 
-        let loaded_prompt = load_prompt(&paths, 1, LmInvocationKind::Behavior).unwrap();
-        assert_eq!(loaded_prompt, Some(prompt.to_string()));
-
-        let loaded_response = load_response(&paths, 1, LmInvocationKind::Behavior).unwrap();
-        assert_eq!(loaded_response, Some(response.to_string()));
+        assert!(prompt_path.exists());
+        assert!(response_path.exists());
+        assert_eq!(std::fs::read_to_string(&prompt_path).unwrap(), prompt);
+        assert_eq!(std::fs::read_to_string(&response_path).unwrap(), response);
     }
 }
