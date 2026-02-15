@@ -67,6 +67,40 @@
         end
       )
   ),
+  -- Pre-aggregate covers_norm for accepted_status (avoids correlated EXISTS)
+  covers_acceptance_agg as (
+    select
+      surface_id,
+      max(case when coverage_tier <> 'rejection' then 1 else 0 end) as has_non_rejection,
+      max(case when coverage_tier <> 'rejection' and acceptance_outcome = 'accepted' then 1 else 0 end) as has_accepted,
+      max(case when coverage_tier <> 'rejection' and acceptance_outcome = 'rejected' then 1 else 0 end) as has_rejected,
+      max(case when coverage_tier <> 'rejection' and has_evidence then 1 else 0 end) as has_evidence
+    from covers_norm
+    group by surface_id
+  ),
+  -- Pre-aggregate covers_norm for behavior_status and behavior_reason (avoids correlated EXISTS)
+  covers_behavior_agg as (
+    select
+      surface_id,
+      max(case when coverage_tier = 'behavior' then 1 else 0 end) as has_behavior,
+      max(case when coverage_tier = 'behavior'
+        and variant_last_pass
+        and baseline_last_pass
+        and (seeded_assertion_count = 0 or seed_signature_match)
+        and (seeded_assertion_count > 0 or delta_assertion_present)
+        and assertions_pass
+        and delta_proof_pass
+        and semantic_predicate_pass then 1 else 0 end) as is_verified,
+      max(case when coverage_tier = 'behavior' and has_evidence then 1 else 0 end) as has_evidence,
+      max(case when coverage_tier = 'behavior' and delta_assertion_present and outputs_equal then 1 else 0 end) as has_outputs_equal,
+      max(case when coverage_tier = 'behavior'
+        and has_evidence
+        and variant_last_pass
+        and baseline_last_pass
+        and (not assertions_pass or not delta_proof_pass) then 1 else 0 end) as has_assertion_failed
+    from covers_norm
+    group by surface_id
+  ),
   required_value_misuse as (
     select
       c.surface_id,
@@ -151,123 +185,49 @@
     select
       s.surface_id,
       case
-        when not exists (
-          select 1
-          from covers_norm c
-          where c.surface_id = s.surface_id
-            and c.coverage_tier <> 'rejection'
-        ) then 'unknown'
-        when exists (
-          select 1
-          from covers_norm c
-          where c.surface_id = s.surface_id
-            and c.coverage_tier <> 'rejection'
-            and c.acceptance_outcome = 'accepted'
-        ) then 'verified'
-        when exists (
-          select 1
-          from covers_norm c
-          where c.surface_id = s.surface_id
-            and c.coverage_tier <> 'rejection'
-            and c.acceptance_outcome = 'rejected'
-        ) then 'rejected'
-        when exists (
-          select 1
-          from covers_norm c
-          where c.surface_id = s.surface_id
-            and c.coverage_tier <> 'rejection'
-            and c.has_evidence
-        ) then 'inconclusive'
+        when coalesce(a.has_non_rejection, 0) = 0 then 'unknown'
+        when a.has_accepted = 1 then 'verified'
+        when a.has_rejected = 1 then 'rejected'
+        when a.has_evidence = 1 then 'inconclusive'
         else 'recognized'
       end as status
     from surface s
+    left join covers_acceptance_agg a using (surface_id)
   ),
   behavior_status as (
     select
       s.surface_id,
       case
         -- Deferred: auto_verify timed out (likely interactive/hanging command)
-        when exists (
-          select 1 from auto_verify_timeout t
-          where t.surface_id = s.surface_id
-        ) then 'deferred'
-        when not exists (
-          select 1
-          from covers_norm c
-          where c.surface_id = s.surface_id
-            and c.coverage_tier = 'behavior'
-        ) then 'unknown'
-        when exists (
-          select 1
-          from covers_norm c
-          where c.surface_id = s.surface_id
-            and c.coverage_tier = 'behavior'
-            and c.variant_last_pass
-            and c.baseline_last_pass
-            -- Only require seed_signature_match if using seeded assertions
-            and (c.seeded_assertion_count = 0 or c.seed_signature_match)
-            and (c.seeded_assertion_count > 0 or c.delta_assertion_present)
-            and c.assertions_pass
-            and c.delta_proof_pass
-            and c.semantic_predicate_pass
-        ) then 'verified'
-        when exists (
-          select 1
-          from covers_norm c
-          where c.surface_id = s.surface_id
-            and c.coverage_tier = 'behavior'
-            and c.has_evidence
-        ) then 'rejected'
+        when t.surface_id is not null then 'deferred'
+        when coalesce(b.has_behavior, 0) = 0 then 'unknown'
+        when b.is_verified = 1 then 'verified'
+        when b.has_evidence = 1 then 'rejected'
         else 'recognized'
       end as status
     from surface s
+    left join auto_verify_timeout t using (surface_id)
+    left join covers_behavior_agg b using (surface_id)
   ),
   behavior_reason as (
     select
       s.surface_id,
       case
         -- auto_verify_timeout: auto_verify timed out (likely interactive/hanging)
-        when exists (
-          select 1 from auto_verify_timeout t
-          where t.surface_id = s.surface_id
-        ) then 'auto_verify_timeout'
+        when t.surface_id is not null then 'auto_verify_timeout'
         -- no_scenario: no behavior scenario covers this surface
-        when not exists (
-          select 1
-          from covers_norm c
-          where c.surface_id = s.surface_id
-            and c.coverage_tier = 'behavior'
-        ) then 'no_scenario'
+        when coalesce(b.has_behavior, 0) = 0 then 'no_scenario'
         -- outputs_equal: variant output same as baseline
-        when exists (
-          select 1
-          from covers_norm c
-          where c.surface_id = s.surface_id
-            and c.coverage_tier = 'behavior'
-            and c.delta_assertion_present
-            and c.outputs_equal
-        ) then 'outputs_equal'
+        when b.has_outputs_equal = 1 then 'outputs_equal'
         -- assertion_failed: assertions ran but didn't pass
-        when exists (
-          select 1
-          from covers_norm c
-          where c.surface_id = s.surface_id
-            and c.coverage_tier = 'behavior'
-            and c.has_evidence
-            and c.variant_last_pass
-            and c.baseline_last_pass
-            and (not c.assertions_pass or not c.delta_proof_pass)
-        ) then 'assertion_failed'
+        when b.has_assertion_failed = 1 then 'assertion_failed'
         -- scenario_error: everything else (run failed, missing assertions, bad config)
-        when exists (
-          select 1
-          from covers_norm c
-          where c.surface_id = s.surface_id
-            and c.coverage_tier = 'behavior'
-        ) then 'scenario_error'
+        when b.has_behavior = 1 then 'scenario_error'
         else null
       end as behavior_unverified_reason_code
     from surface s
+    left join auto_verify_timeout t using (surface_id)
+    left join covers_behavior_agg b using (surface_id)
   ),
   behavior_reason_detail_candidates as (
     -- scenario_error: any behavior scenario with issues
