@@ -1,3 +1,7 @@
+-- Section 20: Coverage Reasoning
+-- Maps scenario coverage claims to surface items and derives verification status.
+-- Performance: covers_norm is MATERIALIZED to avoid redundant CTE re-evaluation.
+
   covers_raw as (
     select
       scenario_id,

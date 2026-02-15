@@ -1,3 +1,7 @@
+-- Section 30: Rollups and Final Output
+-- Aggregates per-surface data and produces the final verification output.
+-- Performance: Rollups consolidated using FILTER clauses to minimize scans.
+
   -- CONSOLIDATED: single pass over covers_norm for scenario id rollups
   covers_scenario_rollup as (
     select

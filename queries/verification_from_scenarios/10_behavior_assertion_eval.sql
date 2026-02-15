@@ -1,3 +1,7 @@
+-- Section 10: Behavior Assertion Evaluation
+-- Evaluates behavior scenario assertions by comparing variant runs against baselines.
+-- Key outputs: behavior_eval (per-scenario assertion results), scenario_eval (combined status).
+
   behavior_context as (
     select
       s.scenario_id,

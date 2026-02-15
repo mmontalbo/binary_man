@@ -1,4 +1,6 @@
--- Derive per-surface verification status from scenario evidence + plan claims.
+-- Section 00: Inputs Normalization
+-- Loads and normalizes all inputs: surface inventory, scenario plan, and evidence.
+-- Key outputs: surface, plan_scenarios, normalized_evidence, combined_scenarios.
 with
   surface as (
     select

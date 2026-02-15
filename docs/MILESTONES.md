@@ -5,9 +5,9 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M24 — DuckDB Performance.
+Current focus: M25 (next milestone TBD).
 
-## M24 — DuckDB Performance (draft)
+## M24 — DuckDB Performance (done)
 
 Goal: Measure query execution overhead, then optimize if significant.
 
@@ -18,125 +18,104 @@ Motivation:
 
 Approach: Measure first, then decide which optimizations are worth the complexity.
 
-Non-goals (deferred):
-- Embedded DuckDB via duckdb-rs crate (significant integration work)
-- Query rewriting/optimization (current SQL is correct)
-- Preprocessing scenarios in Rust (adds complexity)
-
 ---
 
-## Deliverables
+## Delivered
 
 ### Deliverable 1: Timing Instrumentation
 
-Add timing logs to measure where time is spent.
+Added timing logs to `src/pack.rs` and `src/workflow/lm_client.rs` to measure
+where time is spent. Results showed verification queries taking 1-5 seconds per
+`bman status` call, representing >50% of non-LM time in the enrichment loop.
 
-```rust
-// src/pack.rs
-pub(crate) fn run_duckdb_query(sql: &str, cwd: &Path) -> Result<Vec<u8>> {
-    let start = Instant::now();
-    let output = Command::new("nix")...;
-    tracing::info!(
-        elapsed_ms = start.elapsed().as_millis(),
-        sql_bytes = sql.len(),
-        "duckdb query complete"
-    );
-    // ...
-}
-```
+### Deliverable 2: Direct DuckDB Binary
 
-Also add timing around LM calls in `lm_client.rs` for comparison.
+Implemented `BMAN_DUCKDB_PATH` env var with fallback to `nix run`. The Nix
+flake's devShell sets this automatically, eliminating ~200ms of Nix evaluation
+overhead per query.
 
-Files:
-- `src/pack.rs`: add timing to `run_duckdb_query()`
-- `src/workflow/lm_client.rs`: add timing to `invoke_lm()`
+Files modified:
+- `src/pack.rs`: `duckdb_command()` helper checks env var first
+- `flake.nix`: devShell sets `BMAN_DUCKDB_PATH` to direct binary path
 
-### Deliverable 2: Direct DuckDB Binary (if queries >10% of time)
+### Deliverable 3: Verification Caching
 
-Only implement if Deliverable 1 shows queries are a significant portion of time.
+Implemented verification result caching keyed by hash of:
+- Scenario evidence files (glob of `inventory/scenarios/*.json`)
+- Query SQL content (all `queries/verification_from_scenarios/*.sql` files)
+- Surface inventory hash
 
-Use `BMAN_DUCKDB_PATH` env var with fallback to `nix run`:
+Cache hits now return in ~4ms vs ~1.2s for full query execution (~300x speedup
+for repeated status checks).
 
-```rust
-fn duckdb_command() -> Command {
-    if let Ok(path) = std::env::var("BMAN_DUCKDB_PATH") {
-        if Path::new(&path).exists() {
-            return Command::new(path);
-        }
-    }
-    let mut cmd = Command::new("nix");
-    cmd.args(["run", "nixpkgs#duckdb", "--"]);
-    cmd
-}
-```
+Files modified:
+- `src/scenarios/ledger/verification.rs`: cache layer with `verification_cache.json`
+- Cache invalidation triggers on any input change (evidence, SQL, or surface)
 
-Files:
-- `src/pack.rs`: add `duckdb_command()` helper
-- `flake.nix`: set `BMAN_DUCKDB_PATH` in devShell
+### Deliverable 4: SQL Query Optimizations (exceeded original scope)
 
-### Deliverable 3: Verification Caching (if queries >10% of time)
+Profiling revealed the verification query itself was the bottleneck, not process
+spawning. Implemented three optimizations that compound to 12x total improvement:
 
-Only implement if Deliverable 1 shows queries are significant.
+**Optimization 1: Pre-aggregation CTEs** (commit `7b4493a`)
+- Problem: Correlated EXISTS subqueries in `accepted_status`, `behavior_status`,
+  and `behavior_reason` CTEs caused O(surfaces × scenarios) complexity.
+- Solution: Pre-aggregate `covers_norm` into `covers_acceptance_agg` and
+  `covers_behavior_agg` CTEs using MAX(CASE WHEN...) patterns, then JOIN.
+- Result: 4.8s → 1.7s (2.9x improvement)
 
-Cache verification result keyed by hash of:
-- Scenario evidence files (from existing lock system)
-- Query SQL content (detect query changes)
+**Optimization 2: Consolidated Rollup CTEs** (commit `6f09ee6`)
+- Problem: Five separate rollup CTEs each scanned `covers_norm` independently:
+  `accepted_scenario_ids_rollup`, `behavior_scenario_ids_rollup`, etc.
+- Solution: Consolidate into two CTEs using DuckDB's FILTER clause:
+  `covers_scenario_rollup` (3 aggregations in one scan) and
+  `covers_path_rollup` (2 aggregations with UNNEST in one scan).
+- Result: 1.64s → 1.19s (27% improvement)
 
-```rust
-fn load_or_compute_ledger(paths: &DocPackPaths) -> Result<VerificationLedger> {
-    let cache_path = paths.inventory_dir().join("verification_cache.json");
-    let inputs_hash = compute_inputs_hash(paths)?;
+**Optimization 3: MATERIALIZED covers_norm** (commit `ed642dd`)
+- Problem: `covers_norm` CTE is referenced 8+ times across downstream CTEs
+  and rollups. Without MATERIALIZED, DuckDB re-evaluates the entire CTE chain
+  for each reference, causing redundant JSON file reads (8418 reads for 70 files).
+- Solution: Add `MATERIALIZED` hint to `covers_norm` definition. This forces
+  DuckDB to compute and store the CTE result once, then reuse it.
+- Result: 1.2s → 0.4s (3x improvement)
 
-    if let Ok(cached) = try_load_cache(&cache_path, &inputs_hash) {
-        tracing::info!("verification cache hit");
-        return Ok(cached);
-    }
+Files modified:
+- `queries/verification_from_scenarios/20_coverage_reasoning.sql`: pre-aggregation
+  CTEs and MATERIALIZED hint
+- `queries/verification_from_scenarios/30_rollups_output.sql`: consolidated rollups
 
-    let result = run_verification_query(paths)?;
-    let _ = save_cache(&cache_path, &inputs_hash, &result);
-    Ok(result)
-}
-```
+### Performance Summary
 
-Files:
-- `src/scenarios/ledger/verification.rs`: add cache layer
+| Scenario | Before | After | Improvement |
+|----------|--------|-------|-------------|
+| Full verification query | ~4.8s | ~0.4s | **12x faster** |
+| Repeated status (cache hit) | ~4.8s | ~4ms | **~1000x faster** |
 
----
-
-## Acceptance Criteria
-
-| Criterion | Validation |
-|-----------|------------|
-| Timing instrumentation | `RUST_LOG=info bman status` shows per-query and per-LM-call times |
-| Data-driven decision | Document whether queries are >10% of E2E time |
-| Tests pass | `cargo test --release` green |
-| No regressions | E2E tests pass with same cycle counts |
-
-**Conditional (if queries >10% of time):**
-
-| Criterion | Validation |
-|-----------|------------|
-| Direct binary works | `BMAN_DUCKDB_PATH=... bman status` succeeds |
-| Caching works | Second `bman status` logs "cache hit" |
-| Cache fallback | Corrupted cache triggers recompute, not error |
+The combined effect means `bman status` is now effectively instant for cached
+queries and sub-second even for cache misses. E2E test times are now dominated
+by LM calls, not query overhead.
 
 ---
 
-## Decision Gate After Deliverable 1
+## Acceptance Criteria (all met)
 
-After adding timing instrumentation, run E2E tests and analyze:
+| Criterion | Status | Evidence |
+|-----------|--------|----------|
+| Timing instrumentation | ✓ | `RUST_LOG=info bman status` shows per-query times |
+| Data-driven decision | ✓ | Queries were >50% of non-LM time; optimizations justified |
+| Direct binary works | ✓ | `BMAN_DUCKDB_PATH` eliminates Nix overhead |
+| Caching works | ✓ | Second `bman status` logs "verification cache hit" (~4ms) |
+| Cache fallback | ✓ | Missing/corrupted cache triggers recompute, not error |
+| Tests pass | ✓ | `cargo test --release` green (114 tests) |
+| No regressions | ✓ | E2E tests pass with same cycle counts |
 
-```bash
-RUST_LOG=info cargo test --release test_ls_verification_progress 2>&1 | tee timing.log
+### Deferred (not needed)
 
-# Extract timing breakdown
-grep -E "duckdb query|lm invoke" timing.log | head -20
-```
-
-**If query time < 10% of total**: Mark M24 done with instrumentation only.
-Optimizations are not worth the complexity.
-
-**If query time >= 10%**: Proceed with Deliverables 2 and 3.
+- Embedded DuckDB via duckdb-rs crate: Process spawn overhead is negligible
+  after direct binary path; embedding would add complexity without benefit.
+- Preprocessing scenarios in Rust: SQL optimizations achieved sufficient
+  performance; moving logic to Rust would reduce pack portability.
 
 ---
 

@@ -394,3 +394,110 @@ fn verification_ledger_maps_required_value_reason_and_confounded_columns() {
         vec!["--group-directories-first".to_string()]
     );
 }
+
+fn write_real_verification_query_templates(root: &std::path::Path) {
+    let queries_dir = root.join("queries");
+    let sections_dir = queries_dir.join("verification_from_scenarios");
+    std::fs::create_dir_all(&sections_dir).expect("create queries dirs");
+
+    let templates = [
+        ("verification_from_scenarios.sql", crate::templates::VERIFICATION_FROM_SCENARIOS_SQL),
+        ("verification_from_scenarios/00_inputs_normalization.sql", crate::templates::VERIFICATION_FROM_SCENARIOS_00_INPUTS_NORMALIZATION_SQL),
+        ("verification_from_scenarios/10_behavior_assertion_eval.sql", crate::templates::VERIFICATION_FROM_SCENARIOS_10_BEHAVIOR_ASSERTION_EVAL_SQL),
+        ("verification_from_scenarios/20_coverage_reasoning.sql", crate::templates::VERIFICATION_FROM_SCENARIOS_20_COVERAGE_REASONING_SQL),
+        ("verification_from_scenarios/30_rollups_output.sql", crate::templates::VERIFICATION_FROM_SCENARIOS_30_ROLLUPS_OUTPUT_SQL),
+    ];
+    for (name, content) in templates {
+        std::fs::write(queries_dir.join(name), content).expect("write query template");
+    }
+}
+
+/// Performance smoke test: catches catastrophic query regressions (e.g., removing MATERIALIZED).
+/// Threshold is 5s to avoid flakiness on slow CI runners.
+#[test]
+fn verification_query_performance_smoke_test() {
+    use std::time::Instant;
+
+    let root = temp_doc_pack_root("bman-perf-smoke");
+
+    // Create surface with 20 items
+    let items: Vec<surface::SurfaceItem> = (0..20)
+        .map(|i| surface::SurfaceItem {
+            id: format!("--option-{i}"),
+            display: format!("--option-{i}"),
+            description: Some(format!("Test option {i}")),
+            parent_id: None,
+            context_argv: Vec::new(),
+            forms: vec![format!("--option-{i}")],
+            invocation: surface::SurfaceInvocation::default(),
+            evidence: Vec::new(),
+        })
+        .collect();
+
+    let surface = surface::SurfaceInventory {
+        schema_version: 2,
+        generated_at_epoch_ms: 0,
+        binary_name: Some("test-bin".to_string()),
+        inputs_hash: None,
+        discovery: Vec::new(),
+        items,
+        blockers: Vec::new(),
+    };
+
+    write_minimal_pack_inputs(&root, &surface);
+    write_real_verification_query_templates(&root);
+
+    // Write scenario evidence
+    let scenarios_dir = root.join("inventory").join("scenarios");
+    std::fs::create_dir_all(&scenarios_dir).expect("create scenarios dir");
+    for i in 0..10 {
+        let evidence = serde_json::json!({
+            "schema_version": crate::scenarios::SCENARIO_EVIDENCE_SCHEMA_VERSION,
+            "scenario_id": format!("auto_verify::--option-{i}"),
+            "argv": ["test-bin", format!("--option-{i}")],
+            "exit_code": 0,
+            "stdout": format!("output {i}"),
+            "stderr": "",
+            "generated_at_epoch_ms": 1700000000000_i64 + i,
+        });
+        std::fs::write(
+            scenarios_dir.join(format!("evidence_{i}.json")),
+            serde_json::to_vec(&evidence).unwrap(),
+        ).unwrap();
+    }
+    std::fs::write(
+        scenarios_dir.join("index.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "schema_version": crate::scenarios::SCENARIO_INDEX_SCHEMA_VERSION,
+            "scenarios": (0..10).map(|i| serde_json::json!({
+                "scenario_id": format!("auto_verify::--option-{i}"),
+                "last_pass": true,
+                "evidence_paths": [format!("inventory/scenarios/evidence_{i}.json")]
+            })).collect::<Vec<_>>()
+        })).unwrap(),
+    ).unwrap();
+
+    // Measure query time
+    let start = Instant::now();
+    let result = build_verification_ledger(
+        "test-bin",
+        &surface,
+        &root,
+        &root.join("scenarios").join("plan.json"),
+        &root.join("queries").join("verification_from_scenarios.sql"),
+        Some(&root), // disables cache
+        Some(&root),
+    );
+    let elapsed = start.elapsed();
+    let _ = std::fs::remove_dir_all(&root);
+
+    let ledger = result.expect("query should succeed");
+    assert!(!ledger.entries.is_empty());
+
+    let max = std::time::Duration::from_secs(5);
+    assert!(
+        elapsed < max,
+        "query took {elapsed:?}, exceeds {max:?} - possible performance regression"
+    );
+    eprintln!("verification_query_performance_smoke_test: {elapsed:?}");
+}
