@@ -7,7 +7,7 @@ that supports iterative static + dynamic passes from portable doc packs.
 
 Current focus: M23 — Prompt Consolidation.
 
-## M23 — Prompt Consolidation (draft)
+## M23 — Prompt Consolidation (done)
 
 Goal: Move LM prompt text from Rust code into markdown files for clearer
 ownership, easier review, and reduced binary-specific coupling.
