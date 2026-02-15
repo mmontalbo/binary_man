@@ -1,4 +1,8 @@
 {
   "binary": "ls",
-  "context": []
+  "context": [],
+  "baseline": {
+    "max_lm_cycles": 12,
+    "max_scenarios": 100
+  }
 }
