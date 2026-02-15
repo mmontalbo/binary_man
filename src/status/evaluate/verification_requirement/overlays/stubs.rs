@@ -151,7 +151,7 @@ fn ensure_overlay_requires_argv_placeholder(obj: &mut Map<String, Value>, kind: 
     {
         return;
     }
-    requires_argv.push(Value::String("<TODO_requires_argv>".to_string()));
+    requires_argv.push(Value::String("<required_argv>".to_string()));
 }
 
 fn ensure_overlay_behavior_exclusion(
