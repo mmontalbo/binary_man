@@ -13,12 +13,21 @@ use crate::staging::collect_files_recursive;
 use crate::surface;
 use crate::util::display_path;
 use anyhow::{anyhow, Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+/// Cache entry for verification ledger results.
+#[derive(Debug, Serialize, Deserialize)]
+struct VerificationCache {
+    inputs_hash: String,
+    computed_at_epoch_ms: u128,
+    ledger: VerificationLedger,
+}
 
 static VERIFICATION_ROOT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -53,6 +62,97 @@ pub(crate) fn verification_query_template_failure_path(err: &anyhow::Error) -> O
     })
 }
 
+/// Compute a hash of all inputs that affect verification ledger output.
+fn compute_verification_inputs_hash(
+    doc_pack_root: &Path,
+    template_path: &Path,
+    surface_path: &Path,
+) -> Result<String> {
+    let mut hasher = Sha256::new();
+
+    // Hash template SQL content
+    if template_path.exists() {
+        let sql = fs::read_to_string(template_path)
+            .with_context(|| format!("read template: {}", template_path.display()))?;
+        hasher.update(b"template:");
+        hasher.update(sql.as_bytes());
+    }
+
+    // Hash surface inventory
+    if surface_path.exists() {
+        let surface = fs::read_to_string(surface_path)
+            .with_context(|| format!("read surface: {}", surface_path.display()))?;
+        hasher.update(b"surface:");
+        hasher.update(surface.as_bytes());
+    }
+
+    // Hash all scenario evidence files
+    let scenarios_dir = doc_pack_root.join("inventory/scenarios");
+    if scenarios_dir.is_dir() {
+        if let Ok(files) = collect_files_recursive(&scenarios_dir) {
+            let mut paths: Vec<_> = files
+                .into_iter()
+                .filter(|p| p.extension().is_some_and(|e| e == "json"))
+                .collect();
+            paths.sort();
+            for path in paths {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    let rel = path.strip_prefix(doc_pack_root).unwrap_or(&path);
+                    hasher.update(b"scenario:");
+                    hasher.update(rel.to_string_lossy().as_bytes());
+                    hasher.update(content.as_bytes());
+                }
+            }
+        }
+    }
+
+    let digest = hasher.finalize();
+    Ok(format!("{:x}", digest))
+}
+
+/// Path to the verification cache file.
+fn verification_cache_path(doc_pack_root: &Path) -> PathBuf {
+    doc_pack_root.join("inventory/verification_cache.json")
+}
+
+/// Try to load cached verification ledger if inputs haven't changed.
+fn try_load_verification_cache(
+    doc_pack_root: &Path,
+    inputs_hash: &str,
+) -> Option<VerificationLedger> {
+    let cache_path = verification_cache_path(doc_pack_root);
+    let content = fs::read_to_string(&cache_path).ok()?;
+    let cache: VerificationCache = serde_json::from_str(&content).ok()?;
+    if cache.inputs_hash == inputs_hash {
+        tracing::info!("verification cache hit");
+        Some(cache.ledger)
+    } else {
+        tracing::debug!("verification cache stale");
+        None
+    }
+}
+
+/// Save verification ledger to cache.
+fn save_verification_cache(
+    doc_pack_root: &Path,
+    inputs_hash: &str,
+    ledger: &VerificationLedger,
+) -> Result<()> {
+    let cache_path = verification_cache_path(doc_pack_root);
+    let cache = VerificationCache {
+        inputs_hash: inputs_hash.to_string(),
+        computed_at_epoch_ms: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis(),
+        ledger: ledger.clone(),
+    };
+    let content = serde_json::to_string_pretty(&cache).context("serialize cache")?;
+    fs::write(&cache_path, content)
+        .with_context(|| format!("write cache: {}", cache_path.display()))?;
+    Ok(())
+}
+
 /// Build the verification ledger from surface inventory and scenario evidence.
 pub fn build_verification_ledger(
     binary_name: &str,
@@ -63,9 +163,27 @@ pub fn build_verification_ledger(
     staging_root: Option<&Path>,
     display_root: Option<&Path>,
 ) -> Result<VerificationLedger> {
+    let surface_path = doc_pack_root.join("inventory/surface.json");
+
+    // Try cache first (only when not using staging_root, which indicates test/temp context)
+    if staging_root.is_none() {
+        if let Ok(inputs_hash) =
+            compute_verification_inputs_hash(doc_pack_root, template_path, &surface_path)
+        {
+            if let Some(cached) = try_load_verification_cache(doc_pack_root, &inputs_hash) {
+                return Ok(cached);
+            }
+        }
+    }
+
+    let start = Instant::now();
     let template_sql = load_verification_query_template(template_path)?;
     let _plan = load_plan(scenarios_path, doc_pack_root)?;
     let (query_root, rows) = run_verification_query(doc_pack_root, staging_root, &template_sql)?;
+    tracing::debug!(
+        elapsed_ms = start.elapsed().as_millis(),
+        "verification query executed"
+    );
     let behavior_exclusions = load_behavior_exclusions(doc_pack_root)?;
     let excluded_map = behavior_exclusion_map(surface, &rows, &behavior_exclusions)?;
     let excluded = excluded_entries_from_map(&excluded_map);
@@ -187,7 +305,7 @@ pub fn build_verification_ledger(
         .context("compute timestamp")?
         .as_millis();
 
-    Ok(VerificationLedger {
+    let ledger = VerificationLedger {
         schema_version: 9,
         generated_at_epoch_ms,
         binary_name: binary_name.to_string(),
@@ -207,7 +325,18 @@ pub fn build_verification_ledger(
         excluded,
         entries,
         warnings,
-    })
+    };
+
+    // Save to cache (only when not using staging_root)
+    if staging_root.is_none() {
+        if let Ok(inputs_hash) =
+            compute_verification_inputs_hash(doc_pack_root, template_path, &surface_path)
+        {
+            let _ = save_verification_cache(doc_pack_root, &inputs_hash, &ledger);
+        }
+    }
+
+    Ok(ledger)
 }
 
 fn load_verification_query_template(template_path: &Path) -> Result<String> {

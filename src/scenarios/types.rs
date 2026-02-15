@@ -422,7 +422,7 @@ pub struct CoverageItemEntry {
 }
 
 /// Verification ledger emitted after scenario runs.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct VerificationLedger {
     pub schema_version: u32,
     pub generated_at_epoch_ms: u128,
@@ -443,7 +443,7 @@ pub struct VerificationLedger {
 }
 
 /// Verification entry for a single surface id.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct VerificationEntry {
     pub surface_id: String,
     pub status: String,
@@ -518,7 +518,7 @@ mod tests {
 }
 
 /// Excluded verification entry recorded in the ledger.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct VerificationExcludedEntry {
     pub surface_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
