@@ -1,0 +1,68 @@
+```json
+{
+  "schema_version": 1,
+  "responses": [
+    {
+      "surface_id": "--bool",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--type=bool", "--bool"]
+      }
+    },
+    {
+      "surface_id": "--bool-or-int",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--type=bool-or-int", "--bool-or-int"]
+      }
+    },
+    {
+      "surface_id": "--edit",
+      "action": {
+        "kind": "add_exclusion",
+        "reason_code": "requires_interactive_tty",
+        "note": "Requires interactive editor to launch for editing config"
+      }
+    },
+    {
+      "surface_id": "--null",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--null"]
+      }
+    },
+    {
+      "surface_id": "--path",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["--type=path", "--path"]
+      }
+    },
+    {
+      "surface_id": "--type",
+      "action": {
+        "kind": "add_value_examples",
+        "value_examples": ["bool", "int", "bool-or-int", "path", "expiry-date", "duration"]
+      }
+    },
+    {
+      "surface_id": "-e",
+      "action": {
+        "kind": "add_exclusion",
+        "reason_code": "requires_interactive_tty",
+        "note": "Requires interactive editor to launch for editing config"
+      }
+    },
+    {
+      "surface_id": "-f",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["-f", "/tmp/test_config"],
+        "seed": {
+          "files": {}
+        }
+      }
+    }
+  ]
+}
+```

@@ -1,0 +1,153 @@
+```json
+{
+  "schema_version": 1,
+  "responses": [
+    {
+      "surface_id": "--all",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["config", "--all"],
+        "seed": {
+          "files": {".git/config": "[user]\n\tname = Test User\n\temail = test@example.com\n[core]\n\tbare = false\n"}
+        }
+      }
+    },
+    {
+      "surface_id": "--append",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["config", "--append", "section.key", "value2"],
+        "seed": {
+          "files": {".git/config": "[section]\n\tkey = value1\n"}
+        }
+      }
+    },
+    {
+      "surface_id": "--comment",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["config", "--comment", "Important setting", "section.key", "value"],
+        "seed": {
+          "files": {".git/config": ""}
+        }
+      }
+    },
+    {
+      "surface_id": "--default",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["config", "--default", "default_value", "nonexistent.key"],
+        "seed": {
+          "files": {".git/config": "[section]\n\tkey = value\n"}
+        }
+      }
+    },
+    {
+      "surface_id": "--edit",
+      "action": {
+        "kind": "add_exclusion",
+        "reason_code": "requires_interactive_tty",
+        "note": "Requires interactive editor, cannot be automated"
+      }
+    },
+    {
+      "surface_id": "--file",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["config", "--file", "custom.config", "section.key", "value"],
+        "seed": {
+          "files": {"custom.config": ""}
+        }
+      }
+    },
+    {
+      "surface_id": "--fixed-value",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["config", "--fixed-value", "section.key"],
+        "seed": {
+          "files": {".git/config": "[section]\n\tkey = some.value\n"}
+        }
+      }
+    },
+    {
+      "surface_id": "--int",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["config", "--int", "core.count"],
+        "seed": {
+          "files": {".git/config": "[core]\n\tcount = 42\n"}
+        }
+      }
+    },
+    {
+      "surface_id": "--local",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["config", "--local", "user.name", "Local User"],
+        "seed": {
+          "files": {".git/config": ""}
+        }
+      }
+    },
+    {
+      "surface_id": "--no-type",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["config", "--no-type", "section.key"],
+        "seed": {
+          "files": {".git/config": "[section]\n\tkey = true\n"}
+        }
+      }
+    },
+    {
+      "surface_id": "--regexp",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["config", "--regexp", "sect.*", "section.key"],
+        "seed": {
+          "files": {".git/config": "[section]\n\tkey = value\n"}
+        }
+      }
+    },
+    {
+      "surface_id": "--replace-all",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["config", "--replace-all", "section.key", "newvalue"],
+        "seed": {
+          "files": {".git/config": "[section]\n\tkey = oldvalue\n\tkey = oldvalue2\n"}
+        }
+      }
+    },
+    {
+      "surface_id": "--show-origin",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["config", "--show-origin", "user.name"],
+        "seed": {
+          "files": {".git/config": "[user]\n\tname = Test User\n"}
+        }
+      }
+    },
+    {
+      "surface_id": "--url",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["config", "--url", "https://github.com/user/repo", "user.name"],
+        "seed": {
+          "files": {".git/config": "[user \"https://github.com\"]\n\tname = GitHub User\n"}
+        }
+      }
+    },
+    {
+      "surface_id": "-e",
+      "action": {
+        "kind": "add_exclusion",
+        "reason_code": "requires_interactive_tty",
+        "note": "Launches interactive editor, cannot be automated"
+      }
+    }
+  ]
+}
+```

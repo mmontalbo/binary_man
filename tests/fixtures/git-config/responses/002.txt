@@ -1,0 +1,119 @@
+```json
+{
+  "schema_version": 1,
+  "responses": [
+    {
+      "surface_id": "--blob",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["git", "config", "--blob", "HEAD:.gitmodules", "--list"],
+        "seed": {
+          "files": {
+            ".gitmodules": "[submodule \"example\"]\n\tpath = submodules/example\n\turl = https://github.com/example/repo.git"
+          }
+        }
+      }
+    },
+    {
+      "surface_id": "--edit",
+      "action": {
+        "kind": "add_exclusion",
+        "reason_code": "requires_interactive_tty",
+        "note": "Requires interactive editor for config file editing"
+      }
+    },
+    {
+      "surface_id": "--expiry-date",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["git", "config", "--expiry-date", "now"]
+      }
+    },
+    {
+      "surface_id": "--get-regexp",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["git", "config", "--get-regexp", "user.*"]
+      }
+    },
+    {
+      "surface_id": "--global",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["git", "config", "--global", "--list"]
+      }
+    },
+    {
+      "surface_id": "--list",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["git", "config", "--list"]
+      }
+    },
+    {
+      "surface_id": "--name-only",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["git", "config", "--name-only", "--list"]
+      }
+    },
+    {
+      "surface_id": "--no-refresh",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["git", "config", "--no-refresh", "--list"]
+      }
+    },
+    {
+      "surface_id": "--remove-section",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["git", "config", "--remove-section", "test.section"]
+      }
+    },
+    {
+      "surface_id": "--show-scope",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["git", "config", "--show-scope", "--list"]
+      }
+    },
+    {
+      "surface_id": "--system",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["git", "config", "--system", "--list"]
+      }
+    },
+    {
+      "surface_id": "--worktree",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["git", "config", "--worktree", "--list"]
+      }
+    },
+    {
+      "surface_id": "-e",
+      "action": {
+        "kind": "add_exclusion",
+        "reason_code": "requires_interactive_tty",
+        "note": "Alias for --edit, requires interactive editor"
+      }
+    },
+    {
+      "surface_id": "-l",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["git", "config", "-l"]
+      }
+    },
+    {
+      "surface_id": "-z",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["git", "config", "-z", "--list"]
+      }
+    }
+  ]
+}
+```

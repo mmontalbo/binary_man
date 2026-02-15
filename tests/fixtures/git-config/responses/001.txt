@@ -1,0 +1,70 @@
+```json
+{
+  "definitions": {
+    "git_repo": {
+      "description": "git repository with .git directory",
+      "seed": {"dirs": [".git"]},
+      "exclude": false
+    },
+    "git_config_file": {
+      "description": "git config file with sample configuration",
+      "seed": {
+        "files": {
+          ".git/config": "[core]\n\tbare = false\n[user]\n\tname = Test User\n\temail = test@example.com\n"
+        }
+      },
+      "exclude": false
+    },
+    "global_config": {
+      "description": "global git configuration (~/.gitconfig)",
+      "seed": {
+        "files": {
+          "~/.gitconfig": "[user]\n\tname = Global User\n\temail = global@example.com\n"
+        }
+      },
+      "exclude": false
+    },
+    "interactive": {
+      "description": "requires interactive TTY or editor",
+      "seed": null,
+      "exclude": true
+    }
+  },
+  "surface_map": {
+    "--expiry-date": [],
+    "--system": [],
+    "--name-only": [],
+    "-z": [],
+    "--get-regexp": ["git_repo"],
+    "--no-refresh": [],
+    "--show-scope": [],
+    "--worktree": ["git_repo"],
+    "--remove-section": ["git_repo", "git_config_file"],
+    "--global": [],
+    "--blob": ["git_repo"],
+    "-e": ["interactive"],
+    "--list": [],
+    "-l": [],
+    "--append": ["git_repo", "git_config_file"],
+    "--file": [],
+    "--default": [],
+    "--no-type": [],
+    "--comment": ["git_repo", "git_config_file"],
+    "--local": ["git_repo", "git_config_file"],
+    "--all": [],
+    "--int": [],
+    "--replace-all": ["git_repo", "git_config_file"],
+    "--show-origin": [],
+    "-f": [],
+    "--type": [],
+    "--url": [],
+    "--path": [],
+    "--bool": [],
+    "--fixed-value": ["git_repo", "git_config_file"],
+    "--bool-or-int": [],
+    "--regexp": [],
+    "--null": [],
+    "--edit": ["interactive"]
+  }
+}
+```

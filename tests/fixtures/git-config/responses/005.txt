@@ -1,0 +1,14 @@
+```json
+{
+  "schema_version": 1,
+  "responses": [
+    {
+      "surface_id": "--type",
+      "action": {
+        "kind": "add_behavior_scenario",
+        "argv": ["config", "--type", "bool", "core.bare"]
+      }
+    }
+  ]
+}
+```
