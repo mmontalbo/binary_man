@@ -80,7 +80,9 @@ select
     coalesce(behavior_confounded_rollup.extra_surface_ids, []::VARCHAR[])
   ) as behavior_confounded_extra_surface_ids,
   auto_verify_evidence.auto_verify_exit_code as auto_verify_exit_code,
-  auto_verify_evidence.auto_verify_stderr as auto_verify_stderr
+  auto_verify_evidence.auto_verify_stderr as auto_verify_stderr,
+  behavior_stderr_agg.behavior_exit_code as behavior_exit_code,
+  behavior_stderr_agg.behavior_stderr as behavior_stderr
 from surface
 left join accepted_status using (surface_id)
 left join behavior_status using (surface_id)
@@ -93,4 +95,5 @@ left join covers_path_rollup pr using (surface_id)
 left join delta_outcome using (surface_id)
 left join behavior_confounded_rollup using (surface_id)
 left join auto_verify_evidence using (surface_id)
+left join behavior_stderr_agg using (surface_id)
 order by surface.surface_id;

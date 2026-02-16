@@ -356,6 +356,7 @@ fn behavior_scenario_spec(id: String, argv: Vec<String>) -> scenarios::ScenarioS
         publish: false,
         argv,
         env: BTreeMap::new(),
+        stdin: None,
         seed: None,
         cwd: None,
         timeout_seconds: None,

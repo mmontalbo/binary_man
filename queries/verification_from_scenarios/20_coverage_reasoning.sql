@@ -319,3 +319,27 @@
     )
     where rk = 1
   ),
+  -- Extract stderr from behavior scenarios for LM error feedback
+  behavior_scenario_stderr as (
+    select
+      c.surface_id,
+      e.exit_code as behavior_exit_code,
+      case
+        when length(coalesce(e.stderr, '')) > 200 then substr(e.stderr, 1, 200) || '...'
+        else e.stderr
+      end as behavior_stderr
+    from covers_norm c
+    join normalized_evidence e on e.scenario_id = c.scenario_id
+    where c.coverage_tier = 'behavior'
+      and e.exit_code is not null
+      and coalesce(e.stderr, '') <> ''
+  ),
+  -- Aggregate to get first non-empty stderr per surface
+  behavior_stderr_agg as (
+    select
+      surface_id,
+      first(behavior_exit_code) as behavior_exit_code,
+      first(behavior_stderr) as behavior_stderr
+    from behavior_scenario_stderr
+    group by surface_id
+  ),

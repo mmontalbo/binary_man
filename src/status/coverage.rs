@@ -26,6 +26,7 @@ pub(crate) fn coverage_stub_from_plan(
         publish: false,
         argv,
         env: BTreeMap::new(),
+        stdin: None,
         seed: None,
         cwd: None,
         timeout_seconds: None,

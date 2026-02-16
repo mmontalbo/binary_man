@@ -17,7 +17,9 @@ use super::overlays::{
     STUB_REASON_OUTPUTS_EQUAL_NEEDS_WORKAROUND,
 };
 use super::reasoning::{behavior_reason_code_for_id, behavior_unverified_reason};
-use super::retry::{max_retry_count, partition_cap_hit, preferred_behavior_scenario_id, BEHAVIOR_RERUN_CAP};
+use super::retry::{
+    max_retry_count, partition_cap_hit, preferred_behavior_scenario_id, BEHAVIOR_RERUN_CAP,
+};
 use super::scaffold::{
     assertion_starters_for_missing_assertions, build_existing_behavior_scenarios_scaffold,
     build_missing_assertions_scaffold_content, build_scaffold_context,
@@ -112,6 +114,10 @@ pub(super) fn behavior_payload(
         .map(|key| key.to_string())
         .collect();
     let scaffold_context = build_scaffold_context(args.surface, &target_ids, args.reason_code);
+
+    // Build scenario output for targets (for LM error feedback)
+    let target_scenario_output = build_target_scenario_output(&target_ids, args.ledger_entries);
+
     let payload = enrich::BehaviorNextActionPayload {
         target_ids,
         reason_code: reason_code_str,
@@ -121,8 +127,40 @@ pub(super) fn behavior_payload(
         assertion_starters: args.assertion_starters,
         suggested_exclusion_payload: args.suggested_exclusion_payload,
         scaffold_context,
+        target_scenario_output,
     };
     (!payload.is_empty()).then_some(payload)
+}
+
+/// Build scenario output context for target IDs from ledger entries.
+fn build_target_scenario_output(
+    target_ids: &[String],
+    ledger_entries: &LedgerEntries,
+) -> Vec<enrich::TargetScenarioOutput> {
+    target_ids
+        .iter()
+        .filter_map(|surface_id| {
+            let entry = ledger_entries.get(surface_id)?;
+            // Prefer behavior scenario output (from actual verification scenarios)
+            // over auto_verify output (from initial auto-generated scenarios).
+            // Behavior stderr has more useful error messages like "Two strings must be given".
+            let (exit_code, stderr_preview) =
+                if entry.behavior_exit_code.is_some() || entry.behavior_stderr.is_some() {
+                    (entry.behavior_exit_code, entry.behavior_stderr.clone())
+                } else {
+                    (entry.auto_verify_exit_code, entry.auto_verify_stderr.clone())
+                };
+            // Only include if we have useful output data
+            if exit_code.is_none() && stderr_preview.is_none() {
+                return None;
+            }
+            Some(enrich::TargetScenarioOutput {
+                surface_id: surface_id.clone(),
+                exit_code,
+                stderr_preview,
+            })
+        })
+        .collect()
 }
 
 /// Get the action reason code for a surface ID.

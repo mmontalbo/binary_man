@@ -328,6 +328,8 @@ mod tests {
             behavior_confounded_extra_surface_ids: Vec::new(),
             auto_verify_exit_code: None,
             auto_verify_stderr: None,
+            behavior_exit_code: None,
+            behavior_stderr: None,
             evidence: Vec::new(),
         }
     }

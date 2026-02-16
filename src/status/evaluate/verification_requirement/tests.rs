@@ -1,9 +1,9 @@
+use super::next_action::suggested_exclusion_only_next_action;
+use super::retry::{load_behavior_retry_counts, BEHAVIOR_RERUN_CAP};
 use super::{
     eval_behavior_verification, outputs_equal_workaround_needs_delta_rerun,
     QueueVerificationContext,
 };
-use super::next_action::suggested_exclusion_only_next_action;
-use super::retry::{load_behavior_retry_counts, BEHAVIOR_RERUN_CAP};
 use crate::enrich;
 use crate::scenarios;
 use crate::surface;
@@ -52,6 +52,8 @@ fn verification_entry(delta_path: &str) -> scenarios::VerificationEntry {
         behavior_confounded_extra_surface_ids: Vec::new(),
         auto_verify_exit_code: None,
         auto_verify_stderr: None,
+        behavior_exit_code: None,
+        behavior_stderr: None,
         evidence: Vec::new(),
     }
 }
@@ -84,6 +86,8 @@ fn verification_entry_with_reason(
         behavior_confounded_extra_surface_ids: Vec::new(),
         auto_verify_exit_code: None,
         auto_verify_stderr: None,
+        behavior_exit_code: None,
+        behavior_stderr: None,
         evidence: Vec::new(),
     }
 }
@@ -155,6 +159,7 @@ fn outputs_equal_needs_rerun_fixture(
         publish: false,
         argv: vec!["work".to_string()],
         env: BTreeMap::new(),
+        stdin: None,
         seed: None,
         cwd: None,
         timeout_seconds: None,
@@ -176,6 +181,7 @@ fn outputs_equal_needs_rerun_fixture(
         publish: false,
         argv: vec!["--color".to_string(), "work".to_string()],
         env: BTreeMap::new(),
+        stdin: None,
         seed: None,
         cwd: None,
         timeout_seconds: None,
@@ -556,6 +562,7 @@ fn scenario_error_next_action_includes_edit() {
         publish: false,
         argv: vec!["--color".to_string(), "work".to_string()],
         env: BTreeMap::new(),
+        stdin: None,
         seed: None,
         cwd: None,
         timeout_seconds: None,
@@ -667,6 +674,7 @@ fn scenario_error_scaffold_projects_and_uses_seeded_assertions() {
         publish: false,
         argv: vec!["work".to_string()],
         env: BTreeMap::new(),
+        stdin: None,
         seed: None,
         cwd: None,
         timeout_seconds: None,
@@ -688,6 +696,7 @@ fn scenario_error_scaffold_projects_and_uses_seeded_assertions() {
         publish: false,
         argv: vec!["--color".to_string(), "work".to_string()],
         env: BTreeMap::new(),
+        stdin: None,
         seed: None,
         cwd: None,
         timeout_seconds: None,
@@ -786,6 +795,7 @@ fn scenario_error_batches_emit_non_empty_assertions_and_validate() {
         publish: false,
         argv: vec!["work".to_string()],
         env: BTreeMap::new(),
+        stdin: None,
         seed: None,
         cwd: None,
         timeout_seconds: None,
@@ -812,6 +822,7 @@ fn scenario_error_batches_emit_non_empty_assertions_and_validate() {
             publish: false,
             argv: vec![surface_id.clone(), "work".to_string()],
             env: BTreeMap::new(),
+            stdin: None,
             seed: None,
             cwd: None,
             timeout_seconds: None,

@@ -208,13 +208,8 @@ fn build_behavior_prompt(summary: &StatusSummary, payload: &BehaviorNextActionPa
     // Build context section (scaffold hints, value requirements)
     let context_section = build_context_section(payload);
 
-    // Build target list
-    let targets = payload
-        .target_ids
-        .iter()
-        .map(|id| format!("- `{id}`"))
-        .collect::<Vec<_>>()
-        .join("\n");
+    // Build target list with scenario output when available
+    let targets = build_targets_section(payload);
 
     // Assemble prompt from template
     BEHAVIOR_BASE
@@ -223,6 +218,47 @@ fn build_behavior_prompt(summary: &StatusSummary, payload: &BehaviorNextActionPa
         .replace("{reason_section}", &reason_section)
         .replace("{context_section}", &context_section)
         .replace("{targets}", &targets)
+}
+
+/// Build the targets section, including scenario output for error feedback.
+fn build_targets_section(payload: &BehaviorNextActionPayload) -> String {
+    use std::collections::HashMap;
+
+    // Index scenario output by surface_id
+    let output_map: HashMap<&str, &crate::enrich::TargetScenarioOutput> = payload
+        .target_scenario_output
+        .iter()
+        .map(|o| (o.surface_id.as_str(), o))
+        .collect();
+
+    payload
+        .target_ids
+        .iter()
+        .map(|id| {
+            let mut line = format!("- `{id}`");
+
+            // Add scenario output if available
+            if let Some(output) = output_map.get(id.as_str()) {
+                if let Some(exit_code) = output.exit_code {
+                    line.push_str(&format!(" (exit_code: {exit_code}"));
+                    if let Some(stderr) = &output.stderr_preview {
+                        // Truncate and escape for display
+                        let stderr_short = if stderr.len() > 100 {
+                            format!("{}...", &stderr[..100])
+                        } else {
+                            stderr.clone()
+                        };
+                        let stderr_escaped = stderr_short.replace('\n', " ");
+                        line.push_str(&format!(", stderr: \"{stderr_escaped}\""));
+                    }
+                    line.push(')');
+                }
+            }
+
+            line
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Build the context section with scaffold hints and value requirements.

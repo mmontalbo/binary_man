@@ -138,6 +138,9 @@ pub enum LmAction {
     AddBehaviorScenario {
         /// Command-line arguments (without binary name).
         argv: Vec<String>,
+        /// Optional stdin content to pipe to the command.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stdin: Option<String>,
         /// Optional seed fixtures in flat format.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         seed: Option<FlatSeed>,
@@ -307,6 +310,7 @@ pub fn validate_responses(
 
             LmAction::AddBehaviorScenario {
                 argv,
+                stdin,
                 seed,
                 assertions,
             } => {
@@ -322,6 +326,9 @@ pub fn validate_responses(
                 // Convert flat seed to scenario seed spec
                 let seed_spec = seed.as_ref().map(flat_seed_to_seed_spec);
 
+                // Normalize stdin: treat empty string as None
+                let stdin_normalized = stdin.clone().filter(|s| !s.is_empty());
+
                 // Resolve assertions first - default to OutputsDiffer if empty
                 let final_assertions = if assertions.is_empty() {
                     vec![BehaviorAssertion::OutputsDiffer {}]
@@ -336,6 +343,7 @@ pub fn validate_responses(
                     publish: false,
                     argv: argv.clone(),
                     env: BTreeMap::new(),
+                    stdin: stdin_normalized,
                     seed: seed_spec,
                     cwd: None,
                     timeout_seconds: None,
@@ -345,7 +353,8 @@ pub fn validate_responses(
                     snippet_max_lines: None,
                     snippet_max_bytes: None,
                     coverage_tier: Some("behavior".to_string()),
-                    baseline_scenario_id: if final_assertions.iter().all(|a| !a.requires_baseline()) {
+                    baseline_scenario_id: if final_assertions.iter().all(|a| !a.requires_baseline())
+                    {
                         // File assertions don't need a baseline
                         None
                     } else {
@@ -580,6 +589,7 @@ mod tests {
             publish: false,
             argv: vec![surface_id.to_string(), "work".to_string()],
             env: BTreeMap::new(),
+            stdin: None,
             seed: None,
             cwd: None,
             timeout_seconds: None,

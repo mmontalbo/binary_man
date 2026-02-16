@@ -684,6 +684,7 @@ fn build_help_discovery_scenario(context_argv: &[String]) -> scenarios::Scenario
         publish: false,
         argv,
         env: std::collections::BTreeMap::new(),
+        stdin: None,
         seed: None,
         cwd: None,
         timeout_seconds: None,

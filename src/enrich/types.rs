@@ -428,6 +428,21 @@ pub struct BehaviorNextActionPayload {
     pub suggested_exclusion_payload: Option<SuggestedBehaviorExclusionPayload>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scaffold_context: Option<ScaffoldContext>,
+    /// Per-target scenario output for error feedback.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub target_scenario_output: Vec<TargetScenarioOutput>,
+}
+
+/// Scenario output for a target option, used for LM error feedback.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct TargetScenarioOutput {
+    /// The surface_id this output belongs to.
+    pub surface_id: String,
+    /// Exit code from the scenario run.
+    pub exit_code: Option<i64>,
+    /// Truncated stderr (first 200 chars).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stderr_preview: Option<String>,
 }
 
 /// Contextual hints for LM-driven scaffold editing.
@@ -465,6 +480,7 @@ impl BehaviorNextActionPayload {
             && self.assertion_starters.is_empty()
             && self.suggested_exclusion_payload.is_none()
             && self.scaffold_context.is_none()
+            && self.target_scenario_output.is_empty()
     }
 }
 

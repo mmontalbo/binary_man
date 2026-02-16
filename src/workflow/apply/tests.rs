@@ -62,6 +62,8 @@ fn outputs_equal_verification_entries(
         behavior_confounded_extra_surface_ids: Vec::new(),
         auto_verify_exit_code: None,
         auto_verify_stderr: None,
+        behavior_exit_code: None,
+        behavior_stderr: None,
         evidence: Vec::new(),
     };
     let mut entries = BTreeMap::new();
@@ -313,6 +315,8 @@ fn assertion_failed_verification_entries(
         behavior_confounded_extra_surface_ids: Vec::new(),
         auto_verify_exit_code: None,
         auto_verify_stderr: None,
+        behavior_exit_code: None,
+        behavior_stderr: None,
         evidence: Vec::new(),
     };
     let mut entries = BTreeMap::new();

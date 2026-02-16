@@ -295,6 +295,7 @@ fn minimal_behavior_baseline_scenario(id: &str) -> scenarios::ScenarioSpec {
         publish: false,
         argv: vec![scenarios::DEFAULT_BEHAVIOR_SEED_DIR.to_string()],
         env: std::collections::BTreeMap::new(),
+        stdin: None,
         seed: None,
         cwd: None,
         timeout_seconds: None,

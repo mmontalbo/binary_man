@@ -291,6 +291,8 @@ pub fn build_verification_ledger(
             evidence,
             auto_verify_exit_code: row.auto_verify_exit_code,
             auto_verify_stderr: row.auto_verify_stderr,
+            behavior_exit_code: row.behavior_exit_code,
+            behavior_stderr: row.behavior_stderr,
         });
     }
 
@@ -633,6 +635,10 @@ struct VerificationRow {
     auto_verify_exit_code: Option<i64>,
     #[serde(default)]
     auto_verify_stderr: Option<String>,
+    #[serde(default)]
+    behavior_exit_code: Option<i64>,
+    #[serde(default)]
+    behavior_stderr: Option<String>,
 }
 
 struct VerificationQueryRoot {
