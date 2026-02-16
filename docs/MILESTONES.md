@@ -5,7 +5,264 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M27 (TBD).
+Current focus: M27 (stdin support).
+
+## M27 — Stdin Input Support
+
+Goal: Enable verification of text-processing utilities that read from stdin
+rather than file arguments. Start with `tr`, `cut`, `head`, `tail`.
+
+### Motivation
+
+Survey of coreutils verification coverage revealed stdin as a major blocker:
+
+| Binary | Verified | Blocker |
+|--------|----------|---------|
+| tr | 2/11 | All options require stdin input |
+| cut | 0/18 | Needs stdin + value examples |
+| head | 13/13 | Works (files), stdin would expand coverage |
+| tail | 9/21 | Partial, stdin would help |
+| sort | 13/22 | Partial, stdin would help |
+
+Text-processing utilities like `tr`, `cut`, `sort`, `uniq` are designed for
+pipeline use. Without stdin support, we can only verify file-based invocations.
+
+### Design Decisions
+
+**Stdin specification:**
+```json
+{
+  "id": "tr--delete-chars",
+  "argv": ["tr", "-d", "aeiou"],
+  "stdin": "hello world",
+  "assertions": [
+    {"kind": "stdout_contains", "token": "hll wrld"}
+  ]
+}
+```
+
+**Key constraints:**
+- `stdin` field is optional string
+- `stdin: null`, missing, or `""` = `/dev/null` (no stdin provided)
+- Stdin content validated at plan load time (size limit = 64KB, UTF-8 only)
+- Size limit is a hard error, not warning (prevents accidental large inputs)
+
+**Why string, not file reference:**
+- Scenarios should be self-contained
+- File references add complexity (seed vs inline)
+- Most verification needs small inputs (<1KB typical)
+
+**Why 64KB limit:**
+- Sufficient for verification (proving option behavior, not load testing)
+- Prevents accidental inclusion of large files
+- Matches typical terminal buffer sizes
+
+**Encoding limitation:**
+- Stdin must be valid UTF-8 (JSON string)
+- Null bytes (`\x00`) cannot be represented in JSON strings
+- Binary stdin (non-UTF8, null bytes) deferred to future milestone
+
+**Baseline handling:**
+- Baseline scenarios automatically inherit stdin from variant
+- `OutputsDiffer` compares baseline(stdin) vs variant(stdin) - same input, different options
+- This matches current behavior where baseline/variant share same seed
+
+**Alternative considered: stdin_file**
+```json
+{"stdin_file": "test_input.txt"}  // read from seed
+```
+Deferred: adds complexity, seed files already work via redirection.
+
+### Data Flow
+
+```
+ScenarioSpec.stdin (bman)
+    ↓
+scenarios/plan.json written with stdin field
+    ↓
+binary_lens reads plan, pipes stdin to subprocess
+    ↓
+runs/{id}/manifest.json records stdin_provided: true/false
+    ↓
+bman reads manifest, builds evidence (no stdin field - already in plan)
+    ↓
+SQL verification evaluates assertions against stdout (stdin not needed in SQL)
+```
+
+**Key insight:** Evidence doesn't need stdin content - it's already in the plan.
+SQL only needs stdout/stderr/exit_code to evaluate assertions. The stdin is an
+*input*, not something to verify.
+
+**Version compatibility:**
+- binary_lens without stdin support ignores the field (scenarios get /dev/null)
+- bman can detect this via manifest lacking `stdin_provided` field
+- Emit warning: "binary_lens does not support stdin; upgrade required"
+
+### Implementation Phases
+
+#### Phase 1: ScenarioSpec Extension (bman)
+
+Add `stdin` field to `ScenarioSpec`:
+
+```rust
+pub struct ScenarioSpec {
+    // existing fields...
+
+    /// Stdin content to pipe to the command (max 64KB, UTF-8)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stdin: Option<String>,
+}
+```
+
+**Validation in `validate.rs`:**
+- Error if stdin exceeds 64KB
+- Error if stdin contains invalid UTF-8 (caught by serde, but explicit check)
+
+**Scenario ID generation:**
+- IDs are author-provided, not auto-generated from argv
+- LM should use descriptive IDs: `tr--delete-vowels-stdin`, `cut--field1-colon-delim`
+- No automatic stdin hashing in ID (author's responsibility)
+
+#### Phase 2: binary_lens Integration (separate repo)
+
+**Coordination required:** binary_lens is a separate repository. Changes:
+
+Modify `scripts/runtime_runs.py`:
+
+```python
+# Read stdin from scenario config
+stdin_content = scenario.get("stdin")  # None or string
+
+# Setup stdin source
+if stdin_content:
+    stdin_bytes = stdin_content.encode('utf-8')
+    stdin_arg = subprocess.PIPE
+else:
+    stdin_bytes = None
+    stdin_arg = subprocess.DEVNULL
+
+proc = subprocess.Popen(
+    cmd,
+    stdin=stdin_arg,
+    stdout=stdout_handle,  # preserve existing file-based capture
+    stderr=stderr_handle,
+    ...
+)
+
+try:
+    if stdin_bytes:
+        # Write stdin and close pipe (non-blocking for small inputs)
+        proc.stdin.write(stdin_bytes)
+        proc.stdin.close()
+    proc.wait(timeout=timeout)
+except subprocess.TimeoutExpired:
+    proc.kill()
+    proc.wait()
+    raise
+```
+
+**Note:** Commands that ignore stdin will complete normally (stdin pipe closed).
+Commands that block reading stdin are handled by the existing timeout mechanism.
+
+**Manifest update:**
+```json
+{
+  "config": {
+    "stdin_provided": true  // boolean flag only, not content
+  }
+}
+```
+
+#### Phase 3: Prompt Updates (bman)
+
+Add to `prompts/behavior_base.md`:
+
+```markdown
+**Stdin Input:**
+
+For commands that read from stdin (pipelines, filters), use the `stdin` field:
+
+```json
+{
+  "id": "tr--squeeze-repeats",
+  "argv": ["tr", "-s", " "],
+  "stdin": "hello    world",
+  "assertions": [
+    {"kind": "stdout_contains", "token": "hello world"}
+  ]
+}
+```
+
+```json
+{
+  "id": "cut--field2-colon",
+  "argv": ["cut", "-d:", "-f2"],
+  "stdin": "root:x:0:0\nnobody:x:65534:65534",
+  "assertions": [
+    {"kind": "stdout_contains", "token": "x"}
+  ]
+}
+```
+
+**Guidelines:**
+- Use stdin for filter commands (tr, cut, sort, uniq, sed, awk)
+- Keep stdin content minimal - just enough to verify behavior
+- Include multiple lines when the option's behavior depends on line structure
+- Combine with stdout assertions to verify transformation
+- Maximum stdin size: 64KB (UTF-8 only, no null bytes)
+```
+
+#### Phase 4: LM Response Parsing (bman)
+
+Update `src/workflow/lm_response.rs`:
+
+```rust
+// ScenarioSpec already has stdin: Option<String>
+// No new parsing needed - serde handles it automatically
+
+// Validation happens in validate.rs during plan load
+```
+
+The existing scenario parsing will pick up stdin automatically since ScenarioSpec
+uses `#[serde(default)]`. No explicit parsing code changes needed.
+
+#### Phase 5: Testing
+
+1. **Manual test:** Create tr scenario with stdin, run via binary_lens
+2. **tr verification:** LM-generated scenarios with stdin
+3. **cut verification:** Field/character selection with stdin
+4. **Regression:** Existing packs (ls, touch, mkdir) still work
+5. **Validation:** Verify >64KB stdin rejected at plan load
+6. **Version compat:** Test with old binary_lens, verify warning emitted
+
+### Files to Modify
+
+| File | Changes |
+|------|---------|
+| `src/scenarios/types.rs` | Add `stdin` field to ScenarioSpec |
+| `src/scenarios/validate.rs` | Add stdin size/encoding validation |
+| `src/scenarios/run/exec.rs` | Warn if stdin used but binary_lens didn't report stdin_provided |
+| `prompts/behavior_base.md` | Document stdin usage with examples |
+| *(binary_lens)* `scripts/runtime_runs.py` | Handle stdin piping, report stdin_provided in manifest |
+
+### Acceptance Criteria
+
+1. **tr verified:** `tr -d aeiou` with stdin "hello" → stdout "hll"
+2. **cut verified:** `cut -d: -f1` with stdin "a:b:c" → stdout "a"
+3. **LM generates:** LM produces valid stdin scenarios for filter commands
+4. **No regression:** Existing packs without stdin still work
+5. **Size limit enforced:** >64KB stdin rejected at plan load
+6. **Version warning:** Old binary_lens triggers compatibility warning
+
+### Deferred
+
+- Binary stdin (non-UTF8)
+- `stdin_file` reference to seed file
+- Stdin from previous scenario output (chaining)
+- Interactive stdin (multiple reads)
+- Auto-verify stdin generation (needs LM to craft meaningful inputs)
+
+---
 
 ## M26 — File-Based Assertions (done)
 
@@ -214,6 +471,46 @@ Lower priority because few binaries need this and timing can be flaky.
 
 Use `fixture_gap` exclusion with descriptive notes for timing/side-effect
 behaviors that can't be verified with current stdout-based assertions.
+
+### Value-Only Flag Patterns (surface discovery improvement)
+
+Some utilities document range/value syntax that looks like option flags:
+
+```
+cut --help:
+  -M    from first to M'th (included) byte, character or field
+  N-M   from N'th to M'th (included) byte, character or field
+```
+
+Here `-M` is **range syntax** (user types `-5` for "first to 5th"), not an
+option flag. The surface discovery lens incorrectly parses it as an option.
+
+**Indicators this is value syntax, not an option:**
+- Single uppercase letter placeholder (`M`, `N`) instead of lowercase flag
+- Description talks about "from/to" ranges or numeric values
+- Appears in "Each range is one of:" documentation section
+- Running it produces "invalid option" error
+
+**Current behavior:** LM correctly excludes these as `fixture_gap` when the
+scenario fails with "invalid option" error. This is acceptable but noisy.
+
+**Future improvement:** Surface discovery should recognize value-syntax patterns
+and either:
+1. Skip them entirely (don't emit as surface items)
+2. Mark them with a `kind: "value_syntax"` that excludes from verification
+
+This affects utilities with range syntax: `cut`, `head`, `tail`, `seq`, etc.
+
+### Binary stdin with NUL bytes (binary_lens limitation)
+
+Options like `-z`/`--zero-terminated` require NUL-delimited input (`\x00`).
+Current limitation: binary_lens fails with "nul byte found in provided data"
+when stdin contains NUL bytes.
+
+**Current workaround:** These options remain unverified or manually excluded.
+
+**Future fix:** binary_lens should accept stdin as raw bytes, not C strings,
+to support arbitrary binary content including NUL bytes.
 
 ## M25 — Coreutils Validation (done)
 
