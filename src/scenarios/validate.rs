@@ -93,6 +93,16 @@ pub(crate) fn validate_scenario_spec(scenario: &ScenarioSpec) -> Result<()> {
             return Err(anyhow!("cwd must not contain '..'"));
         }
     }
+    if let Some(stdin) = scenario.stdin.as_deref() {
+        const MAX_STDIN_BYTES: usize = 64 * 1024; // 64KB
+        if stdin.len() > MAX_STDIN_BYTES {
+            return Err(anyhow!(
+                "stdin exceeds maximum size ({} bytes > {} bytes)",
+                stdin.len(),
+                MAX_STDIN_BYTES
+            ));
+        }
+    }
     if let Some(net_mode) = scenario.net_mode.as_deref() {
         if net_mode != "off" && net_mode != "inherit" {
             return Err(anyhow!(

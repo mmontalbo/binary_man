@@ -256,6 +256,7 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<RunScenariosResult> 
         let run_kv_args = build_run_kv_args(
             &run_argv0,
             seed_spec_json.as_deref(),
+            scenario.stdin.as_deref(),
             run_config.cwd.as_deref(),
             run_config.timeout_seconds,
             run_config.net_mode.as_deref(),

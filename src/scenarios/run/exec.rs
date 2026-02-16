@@ -285,9 +285,11 @@ pub(super) fn invoke_binary_lens_run(
     Ok(status)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn build_run_kv_args(
     run_argv0: &str,
     seed_spec_json: Option<&str>,
+    stdin: Option<&str>,
     cwd: Option<&str>,
     timeout_seconds: Option<f64>,
     net_mode: Option<&str>,
@@ -298,6 +300,18 @@ pub(super) fn build_run_kv_args(
 
     if let Some(spec_json) = seed_spec_json {
         args.push(format!("run_seed_spec={spec_json}"));
+    }
+    if let Some(stdin) = stdin {
+        if !stdin.is_empty() {
+            // Use base64 encoding if stdin contains NUL bytes (binary_lens supports run_stdin_base64)
+            if stdin.contains('\0') {
+                use base64::prelude::*;
+                let encoded = BASE64_STANDARD.encode(stdin.as_bytes());
+                args.push(format!("run_stdin_base64={encoded}"));
+            } else {
+                args.push(format!("run_stdin={stdin}"));
+            }
+        }
     }
     if let Some(cwd) = cwd {
         args.push(format!("run_cwd={cwd}"));

@@ -265,6 +265,10 @@ pub struct ScenarioSpec {
     pub argv: Vec<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env: BTreeMap<String, String>,
+    /// Stdin content to pipe to the command (max 64KB, UTF-8).
+    /// If None or empty, stdin is /dev/null.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stdin: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<ScenarioSeedSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -518,6 +522,12 @@ pub struct VerificationEntry {
     /// Auto-verify stderr preview (truncated, if auto_verify evidence exists)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_verify_stderr: Option<String>,
+    /// Behavior scenario exit code (for error feedback to LM)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behavior_exit_code: Option<i64>,
+    /// Behavior scenario stderr preview (truncated, for error feedback to LM)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behavior_stderr: Option<String>,
 }
 
 #[cfg(test)]

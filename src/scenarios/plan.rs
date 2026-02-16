@@ -168,10 +168,7 @@ fn validate_plan_scenarios(plan: &ScenarioPlan) -> Result<()> {
             continue;
         }
         // Check if any assertion requires a baseline (file assertions don't)
-        let needs_baseline = scenario
-            .assertions
-            .iter()
-            .any(|a| a.requires_baseline());
+        let needs_baseline = scenario.assertions.iter().any(|a| a.requires_baseline());
         let baseline_id = scenario.baseline_scenario_id.as_deref().unwrap_or("");
         if needs_baseline && baseline_id.trim().is_empty() {
             return Err(anyhow!(
@@ -268,6 +265,7 @@ mod tests {
             publish: false,
             argv: vec!["work".to_string()],
             env: BTreeMap::new(),
+            stdin: None,
             seed: None,
             cwd: None,
             timeout_seconds: None,
@@ -295,6 +293,7 @@ mod tests {
             publish: false,
             argv: vec!["-a".to_string()],
             env: BTreeMap::new(),
+            stdin: None,
             seed: None,
             cwd: None,
             timeout_seconds: None,

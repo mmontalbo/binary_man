@@ -241,6 +241,7 @@ mod tests {
             publish: false,
             argv: vec!["--help".to_string()],
             env: BTreeMap::new(),
+            stdin: None,
             seed: None,
             cwd: None,
             timeout_seconds: None,

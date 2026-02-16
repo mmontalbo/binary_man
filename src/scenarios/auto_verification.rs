@@ -166,6 +166,7 @@ pub fn auto_verification_scenarios(
             publish: false,
             argv,
             env: std::collections::BTreeMap::new(),
+            stdin: None,
             // Use prereq seed or pin inline empty seed
             seed: Some(seed),
             cwd: None,
