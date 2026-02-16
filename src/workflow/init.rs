@@ -67,6 +67,7 @@ pub fn run_init(args: &InitArgs) -> Result<()> {
         templates::ENRICH_SEMANTICS_JSON,
         args.force,
     )?;
+
     ensure_empty_fixture(paths.root())?;
 
     enrich::write_config(paths.root(), &config)?;

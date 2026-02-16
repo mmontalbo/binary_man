@@ -53,8 +53,5 @@ pub use lm_log::{
 };
 pub use lock::{build_lock, hash_paths, load_lock, lock_status, now_epoch_ms, write_lock};
 pub use paths::DocPackPaths;
-pub use prereqs::{
-    load_prereqs, write_prereqs, FlatSeed, PrereqInferenceDefinition, PrereqsFile,
-    PREREQS_SCHEMA_VERSION,
-};
+pub use prereqs::{load_prereqs, PrereqsFile};
 pub use types::*;
