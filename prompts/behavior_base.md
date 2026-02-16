@@ -26,6 +26,8 @@ Basic: `{"kind": "add_behavior_scenario", "argv": ["--option"]}`
 
 With seed: `{"kind": "add_behavior_scenario", "argv": ["--option", "input.txt"], "seed": {"files": {"input.txt": "line1\nline2"}}}`
 
+**CRITICAL: Use the EXACT option form in argv.** When verifying `--delete`, use `--delete` in argv (not `-d`). When verifying `-d`, use `-d` (not `--delete`). The argv must contain the exact surface_id being tested.
+
 **IMPORTANT**: If your seed creates input files, include them in argv! Many commands read from files, not stdin.
 - `cat -n input.txt` (not just `cat -n`)
 - `tac input.txt` (not just `tac`)
@@ -38,6 +40,35 @@ Seed fields (all optional):
 - `executables`: `{"script.sh": "content"}` - create executable files
 
 **Seed paths must be RELATIVE** (e.g., `input.txt`, `work/data.txt`). Never use absolute paths like `/tmp` or `/home/...`. The sandbox already provides a working directory.
+
+**Stdin input**: For filter commands that read from stdin (tr, cut, sort, uniq, sed, awk), use the `stdin` field:
+
+```json
+{
+  "kind": "add_behavior_scenario",
+  "argv": ["-d", "aeiou"],
+  "stdin": "hello world"
+}
+```
+
+The command receives this content on stdin. Use stdout assertions to verify the transformation:
+
+```json
+{
+  "kind": "add_behavior_scenario",
+  "argv": ["-d:", "-f2"],
+  "stdin": "root:x:0:0\nnobody:x:65534:65534",
+  "assertions": [
+    {"kind": "stdout_contains", "run": "variant", "seed_path": null, "token": "x"}
+  ]
+}
+```
+
+**Guidelines for stdin:**
+- Use stdin for filter commands, NOT file arguments
+- Keep stdin content minimal - just enough to verify behavior
+- Include multiple lines when the option's behavior depends on line structure
+- Maximum stdin size: 64KB (UTF-8 only)
 
 **2. add_value_examples**: Specify valid values.
 `{"kind": "add_value_examples", "value_examples": ["val1", "val2"]}`
