@@ -5,9 +5,535 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M27 (stdin support).
+Current focus: M28 (prereq inference).
 
-## M27 — Stdin Input Support
+## M28 — Prereq Inference for Smarter Auto-Verify
+
+Goal: Before auto-verification runs, analyze surface item documentation to infer
+fixture prerequisites. Skip interactive/blocking options, provide correct seeds
+upfront, and reduce cycles wasted on trial-and-error fixture discovery.
+
+### Motivation
+
+Survey of coreutils verification coverage revealed fixture-related blockers:
+
+| Reason Code | Count | Description |
+|-------------|-------|-------------|
+| no_scenario | 535 | LM hasn't authored scenarios yet |
+| outputs_equal | 144 | Option produces same output as baseline (needs fixtures) |
+| missing_value_examples | 135 | Option takes value but no examples provided |
+| auto_verify_timeout | 4 | Blocking options (--follow, etc.) |
+
+The `outputs_equal` failures (144) are caused by auto-verify running options
+without proper fixtures. Example: `git config --local` needs a `.git` directory
+to produce different output from baseline. Currently, auto-verify runs blindly,
+fails, and the LM must fix it reactively. With prereq inference:
+
+1. LM analyzes description: "Write to repository .git/config file"
+2. Infers prereq: needs `.git` directory
+3. Auto-verify uses correct seed upfront
+4. First try succeeds instead of needing retry cycles
+
+### Design Decisions
+
+**File location:**
+```
+inventory/
+├── surface.json              ← Discovered items (SQL lenses, read-only)
+├── surface.overlays.json     ← User overrides (existing)
+└── prereqs.json              ← LM-inferred prereqs (auto-generated cache)
+```
+
+Why `inventory/` not `enrich/`: prereqs.json is derived from surface.json, not
+author-edited config. It's a cache that can be regenerated. Not a lock input
+since it's deterministically derived from surface items + LM.
+
+**prereqs.json schema:**
+```json
+{
+  "schema_version": 1,
+  "definitions": {
+    "git_repo": {
+      "description": "git repository with .git directory",
+      "seed": {"entries": [{"path": ".git", "kind": "dir"}]},
+      "exclude": false
+    },
+    "interactive": {
+      "description": "requires interactive TTY",
+      "seed": null,
+      "exclude": true,
+      "exclude_reason": "interactive"
+    },
+    "has_file": {
+      "description": "needs a regular file to operate on",
+      "seed": {"entries": [{"path": "input.txt", "kind": "file", "content": "line1\nline2\nline3"}]},
+      "exclude": false
+    },
+    "has_symlink": {
+      "description": "needs a symlink to operate on",
+      "seed": {"entries": [
+        {"path": "target.txt", "kind": "file", "content": "target"},
+        {"path": "link.txt", "kind": "symlink", "target": "target.txt"}
+      ]},
+      "exclude": false
+    },
+    "blocking": {
+      "description": "would block indefinitely waiting for input",
+      "seed": null,
+      "exclude": true,
+      "exclude_reason": "blocking"
+    }
+  },
+  "surface_map": {
+    "git.config.--edit": ["interactive"],
+    "git.config.--local": ["git_repo"],
+    "git.config.--global": [],
+    "ls.--dereference": ["has_symlink"],
+    "tail.--follow": ["blocking"],
+    "sort.--numeric-sort": ["has_file"],
+    "head.--lines": ["has_file"]
+  }
+}
+```
+
+**Coreutils-focused examples:**
+- Most coreutils need simple fixtures: files, directories, symlinks
+- `has_file` covers: head, tail, sort, uniq, cut, tr, wc
+- `has_symlink` covers: ls --dereference, readlink, realpath
+- `blocking` covers: tail --follow, yes (infinite output)
+- `interactive` covers: options requiring TTY prompts
+
+**Key constraints:**
+- `definitions`: Reusable prereq definitions with seeds and exclusion flags
+- `surface_map`: Maps **qualified** surface IDs (`{entry_point}.{option}`) to prereq keys
+- Empty array `[]` = analyzed, no prereq needed
+- Missing key = not yet analyzed (triggers inference)
+- `exclude: true` = skip from auto-verify; `exclude_reason` recorded for status
+- Seeds use **canonical format** (`ScenarioSeedSpec`), not a separate FlatSeed type
+
+**Why canonical seed format:**
+- Reuse existing `ScenarioSeedSpec` with `entries: Vec<SeedEntry>`
+- No conversion needed between formats
+- LM prompt shows examples in this format
+- Validation already exists for seed entries
+
+**Resolution order:**
+1. `surface.overlays.json` prereq_override (user wins)
+2. `inventory/prereqs.json` surface_map + definitions
+3. No prereq info = default auto-verify behavior (no seed, not excluded)
+
+**Incremental inference:**
+- On first run: analyze all surface items
+- On subsequent runs: only analyze new items (not in surface_map)
+- Batching: group by context_argv, max 50 items per LM call
+- Large surfaces (>50 items per context): multiple LM calls, merge results
+
+**Exclusion categories and status reporting:**
+- `interactive`: requires TTY/editor (--edit, --interactive)
+- `network`: requires network access (--remote, --fetch)
+- `privilege`: requires elevated permissions (--system, chown)
+- `blocking`: would block indefinitely (--follow, --wait)
+
+Excluded items appear in status with reason:
+```json
+{
+  "behavior_excluded": [
+    {"surface_id": "git.config.--edit", "reason": "interactive"}
+  ]
+}
+```
+
+**Validation:**
+- All surface_map values must reference keys in definitions
+- Seed entry paths must be relative, no `..` or absolute paths
+- Invalid LM responses rejected, logged, not cached
+
+### Data Flow
+
+```
+Surface Discovery
+    ↓
+inventory/surface.json (items with descriptions)
+    ↓
+Prereq Inference (LM call if new items OR --force)
+    ↓
+inventory/prereqs.json (cached)
+    ↓
+Auto-Verify reads prereqs
+    ↓
+- Skip excluded items
+- Use merged prereq seeds for scenarios
+    ↓
+Fewer failures, reduced cycles
+```
+
+**When does inference run?**
+- First apply after surface discovery: always (prereqs.json doesn't exist)
+- Subsequent applies: only if new surface items detected (not in surface_map)
+- `bman apply --force-prereqs`: re-run inference for all items, replace cache
+  (separate from existing `--force behavior` which forces LM scenario authoring)
+- LM call fails: log warning, proceed without prereqs (graceful degradation)
+- Existing packs without prereqs.json: inference runs on first apply, infers all items
+
+**Per-pack isolation:** Each pack has its own `inventory/prereqs.json`. Definition
+keys (like `has_file`, `interactive`) are scoped to that pack. No cross-pack sharing
+in this milestone.
+
+**Seed merging for multiple prereqs:**
+```rust
+// --amend: ["git_repo", "has_commits"]
+// git_repo.seed = {entries: [{path: ".git", kind: "dir"}]}
+// has_commits.seed = {entries: [{path: ".git/objects", kind: "dir"}]}
+// Merged: dedupe by path, later entry wins
+```
+
+### Implementation Phases
+
+#### Phase 1: PrereqsFile Type
+
+Add `src/surface/prereqs.rs` (alongside existing overlays.rs):
+
+```rust
+pub struct PrereqsFile {
+    pub schema_version: u32,
+    pub definitions: BTreeMap<String, PrereqDefinition>,
+    pub surface_map: BTreeMap<String, Vec<String>>,  // qualified IDs
+}
+
+pub struct PrereqDefinition {
+    pub description: String,
+    pub seed: Option<ScenarioSeedSpec>,  // reuse existing type
+    pub exclude: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exclude_reason: Option<String>,  // for status reporting
+}
+
+pub struct ResolvedPrereq {
+    pub exclude: bool,
+    pub exclude_reason: Option<String>,
+    pub seed: Option<ScenarioSeedSpec>,
+}
+
+/// Qualified surface ID: "git.config.--local" or "ls.--all"
+pub fn qualify_surface_id(context_argv: &[String], surface_id: &str) -> String {
+    let mut parts: Vec<_> = context_argv.iter().map(|s| s.as_str()).collect();
+    parts.push(surface_id);
+    parts.join(".")
+}
+```
+
+Functions:
+- `load_prereqs(pack: &Pack) -> Option<PrereqsFile>`
+- `save_prereqs(pack: &Pack, prereqs: &PrereqsFile)`
+- `resolve_prereq(qualified_id, prereqs, overlays) -> ResolvedPrereq`
+- `validate_prereqs(prereqs: &PrereqsFile) -> Result<()>` (check refs exist)
+
+#### Phase 2: LM Prompt and Response
+
+Add `prompts/prereq_inference.md`:
+
+```markdown
+# Prereq Inference for {binary_name} {context_argv}
+
+Analyze surface items and determine prerequisites for auto-verification.
+
+## Exclusion Categories (set exclude: true)
+- interactive: requires TTY/editor
+- network: requires network access
+- privilege: requires elevated permissions
+- blocking: would block indefinitely (e.g., --follow, --wait)
+
+## Seed Format (same as scenario seeds)
+{
+  "entries": [
+    {"path": ".git", "kind": "dir"},
+    {"path": "test.txt", "kind": "file", "content": "hello"}
+  ]
+}
+
+## Existing Definitions (reuse these when applicable)
+{existing_definitions_json}
+
+## Surface Items to Analyze
+{surface_items_json}
+
+## Output
+{
+  "definitions": {
+    "prereq_key": {
+      "description": "...",
+      "seed": {"entries": [...]},
+      "exclude": false
+    }
+  },
+  "surface_map": {
+    "--option": ["prereq_key"],
+    "--other": []
+  }
+}
+
+Rules:
+- REUSE existing definitions when they fit (reference by key in surface_map)
+- Only create new definitions when no existing one applies
+- Empty array [] means no prereq needed
+- Set exclude: true with exclude_reason for interactive/network/privilege/blocking
+- Use canonical seed format with entries array
+- Skip items without descriptions (output empty array for them)
+```
+
+**Example surface_items_json:**
+```json
+[
+  {"id": "--local", "description": "Write to repository .git/config", "forms": ["--local"]},
+  {"id": "--global", "description": "Write to global config", "forms": ["--global"]},
+  {"id": "--edit", "description": "Opens an editor", "forms": ["--edit", "-e"]}
+]
+```
+
+**Items without descriptions:** If an option has no description (only forms), the LM
+should output an empty array `[]` for it. These items proceed to auto-verify without
+prereqs (might fail, will be fixed reactively).
+
+Add to `src/workflow/lm_client.rs`:
+
+```rust
+pub fn build_prereq_inference_prompt(
+    binary_name: &str,
+    context_argv: &[String],
+    items: &[&SurfaceItem],
+) -> String
+
+pub fn parse_prereq_response(
+    response: &str,
+    context_argv: &[String],
+) -> Result<PrereqsFile>
+```
+
+**Batching strategy:**
+- Group surface items by context_argv
+- Max 50 items per LM call (fits in context window)
+- Multiple calls merged into single prereqs.json
+
+Response validation:
+- All surface_map values must reference keys in definitions
+- Seed paths must be relative, no `..` or absolute paths
+- Invalid response = error, not cached (LM must retry)
+
+#### Phase 3: Inference Orchestration
+
+Add `src/workflow/apply/prereq_inference.rs`:
+
+```rust
+pub fn infer_prereqs_if_needed(
+    ctx: &EnrichContext,
+    surface: &SurfaceInventory,
+    existing: Option<PrereqsFile>,
+    force: bool,
+) -> Result<Option<PrereqsFile>> {
+    // If force, re-infer everything
+    let items_to_infer: Vec<_> = if force {
+        surface.items.iter().collect()
+    } else {
+        // Find items not in surface_map
+        surface.items.iter()
+            .filter(|item| {
+                let qualified = qualify_surface_id(&item.context_argv, &item.id);
+                existing.as_ref()
+                    .map(|p| !p.surface_map.contains_key(&qualified))
+                    .unwrap_or(true)
+            })
+            .collect()
+    };
+
+    if items_to_infer.is_empty() {
+        return Ok(existing);
+    }
+
+    // Group by context_argv for batching
+    let batches = group_by_context_argv(&items_to_infer, 50);
+
+    // Call LM for each batch
+    let mut merged = existing.unwrap_or_default();
+    for batch in batches {
+        match invoke_lm_for_prereqs(ctx, &batch) {
+            Ok(response) => {
+                merged = merge_prereqs(merged, response)?;
+            }
+            Err(e) => {
+                // Log warning, continue without prereqs for this batch
+                log::warn!("Prereq inference failed for {:?}: {}",
+                    batch.first().map(|i| &i.context_argv), e);
+            }
+        }
+    }
+
+    Ok(Some(merged))
+}
+```
+
+**Graceful degradation:**
+- If LM call fails (timeout, invalid response), log warning and continue
+- Auto-verify proceeds without prereqs for failed items
+- Next apply will retry inference for items still not in surface_map
+
+#### Phase 4: Apply Integration
+
+Modify `src/workflow/apply/mod.rs`:
+
+```rust
+fn apply_plan_actions(inputs: &ApplyInputs) -> Result<ApplyPlanActionsResult> {
+    // ... existing surface discovery ...
+
+    // NEW: Prereq inference after surface discovery
+    if let Some(surface) = &inputs.surface {
+        let existing_prereqs = load_prereqs(&inputs.pack);
+        let prereqs = infer_prereqs_if_needed(ctx, surface, existing_prereqs)?;
+        save_prereqs(&inputs.pack, &prereqs)?;
+    }
+
+    // ... existing auto-verify (now reads prereqs) ...
+}
+```
+
+#### Phase 5: Auto-Verify Enhancement
+
+Modify `src/workflow/apply/auto_verify.rs`:
+
+```rust
+pub fn auto_verification_scenarios(
+    surface: &SurfaceInventory,
+    prereqs: Option<&PrereqsFile>,  // NEW
+    overlays: &SurfaceOverlays,
+    semantics: &Semantics,
+) -> Vec<ScenarioSpec> {
+    surface.items.iter()
+        .filter_map(|item| {
+            let resolved = resolve_prereq(&item.id, prereqs, overlays);
+
+            // Skip excluded items
+            if resolved.exclude {
+                return None;
+            }
+
+            // Build scenario with prereq seed
+            Some(ScenarioSpec {
+                id: auto_verify_id(&item.id),
+                argv: build_argv(item),
+                seed: resolved.seed,
+                assertions: vec![OutputsDiffer],
+                ..Default::default()
+            })
+        })
+        .collect()
+}
+```
+
+#### Phase 6: Overlay Support (Optional)
+
+Extend `src/surface/overlays.rs`:
+
+```rust
+pub struct SurfaceOverlay {
+    pub id: String,
+    // ... existing fields ...
+
+    /// Override inferred prereqs
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prereq_override: Option<PrereqOverride>,
+}
+
+pub struct PrereqOverride {
+    pub exclude: Option<bool>,
+    pub seed: Option<ScenarioSeedSpec>,  // canonical format, not FlatSeed
+}
+```
+
+#### Phase 7: Testing
+
+Add tests in `src/surface/prereqs.rs` (inline) or `src/surface/prereqs_tests.rs`:
+
+```rust
+#[test]
+fn test_qualify_surface_id() {
+    assert_eq!(
+        qualify_surface_id(&["git".into(), "config".into()], "--local"),
+        "git.config.--local"
+    );
+    assert_eq!(
+        qualify_surface_id(&["ls".into()], "--all"),
+        "ls.--all"
+    );
+}
+
+#[test]
+fn test_resolve_prereq_merges_seeds() {
+    // Test that multiple prereqs merge their seeds correctly
+}
+
+#[test]
+fn test_validate_prereqs_catches_dangling_refs() {
+    // surface_map references definition that doesn't exist
+}
+```
+
+Integration test in `tests/prereq_inference.rs`:
+- Mock LM response
+- Verify prereqs.json created with expected content
+- Verify auto-verify uses seeds from prereqs
+
+### Files to Modify
+
+| File | Action | Description |
+|------|--------|-------------|
+| `src/surface/prereqs.rs` | NEW | PrereqsFile type, load/save, resolve, validate |
+| `src/surface/mod.rs` | MODIFY | Re-export prereqs module |
+| `src/workflow/apply/prereq_inference.rs` | NEW | LM orchestration, batching, incremental inference |
+| `src/workflow/apply/mod.rs` | MODIFY | Call prereq inference after surface discovery |
+| `src/workflow/apply/auto_verify.rs` | MODIFY | Use resolved prereqs for seeds/exclusions |
+| `src/workflow/lm_client.rs` | MODIFY | Add prereq prompt builder and response parsing |
+| `prompts/prereq_inference.md` | NEW | Prompt template |
+| `src/surface/overlays.rs` | MODIFY | Add prereq_override field (optional) |
+| `src/status/verification.rs` | MODIFY | Report excluded items with reasons |
+| `src/cli.rs` | MODIFY | Add `--force-prereqs` flag |
+
+### Acceptance Criteria
+
+1. **First run infers:** `bman git config` creates `inventory/prereqs.json` on first apply
+2. **Qualified IDs:** surface_map uses `git.config.--edit` format, not bare `--edit`
+3. **Exclusions work:** `--edit` excluded (interactive), not auto-verified
+4. **Exclusions reported:** `status --json` shows `behavior_excluded` with reasons
+5. **Seeds applied:** `--local` gets `.git` seed, auto-verify succeeds first try
+6. **Canonical format:** Seeds use `ScenarioSeedSpec` format, no conversion needed
+7. **Caching works:** Second run skips LM call (prereqs.json exists)
+8. **Incremental:** New surface items trigger inference only for those items
+9. **Batching:** Large surfaces (>50 items) use multiple LM calls, merged correctly
+10. **Validation:** Invalid LM response rejected with clear error, not cached
+11. **Override works:** User can set prereq_override in overlays to fix bad inference
+12. **Reduced cycles:** Large-surface binaries complete in ~3-4 cycles instead of ~10
+
+### Metrics (for validation)
+
+Before prereq inference:
+- `git config`: ~10 cycles to reach verification complete
+- 144 `outputs_equal` failures across survey
+
+After prereq inference:
+- `git config`: ~3-4 cycles to reach verification complete
+- `outputs_equal` reduced by 50%+ (items with inferred seeds)
+
+### Deferred
+
+- Two-tier model (fast model for classification, full model for seeds)
+- Automatic prereq definition cleanup (remove unused definitions)
+- Cross-binary prereq library (share `git_repo` definition across git subcommands)
+- Confidence scoring for inferences
+- Auto-retry with different seed on `outputs_equal` failure
+- Content-specific fixtures (e.g., numeric content for `sort --numeric-sort`)
+- Option value inference (what values make sense for `--lines=N`)
+
+---
+
+## M27 — Stdin Input Support (done)
 
 Goal: Enable verification of text-processing utilities that read from stdin
 rather than file arguments. Start with `tr`, `cut`, `head`, `tail`.
