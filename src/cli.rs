@@ -49,7 +49,7 @@ pub struct RunArgs {
     pub doc_pack: Option<std::path::PathBuf>,
 
     /// Maximum enrichment cycles before stopping (0 = unlimited)
-    #[arg(long, default_value = "50")]
+    #[arg(long, default_value = "15")]
     pub max_cycles: usize,
 
     /// Show detailed progress during enrichment
