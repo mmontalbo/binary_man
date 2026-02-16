@@ -564,7 +564,14 @@ pub(super) fn eval_verification_requirement(
                     // that ran but are still unverified (e.g., binaries like grep where
                     // auto_verify scenarios fail with usage errors due to missing args)
                     let stuck = auto_verification_is_stuck(&auto_remaining_ids, paths);
-                    if stuck {
+                    // Also skip auto verification in initial behavior cycle:
+                    // no behavior scenarios exist yet, so let behavior verification
+                    // generate full scenarios via LM instead of bare auto-verify.
+                    let is_initial_behavior = plan.scenarios.iter().all(|scenario| {
+                        scenario.coverage_tier.as_deref() != Some("behavior")
+                            || scenario.covers.is_empty()
+                    });
+                    if stuck || is_initial_behavior {
                         // Clear the auto verification next_action so behavior verification
                         // can set its own next_action
                         *verification_next_action = None;

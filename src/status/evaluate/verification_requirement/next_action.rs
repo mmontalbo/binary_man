@@ -148,7 +148,10 @@ fn build_target_scenario_output(
                 if entry.behavior_exit_code.is_some() || entry.behavior_stderr.is_some() {
                     (entry.behavior_exit_code, entry.behavior_stderr.clone())
                 } else {
-                    (entry.auto_verify_exit_code, entry.auto_verify_stderr.clone())
+                    (
+                        entry.auto_verify_exit_code,
+                        entry.auto_verify_stderr.clone(),
+                    )
                 };
             // Only include if we have useful output data
             if exit_code.is_none() && stderr_preview.is_none() {
@@ -607,6 +610,44 @@ fn reason_based_behavior_next_action(
     })
 }
 
+/// Check if this is the initial behavior cycle (surface exists but no behavior scenarios).
+///
+/// Returns false if:
+/// - required_ids is empty
+/// - behavior scenarios exist in the plan
+/// - ledger entries show failure reasons that imply scenarios were run
+fn is_initial_behavior_cycle(
+    plan: &scenarios::ScenarioPlan,
+    required_ids: &[String],
+    ledger_entries: &LedgerEntries,
+) -> bool {
+    // Must have some required surface items
+    if required_ids.is_empty() {
+        return false;
+    }
+    // Check if any behavior scenarios exist in the plan
+    let has_behavior_scenarios = plan.scenarios.iter().any(|scenario| {
+        scenario.coverage_tier.as_deref() == Some("behavior") && !scenario.covers.is_empty()
+    });
+    if has_behavior_scenarios {
+        return false;
+    }
+    // Check if ledger entries show failure reasons that imply scenarios were run.
+    // Reasons like scenario_error, outputs_equal, assertion_failed mean scenarios ran.
+    let has_scenario_run_evidence = ledger_entries.values().any(|entry| {
+        entry
+            .behavior_unverified_reason_code
+            .as_deref()
+            .is_some_and(|code| {
+                matches!(
+                    code,
+                    "scenario_error" | "outputs_equal" | "assertion_failed" | "auto_verify_timeout"
+                )
+            })
+    });
+    !has_scenario_run_evidence
+}
+
 /// Maybe set behavior next action based on evaluation state.
 pub(super) fn maybe_set_behavior_next_action(
     ctx: &mut QueueVerificationContext<'_>,
@@ -617,6 +658,53 @@ pub(super) fn maybe_set_behavior_next_action(
         && ctx.missing.is_empty()
         && ctx.local_blockers.is_empty();
     if !can_set_next_action {
+        return;
+    }
+
+    // Check for initial scenarios: surface exists but no behavior scenarios yet
+    if is_initial_behavior_cycle(
+        ctx.plan,
+        state.required_ids,
+        state.lookup_ctx.ledger_entries,
+    ) {
+        let target_ids: Vec<String> = state
+            .required_ids
+            .iter()
+            .take(BEHAVIOR_BATCH_LIMIT)
+            .cloned()
+            .collect();
+        let scaffold_context =
+            build_scaffold_context(Some(ctx.surface), &target_ids, Some("initial_scenarios"));
+        let payload = behavior_payload(BehaviorPayloadArgs {
+            surface: Some(ctx.surface),
+            target_ids: &target_ids,
+            reason_code: Some("initial_scenarios"),
+            retry_counts: state.retry_counts,
+            ledger_entries: state.lookup_ctx.ledger_entries,
+            suggested_overlay_keys: &[],
+            assertion_starters: Vec::new(),
+            suggested_exclusion_payload: None,
+        });
+        let content = crate::status::verification::behavior_scenarios_batch_stub(
+            ctx.plan,
+            ctx.surface,
+            &target_ids,
+        )
+        .unwrap_or_default();
+        *ctx.verification_next_action = Some(enrich::NextAction::Edit {
+            path: "scenarios/plan.json".to_string(),
+            content,
+            reason: format!(
+                "generate initial behavior scenarios for {} surface items",
+                target_ids.len()
+            ),
+            hint: Some("Generate initial behavior scenarios".to_string()),
+            edit_strategy: crate::status::verification::BEHAVIOR_SCENARIO_EDIT_STRATEGY.to_string(),
+            payload: payload.map(|mut p| {
+                p.scaffold_context = scaffold_context;
+                p
+            }),
+        });
         return;
     }
 

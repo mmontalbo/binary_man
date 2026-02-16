@@ -81,6 +81,8 @@ impl VerificationStatus {
 /// Behavior verification reason codes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BehaviorReasonKind {
+    /// Initial scenario generation - surface exists but no behavior scenarios yet.
+    InitialScenarios,
     NoScenario,
     ScenarioError,
     AssertionFailed,
@@ -92,6 +94,7 @@ pub(crate) enum BehaviorReasonKind {
 impl BehaviorReasonKind {
     pub(crate) fn as_code(self) -> &'static str {
         match self {
+            Self::InitialScenarios => "initial_scenarios",
             Self::NoScenario => "no_scenario",
             Self::ScenarioError => "scenario_error",
             Self::AssertionFailed => "assertion_failed",
@@ -102,6 +105,7 @@ impl BehaviorReasonKind {
 
     pub(crate) fn from_code(raw: Option<&str>) -> Self {
         match raw.unwrap_or("no_scenario") {
+            "initial_scenarios" => Self::InitialScenarios,
             "no_scenario" => Self::NoScenario,
             "scenario_error" => Self::ScenarioError,
             "assertion_failed" => Self::AssertionFailed,

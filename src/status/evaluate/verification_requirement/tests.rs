@@ -497,6 +497,29 @@ fn no_scenario_next_action_payload_includes_assertion_starters() {
         serde_json::from_str(&scenarios::plan_stub(Some("bin"))).expect("parse plan stub");
     plan.scenarios
         .retain(|scenario| scenario.kind != scenarios::ScenarioKind::Behavior);
+    // Add a behavior scenario for --other to avoid triggering initial_scenarios path
+    plan.scenarios.push(scenarios::ScenarioSpec {
+        id: "verify_other".to_string(),
+        kind: scenarios::ScenarioKind::Behavior,
+        publish: false,
+        argv: vec!["--other".to_string()],
+        env: BTreeMap::new(),
+        stdin: None,
+        seed: None,
+        cwd: None,
+        timeout_seconds: None,
+        net_mode: None,
+        no_sandbox: None,
+        no_strace: None,
+        snippet_max_lines: None,
+        snippet_max_bytes: None,
+        coverage_tier: Some("behavior".to_string()),
+        baseline_scenario_id: Some("baseline".to_string()),
+        assertions: Vec::new(),
+        covers: vec!["--other".to_string()],
+        coverage_ignore: false,
+        expect: scenarios::ScenarioExpect::default(),
+    });
     let surface = minimal_surface("--color");
     let mut ledger_entries = BTreeMap::new();
     ledger_entries.insert(

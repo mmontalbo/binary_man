@@ -64,6 +64,23 @@ pub(super) fn auto_verification_scenarios(
         return Ok(None);
     };
 
+    // Skip bare auto-verify in initial behavior cycle - LM should generate scenarios first.
+    // Check if any behavior scenarios exist in the plan with covers.
+    if verification_tier == "behavior" {
+        let has_behavior_scenarios = plan.scenarios.iter().any(|scenario| {
+            scenario.coverage_tier.as_deref() == Some("behavior") && !scenario.covers.is_empty()
+        });
+        if !has_behavior_scenarios {
+            if verbose {
+                eprintln!(
+                    "auto_verify: skipping bare scenarios for {} targets (initial behavior cycle)",
+                    targets.target_ids.len()
+                );
+            }
+            return Ok(None);
+        }
+    }
+
     // Load prereqs for seed resolution
     let paths = enrich::DocPackPaths::new(doc_pack_root.to_path_buf());
     let prereqs = super::prereq_inference::load_prereqs_for_auto_verify(&paths).ok();

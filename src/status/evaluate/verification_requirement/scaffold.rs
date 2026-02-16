@@ -40,12 +40,15 @@ pub(super) fn build_scaffold_context(
     let surface = surface?;
     let is_no_scenario = reason_code == Some("no_scenario");
     let is_outputs_equal = reason_code == Some("outputs_equal");
+    let is_initial_scenarios = reason_code == Some("initial_scenarios");
 
-    if !is_no_scenario && !is_outputs_equal {
+    if !is_no_scenario && !is_outputs_equal && !is_initial_scenarios {
         return None;
     }
 
     let mut value_required = Vec::new();
+    let mut all_surface_items = Vec::new();
+
     for target_id in target_ids {
         let Some(item) = crate::surface::primary_surface_item_by_id(surface, target_id) else {
             continue;
@@ -61,10 +64,25 @@ pub(super) fn build_scaffold_context(
                 description: item.description.clone().unwrap_or_default(),
             });
         }
+
+        // For initial_scenarios, include all surface items with descriptions
+        if is_initial_scenarios {
+            all_surface_items.push(enrich::SurfaceItemHint {
+                id: target_id.clone(),
+                description: item.description.clone(),
+                value_placeholder: if item.invocation.value_arity == "required" {
+                    item.invocation.value_placeholder.clone()
+                } else {
+                    None
+                },
+            });
+        }
     }
 
     let has_value_required = !value_required.is_empty();
-    let guidance = if has_value_required && is_outputs_equal {
+    let guidance = if is_initial_scenarios {
+        Some("Generate behavior scenarios for ALL options. Use descriptions to determine appropriate stdin, seed files, or assertions.".to_string())
+    } else if has_value_required && is_outputs_equal {
         Some("Replace __value__ placeholders using examples from option descriptions; options with identical output may need companion flags (-l for details, -s for sizes) or behavior exclusion".to_string())
     } else if has_value_required {
         Some(
@@ -81,6 +99,7 @@ pub(super) fn build_scaffold_context(
         value_required,
         has_outputs_equal: is_outputs_equal,
         guidance,
+        all_surface_items,
     })
 }
 

@@ -49,14 +49,9 @@
 //! 2. `lm_command` in `enrich/config.json`
 //! 3. `BMAN_LM_COMMAND` environment variable
 
-use crate::enrich::{
-    BehaviorNextActionPayload, FlatSeed, PrereqInferenceDefinition, PrereqsFile, StatusSummary,
-    PREREQS_SCHEMA_VERSION,
-};
+use crate::enrich::{BehaviorNextActionPayload, StatusSummary};
 use crate::workflow::lm_response::LmResponseBatch;
 use anyhow::{anyhow, Context, Result};
-use serde::Deserialize;
-use std::collections::BTreeMap;
 use std::io::Write;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -106,9 +101,9 @@ const REASON_ASSERTION_FAILED: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/prompts/behavior_reason_assertion_failed.md"
 ));
-const PREREQ_INFERENCE: &str = include_str!(concat!(
+const REASON_INITIAL_SCENARIOS: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/prompts/prereq_inference.md"
+    "/prompts/behavior_reason_initial_scenarios.md"
 ));
 
 /// Invoke the LM to generate responses for behavior verification.
@@ -192,6 +187,7 @@ fn build_behavior_prompt(summary: &StatusSummary, payload: &BehaviorNextActionPa
 
     // Select reason-specific section
     let reason_section = match reason_code {
+        "initial_scenarios" => REASON_INITIAL_SCENARIOS.to_string(),
         "no_scenario" => REASON_NO_SCENARIO.to_string(),
         "outputs_equal" => {
             let retry_count = payload.retry_count.unwrap_or(0);
@@ -268,6 +264,24 @@ fn build_context_section(payload: &BehaviorNextActionPayload) -> String {
     if let Some(ctx) = &payload.scaffold_context {
         if let Some(guidance) = &ctx.guidance {
             context.push_str(&format!("## Guidance\n{guidance}\n\n"));
+        }
+
+        // For initial_scenarios, include all surface items with descriptions
+        if !ctx.all_surface_items.is_empty() {
+            context.push_str("## Surface Items\n\n");
+            for item in &ctx.all_surface_items {
+                context.push_str(&format!("### `{}`\n", item.id));
+                if let Some(desc) = &item.description {
+                    context.push_str(&format!("- Description: {}\n", desc));
+                }
+                if let Some(placeholder) = &item.value_placeholder {
+                    context.push_str(&format!(
+                        "- Value required (placeholder: {})\n",
+                        placeholder
+                    ));
+                }
+                context.push('\n');
+            }
         }
 
         if !ctx.value_required.is_empty() {
@@ -423,7 +437,7 @@ fn parse_lm_response(text: &str, binary_name: &str) -> Result<LmResponseBatch> {
     let json_text = extract_json(text);
 
     // Fix common LM typos before parsing
-    let fixed_json = fix_common_typos(json_text);
+    let fixed_json = fix_common_typos(&json_text);
 
     let mut batch: LmResponseBatch = match serde_json::from_str(&fixed_json) {
         Ok(b) => b,
@@ -550,142 +564,21 @@ fn sanitize_lm_response(batch: &mut LmResponseBatch, binary_name: &str) {
     }
 }
 
-// ============================================================================
-// Prereq Inference
-// ============================================================================
-
-/// Surface item info passed to prereq inference.
-#[derive(Debug, Clone)]
-pub struct SurfaceItemInfo {
-    pub id: String,
-    pub description: Option<String>,
-    pub forms: Vec<String>,
-}
-
-/// LM response format for prereq inference.
-#[derive(Debug, Deserialize)]
-struct LmPrereqResponse {
-    #[serde(default)]
-    definitions: BTreeMap<String, LmPrereqDefinition>,
-    #[serde(default)]
-    surface_map: BTreeMap<String, Vec<String>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct LmPrereqDefinition {
-    #[serde(default)]
-    description: Option<String>,
-    #[serde(default)]
-    seed: Option<FlatSeed>,
-    #[serde(default)]
-    exclude: bool,
-}
-
-/// Invoke the LM to infer prereqs for surface items.
-///
-/// Returns the parsed prereqs along with prompt/response metadata for logging.
-pub fn invoke_lm_for_prereqs(
-    config: &LmClientConfig,
-    binary_name: &str,
-    existing_definitions: &BTreeMap<String, PrereqInferenceDefinition>,
-    items: &[SurfaceItemInfo],
-) -> Result<LmInvocationResult<PrereqsFile>> {
-    let start = Instant::now();
-    let prompt = build_prereq_prompt(binary_name, existing_definitions, items);
-
-    let response_text = invoke_lm_command(&config.command, &prompt)?;
-    let result = parse_prereq_response(&response_text)?;
-
-    Ok(LmInvocationResult {
-        result,
-        prompt,
-        raw_response: response_text,
-        duration: start.elapsed(),
-    })
-}
-
-/// Build prompt for prereq inference.
-fn build_prereq_prompt(
-    binary_name: &str,
-    existing_definitions: &BTreeMap<String, PrereqInferenceDefinition>,
-    items: &[SurfaceItemInfo],
-) -> String {
-    // Build existing definitions section
-    let existing_defs = if existing_definitions.is_empty() {
-        String::new()
-    } else {
-        let mut section =
-            String::from("## Existing Prereq Definitions (reference these when applicable)\n");
-        for (key, def) in existing_definitions {
-            let desc = def.description.as_deref().unwrap_or("no description");
-            section.push_str(&format!("- `{key}`: {desc}\n"));
-        }
-        section.push('\n');
-        section
-    };
-
-    // Build surface items section
-    let surface_items = items
-        .iter()
-        .map(|item| {
-            let desc = item.description.as_deref().unwrap_or("no description");
-            let forms = if item.forms.is_empty() {
-                String::new()
-            } else {
-                format!(" (forms: {})", item.forms.join(", "))
-            };
-            format!("`{}`{}: {}", item.id, forms, desc)
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    PREREQ_INFERENCE
-        .replace("{binary_name}", binary_name)
-        .replace("{existing_definitions}", &existing_defs)
-        .replace("{surface_items}", &surface_items)
-}
-
-/// Parse LM prereq response into PrereqsFile.
-fn parse_prereq_response(text: &str) -> Result<PrereqsFile> {
-    let json_text = extract_json(text);
-    let response: LmPrereqResponse = serde_json::from_str(json_text)
-        .with_context(|| format!("parse prereq response: {}", &text[..text.len().min(500)]))?;
-
-    let mut prereqs = PrereqsFile {
-        schema_version: PREREQS_SCHEMA_VERSION,
-        definitions: BTreeMap::new(),
-        surface_map: response.surface_map,
-    };
-
-    // Convert LM definitions to PrereqInferenceDefinition
-    for (key, def) in response.definitions {
-        prereqs.definitions.insert(
-            key,
-            PrereqInferenceDefinition {
-                description: def.description,
-                seed: def.seed.map(|flat| flat.to_seed_spec()),
-                exclude: def.exclude,
-            },
-        );
-    }
-
-    Ok(prereqs)
-}
-
 /// Extract JSON from text that might have markdown code fences.
-fn extract_json(text: &str) -> &str {
+/// Returns a Cow<str> because we may need to fix malformed JSON.
+fn extract_json(text: &str) -> std::borrow::Cow<'_, str> {
     let text = text.trim();
 
-    // Try to find JSON in code fences
-    if let Some(start) = text.find("```json") {
+    let extracted = if let Some(start) = text.find("```json") {
+        // Try to find JSON in code fences
         let start = start + 7;
         if let Some(end) = text[start..].find("```") {
-            return text[start..start + end].trim();
+            text[start..start + end].trim()
+        } else {
+            text
         }
-    }
-
-    // Try plain code fences
-    if let Some(start) = text.find("```") {
+    } else if let Some(start) = text.find("```") {
+        // Try plain code fences
         let start = start + 3;
         // Skip language identifier if present
         let start = text[start..]
@@ -693,12 +586,23 @@ fn extract_json(text: &str) -> &str {
             .map(|i| start + i + 1)
             .unwrap_or(start);
         if let Some(end) = text[start..].find("```") {
-            return text[start..start + end].trim();
+            text[start..start + end].trim()
+        } else {
+            text
         }
+    } else {
+        text
+    };
+
+    // Fix common LM issue: JSON missing opening brace
+    // e.g., LM outputs `"definitions": {...}` instead of `{"definitions": {...}}`
+    let trimmed = extracted.trim();
+    if trimmed.starts_with('"') && trimmed.ends_with('}') {
+        // Likely missing opening brace
+        return std::borrow::Cow::Owned(format!("{{{}", trimmed));
     }
 
-    // Return as-is, trimmed
-    text
+    std::borrow::Cow::Borrowed(extracted)
 }
 
 #[cfg(test)]
@@ -727,6 +631,25 @@ mod tests {
 {"responses": []}
 ```"#;
         assert_eq!(extract_json(text), r#"{"responses": []}"#);
+    }
+
+    #[test]
+    fn test_extract_json_missing_brace() {
+        // LM sometimes outputs JSON without opening brace
+        let text = r#"```json
+  "definitions": {},
+  "surface_map": {}
+}
+```"#;
+        // Should fix by adding opening brace
+        let extracted = extract_json(text);
+        assert!(
+            extracted.starts_with('{'),
+            "Should add missing brace: {}",
+            extracted
+        );
+        // Should be parseable
+        let _: serde_json::Value = serde_json::from_str(&extracted).expect("Should be valid JSON");
     }
 
     #[test]

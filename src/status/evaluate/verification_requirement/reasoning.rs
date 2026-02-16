@@ -25,6 +25,9 @@ pub(super) fn behavior_reason_code_for_id(
 
 pub(super) fn behavior_recommended_fix(reason_code: &str) -> &'static str {
     match BehaviorReasonKind::from_code(Some(reason_code)) {
+        BehaviorReasonKind::InitialScenarios => {
+            "generate initial behavior scenarios for all surface items"
+        }
         BehaviorReasonKind::NoScenario => {
             "add behavior scenario with baseline_scenario_id and assertions"
         }
@@ -279,6 +282,9 @@ pub(super) fn behavior_unverified_reason(
     let reason_code = reason_kind.as_code();
     let fix = behavior_recommended_fix(reason_code);
     match reason_kind {
+        BehaviorReasonKind::InitialScenarios => {
+            format!("{reason_code}: {fix}")
+        }
         BehaviorReasonKind::NoScenario => {
             format!("{reason_code}: {fix} for {surface_id}")
         }

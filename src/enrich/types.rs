@@ -457,6 +457,22 @@ pub struct ScaffoldContext {
     /// Actionable guidance based on batch composition.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guidance: Option<String>,
+    /// All surface items for initial scenario generation (only for InitialScenarios reason).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub all_surface_items: Vec<SurfaceItemHint>,
+}
+
+/// Hint for a surface item, used for initial scenario generation.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct SurfaceItemHint {
+    /// The option id (e.g., "--verbose", "-d").
+    pub id: String,
+    /// Description from help text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Value placeholder if option requires a value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_placeholder: Option<String>,
 }
 
 /// Hint for an option that requires a value in its argv.

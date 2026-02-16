@@ -143,14 +143,18 @@ pub fn auto_verification_scenarios(
 ) -> Vec<ScenarioSpec> {
     let mut scenarios = Vec::with_capacity(targets.target_ids.len());
     for surface_id in &targets.target_ids {
-        // Check prereqs for exclusion
-        let resolved = prereqs.map(|p| p.resolve(surface_id));
+        let item = surface.items.iter().find(|item| &item.id == surface_id);
+        let context_argv = item.map(|i| i.context_argv.as_slice()).unwrap_or(&[]);
+
+        // Build qualified surface_id for prereq lookup
+        let qualified_id = qualify_surface_id(context_argv, surface_id);
+
+        // Check prereqs for exclusion using qualified ID
+        let resolved = prereqs.map(|p| p.resolve(&qualified_id));
         if resolved.as_ref().is_some_and(|r| r.exclude) {
             continue;
         }
 
-        let item = surface.items.iter().find(|item| &item.id == surface_id);
-        let context_argv = item.map(|i| i.context_argv.as_slice()).unwrap_or(&[]);
         let argv = existence_argv(semantics, surface_id, context_argv);
 
         // Use prereq seed if available, otherwise empty seed
@@ -189,6 +193,15 @@ pub fn auto_verification_scenarios(
 
 fn auto_scenario_id(surface_id: &str) -> String {
     format!("{}{}", super::AUTO_VERIFY_SCENARIO_PREFIX, surface_id)
+}
+
+/// Qualify a surface_id with context_argv to create a unique key.
+fn qualify_surface_id(context_argv: &[String], surface_id: &str) -> String {
+    if context_argv.is_empty() {
+        surface_id.to_string()
+    } else {
+        format!("{}.{}", context_argv.join("."), surface_id)
+    }
 }
 
 fn existence_argv(semantics: &Semantics, surface_id: &str, context_argv: &[String]) -> Vec<String> {
