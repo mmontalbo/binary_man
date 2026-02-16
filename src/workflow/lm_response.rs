@@ -509,6 +509,26 @@ fn validate_scenario(scenario: &ScenarioSpec, surface_id: &str) -> Result<()> {
         surface_id,
         scenario.covers
     );
+
+    // Validate that assertion seed_path references exist in scenario seed
+    let seed_paths: std::collections::BTreeSet<String> = scenario
+        .seed
+        .as_ref()
+        .map(|s| s.entries.iter().map(|e| e.path.clone()).collect())
+        .unwrap_or_default();
+
+    for assertion in &scenario.assertions {
+        if let Some(path) = assertion.seed_path() {
+            ensure!(
+                seed_paths.contains(path),
+                "assertion references seed_path '{}' but scenario seed does not contain it; \
+                 either add '{}' to the scenario seed or use stdout_token instead",
+                path,
+                path
+            );
+        }
+    }
+
     Ok(())
 }
 
@@ -799,5 +819,79 @@ mod tests {
         assert_eq!(result.valid_count, 0);
         assert_eq!(result.errors.len(), 1);
         assert!(result.errors[0].message.contains("non-empty scenario_id"));
+    }
+
+    #[test]
+    fn test_validate_scenario_rejects_seed_path_not_in_seed() {
+        let surface_ids: std::collections::BTreeSet<String> =
+            ["--delimiter".to_string()].into_iter().collect();
+
+        // Create scenario with assertion referencing seed_path but no seed
+        let mut scenario = make_scenario("verify_--delimiter", "--delimiter");
+        scenario.assertions = vec![crate::scenarios::BehaviorAssertion::StdoutContains {
+            run: crate::scenarios::RunTarget::Variant,
+            seed_path: "input.txt".to_string(),
+            token: Some("expected".to_string()),
+            exact_line: false,
+        }];
+        scenario.seed = None; // No seed!
+
+        let batch = LmResponseBatch {
+            schema_version: 1,
+            responses: vec![LmDecisionResponse {
+                surface_id: "--delimiter".to_string(),
+                action: LmAction::AddScenario {
+                    scenario: Box::new(scenario),
+                },
+            }],
+        };
+
+        let (_, result) = validate_responses(&batch, &surface_ids);
+
+        assert_eq!(result.valid_count, 0);
+        assert_eq!(result.errors.len(), 1);
+        assert!(result.errors[0]
+            .message
+            .contains("seed_path 'input.txt' but scenario seed does not contain it"));
+    }
+
+    #[test]
+    fn test_validate_scenario_accepts_seed_path_in_seed() {
+        let surface_ids: std::collections::BTreeSet<String> =
+            ["--delimiter".to_string()].into_iter().collect();
+
+        // Create scenario with assertion referencing seed_path that IS in seed
+        let mut scenario = make_scenario("verify_--delimiter", "--delimiter");
+        scenario.assertions = vec![crate::scenarios::BehaviorAssertion::StdoutContains {
+            run: crate::scenarios::RunTarget::Variant,
+            seed_path: "input.txt".to_string(),
+            token: Some("expected".to_string()),
+            exact_line: false,
+        }];
+        scenario.seed = Some(crate::scenarios::ScenarioSeedSpec {
+            entries: vec![crate::scenarios::ScenarioSeedEntry {
+                path: "input.txt".to_string(),
+                kind: crate::scenarios::SeedEntryKind::File,
+                contents: Some("test content".to_string()),
+                target: None,
+                mode: Some(0o644),
+            }],
+        });
+
+        let batch = LmResponseBatch {
+            schema_version: 1,
+            responses: vec![LmDecisionResponse {
+                surface_id: "--delimiter".to_string(),
+                action: LmAction::AddScenario {
+                    scenario: Box::new(scenario),
+                },
+            }],
+        };
+
+        let (validated, result) = validate_responses(&batch, &surface_ids);
+
+        assert_eq!(result.valid_count, 1);
+        assert_eq!(result.errors.len(), 0);
+        assert_eq!(validated.scenarios_to_upsert.len(), 1);
     }
 }
