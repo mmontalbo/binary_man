@@ -244,6 +244,7 @@ mod tests {
             forms: vec!["show".to_string()],
             invocation: crate::surface::SurfaceInvocation::default(),
             evidence: Vec::new(),
+            is_help_output: false,
         });
         let kind = surface_kind_for_id(&surface, "show", "option");
         assert_eq!(kind, "subcommand");
@@ -261,6 +262,7 @@ mod tests {
             forms: vec!["--verbose".to_string()],
             invocation: crate::surface::SurfaceInvocation::default(),
             evidence: Vec::new(),
+            is_help_output: false,
         });
         let kind = surface_kind_for_id(&surface, "--verbose", "subcommand");
         assert_eq!(kind, "option");

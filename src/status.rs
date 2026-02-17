@@ -330,6 +330,7 @@ fn build_action_focus(
         enrich::NextAction::Edit { payload, .. } => {
             payload.as_ref().and_then(|p| p.reason_code.clone())
         }
+        enrich::NextAction::AutoExclude { evidence, .. } => Some(evidence.reason_code.clone()),
     };
     let payload_target_ids = match next_action {
         enrich::NextAction::Command { payload, .. } => payload
@@ -340,6 +341,7 @@ fn build_action_focus(
             .as_ref()
             .map(|p| p.target_ids.clone())
             .unwrap_or_default(),
+        enrich::NextAction::AutoExclude { target_ids, .. } => target_ids.clone(),
     };
 
     // Find the first unmet requirement
@@ -408,6 +410,15 @@ pub fn print_status(doc_pack_root: &Path, summary: &enrich::StatusSummary) {
         }
         enrich::NextAction::Edit { path, reason, .. } => {
             println!("next edit: {}", path);
+            println!("next detail: {reason}");
+        }
+        enrich::NextAction::AutoExclude {
+            path,
+            reason,
+            target_ids,
+            ..
+        } => {
+            println!("next auto-exclude: {} ({} items)", path, target_ids.len());
             println!("next detail: {reason}");
         }
     }

@@ -244,6 +244,7 @@ fn ledger_adapter_rejects_duplicate_behavior_exclusions() {
             forms: Vec::new(),
             invocation: surface::SurfaceInvocation::default(),
             evidence: Vec::new(),
+            is_help_output: false,
         }],
         blockers: Vec::new(),
     };
@@ -275,6 +276,7 @@ fn verification_ledger_changes_when_query_template_changes() {
             forms: vec!["--color[=WHEN]".to_string()],
             invocation: surface::SurfaceInvocation::default(),
             evidence: Vec::new(),
+            is_help_output: false,
         }],
         blockers: Vec::new(),
     };
@@ -355,6 +357,7 @@ fn verification_ledger_maps_required_value_reason_and_confounded_columns() {
             forms: vec!["--color[=WHEN]".to_string()],
             invocation: surface::SurfaceInvocation::default(),
             evidence: Vec::new(),
+            is_help_output: false,
         }],
         blockers: Vec::new(),
     };
@@ -448,6 +451,7 @@ fn verification_query_performance_smoke_test() {
             forms: vec![format!("--option-{i}")],
             invocation: surface::SurfaceInvocation::default(),
             evidence: Vec::new(),
+            is_help_output: false,
         })
         .collect();
 

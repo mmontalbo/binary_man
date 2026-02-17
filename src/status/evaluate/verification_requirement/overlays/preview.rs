@@ -221,6 +221,7 @@ mod tests {
                 path: format!("inventory/scenarios/help::{surface_id}.json"),
                 sha256: None,
             }],
+            is_help_output: false,
         }
     }
 

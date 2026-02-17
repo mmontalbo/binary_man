@@ -95,6 +95,11 @@ pub fn auto_verification_targets_for_behavior(
             if is_entry_point(item) {
                 return false;
             }
+            // Skip help-output items (--help, --version, etc.)
+            // These are already verified by the help tier.
+            if item.is_help_output {
+                return false;
+            }
             // If we should verify options, include option-like items
             if verify_options && looks_like_option(&item.id) {
                 return true;
@@ -271,6 +276,7 @@ mod tests {
                     forms: vec!["--color[=WHEN]".to_string()],
                     invocation: crate::surface::SurfaceInvocation::default(),
                     evidence: Vec::new(),
+                    is_help_output: false,
                 },
                 // Entry point (subcommand) - context_argv contains its own id
                 crate::surface::SurfaceItem {
@@ -282,6 +288,7 @@ mod tests {
                     forms: vec!["show".to_string()],
                     invocation: crate::surface::SurfaceInvocation::default(),
                     evidence: Vec::new(),
+                    is_help_output: false,
                 },
             ],
             blockers: Vec::new(),
@@ -443,6 +450,7 @@ mod tests {
                 forms: vec!["--global".to_string()],
                 invocation: crate::surface::SurfaceInvocation::default(),
                 evidence: Vec::new(),
+                is_help_output: false,
             }],
             blockers: Vec::new(),
         };

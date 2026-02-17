@@ -104,6 +104,7 @@ fn minimal_surface_with_ids(surface_ids: &[&str]) -> surface::SurfaceInventory {
             forms: vec![(*surface_id).to_string()],
             invocation: surface::SurfaceInvocation::default(),
             evidence: Vec::new(),
+            is_help_output: false,
         })
         .collect();
     surface::SurfaceInventory {
@@ -133,6 +134,7 @@ fn minimal_surface(surface_id: &str) -> surface::SurfaceInventory {
             forms: vec![surface_id.to_string()],
             invocation: surface::SurfaceInvocation::default(),
             evidence: Vec::new(),
+            is_help_output: false,
         }],
         blockers: Vec::new(),
     }
@@ -215,6 +217,7 @@ fn outputs_equal_needs_rerun_fixture(
                 ..Default::default()
             },
             evidence: Vec::new(),
+            is_help_output: false,
         }],
         blockers: Vec::new(),
     };
@@ -417,6 +420,9 @@ fn cap_hit_suggestion_uses_command_with_delta_evidence() {
         enrich::NextAction::Edit { .. } => {
             panic!("expected command next_action for suggestion-only cap hit");
         }
+        enrich::NextAction::AutoExclude { .. } => {
+            panic!("expected command next_action for suggestion-only cap hit");
+        }
     }
 
     std::fs::remove_dir_all(root).expect("cleanup");
@@ -482,6 +488,9 @@ fn behavior_priority_repairs_existing_rejections_before_missing_behavior_stubs()
             assert_eq!(payload.reason_code.as_deref(), Some("scenario_error"));
         }
         enrich::NextAction::Command { .. } => {
+            panic!("expected edit next action");
+        }
+        enrich::NextAction::AutoExclude { .. } => {
             panic!("expected edit next action");
         }
     }
@@ -568,6 +577,9 @@ fn no_scenario_next_action_payload_includes_assertion_starters() {
         enrich::NextAction::Command { .. } => {
             panic!("expected edit next action");
         }
+        enrich::NextAction::AutoExclude { .. } => {
+            panic!("expected edit next action");
+        }
     }
 
     std::fs::remove_dir_all(root).expect("cleanup");
@@ -622,6 +634,7 @@ fn scenario_error_next_action_includes_edit() {
                 requires_argv: Vec::new(),
             },
             evidence: Vec::new(),
+            is_help_output: false,
         }],
         blockers: Vec::new(),
     };
@@ -675,6 +688,9 @@ fn scenario_error_next_action_includes_edit() {
             assert_eq!(payload.reason_code.as_deref(), Some("scenario_error"));
         }
         enrich::NextAction::Command { .. } => {
+            panic!("expected edit next action");
+        }
+        enrich::NextAction::AutoExclude { .. } => {
             panic!("expected edit next action");
         }
     }
@@ -751,6 +767,7 @@ fn scenario_error_scaffold_projects_and_uses_seeded_assertions() {
             assert_eq!(payload.target_ids, vec!["--color".to_string()]);
         }
         enrich::NextAction::Command { .. } => panic!("expected edit next action"),
+        enrich::NextAction::AutoExclude { .. } => panic!("expected edit next action"),
     };
 
     std::fs::remove_dir_all(root).expect("cleanup");
@@ -883,6 +900,7 @@ fn scenario_error_batches_emit_non_empty_assertions_and_validate() {
             assert!(!payload.target_ids.is_empty());
         }
         enrich::NextAction::Command { .. } => panic!("expected edit next action"),
+        enrich::NextAction::AutoExclude { .. } => panic!("expected edit next action"),
     };
 
     std::fs::remove_dir_all(root).expect("cleanup");
@@ -908,6 +926,9 @@ fn outputs_equal_status_is_read_only_and_pivots_only_from_persisted_cap() {
                 assert!(reason.contains("no-progress retry 1/2"));
             }
             enrich::NextAction::Edit { .. } => panic!("status-only polling must not advance cap"),
+            enrich::NextAction::AutoExclude { .. } => {
+                panic!("status-only polling must not advance cap")
+            }
         }
     }
     assert!(
@@ -930,18 +951,22 @@ fn outputs_equal_status_is_read_only_and_pivots_only_from_persisted_cap() {
 
     let edit_action = eval_behavior_next_action(&plan, &surface, &entries, &paths);
     match edit_action {
-        enrich::NextAction::Edit {
+        enrich::NextAction::AutoExclude {
             path,
             reason,
-            payload,
+            target_ids,
+            evidence,
             ..
         } => {
             assert_eq!(path, "inventory/surface.overlays.json");
-            assert!(reason.contains("stopped outputs_equal retries"));
-            let payload = payload.expect("expected payload");
-            assert_eq!(payload.reason_code.as_deref(), Some("outputs_equal"));
+            assert!(reason.contains("auto-excluding"));
+            assert!(reason.contains("outputs_equal"));
+            assert!(target_ids.contains(&"--color".to_string()));
+            assert_eq!(evidence.reason_code, "outputs_equal_exhausted");
+            assert!(evidence.retry_count >= BEHAVIOR_RERUN_CAP);
         }
-        enrich::NextAction::Command { .. } => panic!("expected edit after cap"),
+        enrich::NextAction::Command { .. } => panic!("expected auto-exclude after cap"),
+        enrich::NextAction::Edit { .. } => panic!("expected auto-exclude after cap, not edit"),
     }
 
     std::fs::remove_dir_all(root).expect("cleanup");
@@ -973,6 +998,9 @@ fn outputs_equal_status_does_not_mutate_existing_retry_progress() {
                 assert!(reason.contains("no-progress retry 2/2"));
             }
             enrich::NextAction::Edit { .. } => panic!("status-only polling must remain command"),
+            enrich::NextAction::AutoExclude { .. } => {
+                panic!("status-only polling must remain command, not auto-exclude")
+            }
         }
     }
 

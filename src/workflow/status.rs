@@ -215,6 +215,7 @@ fn slim_status_for_actionability(summary: &mut enrich::StatusSummary) {
     match &mut summary.next_action {
         enrich::NextAction::Command { payload, .. } => slim_behavior_next_action_payload(payload),
         enrich::NextAction::Edit { payload, .. } => slim_behavior_next_action_payload(payload),
+        enrich::NextAction::AutoExclude { .. } => {} // No payload to slim
     }
 }
 

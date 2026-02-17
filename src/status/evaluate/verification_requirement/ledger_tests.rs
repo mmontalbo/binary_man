@@ -37,6 +37,7 @@ fn minimal_surface() -> surface::SurfaceInventory {
             forms: vec!["--color[=WHEN]".to_string()],
             invocation: surface::SurfaceInvocation::default(),
             evidence: Vec::new(),
+            is_help_output: false,
         }],
         blockers: Vec::new(),
     }

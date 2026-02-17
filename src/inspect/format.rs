@@ -22,6 +22,17 @@ pub(super) fn next_action_summary(action: &enrich::NextAction) -> String {
         enrich::NextAction::Edit { path, reason, .. } => {
             format!("edit: {path} ({reason})")
         }
+        enrich::NextAction::AutoExclude {
+            path,
+            reason,
+            target_ids,
+            ..
+        } => {
+            format!(
+                "auto-exclude: {path} ({} items) ({reason})",
+                target_ids.len()
+            )
+        }
     }
 }
 

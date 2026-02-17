@@ -38,6 +38,7 @@ fn surface_item(
         forms: forms.iter().map(|form| (*form).to_string()).collect(),
         invocation,
         evidence: Vec::new(),
+        is_help_output: false,
     }
 }
 
@@ -156,6 +157,7 @@ fn minimal_surface(surface_id: &str) -> surface::SurfaceInventory {
                 ..Default::default()
             },
             evidence: Vec::new(),
+            is_help_output: false,
         }],
         blockers: Vec::new(),
     }
