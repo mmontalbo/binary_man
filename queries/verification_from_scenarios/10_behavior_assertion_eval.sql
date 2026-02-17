@@ -432,9 +432,10 @@
       coalesce(a.exit_code_assertion_pass_count, 0) as exit_code_assertion_pass_count,
       coalesce(a.exit_code_assertion_count, 0) > 0 as exit_code_assertion_present,
       coalesce(a.exit_code_assertion_count, 0) > 0
+        and coalesce(a.exit_code_assertion_count, 0) = coalesce(a.assertion_count, 0) as exit_code_assertion_only,
+      coalesce(a.exit_code_assertion_count, 0) > 0
         and coalesce(a.exit_code_assertion_count, 0) = coalesce(a.exit_code_assertion_pass_count, 0) as exit_code_assertion_pass,
       coalesce(s.expect_has_output_predicate, false) as expect_has_output_predicate,
-      -- Semantic predicate includes file assertions
       -- Semantic predicate includes file and exit code assertions
       (
         coalesce(s.expect_has_output_predicate, false)
@@ -582,6 +583,7 @@
       coalesce(b.file_assertion_pass, false) as file_assertion_pass,
       -- Exit code assertion fields
       coalesce(b.exit_code_assertion_present, false) as exit_code_assertion_present,
+      coalesce(b.exit_code_assertion_only, false) as exit_code_assertion_only,
       coalesce(b.exit_code_assertion_pass, false) as exit_code_assertion_pass,
       e.scenario_id is not null as has_evidence,
       e.last_pass as last_pass,

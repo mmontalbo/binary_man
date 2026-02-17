@@ -28,6 +28,9 @@
       file_assertion_present,
       file_assertion_only,
       file_assertion_pass,
+      exit_code_assertion_present,
+      exit_code_assertion_only,
+      exit_code_assertion_pass,
       argv,
       trim(cover) as cover_raw
     from scenario_eval,
@@ -63,6 +66,9 @@
       file_assertion_present,
       file_assertion_only,
       file_assertion_pass,
+      exit_code_assertion_present,
+      exit_code_assertion_only,
+      exit_code_assertion_pass,
       argv,
       cover_raw as surface_id
     from covers_raw
@@ -99,11 +105,12 @@
       max(case when coverage_tier = 'behavior'
         and variant_last_pass
         and (
-          -- File-only assertions: don't require baseline or delta checks
-          (file_assertion_only and assertions_pass and file_assertion_pass)
+          -- Independent assertions (file-only or exit_code-only): don't require baseline
+          ((file_assertion_only or exit_code_assertion_only) and assertions_pass)
           -- Standard assertions: require baseline and delta checks
           or (
             not file_assertion_only
+            and not exit_code_assertion_only
             and baseline_last_pass
             and (seeded_assertion_count = 0 or seed_signature_match)
             and (seeded_assertion_count > 0 or delta_assertion_present)
@@ -118,8 +125,10 @@
         and has_evidence
         and variant_last_pass
         and (
-          (file_assertion_only and not file_assertion_pass)
-          or (not file_assertion_only and baseline_last_pass and (not assertions_pass or not delta_proof_pass))
+          -- Independent assertions: check assertions_pass directly
+          ((file_assertion_only or exit_code_assertion_only) and not assertions_pass)
+          -- Standard assertions: require baseline pass first
+          or (not file_assertion_only and not exit_code_assertion_only and baseline_last_pass and (not assertions_pass or not delta_proof_pass))
         ) then 1 else 0 end) as has_assertion_failed
     from covers_norm
     group by surface_id
