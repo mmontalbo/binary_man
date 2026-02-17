@@ -34,7 +34,7 @@ use super::{normalize_target_ids, LedgerEntries, QueueVerificationContext};
 pub(super) const BEHAVIOR_BATCH_LIMIT: usize = 15;
 
 /// Maximum no-progress retries for assertion_failed before pivoting to exclusion.
-pub(super) const ASSERTION_FAILED_NOOP_CAP: usize = 2;
+pub const ASSERTION_FAILED_NOOP_CAP: usize = 2;
 
 /// Fallback delta path when no evidence exists.
 const DELTA_PATH_FALLBACK: &str = "inventory/scenarios/<delta_variant>.json";

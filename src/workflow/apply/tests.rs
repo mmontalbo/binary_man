@@ -1,4 +1,5 @@
 use super::*;
+use crate::status::ASSERTION_FAILED_NOOP_CAP;
 use crate::verification_progress::load_verification_progress;
 use std::cell::RefCell;
 use std::rc::Rc;

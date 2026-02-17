@@ -4,10 +4,14 @@
 
 use crate::enrich;
 use crate::scenarios;
-use crate::verification_progress::{load_verification_progress, write_verification_progress};
-use anyhow::{anyhow, Result};
-use std::collections::BTreeSet;
+use crate::surface;
+use crate::verification_progress::{
+    load_verification_progress, outputs_equal_delta_signature, write_verification_progress,
+};
+use anyhow::{anyhow, Context, Result};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::path::Path;
 
 /// Result of checking progress between cycles
 pub(super) enum CycleProgress {
@@ -347,4 +351,230 @@ pub(super) fn get_excluded_count(summary: &enrich::StatusSummary) -> usize {
         .and_then(|r| r.verification.as_ref())
         .map(|v| v.behavior_excluded_count)
         .unwrap_or(0)
+}
+
+// --- Verification retry progress tracking ---
+
+fn modified_epoch_ms(path: &Path) -> Option<u128> {
+    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
+    let duration = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
+    Some(duration.as_millis())
+}
+
+fn outputs_equal_workaround_needs_delta_rerun(
+    paths: &enrich::DocPackPaths,
+    entry: &scenarios::VerificationEntry,
+) -> bool {
+    let overlays_path = paths.surface_overlays_path();
+    let Some(overlays_modified_ms) = modified_epoch_ms(&overlays_path) else {
+        return false;
+    };
+    let latest_delta_modified_ms = entry
+        .delta_evidence_paths
+        .iter()
+        .filter_map(|rel| {
+            let rel = rel.trim();
+            if rel.is_empty() {
+                return None;
+            }
+            let abs = paths.root().join(rel);
+            modified_epoch_ms(&abs)
+        })
+        .max();
+    match latest_delta_modified_ms {
+        Some(delta_modified_ms) => delta_modified_ms <= overlays_modified_ms,
+        None => true,
+    }
+}
+
+fn surface_has_requires_argv_hint(surface: &surface::SurfaceInventory, surface_id: &str) -> bool {
+    surface::primary_surface_item_by_id(surface, surface_id)
+        .is_some_and(|item| !item.invocation.requires_argv.is_empty())
+}
+
+fn fallback_behavior_scenario_id_for_surface_id(surface_id: &str) -> String {
+    format!(
+        "verify_{}",
+        surface_id.trim_start_matches('-').trim().replace('-', "_")
+    )
+}
+
+fn behavior_scenario_ids_for_entry(
+    surface_id: &str,
+    entry: &scenarios::VerificationEntry,
+) -> BTreeSet<String> {
+    let mut ids = BTreeSet::new();
+    if let Some(scenario_id) = entry.behavior_unverified_scenario_id.as_deref() {
+        let scenario_id = scenario_id.trim();
+        if !scenario_id.is_empty() {
+            ids.insert(scenario_id.to_string());
+        }
+    }
+    for scenario_id in &entry.behavior_scenario_ids {
+        let scenario_id = scenario_id.trim();
+        if scenario_id.is_empty() {
+            continue;
+        }
+        ids.insert(scenario_id.to_string());
+    }
+    if ids.is_empty() {
+        ids.insert(fallback_behavior_scenario_id_for_surface_id(surface_id));
+    }
+    ids
+}
+
+fn normalize_rerun_ids(ids: &[String]) -> BTreeSet<String> {
+    ids.iter()
+        .map(|id| id.trim())
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Update outputs_equal retry progress after scenario executions.
+/// Tracks retry counts for surfaces stuck in outputs_equal state.
+pub fn update_outputs_equal_retry_progress_after_apply(
+    paths: &enrich::DocPackPaths,
+    executed_forced_rerun_scenario_ids: &[String],
+    ledger_entries: &BTreeMap<String, scenarios::VerificationEntry>,
+) -> Result<()> {
+    if !paths.surface_path().is_file() {
+        return Ok(());
+    }
+
+    let surface = surface::load_surface_inventory(&paths.surface_path())
+        .with_context(|| format!("load {}", paths.surface_path().display()))?;
+    let executed_forced_rerun_ids = normalize_rerun_ids(executed_forced_rerun_scenario_ids);
+    let mut progress = load_verification_progress(paths);
+
+    let active_outputs_equal_surface_ids: BTreeSet<String> = ledger_entries
+        .iter()
+        .filter(|(surface_id, entry)| {
+            entry.delta_outcome.as_deref() == Some("outputs_equal")
+                && surface_has_requires_argv_hint(&surface, surface_id)
+                && outputs_equal_workaround_needs_delta_rerun(paths, entry)
+        })
+        .map(|(surface_id, _)| surface_id.clone())
+        .collect();
+
+    let before_len = progress.outputs_equal_retries_by_surface.len();
+    progress
+        .outputs_equal_retries_by_surface
+        .retain(|surface_id, _| active_outputs_equal_surface_ids.contains(surface_id));
+    let mut changed = progress.outputs_equal_retries_by_surface.len() != before_len;
+
+    for surface_id in &active_outputs_equal_surface_ids {
+        let Some(entry) = ledger_entries.get(surface_id.as_str()) else {
+            continue;
+        };
+        let scenario_ids = behavior_scenario_ids_for_entry(surface_id, entry);
+        let was_forced_rerun_executed = scenario_ids
+            .iter()
+            .any(|scenario_id| executed_forced_rerun_ids.contains(scenario_id));
+        let delta_signature = outputs_equal_delta_signature(Some(entry));
+
+        if !was_forced_rerun_executed {
+            if let Some(progress_entry) = progress
+                .outputs_equal_retries_by_surface
+                .get_mut(surface_id)
+            {
+                if progress_entry.delta_signature.as_deref() != Some(delta_signature.as_str()) {
+                    progress_entry.retry_count = 0;
+                    progress_entry.delta_signature = Some(delta_signature);
+                    changed = true;
+                }
+            }
+            continue;
+        }
+
+        let progress_entry = progress
+            .outputs_equal_retries_by_surface
+            .entry(surface_id.clone())
+            .or_default();
+        if progress_entry.delta_signature.as_deref() != Some(delta_signature.as_str()) {
+            progress_entry.retry_count = 0;
+        }
+        progress_entry.retry_count = progress_entry.retry_count.saturating_add(1);
+        progress_entry.delta_signature = Some(delta_signature);
+        changed = true;
+    }
+
+    if changed {
+        write_verification_progress(paths, &progress)?;
+    }
+
+    Ok(())
+}
+
+/// Update assertion_failed loop progress after scenario executions.
+/// Advances loop state and no_progress_count when targeted reruns are executed.
+pub fn update_assertion_failed_progress_after_apply(
+    paths: &enrich::DocPackPaths,
+    executed_forced_rerun_scenario_ids: &[String],
+    ledger_entries: &BTreeMap<String, scenarios::VerificationEntry>,
+) -> Result<()> {
+    let executed_forced_rerun_ids = normalize_rerun_ids(executed_forced_rerun_scenario_ids);
+    let mut progress = load_verification_progress(paths);
+
+    // Find surfaces with assertion_failed that had forced reruns executed
+    let assertion_failed_surface_ids: BTreeSet<String> = ledger_entries
+        .iter()
+        .filter(|(_, entry)| {
+            entry.behavior_unverified_reason_code.as_deref() == Some("assertion_failed")
+        })
+        .map(|(surface_id, _)| surface_id.clone())
+        .collect();
+
+    let before_len = progress.assertion_failed_by_surface.len();
+    // Remove entries for surfaces no longer in assertion_failed state
+    progress
+        .assertion_failed_by_surface
+        .retain(|surface_id, _| assertion_failed_surface_ids.contains(surface_id));
+    let mut changed = progress.assertion_failed_by_surface.len() != before_len;
+
+    for surface_id in &assertion_failed_surface_ids {
+        let Some(entry) = ledger_entries.get(surface_id.as_str()) else {
+            continue;
+        };
+        let scenario_ids = behavior_scenario_ids_for_entry(surface_id, entry);
+        let was_forced_rerun_executed = scenario_ids
+            .iter()
+            .any(|scenario_id| executed_forced_rerun_ids.contains(scenario_id));
+
+        if !was_forced_rerun_executed {
+            continue;
+        }
+
+        // Compute current evidence fingerprint
+        let current_fingerprint = crate::verification_progress::evidence_fingerprint(Some(entry));
+
+        let progress_entry = progress
+            .assertion_failed_by_surface
+            .entry(surface_id.clone())
+            .or_default();
+
+        // Check if evidence has changed
+        let evidence_changed = progress_entry
+            .last_signature
+            .evidence_fingerprint
+            .as_deref()
+            != Some(current_fingerprint.as_str());
+
+        if evidence_changed {
+            // Evidence changed - this is progress, reset counter
+            progress_entry.no_progress_count = 0;
+            progress_entry.last_signature.evidence_fingerprint = Some(current_fingerprint);
+            changed = true;
+        } else {
+            // Evidence unchanged after rerun - no progress made
+            progress_entry.no_progress_count = progress_entry.no_progress_count.saturating_add(1);
+            changed = true;
+        }
+    }
+
+    if changed {
+        write_verification_progress(paths, &progress)?;
+    }
+
+    Ok(())
 }

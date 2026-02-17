@@ -60,6 +60,8 @@ mod plan;
 mod scenario_failures;
 mod verification;
 mod verification_policy;
+#[cfg(test)]
+pub use evaluate::ASSERTION_FAILED_NOOP_CAP;
 pub use plan::{load_plan, plan_status, planned_actions_from_requirements, write_plan};
 pub(crate) use verification::auto_verification_plan_summary;
 

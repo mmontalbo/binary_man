@@ -14,6 +14,8 @@ use examples_requirement::eval_examples_report_requirement;
 use man_requirement::eval_man_page_requirement;
 use surface_requirement::eval_surface_requirement;
 use verification_requirement::eval_verification_requirement;
+#[cfg(test)]
+pub use verification_requirement::ASSERTION_FAILED_NOOP_CAP;
 
 const TRIAGE_PREVIEW_LIMIT: usize = 10;
 
