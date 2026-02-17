@@ -11,7 +11,7 @@ use std::path::Path;
 
 use super::validate::{validate_scenario_defaults, validate_scenario_spec};
 use super::SCENARIO_PLAN_SCHEMA_VERSION;
-use super::{BehaviorAssertion, ScenarioPlan, ScenarioSpec, VerificationIntent};
+use super::{ScenarioPlan, VerificationIntent};
 
 /// Result of loading a plan with potential skipped scenarios.
 #[derive(Debug)]
@@ -156,13 +156,6 @@ fn validate_plan_scenarios(plan: &ScenarioPlan) -> Result<()> {
             ));
         }
     }
-    let mut seed_paths_by_scenario: std::collections::BTreeMap<
-        String,
-        std::collections::BTreeSet<String>,
-    > = std::collections::BTreeMap::new();
-    for scenario in &plan.scenarios {
-        seed_paths_by_scenario.insert(scenario.id.clone(), effective_seed_paths(plan, scenario));
-    }
     for scenario in &plan.scenarios {
         if scenario.kind != super::ScenarioKind::Behavior || scenario.assertions.is_empty() {
             continue;
@@ -183,60 +176,12 @@ fn validate_plan_scenarios(plan: &ScenarioPlan) -> Result<()> {
                 baseline_id
             ));
         }
-        let scenario_seed_paths = seed_paths_by_scenario
-            .get(&scenario.id)
-            .cloned()
-            .unwrap_or_default();
-        let baseline_seed_paths = seed_paths_by_scenario
-            .get(baseline_id)
-            .cloned()
-            .unwrap_or_default();
-        let mut invalid_paths = std::collections::BTreeSet::new();
-        for assertion in &scenario.assertions {
-            let Some(seed_path) = assertion_seed_path(assertion) else {
-                continue;
-            };
-            if !scenario_seed_paths.contains(seed_path) || !baseline_seed_paths.contains(seed_path)
-            {
-                invalid_paths.insert(seed_path.to_string());
-            }
-        }
-        if !invalid_paths.is_empty() {
-            let invalid_list = invalid_paths.into_iter().collect::<Vec<_>>().join(", ");
-            return Err(anyhow!(
-                "scenario {} baseline_scenario_id {} has assertion seed_path(s) not present in both baseline and variant seed entries: {}. seed_path must match a seeded entry path; use stdout_token for printed token",
-                scenario.id,
-                baseline_id,
-                invalid_list
-            ));
-        }
+        // Note: seed_path validation is intentionally deferred to run-time.
+        // The SQL verification query detects missing seed_paths and marks scenarios
+        // as `scenario_error`, allowing the LM to self-correct instead of blocking
+        // the entire pack at load time. See 10_behavior_assertion_eval.sql.
     }
     Ok(())
-}
-
-fn effective_seed_paths(
-    plan: &ScenarioPlan,
-    scenario: &ScenarioSpec,
-) -> std::collections::BTreeSet<String> {
-    let defaults = plan.defaults.as_ref();
-    let seed = scenario
-        .seed
-        .as_ref()
-        .or_else(|| defaults.and_then(|value| value.seed.as_ref()));
-    let mut paths = std::collections::BTreeSet::new();
-    if let Some(seed) = seed {
-        for entry in &seed.entries {
-            if entry.path.trim().is_empty() {
-                continue;
-            }
-            paths.insert(entry.path.clone());
-        }
-    }
-    paths
-}
-
-fn assertion_seed_path(assertion: &BehaviorAssertion) -> Option<&str> {
-    assertion.seed_path()
 }
 
 /// Render a minimal scenario plan stub for edit suggestions.
@@ -360,16 +305,16 @@ mod tests {
     }
 
     #[test]
-    fn behavior_assertions_reject_unseeded_path() {
+    fn behavior_assertions_with_unseeded_path_are_deferred_to_runtime() {
+        // Unseeded seed_path validation was moved from load-time to run-time.
+        // The SQL verification query now detects missing seed_paths and marks
+        // scenarios as `scenario_error`. This allows LM self-correction instead
+        // of blocking the entire pack. See 10_behavior_assertion_eval.sql.
         let plan = plan_with(vec![
             baseline_scenario(),
             behavior_scenario(Some("baseline"), "."),
         ]);
-        let err = validate_plan(&plan, Path::new(".")).expect_err("unseeded seed_path");
-        let message = err.to_string();
-        assert!(message.contains("scenario verify"));
-        assert!(message.contains("baseline_scenario_id baseline"));
-        assert!(message.contains("seed_path"));
+        validate_plan(&plan, Path::new(".")).expect("unseeded seed_path deferred to run-time");
     }
 
     #[test]

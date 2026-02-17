@@ -574,7 +574,10 @@ mod tests {
     fn exit_code_assertion_deserializes_correctly() {
         let json = r#"{"kind":"exit_code","expected":1}"#;
         let assertion: BehaviorAssertion = serde_json::from_str(json).unwrap();
-        assert!(matches!(assertion, BehaviorAssertion::ExitCode { expected: 1 }));
+        assert!(matches!(
+            assertion,
+            BehaviorAssertion::ExitCode { expected: 1 }
+        ));
     }
 
     #[test]
