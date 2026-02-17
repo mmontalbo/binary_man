@@ -355,6 +355,26 @@ pub(super) fn apply_lm_response(doc_pack: &Path, lm_response_path: &Path) -> Res
 
         for (scenario_id, assertions) in &validated.assertion_fixes {
             if let Some(scenario) = plan.scenarios.iter_mut().find(|s| s.id == *scenario_id) {
+                // Validate assertion seed_paths exist in scenario's seed entries
+                let seed_paths: std::collections::BTreeSet<String> = scenario
+                    .seed
+                    .as_ref()
+                    .map(|s| s.entries.iter().map(|e| e.path.clone()).collect())
+                    .unwrap_or_default();
+                let invalid_seed_paths: Vec<String> = assertions
+                    .iter()
+                    .filter_map(|a| a.seed_path())
+                    .filter(|p| !seed_paths.contains(*p))
+                    .map(|s| s.to_string())
+                    .collect();
+                if !invalid_seed_paths.is_empty() {
+                    eprintln!(
+                        "  warning: skipping assertion fix for {}: seed_path(s) not in seed entries: {}",
+                        scenario_id,
+                        invalid_seed_paths.join(", ")
+                    );
+                    continue;
+                }
                 scenario.assertions = assertions.clone();
                 eprintln!("  fixed assertions in scenario: {}", scenario_id);
             } else {

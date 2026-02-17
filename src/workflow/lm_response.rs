@@ -336,6 +336,28 @@ pub fn validate_responses(
                     assertions.clone()
                 };
 
+                // Validate assertion seed_paths exist in seed entries
+                let seed_paths: std::collections::BTreeSet<String> = seed_spec
+                    .as_ref()
+                    .map(|s| s.entries.iter().map(|e| e.path.clone()).collect())
+                    .unwrap_or_default();
+                let invalid_seed_paths: Vec<String> = final_assertions
+                    .iter()
+                    .filter_map(|a| a.seed_path())
+                    .filter(|p| !seed_paths.contains(*p))
+                    .map(|s| s.to_string())
+                    .collect();
+                if !invalid_seed_paths.is_empty() {
+                    result.errors.push(ValidationError {
+                        surface_id: surface_id.to_string(),
+                        message: format!(
+                            "assertion seed_path(s) not in seed entries: {}",
+                            invalid_seed_paths.join(", ")
+                        ),
+                    });
+                    continue;
+                }
+
                 // Generate the full scenario with boilerplate
                 let scenario = ScenarioSpec {
                     id: format!("verify_{}", surface_id.replace(' ', "_")),
