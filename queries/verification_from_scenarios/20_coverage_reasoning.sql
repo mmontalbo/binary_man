@@ -328,7 +328,8 @@
     )
     where rk = 1
   ),
-  -- Extract stderr from behavior scenarios for LM error feedback
+  -- Extract exit_code and stderr from behavior scenarios for exclusion context.
+  -- Captures exit_code even when stderr is empty (successful scenarios).
   behavior_scenario_stderr as (
     select
       c.surface_id,
@@ -341,14 +342,13 @@
     join normalized_evidence e on e.scenario_id = c.scenario_id
     where c.coverage_tier = 'behavior'
       and e.exit_code is not null
-      and coalesce(e.stderr, '') <> ''
   ),
-  -- Aggregate to get first non-empty stderr per surface
+  -- Aggregate: prefer entries with non-empty stderr, but include exit_code regardless
   behavior_stderr_agg as (
     select
       surface_id,
-      first(behavior_exit_code) as behavior_exit_code,
-      first(behavior_stderr) as behavior_stderr
+      first(behavior_exit_code order by case when coalesce(behavior_stderr, '') <> '' then 0 else 1 end) as behavior_exit_code,
+      first(behavior_stderr order by case when coalesce(behavior_stderr, '') <> '' then 0 else 1 end) as behavior_stderr
     from behavior_scenario_stderr
     group by surface_id
   ),
