@@ -5,21 +5,73 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M30 (unlock remaining coreutils).
+Current focus: M31 (git deep-dive for stateful verification patterns).
 
-## M30 — Unlock Remaining Coreutils
+## M31 — Git Deep-Dive: Stateful Verification Patterns
+
+Goal: Use `git` as a test case for **stateful command verification**, exposing
+gaps in prereq inference, assertion types, and subcommand handling that don't
+surface with simple coreutils.
+
+### Motivation
+
+Coreutils are mostly stateless (input → output). Git is stateful:
+- Commands depend on repository state (staged files, commits, branches)
+- Many commands mutate state rather than producing output
+- Subcommand hierarchy (`git config`, `git branch`, etc.) is complex
+- Behavior depends on `.git/` state, not just arguments
+
+### Key Questions to Answer
+
+1. **Prereq Inference**: Can the LM reason "to verify `git commit -m`, I need staged changes first"?
+2. **Assertion Types**: Is `stdout_contains` sufficient, or do we need `ref_exists`, `config_value_equals`?
+3. **Subcommand Coverage**: Does surface lens handle `git config --get` vs `git config --list` as separate items?
+4. **State Mutation Verification**: How do we verify `git add` staged a file vs just checking stdout?
+
+### Expected Gaps
+
+| Gap | Coreutils | Git |
+|-----|-----------|-----|
+| Prereq complexity | Seed files | Repo state (init, add, commit) |
+| Assertion types | stdout/stderr/exit_code | file_staged, branch_exists, config_set |
+| Dependency chains | Mostly independent | commit→add→files |
+| Side effects | File creation | .git/ mutations |
+
+### Approach
+
+1. Start fresh with `git config` (simplest subcommand, stateless reads)
+2. Progress to `git init`, `git add`, `git commit` (stateful)
+3. Document mechanical gaps as they surface
+4. Propose fixes for M32+
+
+### Acceptance Criteria
+
+| Criterion | Status |
+|-----------|--------|
+| `git config` subcommand fully verified | |
+| Document prereq inference gaps | |
+| Document assertion type gaps | |
+| Propose M32 plan based on findings | |
+
+---
+
+## M30 — Unlock Remaining Coreutils (done)
 
 Goal: Unblock 3 blocked binaries + complete 2 easy wins = **99+ coreutils complete**
 (from 94) through targeted fixes to validation recovery, help-output detection, and
 outputs_equal exhaustion handling.
 
-### Current State
+### Results
 
 | Status | Count | Binaries |
 |--------|-------|----------|
-| **Complete** | 94 | (see M29 validation) |
-| **Blocked** | 3 | du, ls, shred |
-| **Incomplete** | 7 | chgrp, chown, cp, ptx, rev, split, test |
+| **Newly Complete** | 6 | du, ls, chown, ptx, rev, split |
+| **Still Incomplete** | 4 | shred, chgrp, cp, test |
+| **Total Complete** | 100 | (94 + 6 from M30) |
+
+**Unblocked**: du, ls (were blocked by seed_path validation errors)
+**Completed via help-output detection**: rev (all 4 help options)
+**Completed via auto-exclude**: chown, ptx, split (outputs_equal exhaustion)
 
 #### Blocked Analysis
 
@@ -150,45 +202,39 @@ instead of LM action, with dedicated reason code.
 
 **Impact**: Completes chown (2), reduces chgrp (2), ptx (8), split (4), cp (1).
 
-### Deferred to M31
 
-- **assertion_failed prompt improvements**: cp, chgrp need more LM cycles, not code changes
-- **test binary handling**: Document as unsupported (shell builtin)
-- **no_scenario gap**: Needs initial_scenarios prompt tuning
+### Implementation Order (all done)
 
-### Implementation Order
-
-1. **Change 3** (smallest, self-contained) - outputs_equal exhaustion
-2. **Change 2** (small, surface parsing) - help-output detection
-3. **Change 1** (medium, touches validation + scaffold) - scenario_error recovery
+1. **Change 3** ✓ - outputs_equal exhaustion → AutoExclude action
+2. **Change 2** ✓ - help-output detection → `is_help_output` flag
+3. **Change 1** ✓ - scenario_error recovery → deferred seed_path validation to SQL
 
 ### Acceptance Criteria
 
 | Criterion | Status |
 |-----------|--------|
-| Zero blocked binaries (du, ls, shred unblocked) | |
-| `rev` complete (all 4 help options resolved) | |
-| `chown` complete (both outputs_equal options excluded with evidence) | |
-| 99+ coreutils complete (from 94) | |
-| No regression in existing complete binaries | |
+| Zero blocked binaries (du, ls, shred unblocked) | ✓ (du, ls unblocked; shred incomplete but not blocked) |
+| `rev` complete (all 4 help options resolved) | ✓ |
+| `chown` complete (both outputs_equal options excluded with evidence) | ✓ |
+| 99+ coreutils complete (from 94) | ✓ (100 complete) |
+| No regression in existing complete binaries | ✓ |
 
-**Verification command**:
-```bash
-# Before M30: Complete: 94, Blocked: 3, Incomplete: 7
-# After M30:  Complete: 99+, Blocked: 0, Incomplete: 5 or fewer
-bash /tmp/check_all_coreutils.sh
-```
+### Additional Improvements (not in original plan)
 
-### Risks
+- **Rich exclusion context**: Added `exclusion_note.rs` with contextual notes like
+  "outputs_equal: requires SELinux context" and evidence fields (delta_outcome,
+  assertion_kind, stderr_preview, exit_code)
+- **Query fix**: `behavior_exit_code` now captured even when stderr is empty
+- **AutoExclude action**: Bypasses LM when surfaces are stuck after max retries
 
-1. **Help-output detection false positives**: Option described as "display X" might
-   not be help-output. Mitigation: Conservative pattern matching.
+### Remaining Incomplete (deferred to M31+)
 
-2. **Exclusion evidence missing**: Some outputs_equal scenarios might lack
-   delta_evidence_paths. Mitigation: Fall back to scenario path.
-
-3. **Regression in complete binaries**: Changes to verification logic could flip
-   complete→incomplete. Mitigation: Run full suite before/after, diff results.
+| Binary | Reason |
+|--------|--------|
+| shred | Requires elevated permissions for file operations |
+| chgrp | Requires valid group IDs |
+| cp | SELinux context, reflink filesystem features |
+| test | No parseable --help (shell builtin) |
 
 ---
 
