@@ -2,6 +2,7 @@ use super::super::selectors::surface_kind_for_id;
 use super::super::LedgerEntries;
 use crate::enrich;
 use crate::scenarios;
+use crate::surface::{build_exclusion_evidence, build_exclusion_note, derive_reason_code};
 use serde_json::{Map, Value};
 use std::cmp::Ordering;
 
@@ -160,10 +161,9 @@ fn ensure_overlay_behavior_exclusion(
     id: &str,
     ledger_entries: &LedgerEntries,
 ) {
-    let Some(entry) = ledger_entries.get(id) else {
-        return;
-    };
-    let delta_variant_path = delta_variant_path_for_entry(entry)
+    let entry = ledger_entries.get(id);
+    let delta_variant_path = entry
+        .and_then(delta_variant_path_for_entry)
         .unwrap_or_else(|| "inventory/scenarios/<delta_variant>.json".to_string());
     let Some(overlay_obj) = overlay_entry_object_mut(obj, kind, id) else {
         return;
@@ -175,14 +175,18 @@ fn ensure_overlay_behavior_exclusion(
     {
         return;
     }
+
+    // Use shared builders for contextual note, evidence, and reason_code
+    let reason_code = derive_reason_code(entry);
+    let note = build_exclusion_note(entry);
+    let evidence = build_exclusion_evidence(entry, &delta_variant_path);
+
     overlay_obj.insert(
         "behavior_exclusion".to_string(),
         serde_json::json!({
-            "reason_code": "fixture_gap",
-            "note": "still outputs_equal after workarounds",
-            "evidence": {
-                "delta_variant_path": delta_variant_path
-            }
+            "reason_code": reason_code,
+            "note": note,
+            "evidence": evidence
         }),
     );
 }

@@ -5,6 +5,7 @@
 use crate::enrich;
 use crate::scenarios;
 use crate::surface;
+use crate::surface::{build_exclusion_evidence, build_exclusion_note, derive_reason_code};
 use crate::verification_progress::{
     load_verification_progress, outputs_equal_delta_signature, write_verification_progress,
 };
@@ -229,6 +230,33 @@ pub(super) fn handle_lm_no_progress_for_targets(
     excluded_count
 }
 
+/// Load cached verification ledger entries (best-effort).
+/// Returns an empty map if the cache is unavailable or invalid.
+fn load_cached_ledger_entries(
+    paths: &enrich::DocPackPaths,
+) -> BTreeMap<String, scenarios::VerificationEntry> {
+    let cache_path = paths.root().join("inventory/verification_cache.json");
+    let Ok(content) = fs::read_to_string(&cache_path) else {
+        return BTreeMap::new();
+    };
+
+    #[derive(serde::Deserialize)]
+    struct Cache {
+        ledger: scenarios::VerificationLedger,
+    }
+
+    let Ok(cache) = serde_json::from_str::<Cache>(&content) else {
+        return BTreeMap::new();
+    };
+
+    cache
+        .ledger
+        .entries
+        .into_iter()
+        .map(|e| (e.surface_id.clone(), e))
+        .collect()
+}
+
 /// Auto-exclude surfaces that are stuck after repeated LM failures.
 pub(super) fn auto_exclude_stuck_surfaces(
     paths: &enrich::DocPackPaths,
@@ -275,6 +303,9 @@ pub(super) fn auto_exclude_stuck_surfaces(
         std::collections::BTreeMap::new()
     };
 
+    // Load ledger entries for contextual notes
+    let ledger_entries = load_cached_ledger_entries(paths);
+
     for surface_id in surface_ids {
         let surface_id = surface_id.trim();
         if surface_id.is_empty() {
@@ -312,16 +343,20 @@ pub(super) fn auto_exclude_stuck_surfaces(
                 )
             });
 
+        // Use shared builders for reason_code, note, and evidence
+        let entry = ledger_entries.get(surface_id);
+        let reason_code = derive_reason_code(entry);
+        let note = build_exclusion_note(entry);
+        let evidence = build_exclusion_evidence(entry, &delta_path);
+
         overlays_array[idx]["behavior_exclusion"] = serde_json::json!({
-            "reason_code": "assertion_gap",
-            "note": "Auto-excluded after repeated LM failures",
-            "evidence": {
-                "delta_variant_path": delta_path
-            }
+            "reason_code": reason_code,
+            "note": note,
+            "evidence": evidence
         });
 
         if verbose {
-            eprintln!("  auto-excluded {} after repeated LM failures", surface_id);
+            eprintln!("  auto-excluded {}: {}", surface_id, note);
         }
     }
 
