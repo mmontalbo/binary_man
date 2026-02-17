@@ -7,6 +7,70 @@ use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Detect if a surface item is help/version output based on description patterns.
+/// These options don't need behavior verification since their output is verified by the help tier.
+fn is_help_output_item(id: &str, description: Option<&str>) -> bool {
+    // Common help/version option IDs
+    let help_ids = ["-h", "--help", "-?", "-help"];
+    let version_ids = ["-V", "--version", "-v", "-version"];
+
+    // Check if ID is a known help/version flag
+    let is_help_id = help_ids.contains(&id);
+    let is_version_id = version_ids.contains(&id);
+
+    // If no description, rely on ID match for common flags
+    let Some(desc) = description else {
+        return is_help_id || is_version_id;
+    };
+
+    let desc_lower = desc.to_lowercase();
+
+    // Description patterns indicating help output
+    let help_patterns = [
+        "display this help",
+        "display help",
+        "print help",
+        "show help",
+        "print this help",
+        "show this help",
+        "output help",
+        "help message",
+        "usage information",
+    ];
+
+    // Description patterns indicating version output
+    let version_patterns = [
+        "display version",
+        "print version",
+        "show version",
+        "output version",
+        "version information",
+        "version number",
+    ];
+
+    // Check description patterns
+    for pattern in help_patterns {
+        if desc_lower.contains(pattern) {
+            return true;
+        }
+    }
+    for pattern in version_patterns {
+        if desc_lower.contains(pattern) {
+            return true;
+        }
+    }
+
+    // For known IDs, also match simpler patterns
+    if is_help_id && (desc_lower.contains("help") || desc_lower.contains("usage")) {
+        return true;
+    }
+    if is_version_id && desc_lower.contains("version") {
+        return true;
+    }
+
+    false
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SurfaceLensRow {
@@ -149,12 +213,13 @@ pub(super) fn run_surface_lenses(
                         let item = SurfaceItem {
                             id: id.to_string(),
                             display,
-                            description,
+                            description: description.clone(),
                             parent_id,
                             context_argv: row.context_argv.clone(),
                             forms: row.forms.clone(),
                             invocation: row.invocation.clone(),
                             evidence: vec![evidence],
+                            is_help_output: is_help_output_item(id, description.as_deref()),
                         };
                         merge_surface_item(&mut state.items, &mut state.seen, item);
                         found_any = true;

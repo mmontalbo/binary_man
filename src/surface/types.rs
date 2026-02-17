@@ -77,4 +77,9 @@ pub struct SurfaceItem {
     #[serde(default)]
     pub invocation: SurfaceInvocation,
     pub evidence: Vec<enrich::EvidenceRef>,
+    /// True if this option's purpose is displaying help or version text.
+    /// These options don't need behavior verification since their output
+    /// is already verified by the help tier.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_help_output: bool,
 }
