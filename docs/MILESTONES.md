@@ -5,7 +5,143 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M28 complete.
+Current focus: M29 (exit code assertions).
+
+## M29 — Exit Code Assertions
+
+Goal: Add assertion types that verify command behavior via exit code rather than
+stdout content, unlocking verification for commands like `sort --check`, `test`,
+`grep`, and `cmp`.
+
+### Motivation
+
+Several commands signal success/failure via exit code with no stdout change:
+
+| Binary | Options | Behavior |
+|--------|---------|----------|
+| sort | `--check`, `-c`, `-C` | Exit 0 if sorted, 1 if unsorted |
+| test/[ | All expressions | Exit 0 if true, 1 if false |
+| grep | Pattern matching | Exit 0 if match, 1 if no match |
+| cmp | Default comparison | Exit 0 if same, 1 if differ |
+| diff | Default comparison | Exit 0 if same, 1 if differ |
+
+Current assertion types (`outputs_differ`, `stdout_contains`) cannot verify this.
+The LM tries complex workarounds (using unsorted input to produce stderr) but
+these often fail validation or produce confounded coverage.
+
+Example: `sort --check` on sorted input:
+```bash
+$ echo -e "a\nb\nc" | sort --check
+$ echo $?
+0
+# No stdout, exit 0 means "input is sorted"
+```
+
+### Proposed Assertion Types
+
+```json
+{"kind": "exit_code", "expected": 0}
+{"kind": "exit_code", "expected": 1}
+{"kind": "exit_code_nonzero"}
+```
+
+The `exit_code_nonzero` variant is useful when the exact code varies (e.g., 1 vs 2).
+
+### Design Decisions
+
+1. **Baseline not required**: Exit code assertions compare against an expected
+   value, not against a baseline run. `requires_baseline()` returns false.
+
+2. **Combinable with other assertions**: A scenario can assert both exit code
+   and stdout content (e.g., `grep` matches AND exits 0).
+
+3. **No new scenario fields**: Assertions are added to existing `assertions`
+   array, no schema changes to `ScenarioSpec`.
+
+4. **Serde representation**: Use externally tagged enum matching existing assertions:
+   ```json
+   {"kind": "exit_code", "expected": 0}
+   ```
+
+5. **Single assertion type**: Use `exit_code` with explicit expected value.
+   No `exit_code_nonzero` variant - if needed, use `{"kind": "exit_code", "expected": 1}`.
+   Simplifies implementation and LM prompt.
+
+6. **Validation**: Expected value must be 0-255. Reject invalid values during
+   LM response validation.
+
+### Prerequisites
+
+- Scenario execution already captures `exit_code` in results JSON (verified: yes)
+
+### Implementation
+
+| File | Change |
+|------|--------|
+| `src/scenarios/types.rs` | Add `ExitCode{expected: u8}` variant; update `requires_baseline()` |
+| `src/workflow/lm_response.rs` | Parse `exit_code` assertion from LM JSON; validate expected 0-255 |
+| `queries/.../10_behavior_assertion_eval.sql` | Add CASE: `kind = 'exit_code' AND exit_code = (assertion->>'expected')::int` |
+| `prompts/behavior_reason_outputs_equal.md` | Add exit_code guidance with concrete example |
+| `prompts/behavior_reason_initial_scenarios.md` | Include exit_code in assertion options |
+| `src/scenarios/types.rs` (tests) | Add unit test for ExitCode assertion serialization/deserialization |
+
+### Prompt Guidance
+
+Add to `behavior_reason_outputs_equal.md`:
+
+```markdown
+6. **Option signals via exit code**: Use `exit_code` assertion instead of stdout comparison.
+   - `sort --check` exits 0 (sorted) or 1 (unsorted) with no stdout change
+   - `test -f file` exits 0 (exists) or 1 (missing)
+   - `grep pattern` exits 0 (match) or 1 (no match)
+```
+
+Example for success verification:
+```json
+{"argv": ["--check"], "stdin": "a\nb\nc", "assertions": [{"kind": "exit_code", "expected": 0}]}
+```
+
+Example for error verification:
+```json
+{"argv": ["--check"], "stdin": "c\nb\na", "assertions": [{"kind": "exit_code", "expected": 1}]}
+```
+
+### Query Coverage Logic
+
+Scenarios with only `exit_code` assertions (no baseline needed) must still count
+as "verified" in coverage rollup. The `20_coverage_reasoning.sql` query checks
+`all_assertions_pass` - ensure exit_code assertions contribute to this flag.
+
+### Future Enhancement (not M29)
+
+Auto-detection heuristic: options containing "check", "test", "verify" could
+default to exit_code assertions. Deferred to avoid over-engineering.
+
+### Expected Coverage Impact
+
+| Binary | Current | After M29 | Unlocked by exit_code |
+|--------|---------|-----------|----------------------|
+| sort | 23% (12/52) | ~35% (18/52) | `--check`, `-c`, `-C` + cascading fixes |
+| test | 0% | ~80% | All expression operators |
+| grep | partial | +10-15% | Pattern match verification |
+
+Note: sort's remaining gaps are `no_scenario` (LM didn't generate) and
+`missing_value_examples`, not assertion limitations.
+
+### Acceptance Criteria
+
+| Criterion | Status |
+|-----------|--------|
+| Add `exit_code` assertion kind | |
+| Add `exit_code_nonzero` assertion kind | |
+| `requires_baseline()` returns false for exit_code assertions | |
+| Query evaluates `exit_code = expected` | |
+| Query evaluates `exit_code != 0` for nonzero | |
+| Update prompt templates with exit_code guidance | |
+| `sort --check` verifies with exit_code assertion | |
+| No regression in existing tests | |
+
+---
 
 ## M28 — LM-First Scenario Generation (done)
 
