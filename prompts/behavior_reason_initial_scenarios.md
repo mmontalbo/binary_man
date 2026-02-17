@@ -14,4 +14,11 @@ Use the descriptions to determine what each option does and create scenarios tha
 
 6. **Help/version options**: Add exclusion with `assertion_gap` (output varies by installation).
 
+7. **Check/test options** (--check, -c, test expressions): Use `exit_code` assertion for options that signal via return code instead of stdout:
+   - `sort --check` exits 0 if sorted, 1 if unsorted
+   - `test -f file` exits 0 if exists, 1 if missing
+   - `grep pattern` exits 0 if match, 1 if no match
+
+   Example: `{"argv": ["--check"], "stdin": "a\nb\nc", "assertions": [{"kind": "exit_code", "expected": 0}]}`
+
 Each option needs EITHER a scenario OR an exclusion. Respond with ALL options covered.

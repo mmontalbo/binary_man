@@ -10,4 +10,14 @@ These options produce identical output to the baseline. Analyze the option descr
 
 5. **Option effect not visible in text output**: Add exclusion with appropriate reason_code.
 
-Prefer updating the scenario with seed fixtures before excluding.
+6. **Option signals via exit code**: Use `exit_code` assertion for commands that signal success/failure via return code instead of stdout. Examples:
+   - `sort --check` exits 0 (sorted) or 1 (unsorted) with no stdout change
+   - `test -f file` exits 0 (exists) or 1 (missing)
+   - `grep pattern` exits 0 (match) or 1 (no match)
+
+   Example scenario with exit_code assertion:
+   ```json
+   {"argv": ["--check"], "stdin": "a\nb\nc", "assertions": [{"kind": "exit_code", "expected": 0}]}
+   ```
+
+Prefer updating the scenario with seed fixtures or exit_code assertions before excluding.

@@ -350,6 +350,7 @@ impl ScenarioExpect {
 /// - `stdout_contains`: Token should be present in stdout
 /// - `stdout_lacks`: Token should be absent from stdout
 /// - `outputs_differ`: Variant stdout should differ from baseline
+/// - `exit_code`: Exit code should match expected value
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
@@ -386,6 +387,8 @@ pub enum BehaviorAssertion {
     DirMissing { path: String },
     /// File should contain the given pattern (variant only).
     FileContains { path: String, pattern: String },
+    /// Exit code should match expected value (0-255).
+    ExitCode { expected: u8 },
 }
 
 impl BehaviorAssertion {
@@ -399,20 +402,22 @@ impl BehaviorAssertion {
             | BehaviorAssertion::FileMissing { .. }
             | BehaviorAssertion::DirExists { .. }
             | BehaviorAssertion::DirMissing { .. }
-            | BehaviorAssertion::FileContains { .. } => None,
+            | BehaviorAssertion::FileContains { .. }
+            | BehaviorAssertion::ExitCode { .. } => None,
         }
     }
 
     /// Check if this assertion requires a baseline scenario for comparison.
-    /// File-based assertions are variant-only and don't need a baseline.
+    /// File-based and exit code assertions are variant-only and don't need a baseline.
     pub fn requires_baseline(&self) -> bool {
         match self {
-            // File assertions are variant-only
+            // File and exit code assertions are variant-only
             BehaviorAssertion::FileExists { .. }
             | BehaviorAssertion::FileMissing { .. }
             | BehaviorAssertion::DirExists { .. }
             | BehaviorAssertion::DirMissing { .. }
-            | BehaviorAssertion::FileContains { .. } => false,
+            | BehaviorAssertion::FileContains { .. }
+            | BehaviorAssertion::ExitCode { .. } => false,
             // Stdout assertions and OutputsDiffer require baseline comparison
             BehaviorAssertion::StdoutContains { .. }
             | BehaviorAssertion::StdoutLacks { .. }
@@ -532,7 +537,7 @@ pub struct VerificationEntry {
 
 #[cfg(test)]
 mod tests {
-    use super::ScenarioExpect;
+    use super::{BehaviorAssertion, ScenarioExpect};
 
     #[test]
     fn empty_expect_has_no_output_predicate() {
@@ -556,6 +561,32 @@ mod tests {
             ..Default::default()
         };
         assert!(expect.has_output_predicate());
+    }
+
+    #[test]
+    fn exit_code_assertion_serializes_correctly() {
+        let assertion = BehaviorAssertion::ExitCode { expected: 0 };
+        let json = serde_json::to_string(&assertion).unwrap();
+        assert_eq!(json, r#"{"kind":"exit_code","expected":0}"#);
+    }
+
+    #[test]
+    fn exit_code_assertion_deserializes_correctly() {
+        let json = r#"{"kind":"exit_code","expected":1}"#;
+        let assertion: BehaviorAssertion = serde_json::from_str(json).unwrap();
+        assert!(matches!(assertion, BehaviorAssertion::ExitCode { expected: 1 }));
+    }
+
+    #[test]
+    fn exit_code_assertion_does_not_require_baseline() {
+        let assertion = BehaviorAssertion::ExitCode { expected: 0 };
+        assert!(!assertion.requires_baseline());
+    }
+
+    #[test]
+    fn exit_code_assertion_has_no_seed_path() {
+        let assertion = BehaviorAssertion::ExitCode { expected: 0 };
+        assert!(assertion.seed_path().is_none());
     }
 }
 

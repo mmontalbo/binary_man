@@ -218,6 +218,9 @@ fn validate_behavior_assertion(assertion: &BehaviorAssertion) -> Result<()> {
                 return Err(anyhow!("file_contains pattern must not be empty"));
             }
         }
+        BehaviorAssertion::ExitCode { .. } => {
+            // No special validation needed - expected is already u8 (0-255)
+        }
     }
     Ok(())
 }

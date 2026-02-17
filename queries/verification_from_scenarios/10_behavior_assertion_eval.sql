@@ -17,7 +17,8 @@
       var.normalized_stdout is not null
         and base.normalized_stdout is not null
         and var.normalized_stdout = base.normalized_stdout as outputs_equal,
-      var.files_checked as variant_files_checked
+      var.files_checked as variant_files_checked,
+      var.exit_code as variant_exit_code
     from combined_scenarios s
     left join normalized_evidence var
       on var.scenario_id = s.scenario_id
@@ -39,8 +40,10 @@
       coalesce(a.exact_line, false) as exact_line,
       a.path as file_path,
       a.pattern as file_pattern,
+      a.expected as expected_exit_code,
       a.kind in ('stdout_contains', 'stdout_lacks') as uses_seed_path_assertion,
       a.kind in ('file_exists', 'file_missing', 'dir_exists', 'dir_missing', 'file_contains') as is_file_assertion,
+      a.kind = 'exit_code' as is_exit_code_assertion,
       -- Normalize stdout_contains/lacks based on run target, pass through others
       case
         when a.kind = 'stdout_contains' and a.run = 'baseline' then 'baseline_contains'
@@ -57,7 +60,8 @@
         run VARCHAR,
         exact_line BOOLEAN,
         path VARCHAR,
-        pattern VARCHAR
+        pattern VARCHAR,
+        expected INTEGER
       )[])) as t(a)
     where s.coverage_tier = 'behavior'
   ),
@@ -74,7 +78,10 @@
       b.file_pattern,
       b.uses_seed_path_assertion,
       b.is_file_assertion,
+      b.is_exit_code_assertion,
+      b.expected_exit_code,
       b.variant_last_pass,
+      b.variant_exit_code,
       b.baseline_last_pass,
       b.seed_signature_match,
       b.variant_stdout,
@@ -192,6 +199,14 @@
               then 1
             else 0
           end
+        -- Exit code assertion
+        when b.normalized_kind = 'exit_code' then
+          case
+            when not coalesce(b.variant_last_pass, false) then 0
+            when b.expected_exit_code is null then 0
+            when b.variant_exit_code = b.expected_exit_code then 1
+            else 0
+          end
         else 0
       end as assertion_pass
     from (
@@ -207,7 +222,10 @@
         b.file_pattern,
         b.uses_seed_path_assertion,
         b.is_file_assertion,
+        b.is_exit_code_assertion,
+        b.expected_exit_code,
         ctx.variant_last_pass,
+        ctx.variant_exit_code,
         ctx.baseline_last_pass,
         ctx.seed_signature_match,
         ctx.variant_stdout,
@@ -283,8 +301,9 @@
         end as seeded_assertion,
         case
           when not coalesce(ctx.variant_last_pass, false) then 0
-          -- File assertions only need variant to pass (no baseline required)
+          -- File and exit code assertions only need variant to pass (no baseline required)
           when b.is_file_assertion then 1
+          when b.is_exit_code_assertion then 1
           when not coalesce(ctx.baseline_last_pass, false) then 0
           when b.uses_seed_path_assertion
             and (b.seed_path is null or b.seed_path = '') then 0
@@ -369,7 +388,10 @@
       max(case when normalized_kind = 'outputs_differ' and assertion_pass = 1 then 1 else 0 end) as diff_assertion_pass,
       -- File assertion tracking
       sum(case when is_file_assertion then 1 else 0 end) as file_assertion_count,
-      sum(case when is_file_assertion and assertion_pass = 1 then 1 else 0 end) as file_assertion_pass_count
+      sum(case when is_file_assertion and assertion_pass = 1 then 1 else 0 end) as file_assertion_pass_count,
+      -- Exit code assertion tracking
+      sum(case when is_exit_code_assertion then 1 else 0 end) as exit_code_assertion_count,
+      sum(case when is_exit_code_assertion and assertion_pass = 1 then 1 else 0 end) as exit_code_assertion_pass_count
     from behavior_assertion_detail
     group by scenario_id
   ),
@@ -405,13 +427,21 @@
         and coalesce(a.file_assertion_count, 0) = coalesce(a.assertion_count, 0) as file_assertion_only,
       coalesce(a.file_assertion_count, 0) > 0
         and coalesce(a.file_assertion_count, 0) = coalesce(a.file_assertion_pass_count, 0) as file_assertion_pass,
+      -- Exit code assertion tracking
+      coalesce(a.exit_code_assertion_count, 0) as exit_code_assertion_count,
+      coalesce(a.exit_code_assertion_pass_count, 0) as exit_code_assertion_pass_count,
+      coalesce(a.exit_code_assertion_count, 0) > 0 as exit_code_assertion_present,
+      coalesce(a.exit_code_assertion_count, 0) > 0
+        and coalesce(a.exit_code_assertion_count, 0) = coalesce(a.exit_code_assertion_pass_count, 0) as exit_code_assertion_pass,
       coalesce(s.expect_has_output_predicate, false) as expect_has_output_predicate,
       -- Semantic predicate includes file assertions
+      -- Semantic predicate includes file and exit code assertions
       (
         coalesce(s.expect_has_output_predicate, false)
         or coalesce(a.diff_assertion_present, 0) = 1
         or coalesce(dp.delta_pair_present, 0) = 1
         or coalesce(a.file_assertion_count, 0) > 0
+        or coalesce(a.exit_code_assertion_count, 0) > 0
       ) as semantic_predicate_present,
       (
         coalesce(s.expect_has_output_predicate, false)
@@ -419,6 +449,8 @@
         or coalesce(dp.delta_pair_pass, 0) = 1
         or (coalesce(a.file_assertion_count, 0) > 0
             and coalesce(a.file_assertion_count, 0) = coalesce(a.file_assertion_pass_count, 0))
+        or (coalesce(a.exit_code_assertion_count, 0) > 0
+            and coalesce(a.exit_code_assertion_count, 0) = coalesce(a.exit_code_assertion_pass_count, 0))
       ) as semantic_predicate_pass,
       coalesce(ctx.seed_signature_match, false) as seed_signature_match,
       coalesce(ctx.variant_last_pass, false) as variant_last_pass,
@@ -548,6 +580,9 @@
       coalesce(b.file_assertion_present, false) as file_assertion_present,
       coalesce(b.file_assertion_only, false) as file_assertion_only,
       coalesce(b.file_assertion_pass, false) as file_assertion_pass,
+      -- Exit code assertion fields
+      coalesce(b.exit_code_assertion_present, false) as exit_code_assertion_present,
+      coalesce(b.exit_code_assertion_pass, false) as exit_code_assertion_pass,
       e.scenario_id is not null as has_evidence,
       e.last_pass as last_pass,
       case
