@@ -66,6 +66,10 @@ mod tests {
             BehaviorExclusionEvidence {
                 delta_variant_path: Some("inventory/scenarios/after.json".to_string()),
                 delta_ids: Vec::new(),
+                delta_outcome: None,
+                assertion_kind: None,
+                stderr_preview: None,
+                exit_code: None,
             },
         )];
 
@@ -85,6 +89,10 @@ mod tests {
                 BehaviorExclusionEvidence {
                     delta_variant_path: Some("inventory/scenarios/first.json".to_string()),
                     delta_ids: Vec::new(),
+                    delta_outcome: None,
+                    assertion_kind: None,
+                    stderr_preview: None,
+                    exit_code: None,
                 },
             ),
             exclusion_with_evidence(
@@ -92,6 +100,10 @@ mod tests {
                 BehaviorExclusionEvidence {
                     delta_variant_path: Some("inventory/scenarios/second.json".to_string()),
                     delta_ids: Vec::new(),
+                    delta_outcome: None,
+                    assertion_kind: None,
+                    stderr_preview: None,
+                    exit_code: None,
                 },
             ),
         ];

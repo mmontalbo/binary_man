@@ -41,6 +41,18 @@ pub(crate) struct BehaviorExclusionEvidence {
     pub delta_variant_path: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub delta_ids: Vec<String>,
+    /// The delta outcome (assertion_failed, outputs_equal, scenario_error)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delta_outcome: Option<String>,
+    /// Which assertion kind failed (file_exists, stdout_contains, etc)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assertion_kind: Option<String>,
+    /// Truncated stderr from the scenario execution
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stderr_preview: Option<String>,
+    /// Exit code from the scenario (0 = success)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
 }
 
 impl BehaviorExclusionEvidence {
@@ -194,6 +206,7 @@ pub(super) fn apply_surface_overlays(
                     forms: Vec::new(),
                     invocation: SurfaceInvocation::default(),
                     evidence: vec![evidence.clone()],
+                    is_help_output: false,
                 };
                 merge_surface_item(&mut state.items, &mut state.seen, surface_item);
             }
@@ -220,6 +233,7 @@ pub(super) fn apply_surface_overlays(
                         ..SurfaceInvocation::default()
                     },
                     evidence: vec![evidence.clone()],
+                    is_help_output: false,
                 };
                 merge_surface_item(&mut state.items, &mut state.seen, surface_item);
             }

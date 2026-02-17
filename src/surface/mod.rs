@@ -3,6 +3,7 @@
 //! Surface items are derived from SQL lenses over scenario evidence to keep
 //! semantics pack-owned and deterministic.
 mod behavior_exclusion;
+mod exclusion_note;
 mod lens;
 mod overlays;
 mod types;
@@ -23,6 +24,9 @@ const MAX_DISCOVERY_ROUNDS: usize = 10;
 const HELP_DISCOVERY_SCENARIO_PREFIX: &str = "help::";
 
 pub(crate) use behavior_exclusion::validate_behavior_exclusions;
+pub(crate) use exclusion_note::{
+    build_exclusion_evidence, build_exclusion_note, derive_reason_code,
+};
 pub(crate) use overlays::{
     collect_behavior_exclusions, load_surface_overlays_if_exists, SurfaceBehaviorExclusion,
 };
