@@ -5,9 +5,9 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M29 (exit code assertions).
+Current focus: M30 (unlock remaining blockers).
 
-## M29 — Exit Code Assertions
+## M29 — Exit Code Assertions (done)
 
 Goal: Add assertion types that verify command behavior via exit code rather than
 stdout content, unlocking verification for commands like `sort --check`, `test`,
@@ -132,14 +132,135 @@ Note: sort's remaining gaps are `no_scenario` (LM didn't generate) and
 
 | Criterion | Status |
 |-----------|--------|
-| Add `exit_code` assertion kind | |
-| Add `exit_code_nonzero` assertion kind | |
-| `requires_baseline()` returns false for exit_code assertions | |
-| Query evaluates `exit_code = expected` | |
-| Query evaluates `exit_code != 0` for nonzero | |
-| Update prompt templates with exit_code guidance | |
-| `sort --check` verifies with exit_code assertion | |
-| No regression in existing tests | |
+| Add `exit_code` assertion kind | done |
+| Add `exit_code_nonzero` assertion kind | skipped (use expected: 1) |
+| `requires_baseline()` returns false for exit_code assertions | done |
+| Query evaluates `exit_code = expected` | done |
+| Query evaluates `exit_code != 0` for nonzero | skipped |
+| Update prompt templates with exit_code guidance | done |
+| `sort --check` verifies with exit_code assertion | done |
+| No regression in existing tests | done |
+
+### Comprehensive Coreutils Validation (post-M29)
+
+After implementing exit_code assertions, comprehensive validation was run across
+all 104 available coreutils binaries.
+
+#### Summary
+
+| Status | Count | Percentage |
+|--------|-------|------------|
+| **Complete** | 96 | 92.3% |
+| **Incomplete** | 8 | 7.7% |
+
+#### Complete (96 binaries - 100% verified)
+
+```
+base32    base64    basename  cat       chcon     chmod     chroot    cksum
+comm      csplit    cut       date      dd        df        dir       dircolors
+dirname   du        echo      env       expand    expr      factor    false
+fmt       fold      groups    head      hostid    hostname  id        install
+join      link      ln        logname   ls        md5sum    mkdir     mkfifo
+mknod     mktemp    mv        nice      nl        nohup     nproc     numfmt
+od        paste     pathchk   pinky     pr        printenv  printf    pwd
+readlink  realpath  rm        rmdir     runcon    seq       sha1sum   sha224sum
+sha256sum sha384sum sha512sum shuf      sleep     sort      stat      stdbuf
+stty      sum       sync      tac       tail      tee       timeout   touch
+tr        true      truncate  tsort     tty       uname     unexpand  uniq
+unlink    uptime    users     vdir      wc        who       whoami    yes
+```
+
+#### Incomplete (8 binaries)
+
+| Binary | Unverified | Blocker Breakdown |
+|--------|------------|-------------------|
+| split | 15 | `outputs_equal`: 4, `no_scenario`: 7, `missing_value_examples`: 4 |
+| cp | 14 | `assertion_failed`: 9, `no_scenario`: 3, `outputs_equal`: 1, `scenario_error`: 1 |
+| ptx | 11 | `outputs_equal`: 8, `scenario_error`: 2, `no_scenario`: 1 |
+| chgrp | 8 | `assertion_failed`: 6, `outputs_equal`: 2 |
+| shred | 5 | `outputs_equal`: 2, `no_scenario`: 2, `assertion_failed`: 1 |
+| rev | 4 | `no_scenario`: 4 (only --help/--version) |
+| chown | 2 | `outputs_equal`: 2 |
+| test | ? | Surface inventory missing (shell builtin conflict) |
+
+### Remaining Blocker Classes
+
+Five distinct blocker types prevent full verification:
+
+#### 1. `outputs_equal` (19 options across 6 binaries)
+
+**Root cause**: Option changes behavior but not visible output. These options
+don't change exit code OR stdout - only side effects like file contents or
+ownership. Exit code assertions (added in M29) don't help here.
+
+**Subcategories**:
+
+| Category | Options | Issue | Resolution |
+|----------|---------|-------|------------|
+| **Fixable with file assertions** | `split --bytes/--lines` (4) | Output goes to files, not stdout | Add `file_contains` on output files |
+| **Requires privileges** | `chown/chgrp --from/--reference` (4) | Ownership change needs root | Exclude with evidence (unprivileged) |
+| **Genuinely unobservable** | `ptx` parsing options (8) | Internal parsing, same output | Exclude with evidence (by design) |
+| **Unobservable by design** | `shred --random-source` (2) | Randomness source is internal | Exclude with evidence (by design) |
+| **Arg interpretation** | `cp -t` (1) | Changes arg order, not output | Exclude with evidence |
+
+**Fix needed**:
+- `split`: Add file assertions to verify output file contents differ
+- Others: Mark as **excluded with evidence** - verification impossible without
+  elevated privileges or the difference is internal by design
+
+#### 2. `assertion_failed` (16 options across 3 binaries)
+
+**Root cause**: LM generates scenarios with incorrect file paths or missing operands.
+
+**Examples**:
+- `cp --backup` runs without source/dest files → "missing file operand"
+- `chgrp --no-dereference` runs without target → error exit
+
+**Fix needed**: Improve prompt guidance for file-operation commands to always
+include required positional arguments in argv.
+
+#### 3. `no_scenario` (17 options across 5 binaries)
+
+**Root cause**: LM never generated a scenario for the option.
+
+**Examples**:
+- `split --elide-empty-files` - complex edge case
+- `cp --interactive` - requires TTY interaction
+- `rev --help/--version` - meta options on simple filter
+
+**Fix needed**: For interactive options, mark as `blocks_indefinitely`. For
+meta options on simple filters, consider structural verification.
+
+#### 4. `scenario_error` (3 options across 2 binaries)
+
+**Root cause**: Invalid scenario configuration (bad argv or seed references).
+
+**Examples**:
+- `cp --update` - scenario references nonexistent comparison file
+- `ptx --break-file` - needs seed file for break patterns
+
+**Fix needed**: Validate seed file references in scenarios before execution.
+
+#### 5. `missing_value_examples` (4 options in split)
+
+**Root cause**: Options require values but LM doesn't know valid examples.
+
+**Examples**:
+- `split --filter` - requires shell command string
+- `split --separator` - requires separator character
+
+**Fix needed**: Include value examples from help text in LM prompt context.
+
+### Next Steps
+
+1. **High impact (16 options)**: Fix `assertion_failed` by improving file-operation
+   prompts to require positional arguments in argv for cp/chgrp/shred
+2. **Medium impact (4 options)**: Add file assertions for `split` outputs_equal blockers
+3. **Medium impact (17 options)**: Handle `no_scenario` - mark interactive options as
+   `blocks_indefinitely`, meta-only binaries (rev) as structurally complete
+4. **Low impact (15 options)**: Exclude remaining `outputs_equal` with evidence -
+   privileged operations (chown/chgrp) and unobservable internals (ptx/shred)
+5. **Low impact (4 options)**: Extract value examples from help text for `split`
 
 ---
 
