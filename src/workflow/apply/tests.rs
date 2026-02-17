@@ -97,6 +97,7 @@ fn setup_outputs_equal_retry_fixture(root: &std::path::Path) -> OutputsEqualFixt
                 ..Default::default()
             },
             evidence: Vec::new(),
+            is_help_output: false,
         }],
         blockers: Vec::new(),
     };
@@ -347,6 +348,7 @@ fn setup_assertion_failed_retry_fixture(root: &std::path::Path) -> AssertionFail
             forms: vec!["--color".to_string()],
             invocation: crate::surface::SurfaceInvocation::default(),
             evidence: Vec::new(),
+            is_help_output: false,
         }],
         blockers: Vec::new(),
     };

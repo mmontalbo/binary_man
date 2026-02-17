@@ -151,6 +151,121 @@ pub(crate) fn run_apply(args: &ApplyArgs) -> Result<()> {
     run_apply_single(args)
 }
 
+/// Write an auto-exclude overlay file.
+fn write_auto_exclude(
+    paths: &enrich::DocPackPaths,
+    path: &str,
+    content: &str,
+    verbose: bool,
+) -> Result<()> {
+    let overlay_path = paths.root().join(path);
+    if let Some(parent) = overlay_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&overlay_path, content)?;
+    if verbose {
+        eprintln!("apply: wrote exclusion to {}", overlay_path.display());
+    }
+    Ok(())
+}
+
+/// Result of a single LM cycle iteration
+enum LmCycleResult {
+    /// Continue to next cycle
+    Continue,
+    /// Continue with updated state
+    ContinueWithUpdates {
+        rerun_scenario_ids: Vec<String>,
+        processed_surfaces: Vec<String>,
+        increment_no_progress: bool,
+    },
+    /// Stop the loop (no LM configured for edit action)
+    Stop,
+}
+
+/// Process a single LM cycle given the summary and payload.
+#[allow(clippy::too_many_arguments)]
+fn run_lm_cycle(
+    doc_pack_root: &Path,
+    paths: &enrich::DocPackPaths,
+    lm_config: Option<&LmClientConfig>,
+    summary: &enrich::StatusSummary,
+    payload: &enrich::BehaviorNextActionPayload,
+    lm_processed_surfaces: &mut BTreeSet<String>,
+    max_lm_failures: usize,
+    max_lm_no_progress: usize,
+    verbose: bool,
+) -> Result<LmCycleResult> {
+    let current_targets: BTreeSet<String> = payload
+        .target_ids
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    // Find surfaces that LM has previously processed but are still unverified
+    let still_unverified_after_lm: Vec<String> = lm_processed_surfaces
+        .intersection(&current_targets)
+        .cloned()
+        .collect();
+
+    if !still_unverified_after_lm.is_empty() {
+        let auto_excluded = handle_lm_no_progress_for_targets(
+            paths,
+            &still_unverified_after_lm,
+            max_lm_no_progress,
+            verbose,
+        );
+        if auto_excluded > 0 {
+            if verbose {
+                eprintln!(
+                    "apply: auto-excluded {} surface(s) after repeated LM targeting without progress",
+                    auto_excluded
+                );
+            }
+            for s in &still_unverified_after_lm {
+                lm_processed_surfaces.remove(s);
+            }
+            return Ok(LmCycleResult::Continue);
+        }
+    }
+
+    // Check if LM is configured
+    let lm_config = match lm_config {
+        Some(cfg) => cfg,
+        None => {
+            if verbose {
+                eprintln!("apply: edit action requires LM, but no LM configured, stopping");
+            }
+            return Ok(LmCycleResult::Stop);
+        }
+    };
+
+    if verbose {
+        eprintln!(
+            "apply: invoking LM for {} targets (reason: {})",
+            payload.target_ids.len(),
+            payload.reason_code.as_deref().unwrap_or("unknown")
+        );
+    }
+
+    let lm_result = invoke_lm_and_apply(doc_pack_root, lm_config, summary, payload, verbose);
+    let processing = process_lm_result(
+        paths,
+        lm_result,
+        &payload.target_ids,
+        &current_targets,
+        max_lm_failures,
+        verbose,
+    );
+
+    Ok(LmCycleResult::ContinueWithUpdates {
+        rerun_scenario_ids: processing.updated_scenario_ids,
+        processed_surfaces: processing.processed_surfaces,
+        increment_no_progress: processing.increment_no_progress,
+    })
+}
+
 /// Run apply in a loop with LM assistance.
 ///
 /// This is the main enrichment loop that:
@@ -266,14 +381,38 @@ fn run_apply_with_lm_loop(args: &ApplyArgs) -> Result<()> {
             break;
         }
 
-        // Check next action type
+        // Handle AutoExclude action type
+        if let enrich::NextAction::AutoExclude {
+            path,
+            content,
+            reason,
+            target_ids,
+            evidence,
+        } = &summary.next_action
+        {
+            if args.verbose {
+                eprintln!(
+                    "apply: auto-excluding {} surface(s): {}",
+                    target_ids.len(),
+                    reason
+                );
+                eprintln!(
+                    "apply: evidence: reason_code={}, retry_count={}",
+                    evidence.reason_code, evidence.retry_count
+                );
+            }
+            write_auto_exclude(&paths, path, content, args.verbose)?;
+            continue;
+        }
+
+        // Extract action kind and payload
         let (action_kind, payload) = match &summary.next_action {
             enrich::NextAction::Edit { payload, .. } => ("edit", payload.clone()),
             enrich::NextAction::Command { payload, .. } => ("command", payload.clone()),
+            enrich::NextAction::AutoExclude { .. } => unreachable!("handled above"),
         };
 
-        // If next action is a command with no LM payload, just continue the loop
-        // (it will run more scenarios on the next cycle)
+        // Check for payload and early-exit conditions
         let Some(payload) = payload else {
             if args.verbose {
                 eprintln!(
@@ -291,86 +430,39 @@ fn run_apply_with_lm_loop(args: &ApplyArgs) -> Result<()> {
             continue;
         }
 
-        // Track surfaces that have been processed by LM but remain unverified
-        // Only increment counter for surfaces that LM has ALREADY worked on
-        let current_targets: BTreeSet<String> = payload
-            .target_ids
-            .iter()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-
-        // Find surfaces that LM has previously processed but are still unverified
-        let still_unverified_after_lm: Vec<String> = lm_processed_surfaces
-            .intersection(&current_targets)
-            .cloned()
-            .collect();
-
-        if !still_unverified_after_lm.is_empty() {
-            let auto_excluded = handle_lm_no_progress_for_targets(
-                &paths,
-                &still_unverified_after_lm,
-                MAX_LM_NO_PROGRESS_PER_SURFACE,
-                args.verbose,
-            );
-            if auto_excluded > 0 {
-                if args.verbose {
-                    eprintln!(
-                        "apply: auto-excluded {} surface(s) after repeated LM targeting without progress",
-                        auto_excluded
-                    );
-                }
-                // Remove excluded surfaces from tracking
-                for s in &still_unverified_after_lm {
-                    lm_processed_surfaces.remove(s);
-                }
-                // Recalculate status and continue to next cycle
-                continue;
-            }
+        // For command actions without LM, just continue
+        if action_kind == "command" && lm_config.is_none() {
+            continue;
         }
 
-        // Check if LM is configured for edit actions
-        let lm_config = match &lm_config {
-            Some(cfg) => cfg,
-            None => {
-                if action_kind == "edit" {
-                    if args.verbose {
-                        eprintln!("apply: edit action requires LM, but no LM configured, stopping");
-                    }
-                    break;
-                }
-                // For command actions, just continue to run more scenarios
-                continue;
-            }
-        };
-
-        // Invoke LM for actions with payload
-        if args.verbose {
-            eprintln!(
-                "apply: invoking LM for {} targets (reason: {})",
-                payload.target_ids.len(),
-                payload.reason_code.as_deref().unwrap_or("unknown")
-            );
-        }
-
-        let lm_result =
-            invoke_lm_and_apply(&doc_pack_root, lm_config, summary, &payload, args.verbose);
-        let processing = process_lm_result(
+        // Run LM cycle with payload
+        match run_lm_cycle(
+            &doc_pack_root,
             &paths,
-            lm_result,
-            &payload.target_ids,
-            &current_targets,
+            lm_config.as_ref(),
+            summary,
+            &payload,
+            &mut lm_processed_surfaces,
             MAX_LM_FAILURES_PER_SURFACE,
+            MAX_LM_NO_PROGRESS_PER_SURFACE,
             args.verbose,
-        );
-
-        if processing.increment_no_progress {
-            no_progress_count += 1;
+        )? {
+            LmCycleResult::Continue => continue,
+            LmCycleResult::Stop => break,
+            LmCycleResult::ContinueWithUpdates {
+                rerun_scenario_ids: new_ids,
+                processed_surfaces,
+                increment_no_progress,
+            } => {
+                if increment_no_progress {
+                    no_progress_count += 1;
+                }
+                for surface in processed_surfaces {
+                    lm_processed_surfaces.insert(surface);
+                }
+                rerun_scenario_ids.extend(new_ids);
+            }
         }
-        for surface in processing.processed_surfaces {
-            lm_processed_surfaces.insert(surface);
-        }
-        rerun_scenario_ids.extend(processing.updated_scenario_ids);
     }
 
     // Final status

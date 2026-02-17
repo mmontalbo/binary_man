@@ -291,6 +291,7 @@ pub(super) fn suggested_exclusion_only_next_action(
 }
 
 /// Set next action for outputs_equal plateau (max retries reached).
+/// Emits AutoExclude action to automatically write exclusion overlays.
 fn set_outputs_equal_plateau_next_action(
     ctx: &mut QueueVerificationContext<'_>,
     summary: &mut enrich::VerificationTriageSummary,
@@ -314,25 +315,35 @@ fn set_outputs_equal_plateau_next_action(
         cap_hit,
         ledger_entries,
     );
-    let payload = behavior_payload(BehaviorPayloadArgs {
-        surface: Some(ctx.surface),
-        target_ids: cap_hit,
-        reason_code: Some("outputs_equal"),
-        retry_counts,
-        ledger_entries,
-        suggested_overlay_keys: &["overlays[].behavior_exclusion"],
-        assertion_starters: Vec::new(),
-        suggested_exclusion_payload: None,
-    });
-    *ctx.verification_next_action = Some(enrich::NextAction::Edit {
+
+    // Collect delta variant paths from ledger for evidence
+    let delta_variant_paths: Vec<String> = cap_hit
+        .iter()
+        .filter_map(|id| ledger_entries.get(id.as_str()))
+        .flat_map(|entry| entry.delta_evidence_paths.iter().cloned())
+        .collect();
+
+    // Get max retry count for evidence
+    let max_retry = cap_hit
+        .iter()
+        .filter_map(|id| retry_counts.get(id).copied())
+        .max()
+        .unwrap_or(BEHAVIOR_RERUN_CAP);
+
+    *ctx.verification_next_action = Some(enrich::NextAction::AutoExclude {
         path: "inventory/surface.overlays.json".to_string(),
         content,
         reason: format!(
-            "stopped outputs_equal retries after {BEHAVIOR_RERUN_CAP} no-progress attempts; add behavior_exclusion stubs in inventory/surface.overlays.json"
+            "auto-excluding {} surface(s) after {} outputs_equal retries with no progress",
+            cap_hit.len(),
+            max_retry
         ),
-        hint: Some("Add exclusion stubs after max retries".to_string()),
-        edit_strategy: enrich::default_edit_strategy(),
-        payload,
+        target_ids: cap_hit.to_vec(),
+        evidence: enrich::AutoExcludeEvidence {
+            reason_code: "outputs_equal_exhausted".to_string(),
+            retry_count: max_retry,
+            delta_variant_paths,
+        },
     });
     true
 }

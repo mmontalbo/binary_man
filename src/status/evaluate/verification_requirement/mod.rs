@@ -80,9 +80,9 @@ use anyhow::Result;
 use auto::{eval_auto_verification, AutoVerificationContext};
 use inputs::{base_evidence, ensure_verification_policy, load_verification_inputs};
 use ledger::{build_verification_ledger_entries, LedgerBuildInputs};
-use next_action::{maybe_set_behavior_next_action, BehaviorEvalState, BEHAVIOR_BATCH_LIMIT};
 #[cfg(test)]
 pub use next_action::ASSERTION_FAILED_NOOP_CAP;
+use next_action::{maybe_set_behavior_next_action, BehaviorEvalState, BEHAVIOR_BATCH_LIMIT};
 use reasoning::{
     build_behavior_reason_summary, build_behavior_unverified_preview, build_behavior_warnings,
     load_behavior_exclusion_state,

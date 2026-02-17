@@ -532,6 +532,18 @@ pub struct SuggestedBehaviorExclusionEvidence {
     pub delta_variant_path: Option<String>,
 }
 
+/// Evidence supporting an automatic exclusion decision.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct AutoExcludeEvidence {
+    /// Reason code for exclusion (e.g., "outputs_equal_exhausted").
+    pub reason_code: String,
+    /// Number of retry attempts before exclusion.
+    pub retry_count: usize,
+    /// Delta variant paths that were evaluated.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub delta_variant_paths: Vec<String>,
+}
+
 /// Deterministic next action used by both humans and agents.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -556,6 +568,17 @@ pub enum NextAction {
         edit_strategy: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         payload: Option<BehaviorNextActionPayload>,
+    },
+    /// Auto-exclude surface items that cannot be verified after exhausting retries.
+    /// Unlike Edit, this action is applied automatically by the workflow.
+    AutoExclude {
+        path: String,
+        content: String,
+        reason: String,
+        /// Surface IDs being excluded.
+        target_ids: Vec<String>,
+        /// Evidence supporting the exclusion.
+        evidence: AutoExcludeEvidence,
     },
 }
 
