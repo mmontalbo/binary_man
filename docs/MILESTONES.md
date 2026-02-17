@@ -5,7 +5,192 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M30 (unlock remaining blockers).
+Current focus: M30 (unlock remaining coreutils).
+
+## M30 — Unlock Remaining Coreutils
+
+Goal: Unblock 3 blocked binaries + complete 2 easy wins = **99+ coreutils complete**
+(from 94) through targeted fixes to validation recovery, help-output detection, and
+outputs_equal exhaustion handling.
+
+### Current State
+
+| Status | Count | Binaries |
+|--------|-------|----------|
+| **Complete** | 94 | (see M29 validation) |
+| **Blocked** | 3 | du, ls, shred |
+| **Incomplete** | 7 | chgrp, chown, cp, ptx, rev, split, test |
+
+#### Blocked Analysis
+
+All three blocked binaries fail with the same validation error:
+
+```
+scenario verify_<option> baseline_scenario_id baseline has assertion seed_path(s)
+not present in both baseline and variant seed entries: <filename>. seed_path must
+match a seeded entry path; use stdout_token for printed token
+```
+
+**Root cause**: LM generates `seed_path` assertions pointing to files that don't
+exist in the scenario's seed entries. The LM understands it needs file assertions
+but doesn't know what seed paths are available.
+
+#### Incomplete Analysis
+
+| Binary | Unverified | Breakdown |
+|--------|------------|-----------|
+| split | 15 | `outputs_equal`: 4, `no_scenario`: 7, `missing_value_examples`: 4 |
+| cp | 14 | `assertion_failed`: 9, `no_scenario`: 3, `outputs_equal`: 1, `scenario_error`: 1 |
+| ptx | 11 | `outputs_equal`: 8, `scenario_error`: 2, `no_scenario`: 1 |
+| chgrp | 8 | `assertion_failed`: 6, `outputs_equal`: 2 |
+| rev | 4 | `no_scenario`: 4 (all -h/-V/--help/--version) |
+| chown | 2 | `outputs_equal`: 2 |
+| test | ? | Surface inventory missing (no parseable --help) |
+
+#### Aggregated Blockers by Reason Code
+
+| Reason | Total | Binaries |
+|--------|-------|----------|
+| `outputs_equal` | 17 | chown(2), chgrp(2), cp(1), ptx(8), split(4) |
+| `assertion_failed` | 15 | chgrp(6), cp(9) |
+| `no_scenario` | 15 | cp(3), rev(4), split(7), ptx(1) |
+| `missing_value_examples` | 4 | split(4) |
+| `scenario_error` | 3 | cp(1), ptx(2) |
+| `seed_path_invalid` | 3 binaries | du, ls, shred (blocked) |
+| `missing_surface` | 1 | test |
+
+### Changes
+
+#### Change 1: Validation Errors → Scenario Error with Recovery Scaffold
+
+**Problem**: Invalid `seed_path` blocks entire binary. LM can't self-correct because
+it never sees the error in retry prompts.
+
+**Solution**:
+1. Move validation from blocker to scenario evidence (run-time, not load-time)
+2. In verification ledger, mark scenarios with validation errors as `scenario_error`
+3. In scaffold, include the error message and available seed paths from the baseline
+   scenario's seed (since variant inherits from baseline)
+
+| File | Change |
+|------|--------|
+| `src/scenarios/validate.rs` | Add `ValidationResult` enum instead of `Result<(), Error>` |
+| `queries/.../10_behavior_assertion_eval.sql` | Add `validation_error` column to scenario_eval |
+| `src/status/evaluate/verification_requirement/scaffold.rs` | Include validation error + seed paths from baseline |
+
+**Scaffold for retry**:
+```json
+{
+  "scenario_error": {
+    "message": "seed_path 'visible.txt' not in seed entries",
+    "available_seed_paths": [".hidden_file", "regular_file"]
+  }
+}
+```
+
+**Key insight**: Baseline scenario defines seed entries. Variant scenario references
+them. Error occurs when variant's assertion references path not in baseline's seed.
+
+#### Change 2: Help-Output Options Skip Behavior Tier
+
+**Problem**: `rev` shows `-h`, `-V`, `--help`, `--version` as 4 unverified options.
+These are help-output options whose *purpose* is displaying help/version text.
+
+**Clarified requirement**: Options whose purpose is displaying help/version text
+don't need behavior scenarios. Their behavior IS the help output, which help tier
+already verified structurally.
+
+**Solution**: Detect help-output options from description patterns and skip in
+behavior triage.
+
+| File | Change |
+|------|--------|
+| `src/surface/types.rs` | Add `is_help_output: bool` to SurfaceItem |
+| `src/render/parse/surface.rs` | Detect from description patterns ("display help", "show version", etc.) |
+| `src/status/evaluate/verification_requirement/mod.rs` | Skip help_output items in behavior triage |
+
+**Impact**: Completes `rev` immediately.
+
+#### Change 3: outputs_equal Exhaustion → Auto-Exclude with Evidence
+
+**Problem**: 17 options stuck in `outputs_equal` after multiple LM attempts. Many
+are genuinely unobservable (privileged ops, internal parsing, by design).
+
+**Observation**: We already track `outputs_equal_retries_by_surface` with
+`OUTPUTS_EQUAL_WORKAROUND_CAP = 3`. The gap is transitioning from "LM should fix"
+to "genuinely unfixable."
+
+**Solution**: After `OUTPUTS_EQUAL_WORKAROUND_CAP` reached, emit exclusion action
+instead of LM action, with dedicated reason code.
+
+| File | Change |
+|------|--------|
+| `src/status/evaluate/verification_requirement/next_action.rs` | Check retry cap, return Exclude action |
+| `src/enrich/types.rs` | Add `outputs_equal_exhausted` reason code |
+| `src/workflow/apply/mod.rs` | Handle Exclude action by writing overlay |
+
+**Exclusion criteria**:
+1. Surface has `outputs_equal` reason
+2. LM has attempted fix (scenario was updated)
+3. Re-execution still shows `outputs_equal`
+4. Retry count >= `OUTPUTS_EQUAL_WORKAROUND_CAP`
+
+**Exclusion overlay generated**:
+```json
+{
+  "behavior_exclusion": {
+    "reason_code": "outputs_equal_exhausted",
+    "note": "Variant output equals baseline after 3 workaround attempts",
+    "evidence": {
+      "delta_variant_path": "inventory/scenarios/verify_--sparse.json"
+    }
+  }
+}
+```
+
+**Impact**: Completes chown (2), reduces chgrp (2), ptx (8), split (4), cp (1).
+
+### Deferred to M31
+
+- **assertion_failed prompt improvements**: cp, chgrp need more LM cycles, not code changes
+- **test binary handling**: Document as unsupported (shell builtin)
+- **no_scenario gap**: Needs initial_scenarios prompt tuning
+
+### Implementation Order
+
+1. **Change 3** (smallest, self-contained) - outputs_equal exhaustion
+2. **Change 2** (small, surface parsing) - help-output detection
+3. **Change 1** (medium, touches validation + scaffold) - scenario_error recovery
+
+### Acceptance Criteria
+
+| Criterion | Status |
+|-----------|--------|
+| Zero blocked binaries (du, ls, shred unblocked) | |
+| `rev` complete (all 4 help options resolved) | |
+| `chown` complete (both outputs_equal options excluded with evidence) | |
+| 99+ coreutils complete (from 94) | |
+| No regression in existing complete binaries | |
+
+**Verification command**:
+```bash
+# Before M30: Complete: 94, Blocked: 3, Incomplete: 7
+# After M30:  Complete: 99+, Blocked: 0, Incomplete: 5 or fewer
+bash /tmp/check_all_coreutils.sh
+```
+
+### Risks
+
+1. **Help-output detection false positives**: Option described as "display X" might
+   not be help-output. Mitigation: Conservative pattern matching.
+
+2. **Exclusion evidence missing**: Some outputs_equal scenarios might lack
+   delta_evidence_paths. Mitigation: Fall back to scenario path.
+
+3. **Regression in complete binaries**: Changes to verification logic could flip
+   complete→incomplete. Mitigation: Run full suite before/after, diff results.
+
+---
 
 ## M29 — Exit Code Assertions (done)
 
@@ -253,14 +438,8 @@ meta options on simple filters, consider structural verification.
 
 ### Next Steps
 
-1. **High impact (16 options)**: Fix `assertion_failed` by improving file-operation
-   prompts to require positional arguments in argv for cp/chgrp/shred
-2. **Medium impact (4 options)**: Add file assertions for `split` outputs_equal blockers
-3. **Medium impact (17 options)**: Handle `no_scenario` - mark interactive options as
-   `blocks_indefinitely`, meta-only binaries (rev) as structurally complete
-4. **Low impact (15 options)**: Exclude remaining `outputs_equal` with evidence -
-   privileged operations (chown/chgrp) and unobservable internals (ptx/shred)
-5. **Low impact (4 options)**: Extract value examples from help text for `split`
+See **M30 — Unlock Remaining Coreutils** above for the detailed plan addressing
+these blocker classes.
 
 ---
 
