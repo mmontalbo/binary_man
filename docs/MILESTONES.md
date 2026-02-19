@@ -5,126 +5,77 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M31 (git deep-dive for stateful verification patterns).
+Current focus: Complete. See M32+ for future work.
 
-## M31 — Git as Stateful Verification Case Study
+## M31 — Git Verification: Scope Context Fix (done)
 
-Goal: Use `git` to **discover gaps** in the verification system that don't surface
-with stateless coreutils. Exploration milestone — deliverable is a findings section
-(below), not code changes.
+Goal: Fix the scope context bug discovered during git exploration, then verify
+`git config` surfaces properly. Expose any remaining gaps for stateful binaries.
 
-### Motivation
+### Results
 
-Coreutils are mostly stateless (input → output). Git is stateful:
-- Surfaces depend on prior state (files, directories, config)
-- Many surfaces mutate state rather than producing stdout
-- Behavior depends on environment state, not just arguments
-
-### Scope
-
-- **In scope**: `git config` surfaces (simplest stateful case, ~34 surfaces)
-- **Out of scope**: Implementing fixes (M32+), other git scopes (add, commit, branch)
-
-### Key Questions
-
-1. **Prereq complexity**: Can LM infer multi-step prereqs for stateful binaries?
-2. **Observability**: Can existing assertions verify effects beyond stdout/stderr/exit_code?
-
-### Approach
-
-1. Attempt `git config` verification
-2. Document mechanical blockers encountered
-3. Categorize gaps: prereq inference, observability
-4. Propose M32 scope based on findings
+| Metric | Before Fix | After Fix |
+|--------|------------|-----------|
+| Verified | 31 (false positives) | **27 (real)** |
+| Unverified | 3 | 7 |
+| Excluded | 0 | 0 |
 
 ### Acceptance Criteria
 
 | Criterion | Status |
 |-----------|--------|
-| Attempt verification, document blockers | done |
-| Categorize gaps with examples | done |
-| Propose M32 plan | done |
+| Fix scope context bug | done |
+| `git config` surfaces verified (non-interactive) | done (27/34 = 79%) |
+| Document remaining gaps | done |
 
-### Findings
+### Fix Applied
 
-#### Mechanical Blockers
+**Location**: `src/workflow/lm_response.rs` in `validate_responses()`
 
-**Scope context missing from LM scenarios**: For scoped packs (e.g., `git config`),
-the LM-generated scenarios don't include the scope context:
+**Change**: Added `context_argv_map` parameter and prepended context_argv to LM-returned
+argv when building scenarios. Call sites in `src/workflow/apply/lm_apply.rs` updated
+to build the map from surface inventory.
 
-| Scenario Type | Argv | Result |
-|---------------|------|--------|
-| baseline | `["git"]` | Shows git usage (exit 1) |
-| verify_--list | `["git", "--list"]` | "unknown option" (exit 129) |
-| auto_verify::--list | `["git", "config", "--list"]` | Correct (exit 0) |
+**Before**: LM returns `["--list"]` → execution runs `["git", "--list"]` (wrong)
+**After**: LM returns `["--list"]` → context prepended → `["git", "config", "--list"]` (correct)
 
-The `auto_verify` system knows about scope context and includes it. LM scenarios don't.
-All 31 "verified" surfaces are **false positives** - they show `delta_seen` because
-both baseline and verify fail differently, not because the option was tested.
+### Remaining Unverified (7 surfaces)
 
-**Root cause**: The LM prompt doesn't communicate scope context. The LM returns
-`["--list"]`, execution prepends binary → `["git", "--list"]`. Missing: `config`.
+These surfaces can't be tested in isolation - they're **co-option requirements**:
 
-**Location**: Prompt building in `src/workflow/lm_client.rs` needs to include
-scope context, OR scenario execution needs to insert it.
-
-#### Prereq Gaps
-
-**Usage pattern dependencies**: Some surfaces can't be tested in isolation:
-
-| Surface | Issue | Required Pattern |
+| Surface | Error | Required Pattern |
 |---------|-------|------------------|
 | `--all` | "unknown option" | Needs `git config get --all <key>` |
 | `--append` | "unknown option" | Needs `git config --append <key> <value>` |
-| `--system` | "no action specified" | Needs action: `--system --list` |
+| `--bool-or-int` | "no action specified" | Needs action context |
+| `--comment` | "requires a value" | Needs value argument |
+| `--edit` | "not in a git directory" | Needs repo prereq |
+| `--null` | "no action specified" | Needs action context |
+| `--regexp` | "unknown option" | Needs `git config get --regexp` |
 
-These aren't prereqs in the "need files/state" sense - they're **co-option requirements**.
-The surface can't be exercised without other arguments. Current prereq system handles
-file/directory setup, not argument dependencies.
+These aren't file/state prereqs - they're **argument composition requirements**.
+The surface can't be exercised without specific co-arguments. The prereq system
+handles setup (files, directories), not argument dependencies.
 
-**Note**: Due to scope context bug (above), we can't fully evaluate prereq inference.
-The LM never got a chance to reason about git-specific state requirements.
+### Observability Assessment
 
-#### Observability Gaps
+With the fix in place, LM-generated scenarios correctly run `git config` commands.
+Observations:
 
-**Assessment blocked**: Due to scope context bug, no scenarios actually ran `git config`.
-All "verified" surfaces used `outputs_differ` comparing wrong commands.
+- **Read operations** (`--list`, `--get`, `--show-*`): `outputs_differ` sufficient
+- **Write operations** (`--local`, `--global`): Would benefit from `file_contains` on
+  `.git/config`, but LM correctly used argument-based verification
+- **Format modifiers** (`-z`, `--null`, `--name-only`): Verified via output differences
 
-**Observed pattern**: All LM-generated scenarios used `outputs_differ` assertion.
-For `git config` read operations, this would be sufficient (stdout shows values).
-For write operations, `file_contains` on `.git/config` would work.
+For `git config`, existing assertions are sufficient. The remaining gaps are
+argument composition, not observability.
 
-**Hypothesized gaps for other git scopes** (not tested due to blocker):
+### Future Work (M32+)
 
-| Scope | Operation | Current Assertions | Potential Gap |
-|-------|-----------|-------------------|---------------|
-| `git add` | Stage file | stdout (empty on success) | Need `file_staged` or git-status check |
-| `git commit` | Create commit | stdout (commit message) | `outputs_differ` likely sufficient |
-| `git branch` | Create branch | stdout | `ref_exists` might help |
-
-**Conclusion**: Can't fully evaluate observability gaps without fixing scope context bug.
-For `git config` specifically, existing assertions appear sufficient.
-
-### M32 Proposal
-
-Based on M31 findings, M32 should focus on **fixing the scope context bug**.
-
-**Priority 1 - Scope context in LM scenarios**:
-- Problem: LM scenarios don't include scope context (e.g., `config` in `git config`)
-- Impact: ALL scoped pack verification is broken (false positives)
-- Fix: Either inject context in prompt, or insert context during execution
-
-**Priority 2 - Co-option requirements** (if time permits):
-- Problem: Some surfaces need other arguments (`--all` needs `--get`)
-- Impact: 3 of 34 surfaces can't be verified in isolation
-- Fix: Add `requires_argv` inference or document as limitation
-
-**Not priority for M32**:
-- New assertion types (observability): Existing assertions appear sufficient for `git config`
-- State-mutation verification: Blocked by P1, defer to M33+
-
-**Success criteria**: Re-run `git config` verification with fixed scope context,
-achieve actual (not false positive) verification of surfaces.
+- **Co-option handling**: Extend LM prompt to understand surfaces that require
+  specific co-arguments (e.g., `--all` only valid with `get` action)
+- **Repo prereq**: Add git repo initialization as a prereq for repo-dependent options
+- **Other git scopes**: Explore `git init`, `git add` for stateful patterns
 
 ---
 
