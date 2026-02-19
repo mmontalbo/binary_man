@@ -58,11 +58,6 @@ pub fn run_init(args: &InitArgs) -> Result<()> {
         manifest.as_ref().map(|m| m.binary_name.as_str()),
     )?;
     write_doc_pack_file(
-        &paths.agent_prompt_path(),
-        templates::ENRICH_AGENT_PROMPT_MD,
-        args.force,
-    )?;
-    write_doc_pack_file(
         &paths.semantics_path(),
         templates::ENRICH_SEMANTICS_JSON,
         args.force,

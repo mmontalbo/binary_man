@@ -2,7 +2,7 @@
 //!
 //! Centralizing path construction keeps file access consistent across the
 //! workflow and prevents drift when the layout evolves.
-use super::{evidence_from_path, EvidenceRef, ENRICH_AGENT_PROMPT_REL};
+use super::{evidence_from_path, EvidenceRef};
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
@@ -31,11 +31,6 @@ impl DocPackPaths {
     /// Return the `enrich/config.json` path.
     pub fn config_path(&self) -> PathBuf {
         self.enrich_dir().join("config.json")
-    }
-
-    /// Return the `enrich/agent_prompt.md` path.
-    pub fn agent_prompt_path(&self) -> PathBuf {
-        self.root.join(ENRICH_AGENT_PROMPT_REL)
     }
 
     /// Return the `enrich/semantics.json` path.

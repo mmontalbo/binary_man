@@ -29,8 +29,6 @@ pub const VERIFICATION_FROM_SCENARIOS_SECTION_TEMPLATE_RELS: [&str; 4] = [
 ];
 /// Default surface lenses for scenario-only evidence.
 pub const SURFACE_LENS_TEMPLATE_RELS: [&str; 1] = [SURFACE_FROM_SCENARIOS_TEMPLATE_REL];
-/// Pack-owned prompt guidance installed during init.
-pub const ENRICH_AGENT_PROMPT_REL: &str = "enrich/agent_prompt.md";
 
 mod config;
 mod evidence;
