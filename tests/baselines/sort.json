@@ -1,0 +1,288 @@
+{
+  "schema_version": 1,
+  "generated_at_epoch_ms": 1771525626296,
+  "binary_name": "sort",
+  "lock": {
+    "present": true,
+    "stale": false,
+    "inputs_hash": "bd28839618963ef64600a485a85dc182714843a23e767868e6fd2c6d38d474ed"
+  },
+  "plan": {
+    "present": true,
+    "stale": false,
+    "inputs_hash": "bd28839618963ef64600a485a85dc182714843a23e767868e6fd2c6d38d474ed",
+    "lock_inputs_hash": "bd28839618963ef64600a485a85dc182714843a23e767868e6fd2c6d38d474ed"
+  },
+  "requirements": [
+    {
+      "id": "surface",
+      "status": "met",
+      "reason": "surface inventory present",
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "verification",
+      "status": "unmet",
+      "reason": "verification behavior incomplete (tier=behavior)",
+      "verification_tier": "behavior",
+      "accepted_verified_count": 49,
+      "unverified_ids": [
+        "behavior verification: 13 remaining (13 ids (preview: --batch-size, --compress-program, --files0-from, --key, --output, --parallel, --random-sort, --sort, -S, -T))"
+      ],
+      "accepted_unverified_count": 3,
+      "behavior_verified_count": 33,
+      "behavior_unverified_count": 13,
+      "verification": {
+        "triaged_unverified_count": 13,
+        "triaged_unverified_preview": [
+          "--batch-size",
+          "--compress-program",
+          "--files0-from",
+          "--key",
+          "--output"
+        ],
+        "excluded_count": 3,
+        "behavior_excluded_count": 3,
+        "behavior_excluded_preview": [
+          "--check",
+          "-C",
+          "-c"
+        ],
+        "behavior_unverified_reasons": [
+          {
+            "reason_code": "missing_value_examples",
+            "count": 3,
+            "preview": [
+              "--output",
+              "--parallel",
+              "-t"
+            ],
+            "recommended_fix": "add behavior scenario with baseline_scenario_id and assertions"
+          },
+          {
+            "reason_code": "no_scenario",
+            "count": 3,
+            "preview": [
+              "--random-sort",
+              "--sort",
+              "-S"
+            ],
+            "recommended_fix": "add behavior scenario with baseline_scenario_id and assertions"
+          },
+          {
+            "reason_code": "outputs_equal",
+            "count": 7,
+            "preview": [
+              "--batch-size",
+              "--compress-program",
+              "--files0-from",
+              "--key",
+              "-T",
+              "-k",
+              "-o"
+            ],
+            "recommended_fix": "add workaround hints, rerun, then exclude with evidence if still equal"
+          }
+        ],
+        "behavior_unverified_preview": [
+          {
+            "surface_id": "--batch-size",
+            "reason_code": "outputs_equal",
+            "auto_verify_exit_code": 2,
+            "auto_verify_stderr": "sort: option '--batch-size' requires an argument\nTry 'sort --help' for more information.\n"
+          },
+          {
+            "surface_id": "--compress-program",
+            "reason_code": "outputs_equal",
+            "auto_verify_exit_code": 2,
+            "auto_verify_stderr": "sort: option '--compress-program' requires an argument\nTry 'sort --help' for more information.\n"
+          },
+          {
+            "surface_id": "--files0-from",
+            "reason_code": "outputs_equal",
+            "auto_verify_exit_code": 2,
+            "auto_verify_stderr": "sort: option '--files0-from' requires an argument\nTry 'sort --help' for more information.\n"
+          },
+          {
+            "surface_id": "--key",
+            "reason_code": "outputs_equal",
+            "auto_verify_exit_code": 2,
+            "auto_verify_stderr": "sort: option '--key' requires an argument\nTry 'sort --help' for more information.\n"
+          },
+          {
+            "surface_id": "--output",
+            "reason_code": "missing_value_examples",
+            "auto_verify_exit_code": 2,
+            "auto_verify_stderr": "sort: option '--output' requires an argument\nTry 'sort --help' for more information.\n"
+          }
+        ],
+        "behavior_warnings": [
+          {
+            "surface_id": "--random-source",
+            "warning_code": "confounded_behavior_coverage",
+            "message": "scenario verify_--random-source covers --random-source but also exercises --random-sort",
+            "scenario_id": "verify_--random-source",
+            "extra_surface_ids": [
+              "--random-sort"
+            ]
+          },
+          {
+            "surface_id": "-s",
+            "warning_code": "confounded_behavior_coverage",
+            "message": "scenario verify_-s covers -s but also exercises -n",
+            "scenario_id": "verify_-s",
+            "extra_surface_ids": [
+              "-n"
+            ]
+          },
+          {
+            "surface_id": "--stable",
+            "warning_code": "confounded_behavior_coverage",
+            "message": "scenario verify_--stable covers --stable but also exercises --numeric-sort",
+            "scenario_id": "verify_--stable",
+            "extra_surface_ids": [
+              "--numeric-sort"
+            ]
+          }
+        ]
+      },
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "man_page",
+      "status": "met",
+      "reason": "man page present",
+      "evidence": [],
+      "blockers": []
+    }
+  ],
+  "missing_artifacts": [],
+  "blockers": [],
+  "lens_summary": [
+    {
+      "kind": "usage",
+      "template_path": "queries/usage_from_scenarios.sql",
+      "status": "used",
+      "evidence": []
+    },
+    {
+      "kind": "surface",
+      "template_path": "queries/surface_from_scenarios.sql",
+      "status": "used",
+      "evidence": []
+    }
+  ],
+  "decision": "incomplete",
+  "decision_reason": "unmet requirements: verification",
+  "focus": {
+    "requirement": "verification",
+    "reason_code": "no_scenario",
+    "affected_count": 6,
+    "sample_ids": [
+      "--output",
+      "--parallel",
+      "--random-sort"
+    ]
+  },
+  "next_action": {
+    "kind": "edit",
+    "path": "scenarios/plan.json",
+    "content": "{\n  \"defaults\": {\n    \"seed\": {\n      \"entries\": [\n        {\n          \"path\": \"work\",\n          \"kind\": \"dir\"\n        },\n        {\n          \"path\": \"work/file1.txt\",\n          \"kind\": \"file\",\n          \"contents\": \"a\\n\"\n        },\n        {\n          \"path\": \"work/file2\",\n          \"kind\": \"file\",\n          \"contents\": \"b\\n\"\n        },\n        {\n          \"path\": \"work/subdir\",\n          \"kind\": \"dir\"\n        },\n        {\n          \"path\": \"work/subdir/nested.txt\",\n          \"kind\": \"file\",\n          \"contents\": \"c\\n\"\n        },\n        {\n          \"path\": \"work/link\",\n          \"kind\": \"symlink\",\n          \"target\": \"file1.txt\"\n        }\n      ]\n    }\n  },\n  \"upsert_scenarios\": [\n    {\n      \"id\": \"verify_--output\",\n      \"kind\": \"behavior\",\n      \"publish\": false,\n      \"argv\": [\n        \"--output=__value__\",\n        \"work\"\n      ],\n      \"coverage_tier\": \"behavior\",\n      \"baseline_scenario_id\": \"baseline\",\n      \"assertions\": [\n        {\n          \"kind\": \"outputs_differ\"\n        }\n      ],\n      \"covers\": [\n        \"--output\"\n      ],\n      \"coverage_ignore\": false\n    },\n    {\n      \"id\": \"verify_--parallel\",\n      \"kind\": \"behavior\",\n      \"publish\": false,\n      \"argv\": [\n        \"--parallel=__value__\",\n        \"work\"\n      ],\n      \"coverage_tier\": \"behavior\",\n      \"baseline_scenario_id\": \"baseline\",\n      \"assertions\": [\n        {\n          \"kind\": \"outputs_differ\"\n        }\n      ],\n      \"covers\": [\n        \"--parallel\"\n      ],\n      \"coverage_ignore\": false\n    },\n    {\n      \"id\": \"verify_--random-sort\",\n      \"kind\": \"behavior\",\n      \"publish\": false,\n      \"argv\": [\n        \"--random-sort\",\n        \"work\"\n      ],\n      \"coverage_tier\": \"behavior\",\n      \"baseline_scenario_id\": \"baseline\",\n      \"assertions\": [\n        {\n          \"kind\": \"outputs_differ\"\n        }\n      ],\n      \"covers\": [\n        \"--random-sort\"\n      ],\n      \"coverage_ignore\": false\n    },\n    {\n      \"id\": \"verify_--sort\",\n      \"kind\": \"behavior\",\n      \"publish\": false,\n      \"argv\": [\n        \"--sort=general-numeric\",\n        \"work\"\n      ],\n      \"coverage_tier\": \"behavior\",\n      \"baseline_scenario_id\": \"baseline\",\n      \"assertions\": [\n        {\n          \"kind\": \"outputs_differ\"\n        }\n      ],\n      \"covers\": [\n        \"--sort\"\n      ],\n      \"coverage_ignore\": false\n    },\n    {\n      \"id\": \"verify_-S\",\n      \"kind\": \"behavior\",\n      \"publish\": false,\n      \"argv\": [\n        \"-S\",\n        \"100M\",\n        \"work\"\n      ],\n      \"coverage_tier\": \"behavior\",\n      \"baseline_scenario_id\": \"baseline\",\n      \"assertions\": [\n        {\n          \"kind\": \"outputs_differ\"\n        }\n      ],\n      \"covers\": [\n        \"-S\"\n      ],\n      \"coverage_ignore\": false\n    },\n    {\n      \"id\": \"verify_-t\",\n      \"kind\": \"behavior\",\n      \"publish\": false,\n      \"argv\": [\n        \"-t\",\n        \"__value__\",\n        \"work\"\n      ],\n      \"coverage_tier\": \"behavior\",\n      \"baseline_scenario_id\": \"baseline\",\n      \"assertions\": [\n        {\n          \"kind\": \"outputs_differ\"\n        }\n      ],\n      \"covers\": [\n        \"-t\"\n      ],\n      \"coverage_ignore\": false\n    }\n  ]\n}",
+    "reason": "no_scenario: add behavior scenario with baseline_scenario_id and assertions for -S; batched deterministic scaffold for 6 targets; apply patch as merge/upsert by scenario.id",
+    "hint": "Add or fix behavior scenario assertions",
+    "edit_strategy": "merge_behavior_scenarios",
+    "payload": {
+      "target_ids": [
+        "--output",
+        "--parallel",
+        "--random-sort",
+        "--sort",
+        "-S"
+      ],
+      "reason_code": "no_scenario",
+      "retry_count": null,
+      "latest_delta_path": null,
+      "suggested_overlay_keys": [],
+      "assertion_starters": [
+        {
+          "kind": "baseline_stdout_not_contains_seed_path",
+          "seed_path": "work/item.txt",
+          "stdout_token": "item.txt"
+        },
+        {
+          "kind": "variant_stdout_contains_seed_path",
+          "seed_path": "work/item.txt",
+          "stdout_token": "item.txt"
+        }
+      ],
+      "scaffold_context": {
+        "value_required": [
+          {
+            "option_id": "--output",
+            "placeholder": "FILE",
+            "description": "write result to FILE instead of standard output"
+          },
+          {
+            "option_id": "--parallel",
+            "placeholder": "N",
+            "description": "change the number of sorts run concurrently to N"
+          },
+          {
+            "option_id": "--sort",
+            "placeholder": "WORD",
+            "description": "sort according to WORD: general-numeric -g, human-numeric -h, month -M, numeric -n, random -R, version -V"
+          },
+          {
+            "option_id": "-S",
+            "placeholder": "SIZE",
+            "description": "use SIZE for main memory buffer"
+          },
+          {
+            "option_id": "-t",
+            "placeholder": "SEP",
+            "description": "use SEP instead of non-blank to blank transition"
+          }
+        ],
+        "has_outputs_equal": false,
+        "guidance": "Replace __value__ placeholders using examples from option descriptions above"
+      },
+      "target_scenario_output": [
+        {
+          "surface_id": "--output",
+          "exit_code": 2,
+          "stderr_preview": "sort: option '--output' requires an argument\nTry 'sort --help' for more information.\n"
+        },
+        {
+          "surface_id": "--parallel",
+          "exit_code": 2,
+          "stderr_preview": "sort: option '--parallel' requires an argument\nTry 'sort --help' for more information.\n"
+        },
+        {
+          "surface_id": "--random-sort",
+          "exit_code": 0,
+          "stderr_preview": ""
+        },
+        {
+          "surface_id": "--sort",
+          "exit_code": 2,
+          "stderr_preview": "sort: option '--sort' requires an argument\nTry 'sort --help' for more information.\n"
+        },
+        {
+          "surface_id": "-S",
+          "exit_code": 2,
+          "stderr_preview": "sort: option requires an argument -- 'S'\nTry 'sort --help' for more information.\n"
+        },
+        {
+          "surface_id": "-t",
+          "exit_code": 2,
+          "stderr_preview": "sort: option requires an argument -- 't'\nTry 'sort --help' for more information.\n"
+        }
+      ]
+    }
+  },
+  "warnings": [],
+  "man_warnings": [],
+  "force_used": false
+}

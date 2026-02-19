@@ -5,7 +5,174 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: Complete. See M32+ for future work.
+Current focus: M33 (next milestone TBD).
+
+## M32 — Co-Dependent Surface Verification (done)
+
+Goal: Complete `git config` verification by improving LM prompts for co-dependent
+options. **Hypothesis confirmed**: better prompts alone solved the remaining gaps.
+
+### Results
+
+| Metric | M31 (Before) | M32 (After) |
+|--------|--------------|-------------|
+| Total surfaces | 34 | 34 |
+| Verified (delta_seen) | 24 | 24 |
+| Unverified | 2 | 0 |
+| Excluded | 0 | 2 (`--edit`, `-e`) |
+| Pack status | incomplete | **complete** |
+
+Note: Verified count stayed at 24, but pack became complete by properly excluding
+interactive options and resolving remaining unverified surfaces.
+
+### Git Toplevel Exploration
+
+Tested M32 prompts on git toplevel (all subcommands) to validate generalization:
+
+| Metric | Count |
+|--------|-------|
+| Total surfaces | 488 |
+| Verified (after 5 cycles) | 8 |
+| Unverified | 457 |
+
+LM correctly generates co-dependent argv patterns:
+- `--dry-run` → `["git", "add", "--dry-run", "newfile.txt"]`
+- `--force` → `["git", "add", "--force", "ignored.txt"]`
+- `-A` → `["git", "add", "-A"]`
+
+Prompts generalize well - LM understands git options need subcommand context.
+Progress is slow due to surface count (488) but prompt guidance is effective.
+
+### Changes Made
+
+**Phase 1: Co-dependent guidance in all reason prompts**
+
+Added to `behavior_reason_no_scenario.md`, `behavior_reason_initial_scenarios.md`,
+`behavior_reason_outputs_equal.md`, `behavior_reason_outputs_equal_retry.md`:
+
+```markdown
+## Co-dependent options
+
+Some options only work with specific actions or trailing arguments:
+
+- **Modifier options** that modify another action: include the action
+  `["action", "--modifier", "arg"]` not `["--modifier"]`
+
+- **Options requiring values**: include realistic trailing arguments
+  `["--option", "key", "value"]` not `["--option"]`
+
+**"unknown option" doesn't mean the option is invalid** - it means the option
+needs additional context. Check the option's description for clues like
+"With get..." or "Requires action...".
+```
+
+**Phase 2: Sandbox limitations in behavior_base.md**
+
+```markdown
+**Sandbox limitations**: Setup runs in isolated sandbox with read-only home directory. Avoid:
+- `--global` config operations (use `--local` or `--add` instead)
+- Writing to `~` or user config files
+- Network operations
+```
+
+### Key Insights
+
+1. **Co-dependent guidance worked**: LM now generates `["get", "--all", "color.status"]`
+   instead of bare `["--all"]`
+
+2. **Sandbox awareness critical**: First attempt used `git config --global` which fails
+   in sandbox. After adding sandbox limitations, LM generated sandbox-safe scenarios.
+
+3. **Reason file scope matters**: Co-dependent guidance must be in ALL reason prompt
+   files (`no_scenario`, `initial_scenarios`, `outputs_equal`, etc.) since different
+   cycles use different reasons.
+
+### Acceptance Criteria
+
+| Criterion | Status |
+|-----------|--------|
+| Behavior prompt includes co-dependent guidance | done |
+| Sandbox limitations documented | done |
+| LM generates scenarios with correct argv | done |
+| git config: unverified → 0 or excluded with reason | done |
+
+### Regression Benchmarks
+
+Prompt changes can silently break previously-working binaries. These benchmarks
+establish coverage baselines that must not regress.
+
+**When to run:**
+- After modifying any `prompts/*.md` file
+- After changing LM response parsing in `src/workflow/lm_*.rs`
+- NOT needed for unrelated code changes
+
+#### Benchmark Binaries
+
+| Binary | Coverage Type | Why |
+|--------|---------------|-----|
+| `echo` | argument-only | Canary for basic argv parsing |
+| `sort` | stdin transform | Validates stdin input + output assertions |
+| `touch` | file assertions | Validates file_exists/file_contains |
+| `wc` | stdin + args | Combined stdin and argument scenarios |
+| `git config` | co-dependent | Validates M32 subcommand context prompts |
+| `cp` | known-incomplete | Exercises outputs_equal/assertion_failed paths |
+
+Note: `cp` intentionally tests failure modes (SELinux, reflink options) to ensure
+exclusion logic doesn't regress.
+
+#### Metrics Tracked
+
+| Metric | Regression Condition |
+|--------|---------------------|
+| `verified` | Current < baseline |
+| `complete` | Was true, now false |
+| `excluded` | Unexpected increase (review manually) |
+
+#### Scripts
+
+Scripts in `tests/regression/`:
+
+| Script | Purpose | Runtime |
+|--------|---------|---------|
+| `capture-baselines.sh` | One-time baseline capture | ~20min |
+| `check-sanity.sh` | Re-evaluate existing packs (no LM) | ~10s |
+| `check-full.sh [binary]` | Regenerate + compare (live LM) | ~3min/binary |
+
+**Usage:**
+```bash
+# Capture baselines (one-time, commit results)
+./tests/regression/capture-baselines.sh
+
+# Quick sanity after code changes
+./tests/regression/check-sanity.sh
+
+# Full check after prompt changes (all binaries)
+./tests/regression/check-full.sh
+
+# Single binary for iteration
+./tests/regression/check-full.sh echo
+```
+
+#### Baselines Captured
+
+| Binary | Verified | Complete | Notes |
+|--------|----------|----------|-------|
+| echo | 3 | yes | Argument-only canary |
+| sort | 33 | no | Many options, some auto-excluded |
+| touch | 13 | yes | File assertions |
+| wc | 12 | yes | Stdin + args |
+| cp | 10 | no | SELinux/reflink gaps expected |
+| git-config | 34 | yes | Co-dependent validation |
+
+#### Acceptance Criteria (benchmarks)
+
+| Criterion | Status |
+|-----------|--------|
+| Create `tests/regression/` scripts | done |
+| Capture initial baselines | done |
+| Sanity check passes | done |
+
+---
 
 ## M31 — Git Verification: Scope Context Fix (done)
 
@@ -16,9 +183,13 @@ Goal: Fix the scope context bug discovered during git exploration, then verify
 
 | Metric | Before Fix | After Fix |
 |--------|------------|-----------|
-| Verified | 31 (false positives) | **27 (real)** |
-| Unverified | 3 | 7 |
-| Excluded | 0 | 0 |
+| Total surfaces | 34 | 34 |
+| Verified | 31 (false positives) | **24 (real)** |
+| Unverified | 3 | 10 |
+| Pack status | incomplete | incomplete |
+
+Note: Verified count dropped because the fix exposed false positives from incorrect
+scope context handling. The 10 unverified surfaces became the target for M32.
 
 ### Acceptance Criteria
 

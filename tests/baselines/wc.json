@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "generated_at_epoch_ms": 1771525725194,
+  "binary_name": "wc",
+  "lock": {
+    "present": true,
+    "stale": false,
+    "inputs_hash": "eb5e8ca4955d9c140352a6470fc1ac9cb15b00edfaf96106083368c8714ccd0c"
+  },
+  "plan": {
+    "present": true,
+    "stale": false,
+    "inputs_hash": "eb5e8ca4955d9c140352a6470fc1ac9cb15b00edfaf96106083368c8714ccd0c",
+    "lock_inputs_hash": "eb5e8ca4955d9c140352a6470fc1ac9cb15b00edfaf96106083368c8714ccd0c"
+  },
+  "requirements": [
+    {
+      "id": "surface",
+      "status": "met",
+      "reason": "surface inventory present",
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "verification",
+      "status": "met",
+      "reason": "verification behavior complete (tier=behavior)",
+      "verification_tier": "behavior",
+      "accepted_verified_count": 12,
+      "accepted_unverified_count": 2,
+      "behavior_verified_count": 12,
+      "behavior_unverified_count": 0,
+      "verification": {
+        "triaged_unverified_count": 0,
+        "behavior_excluded_count": 0
+      },
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "man_page",
+      "status": "met",
+      "reason": "man page present",
+      "evidence": [],
+      "blockers": []
+    }
+  ],
+  "missing_artifacts": [],
+  "blockers": [],
+  "lens_summary": [
+    {
+      "kind": "usage",
+      "template_path": "queries/usage_from_scenarios.sql",
+      "status": "used",
+      "evidence": []
+    },
+    {
+      "kind": "surface",
+      "template_path": "queries/surface_from_scenarios.sql",
+      "status": "used",
+      "evidence": []
+    }
+  ],
+  "decision": "complete",
+  "decision_reason": null,
+  "next_action": {
+    "kind": "command",
+    "command": "bman status --doc-pack /tmp/bman-regress-wc",
+    "reason": "requirements met; recheck when needed"
+  },
+  "warnings": [],
+  "man_warnings": [],
+  "force_used": false
+}

@@ -41,6 +41,26 @@ Seed fields (all optional):
 
 **Seed paths must be RELATIVE** (e.g., `input.txt`, `work/data.txt`). Never use absolute paths like `/tmp` or `/home/...`. The sandbox already provides a working directory.
 
+**Setup commands**: Some options require initialization before they work. Use `setup` to run commands before the scenario:
+
+```json
+{
+  "kind": "add_behavior_scenario",
+  "argv": ["--option"],
+  "seed": {
+    "setup": [["some-command", "init"]],
+    "files": {"config": "content"}
+  }
+}
+```
+
+Use setup when an option needs pre-existing state that can't be created with just files/dirs (e.g., initialized repositories, databases, config that requires a command to generate).
+
+**Sandbox limitations**: Setup runs in isolated sandbox with read-only home directory. Avoid:
+- `--global` config operations (use `--local` or `--add` instead)
+- Writing to `~` or user config files
+- Network operations
+
 **Stdin input**: For filter commands that read from stdin (tr, cut, sort, uniq, sed, awk), use the `stdin` field:
 
 ```json
