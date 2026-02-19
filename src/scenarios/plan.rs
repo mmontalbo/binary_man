@@ -264,6 +264,7 @@ mod tests {
     fn defaults_with_seed() -> crate::scenarios::ScenarioDefaults {
         crate::scenarios::ScenarioDefaults {
             seed: Some(crate::scenarios::ScenarioSeedSpec {
+                setup: Vec::new(),
                 entries: vec![crate::scenarios::ScenarioSeedEntry {
                     path: "seed.txt".to_string(),
                     kind: crate::scenarios::SeedEntryKind::File,

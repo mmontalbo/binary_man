@@ -10,6 +10,9 @@ use super::{
 /// Seed spec format expected by binary_lens (created inside sandbox).
 #[derive(Debug, Serialize)]
 pub(crate) struct BinaryLensSeedSpec {
+    /// Setup commands to run before creating entries.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub setup: Vec<Vec<String>>,
     pub entries: Vec<BinaryLensSeedEntry>,
 }
 
@@ -74,7 +77,10 @@ pub(crate) fn to_binary_lens_seed_spec(seed: &ScenarioSeedSpec) -> Result<Binary
         })
         .collect::<Result<Vec<_>>>()?;
 
-    Ok(BinaryLensSeedSpec { entries })
+    Ok(BinaryLensSeedSpec {
+        setup: seed.setup.clone(),
+        entries,
+    })
 }
 
 pub(crate) const DEFAULT_BEHAVIOR_SEED_DIR: &str = "work";
@@ -233,5 +239,8 @@ pub(crate) fn default_behavior_seed() -> ScenarioSeedSpec {
             mode: None,
         });
     }
-    ScenarioSeedSpec { entries }
+    ScenarioSeedSpec {
+        setup: Vec::new(),
+        entries,
+    }
 }

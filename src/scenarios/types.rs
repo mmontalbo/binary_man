@@ -69,6 +69,9 @@ pub struct ScenarioSeedEntry {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct ScenarioSeedSpec {
+    /// Setup commands to run before creating entries: [["git", "init"], ...]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub setup: Vec<Vec<String>>,
     #[serde(default)]
     pub entries: Vec<ScenarioSeedEntry>,
 }

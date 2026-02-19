@@ -91,6 +91,7 @@ impl PrereqsFile {
                 None
             } else {
                 Some(ScenarioSeedSpec {
+                    setup: Vec::new(),
                     entries: seed_entries,
                 })
             },
@@ -159,6 +160,7 @@ mod tests {
             PrereqInferenceDefinition {
                 description: Some("git repository".to_string()),
                 seed: Some(ScenarioSeedSpec {
+                    setup: Vec::new(),
                     entries: vec![ScenarioSeedEntry {
                         path: ".git".to_string(),
                         kind: SeedEntryKind::Dir,
