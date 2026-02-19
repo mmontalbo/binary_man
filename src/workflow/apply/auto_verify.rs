@@ -64,6 +64,25 @@ pub(super) fn auto_verification_scenarios(
         return Ok(None);
     };
 
+    // Load prereqs for seed resolution and exclusion detection
+    let paths = enrich::DocPackPaths::new(doc_pack_root.to_path_buf());
+    let prereqs = super::prereq_inference::load_prereqs_for_auto_verify(&paths).ok();
+
+    // Generate scenarios and detect prereq exclusions
+    let result =
+        scenarios::auto_verification_scenarios(&targets, &semantics, &surface, prereqs.as_ref());
+
+    // Always write prereq exclusion overlays (even if we skip bare scenarios)
+    // This ensures surfaces excluded via prereqs are reported as "excluded" in status
+    if !result.prereq_excluded_ids.is_empty() {
+        write_prereq_exclusion_overlays(
+            &paths,
+            &result.prereq_excluded_ids,
+            &surface,
+            verbose,
+        )?;
+    }
+
     // Skip bare auto-verify in initial behavior cycle - LM should generate scenarios first.
     // Check if any behavior scenarios exist in the plan with covers.
     if verification_tier == "behavior" {
@@ -81,14 +100,8 @@ pub(super) fn auto_verification_scenarios(
         }
     }
 
-    // Load prereqs for seed resolution
-    let paths = enrich::DocPackPaths::new(doc_pack_root.to_path_buf());
-    let prereqs = super::prereq_inference::load_prereqs_for_auto_verify(&paths).ok();
-
-    let scenarios =
-        scenarios::auto_verification_scenarios(&targets, &semantics, &surface, prereqs.as_ref());
     Ok(Some(AutoVerificationBatch {
-        scenarios,
+        scenarios: result.scenarios,
         max_new_runs_per_apply: targets.max_new_runs_per_apply,
         targets,
         surface,
@@ -213,4 +226,99 @@ pub(super) fn load_surface_for_auto(
             Ok(None)
         }
     }
+}
+
+/// Write behavior exclusion overlays for prereq-excluded surface IDs.
+///
+/// This ensures surfaces excluded via prereqs (e.g., interactive TTY options)
+/// are reported as "excluded" in status rather than "no_scenario".
+pub(super) fn write_prereq_exclusion_overlays(
+    paths: &enrich::DocPackPaths,
+    prereq_excluded_ids: &[String],
+    _surface: &surface::SurfaceInventory,
+    verbose: bool,
+) -> Result<()> {
+    if prereq_excluded_ids.is_empty() {
+        return Ok(());
+    }
+
+    // Load or create overlays file
+    let overlays_path = paths.root().join("inventory/surface.overlays.json");
+    let mut overlays: serde_json::Value = if overlays_path.is_file() {
+        let content = std::fs::read_to_string(&overlays_path)?;
+        serde_json::from_str(&content)?
+    } else {
+        serde_json::json!({
+            "items": [],
+            "overlays": [],
+            "schema_version": 3
+        })
+    };
+
+    let overlays_array = overlays
+        .get_mut("overlays")
+        .and_then(|v| v.as_array_mut())
+        .ok_or_else(|| anyhow::anyhow!("overlays must be an array"))?;
+
+    // Check which surfaces need exclusion overlays (collect IDs to owned strings to avoid borrow issues)
+    let existing_with_exclusion: std::collections::HashSet<String> = overlays_array
+        .iter()
+        .filter_map(|o| {
+            let id = o.get("id").and_then(|id| id.as_str())?;
+            // Include if it exists at all OR has behavior_exclusion
+            Some(id.to_string())
+        })
+        .collect();
+
+    // Collect overlays to add
+    let mut to_add: Vec<serde_json::Value> = Vec::new();
+    for surface_id in prereq_excluded_ids {
+        // Skip if overlay already exists
+        if existing_with_exclusion.contains(surface_id) {
+            continue;
+        }
+
+        // Determine kind from surface inventory
+        let kind = if surface_id.starts_with('-') {
+            "option"
+        } else {
+            "subcommand"
+        };
+
+        // Create overlay with behavior exclusion
+        // Use requires_interactive_tty as default reason for prereq exclusions
+        // (covers both interactive TTY and elevated permissions cases)
+        let escaped_id = surface_id.replace('-', "_");
+        let overlay = serde_json::json!({
+            "id": surface_id,
+            "kind": kind,
+            "invocation": {},
+            "behavior_exclusion": {
+                "reason_code": "requires_interactive_tty",
+                "note": "excluded via prereqs (requires interactive TTY or elevated permissions)",
+                "evidence": {
+                    "delta_variant_path": format!("inventory/scenarios/prereq_excluded_{}.json", escaped_id)
+                }
+            }
+        });
+
+        to_add.push(overlay);
+        if verbose {
+            eprintln!("  prereq-excluded overlay: {}", surface_id);
+        }
+    }
+
+    // Add collected overlays
+    let added = to_add.len();
+    overlays_array.extend(to_add);
+
+    if added > 0 {
+        let content = serde_json::to_string_pretty(&overlays)?;
+        std::fs::write(&overlays_path, content)?;
+        if verbose {
+            eprintln!("wrote {} prereq exclusion overlays to {}", added, overlays_path.display());
+        }
+    }
+
+    Ok(())
 }

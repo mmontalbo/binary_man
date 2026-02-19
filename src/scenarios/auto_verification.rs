@@ -136,27 +136,47 @@ fn matches_template_kind(id: &str, template_kind: &str) -> bool {
     }
 }
 
+/// Result of auto-verification scenario generation.
+pub struct AutoVerificationResult {
+    /// Generated scenarios for verification.
+    pub scenarios: Vec<ScenarioSpec>,
+    /// Surface IDs excluded via prereqs (e.g., interactive TTY options).
+    pub prereq_excluded_ids: Vec<String>,
+}
+
 /// Build synthetic scenarios for existence verification.
 ///
 /// When prereqs is provided, uses prereq seeds for items that have them.
-/// Items with `exclude: true` in prereqs are skipped.
+/// Items with `exclude: true` in prereqs are skipped and returned in
+/// `prereq_excluded_ids` for overlay generation.
 pub fn auto_verification_scenarios(
     targets: &AutoVerificationTargets,
     semantics: &Semantics,
     surface: &SurfaceInventory,
     prereqs: Option<&PrereqsFile>,
-) -> Vec<ScenarioSpec> {
+) -> AutoVerificationResult {
     let mut scenarios = Vec::with_capacity(targets.target_ids.len());
+    let mut prereq_excluded_ids = Vec::new();
+
     for surface_id in &targets.target_ids {
         let item = surface.items.iter().find(|item| &item.id == surface_id);
         let context_argv = item.map(|i| i.context_argv.as_slice()).unwrap_or(&[]);
 
-        // Build qualified surface_id for prereq lookup
+        // Build qualified surface_id for prereq lookup (e.g., "config.--regexp")
         let qualified_id = qualify_surface_id(context_argv, surface_id);
 
-        // Check prereqs for exclusion using qualified ID
-        let resolved = prereqs.map(|p| p.resolve(&qualified_id));
+        // Check prereqs for exclusion - try qualified ID first, fall back to simple ID
+        let resolved = prereqs.map(|p| {
+            let r = p.resolve(&qualified_id);
+            // If no prereqs found with qualified ID, try simple surface_id
+            if r.seed.is_none() && !r.exclude {
+                p.resolve(surface_id)
+            } else {
+                r
+            }
+        });
         if resolved.as_ref().is_some_and(|r| r.exclude) {
+            prereq_excluded_ids.push(surface_id.clone());
             continue;
         }
 
@@ -166,6 +186,7 @@ pub fn auto_verification_scenarios(
         let seed = resolved
             .and_then(|r| r.seed)
             .unwrap_or_else(|| super::ScenarioSeedSpec {
+                setup: Vec::new(),
                 entries: Vec::new(),
             });
 
@@ -193,7 +214,10 @@ pub fn auto_verification_scenarios(
             expect: ScenarioExpect::default(),
         });
     }
-    scenarios
+    AutoVerificationResult {
+        scenarios,
+        prereq_excluded_ids,
+    }
 }
 
 fn auto_scenario_id(surface_id: &str) -> String {
@@ -209,7 +233,11 @@ fn qualify_surface_id(context_argv: &[String], surface_id: &str) -> String {
     }
 }
 
-fn existence_argv(semantics: &Semantics, surface_id: &str, context_argv: &[String]) -> Vec<String> {
+fn existence_argv(
+    semantics: &Semantics,
+    surface_id: &str,
+    context_argv: &[String],
+) -> Vec<String> {
     // Determine if this looks like an option based on id shape
     let is_option_like = looks_like_option(surface_id);
     let template_kind = if is_option_like {
@@ -345,11 +373,11 @@ mod tests {
         semantics_b.verification.option_existence_argv_prefix = vec!["inspect".to_string()];
         semantics_b.verification.option_existence_argv_suffix = vec!["--help".to_string()];
 
-        let scenarios_a = auto_verification_scenarios(&targets, &semantics_a, &surface, None);
-        let scenarios_b = auto_verification_scenarios(&targets, &semantics_b, &surface, None);
+        let result_a = auto_verification_scenarios(&targets, &semantics_a, &surface, None);
+        let result_b = auto_verification_scenarios(&targets, &semantics_b, &surface, None);
 
         assert_eq!(
-            scenario_argv_for_id(&scenarios_a, "auto_verify::--color"),
+            scenario_argv_for_id(&result_a.scenarios, "auto_verify::--color"),
             vec![
                 "probe".to_string(),
                 "--color".to_string(),
@@ -357,7 +385,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            scenario_argv_for_id(&scenarios_b, "auto_verify::--color"),
+            scenario_argv_for_id(&result_b.scenarios, "auto_verify::--color"),
             vec![
                 "inspect".to_string(),
                 "--color".to_string(),
@@ -373,8 +401,8 @@ mod tests {
         let targets = auto_verification_targets(&base_plan, &surface).unwrap();
         let semantics: Semantics =
             serde_json::from_str(crate::templates::ENRICH_SEMANTICS_JSON).unwrap();
-        let scenarios = auto_verification_scenarios(&targets, &semantics, &surface, None);
-        let scenario = scenarios
+        let result = auto_verification_scenarios(&targets, &semantics, &surface, None);
+        let scenario = result.scenarios
             .iter()
             .find(|candidate| candidate.id == "auto_verify::--color")
             .cloned()
@@ -421,9 +449,9 @@ mod tests {
             tiers: vec!["accepted".to_string(), "behavior".to_string()],
         }];
 
-        let scenarios = auto_verification_scenarios(&targets, &semantics, &surface, None);
+        let result = auto_verification_scenarios(&targets, &semantics, &surface, None);
         assert_eq!(
-            scenario_argv_for_id(&scenarios, "auto_verify::--color"),
+            scenario_argv_for_id(&result.scenarios, "auto_verify::--color"),
             vec![
                 "new".to_string(),
                 "--color".to_string(),
@@ -467,10 +495,10 @@ mod tests {
             tiers: vec!["behavior".to_string()],
         }];
 
-        let scenarios = auto_verification_scenarios(&targets, &semantics, &surface, None);
+        let result = auto_verification_scenarios(&targets, &semantics, &surface, None);
         // Should be: context_argv + surface_id + suffix = ["config", "--global", "--help"]
         assert_eq!(
-            scenario_argv_for_id(&scenarios, "auto_verify::--global"),
+            scenario_argv_for_id(&result.scenarios, "auto_verify::--global"),
             vec![
                 "config".to_string(),
                 "--global".to_string(),
