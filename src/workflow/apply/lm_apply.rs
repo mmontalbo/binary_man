@@ -99,8 +99,16 @@ pub(super) fn invoke_lm_and_apply(
         .map(|e| e.surface_id.clone())
         .collect();
 
+    // Build context_argv map from surface inventory
+    let context_argv_map: BTreeMap<String, Vec<String>> = surface_inventory
+        .items
+        .iter()
+        .map(|item| (item.id.clone(), item.context_argv.clone()))
+        .collect();
+
     // Validate responses
-    let (validated, result) = validate_responses(&batch, &valid_surface_ids);
+    let (validated, result) =
+        validate_responses(&batch, &valid_surface_ids, &context_argv_map);
 
     if verbose {
         eprintln!(
@@ -298,8 +306,16 @@ pub(super) fn apply_lm_response(doc_pack: &Path, lm_response_path: &Path) -> Res
         .map(|e| e.surface_id.clone())
         .collect();
 
+    // Build context_argv map from surface inventory
+    let context_argv_map: BTreeMap<String, Vec<String>> = surface_inventory
+        .items
+        .iter()
+        .map(|item| (item.id.clone(), item.context_argv.clone()))
+        .collect();
+
     // Validate responses
-    let (validated, result) = validate_responses(&batch, &valid_surface_ids);
+    let (validated, result) =
+        validate_responses(&batch, &valid_surface_ids, &context_argv_map);
 
     eprintln!(
         "lm-response: validated {} responses ({} skipped, {} errors)",
@@ -577,3 +593,4 @@ pub(super) fn apply_lm_overlays(
 
     Ok(invalidated_surface_ids)
 }
+

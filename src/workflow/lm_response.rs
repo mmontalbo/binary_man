@@ -102,6 +102,11 @@ pub struct LmDecisionResponse {
 /// Type is implicit in the field name, reducing LM errors.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FlatSeed {
+    /// Setup commands to run before creating files: [["git", "init"], ...]
+    /// Executed in order inside the sandbox before file creation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub setup: Vec<Vec<String>>,
+
     /// Files to create: {"filename": "content", ...}
     /// Created with mode 644.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -269,9 +274,14 @@ pub fn load_lm_response(path: &std::path::Path) -> Result<LmResponseBatch> {
 }
 
 /// Validate an LM response batch against the current decisions.
+///
+/// The `context_argv_map` provides scope context for each surface_id (e.g., `["config"]`
+/// for surfaces under `git config`). This context is prepended to LM-provided argv
+/// so scenarios run in the correct scope.
 pub fn validate_responses(
     batch: &LmResponseBatch,
     valid_surface_ids: &std::collections::BTreeSet<String>,
+    context_argv_map: &std::collections::BTreeMap<String, Vec<String>>,
 ) -> (ValidatedResponses, ValidationResult) {
     let mut validated = ValidatedResponses::default();
     let mut result = ValidationResult {
@@ -358,12 +368,23 @@ pub fn validate_responses(
                     continue;
                 }
 
+                // Build full argv with context (e.g., ["config"] for git config surfaces)
+                let context = context_argv_map.get(surface_id).cloned().unwrap_or_default();
+
+                // Deduplicate: if LM included context at start, skip prepending
+                let deduped_argv = deduplicate_argv_prefix(&context, argv);
+
+                let full_argv: Vec<String> = context
+                    .into_iter()
+                    .chain(deduped_argv.into_iter())
+                    .collect();
+
                 // Generate the full scenario with boilerplate
                 let scenario = ScenarioSpec {
                     id: format!("verify_{}", surface_id.replace(' ', "_")),
                     kind: crate::scenarios::ScenarioKind::Behavior,
                     publish: false,
-                    argv: argv.clone(),
+                    argv: full_argv,
                     env: BTreeMap::new(),
                     stdin: stdin_normalized,
                     seed: seed_spec,
@@ -518,6 +539,30 @@ pub fn validate_responses(
     (validated, result)
 }
 
+/// Deduplicate argv if LM already included the argv_context prefix.
+///
+/// If `argv` starts with the same elements as `prefix` (case-insensitive),
+/// strip that prefix from `argv` to avoid duplication.
+fn deduplicate_argv_prefix(prefix: &[String], argv: &[String]) -> Vec<String> {
+    if prefix.is_empty() {
+        return argv.to_vec();
+    }
+
+    // Check if argv starts with prefix (case-insensitive)
+    let prefix_matches = prefix.len() <= argv.len()
+        && prefix
+            .iter()
+            .zip(argv.iter())
+            .all(|(p, a)| p.eq_ignore_ascii_case(a));
+
+    if prefix_matches {
+        // LM included prefix, skip it
+        argv[prefix.len()..].to_vec()
+    } else {
+        argv.to_vec()
+    }
+}
+
 /// Validate a scenario specification.
 fn validate_scenario(scenario: &ScenarioSpec, surface_id: &str) -> Result<()> {
     ensure!(
@@ -616,7 +661,10 @@ fn flat_seed_to_seed_spec(flat: &FlatSeed) -> ScenarioSeedSpec {
         });
     }
 
-    ScenarioSeedSpec { entries }
+    ScenarioSeedSpec {
+        setup: flat.setup.clone(),
+        entries,
+    }
 }
 
 #[cfg(test)]
@@ -664,7 +712,7 @@ mod tests {
             }],
         };
 
-        let (validated, result) = validate_responses(&batch, &surface_ids);
+        let (validated, result) = validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
 
         assert_eq!(result.valid_count, 1);
         assert_eq!(result.errors.len(), 0);
@@ -686,7 +734,7 @@ mod tests {
             }],
         };
 
-        let (_, result) = validate_responses(&batch, &surface_ids);
+        let (_, result) = validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
 
         assert_eq!(result.valid_count, 0);
         assert_eq!(result.errors.len(), 1);
@@ -712,7 +760,7 @@ mod tests {
             }],
         };
 
-        let (validated, result) = validate_responses(&batch, &surface_ids);
+        let (validated, result) = validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
 
         assert_eq!(result.valid_count, 1);
         assert_eq!(validated.value_examples.get("--color").unwrap().len(), 3);
@@ -735,7 +783,7 @@ mod tests {
             }],
         };
 
-        let (validated, result) = validate_responses(&batch, &surface_ids);
+        let (validated, result) = validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
 
         assert_eq!(result.valid_count, 1);
         assert!(validated.exclusions.contains_key("--escape"));
@@ -759,7 +807,7 @@ mod tests {
             }],
         };
 
-        let (_, result) = validate_responses(&batch, &surface_ids);
+        let (_, result) = validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
 
         assert_eq!(result.valid_count, 0);
         assert_eq!(result.errors.len(), 1);
@@ -810,7 +858,7 @@ mod tests {
             }],
         };
 
-        let (validated, result) = validate_responses(&batch, &surface_ids);
+        let (validated, result) = validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
 
         assert_eq!(result.valid_count, 1);
         assert_eq!(result.errors.len(), 0);
@@ -836,7 +884,7 @@ mod tests {
             }],
         };
 
-        let (_, result) = validate_responses(&batch, &surface_ids);
+        let (_, result) = validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
 
         assert_eq!(result.valid_count, 0);
         assert_eq!(result.errors.len(), 1);
@@ -868,7 +916,7 @@ mod tests {
             }],
         };
 
-        let (_, result) = validate_responses(&batch, &surface_ids);
+        let (_, result) = validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
 
         assert_eq!(result.valid_count, 0);
         assert_eq!(result.errors.len(), 1);
@@ -891,6 +939,7 @@ mod tests {
             exact_line: false,
         }];
         scenario.seed = Some(crate::scenarios::ScenarioSeedSpec {
+            setup: Vec::new(),
             entries: vec![crate::scenarios::ScenarioSeedEntry {
                 path: "input.txt".to_string(),
                 kind: crate::scenarios::SeedEntryKind::File,
@@ -910,10 +959,97 @@ mod tests {
             }],
         };
 
-        let (validated, result) = validate_responses(&batch, &surface_ids);
+        let (validated, result) = validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
 
         assert_eq!(result.valid_count, 1);
         assert_eq!(result.errors.len(), 0);
         assert_eq!(validated.scenarios_to_upsert.len(), 1);
+    }
+
+    #[test]
+    fn test_deduplicate_argv_prefix() {
+        // No prefix - returns argv unchanged
+        assert_eq!(
+            deduplicate_argv_prefix(&[], &["--list".to_string()]),
+            vec!["--list".to_string()]
+        );
+
+        // Prefix not in argv - returns argv unchanged
+        assert_eq!(
+            deduplicate_argv_prefix(
+                &["config".to_string()],
+                &["--list".to_string()]
+            ),
+            vec!["--list".to_string()]
+        );
+
+        // Prefix matches start of argv - strips prefix
+        assert_eq!(
+            deduplicate_argv_prefix(
+                &["config".to_string()],
+                &["config".to_string(), "--list".to_string()]
+            ),
+            vec!["--list".to_string()]
+        );
+
+        // Multi-element prefix matches - strips all
+        assert_eq!(
+            deduplicate_argv_prefix(
+                &["config".to_string(), "get".to_string()],
+                &["config".to_string(), "get".to_string(), "--all".to_string()]
+            ),
+            vec!["--all".to_string()]
+        );
+
+        // Case-insensitive matching
+        assert_eq!(
+            deduplicate_argv_prefix(
+                &["CONFIG".to_string()],
+                &["config".to_string(), "--list".to_string()]
+            ),
+            vec!["--list".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_context_argv_deduplication_in_validate_responses() {
+        // Regression test: LM includes subcommand in argv, context_argv_map also has it
+        // Result should NOT have duplicated subcommand
+        let surface_ids: std::collections::BTreeSet<String> =
+            ["--list".to_string()].into_iter().collect();
+
+        let mut context_argv_map = std::collections::BTreeMap::new();
+        context_argv_map.insert("--list".to_string(), vec!["config".to_string()]);
+
+        let batch = LmResponseBatch {
+            schema_version: 1,
+            responses: vec![LmDecisionResponse {
+                surface_id: "--list".to_string(),
+                action: LmAction::AddBehaviorScenario {
+                    argv: vec!["config".to_string(), "--list".to_string()], // LM includes "config"
+                    seed: None,
+                    stdin: None,
+                    assertions: Vec::new(),
+                },
+            }],
+        };
+
+        let (validated, result) = validate_responses(
+            &batch,
+            &surface_ids,
+            &context_argv_map,
+        );
+
+        assert_eq!(result.valid_count, 1);
+        assert_eq!(result.errors.len(), 0);
+        assert_eq!(validated.scenarios_to_upsert.len(), 1);
+
+        // The scenario argv should be ["config", "--list"], NOT ["config", "config", "--list"]
+        let scenario = &validated.scenarios_to_upsert[0];
+        assert_eq!(
+            scenario.argv,
+            vec!["config".to_string(), "--list".to_string()],
+            "argv should not have duplicated context prefix"
+        );
     }
 }
