@@ -49,7 +49,7 @@
 //! 2. `lm_command` in `enrich/config.json`
 //! 3. `BMAN_LM_COMMAND` environment variable
 
-use crate::enrich::{BehaviorNextActionPayload, StatusSummary};
+use crate::enrich::{BehaviorNextActionPayload, LearnedHints, StatusSummary};
 use crate::workflow::lm_response::LmResponseBatch;
 use anyhow::{anyhow, Context, Result};
 use std::io::Write;
@@ -85,25 +85,9 @@ const BEHAVIOR_BASE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/prompts/behavior_base.md"
 ));
-const REASON_NO_SCENARIO: &str = include_str!(concat!(
+const REASON_UNIFIED: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/prompts/behavior_reason_no_scenario.md"
-));
-const REASON_OUTPUTS_EQUAL: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/prompts/behavior_reason_outputs_equal.md"
-));
-const REASON_OUTPUTS_EQUAL_RETRY: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/prompts/behavior_reason_outputs_equal_retry.md"
-));
-const REASON_ASSERTION_FAILED: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/prompts/behavior_reason_assertion_failed.md"
-));
-const REASON_INITIAL_SCENARIOS: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/prompts/behavior_reason_initial_scenarios.md"
+    "/prompts/behavior_reason_unified.md"
 ));
 
 /// Invoke the LM to generate responses for behavior verification.
@@ -116,6 +100,7 @@ pub fn invoke_lm_for_behavior(
     config: &LmClientConfig,
     summary: &StatusSummary,
     payload: &BehaviorNextActionPayload,
+    hints: Option<&LearnedHints>,
 ) -> Result<LmInvocationResult<LmResponseBatch>> {
     let binary_name = summary.binary_name.as_deref().unwrap_or("<binary>");
     let start = Instant::now();
@@ -127,7 +112,7 @@ pub fn invoke_lm_for_behavior(
     for attempt in 0..=MAX_LM_RETRIES {
         // Build prompt - include error context on retry
         let prompt = if attempt == 0 {
-            build_behavior_prompt(summary, payload)
+            build_behavior_prompt(summary, payload, hints)
         } else {
             eprintln!(
                 "  LM retry {}/{} (previous response had error)",
@@ -181,25 +166,25 @@ pub fn invoke_lm_for_behavior(
 }
 
 /// Build the prompt for behavior verification.
-fn build_behavior_prompt(summary: &StatusSummary, payload: &BehaviorNextActionPayload) -> String {
+fn build_behavior_prompt(
+    summary: &StatusSummary,
+    payload: &BehaviorNextActionPayload,
+    hints: Option<&LearnedHints>,
+) -> String {
     let binary_name = summary.binary_name.as_deref().unwrap_or("<binary>");
     let reason_code = payload.reason_code.as_deref().unwrap_or("unknown");
 
-    // Select reason-specific section
-    let reason_section = match reason_code {
-        "initial_scenarios" => REASON_INITIAL_SCENARIOS.to_string(),
-        "no_scenario" => REASON_NO_SCENARIO.to_string(),
-        "outputs_equal" => {
-            let retry_count = payload.retry_count.unwrap_or(0);
-            if retry_count > 0 {
-                REASON_OUTPUTS_EQUAL_RETRY.replace("{retry_count}", &retry_count.to_string())
-            } else {
-                REASON_OUTPUTS_EQUAL.to_string()
-            }
-        }
-        "assertion_failed" => REASON_ASSERTION_FAILED.to_string(),
-        _ => format!("Handle these items based on the reason code: {reason_code}"),
-    };
+    // Build state context from reason code
+    let state_context = build_state_context(reason_code, payload);
+
+    // Build hints section from learned patterns
+    let hints_section = build_hints_section(hints);
+
+    // Assemble reason section from unified template
+    let reason_section = REASON_UNIFIED
+        .replace("{reason_code}", reason_code)
+        .replace("{state_context}", &state_context)
+        .replace("{hints_section}", &hints_section);
 
     // Build context section (scaffold hints, value requirements)
     let context_section = build_context_section(payload);
@@ -214,6 +199,68 @@ fn build_behavior_prompt(summary: &StatusSummary, payload: &BehaviorNextActionPa
         .replace("{reason_section}", &reason_section)
         .replace("{context_section}", &context_section)
         .replace("{targets}", &targets)
+}
+
+/// Build state-specific context based on reason code.
+fn build_state_context(reason_code: &str, payload: &BehaviorNextActionPayload) -> String {
+    match reason_code {
+        "initial_scenarios" => {
+            "Generate scenarios for ALL options. Each needs a scenario OR exclusion.".to_string()
+        }
+        "no_scenario" => {
+            "No scenario exists. Create one based on the option description, or exclude if untestable.".to_string()
+        }
+        "outputs_equal" => {
+            let retry_count = payload.retry_count.unwrap_or(0);
+            if retry_count > 0 {
+                format!(
+                    "Output still matches baseline after {} retries. Try a different approach or exclude with context.",
+                    retry_count
+                )
+            } else {
+                "Output matches baseline - no observable difference. Fix by:\n\
+                 - Add `seed` files the option needs\n\
+                 - Add `stdin` for filter commands\n\
+                 - Use assertions (`file_exists`, `exit_code`) instead of stdout\n\
+                 - Include action/subcommand in argv\n\
+                 - Exclude if truly untestable".to_string()
+            }
+        }
+        "assertion_failed" => {
+            "Assertion failed. Fix the assertion, fix the scenario, or exclude if unpredictable.".to_string()
+        }
+        _ => format!("Handle these items based on the reason code: {reason_code}"),
+    }
+}
+
+/// Build hints section from learned patterns.
+fn build_hints_section(hints: Option<&LearnedHints>) -> String {
+    let Some(hints) = hints else {
+        return String::new();
+    };
+
+    if hints.working_argvs.is_empty() {
+        return String::new();
+    }
+
+    let mut section = String::from("## Learned Patterns\n\n");
+    section.push_str("These argvs successfully verified similar options:\n\n");
+
+    // Show up to 5 examples
+    for (surface_id, argv) in hints.working_argvs.iter().take(5) {
+        let argv_json = serde_json::to_string(argv).unwrap_or_else(|_| "[]".to_string());
+        section.push_str(&format!("- `{}`: `{}`\n", surface_id, argv_json));
+    }
+
+    if hints.working_argvs.len() > 5 {
+        section.push_str(&format!(
+            "\n({} more patterns available)\n",
+            hints.working_argvs.len() - 5
+        ));
+    }
+
+    section.push('\n');
+    section
 }
 
 /// Build the targets section, including scenario output for error feedback.
