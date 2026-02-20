@@ -16,6 +16,11 @@ Git's .git/COMMIT_EDITMSG). Without --write, the formatted message is printed
 to stdout. Pass --commit to invoke `git commit` with the formatted message,
 and repeat --commit-arg to forward custom arguments (for example --commit-arg
 --amend).
+
+Path validation:
+    --change entries are validated to ensure the path exists. Deleted files
+    (both staged and unstaged) are accepted. For non-file labels, use a format
+    like "component (description): what changed" to skip path validation.
 """
 
 from __future__ import annotations
@@ -83,6 +88,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def _is_deleted_in_git(root: Path, path: str) -> bool:
+    """Check if path is deleted (staged or unstaged) in git."""
+    # Check unstaged deletions
     try:
         result = subprocess.run(
             ["git", "-C", str(root), "ls-files", "--deleted", "--", path],
@@ -90,9 +97,25 @@ def _is_deleted_in_git(root: Path, path: str) -> bool:
             capture_output=True,
             text=True,
         )
+        if path in result.stdout.splitlines():
+            return True
     except OSError:
-        return False
-    return path in result.stdout.splitlines()
+        pass
+
+    # Check staged deletions
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "diff", "--cached", "--name-only", "--diff-filter=D", "--", path],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if path in result.stdout.splitlines():
+            return True
+    except OSError:
+        pass
+
+    return False
 
 
 def _split_context_lines(entries: list[str]) -> list[str]:
