@@ -3,7 +3,8 @@
 //! Functions for invoking LM and applying its responses to doc packs.
 
 use crate::enrich::{
-    self, append_lm_log, next_cycle_number, store_lm_content, LmInvocationKind, LmLogBuilder,
+    self, append_lm_log, load_learned_hints, next_cycle_number, store_lm_content, LmInvocationKind,
+    LmLogBuilder,
 };
 use crate::scenarios;
 use crate::surface;
@@ -38,8 +39,12 @@ pub(super) fn invoke_lm_and_apply(
     // Build log entry
     let log_builder = LmLogBuilder::new(cycle, kind).with_items(payload.target_ids.clone());
 
+    // Load learned hints for prompt context
+    let hints = load_learned_hints(&paths.learned_hints_path()).ok();
+    let hints_ref = hints.as_ref();
+
     // Invoke LM
-    let invocation = match invoke_lm_for_behavior(lm_config, summary, payload) {
+    let invocation = match invoke_lm_for_behavior(lm_config, summary, payload, hints_ref) {
         Ok(inv) => inv,
         Err(e) => {
             // Log failure

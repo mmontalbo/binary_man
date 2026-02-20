@@ -43,6 +43,11 @@ impl DocPackPaths {
         self.enrich_dir().join("prereqs.json")
     }
 
+    /// Return the `enrich/learned_hints.json` path.
+    pub fn learned_hints_path(&self) -> PathBuf {
+        self.enrich_dir().join("learned_hints.json")
+    }
+
     /// Return the `enrich/lock.json` path.
     pub fn lock_path(&self) -> PathBuf {
         self.enrich_dir().join("lock.json")

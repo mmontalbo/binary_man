@@ -65,7 +65,6 @@ mod cleanup;
 mod ledgers;
 mod lm_apply;
 mod pack;
-mod prereq_inference;
 mod progress;
 mod rendering;
 
@@ -466,10 +465,17 @@ fn run_apply_with_lm_loop(args: &ApplyArgs) -> Result<()> {
     }
 
     // Final status
-    let final_computation = status_summary_for_doc_pack(doc_pack_root, false, false)?;
+    let final_computation = status_summary_for_doc_pack(doc_pack_root.clone(), false, false)?;
     let final_summary = &final_computation.summary;
     let unverified = get_unverified_count(final_summary);
     let excluded = get_excluded_count(final_summary);
+
+    // Record learned hints from successful verifications
+    if let Err(e) = record_learned_hints(&paths, args.verbose) {
+        if args.verbose {
+            eprintln!("apply: warning: failed to record hints: {}", e);
+        }
+    }
 
     eprintln!(
         "apply: finished after {} cycles ({} unverified, {} excluded)",
@@ -940,6 +946,86 @@ fn normalize_rerun_scenario_ids(raw: &[String]) -> Vec<String> {
     ids.sort();
     ids.dedup();
     ids
+}
+
+/// Record learned hints from successful verifications.
+///
+/// Extracts working argvs from scenarios that produced `delta_seen` and
+/// stores them in `enrich/learned_hints.json` for use in future LM prompts.
+fn record_learned_hints(paths: &enrich::DocPackPaths, verbose: bool) -> Result<()> {
+    // Load verification cache
+    let cache_path = paths.root().join("inventory/verification_cache.json");
+    if !cache_path.exists() {
+        return Ok(());
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Cache {
+        ledger: scenarios::VerificationLedger,
+    }
+
+    let content = fs::read_to_string(&cache_path)
+        .with_context(|| format!("read verification cache: {}", cache_path.display()))?;
+    let cache: Cache = serde_json::from_str(&content)
+        .with_context(|| format!("parse verification cache: {}", cache_path.display()))?;
+
+    // Load scenario plan to get argvs
+    let scenarios_path = paths.scenarios_plan_path();
+    if !scenarios_path.exists() {
+        return Ok(());
+    }
+    let plan = scenarios::load_plan(&scenarios_path, paths.root())?;
+
+    // Build surface_id -> argv map from behavior scenarios
+    let mut scenario_argvs: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for scenario in &plan.scenarios {
+        if scenario.covers.is_empty() {
+            continue;
+        }
+        // Only use scenarios that are likely behavior scenarios (have argv)
+        if scenario.argv.is_empty() {
+            continue;
+        }
+        // Use first covered surface as key
+        let surface_id = &scenario.covers[0];
+        // Prefer scenarios with "verify_" prefix as they're behavior scenarios
+        if scenario.id.starts_with("verify_") || !scenario_argvs.contains_key(surface_id) {
+            scenario_argvs.insert(surface_id.clone(), scenario.argv.clone());
+        }
+    }
+
+    // Load existing hints
+    let hints_path = paths.learned_hints_path();
+    let mut hints = enrich::load_learned_hints(&hints_path)?;
+
+    // Record working argvs for delta_seen entries
+    // Always overwrite - verified argv is authoritative
+    let mut new_hints = 0;
+    for entry in &cache.ledger.entries {
+        if entry.delta_outcome.as_deref() == Some("delta_seen") {
+            if let Some(argv) = scenario_argvs.get(&entry.surface_id) {
+                let existing = hints.working_argvs.get(&entry.surface_id);
+                if existing != Some(argv) {
+                    hints.record_working_argv(&entry.surface_id, argv.clone());
+                    new_hints += 1;
+                }
+            }
+        }
+    }
+
+    // Only write if we have hints
+    if !hints.is_empty() && new_hints > 0 {
+        enrich::write_learned_hints(&hints_path, &hints)?;
+        if verbose {
+            eprintln!(
+                "apply: recorded {} new hints ({} total working argvs)",
+                new_hints,
+                hints.working_argv_count()
+            );
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
