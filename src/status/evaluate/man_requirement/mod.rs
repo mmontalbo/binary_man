@@ -1,5 +1,4 @@
 mod meta;
-mod surface;
 
 use super::super::help::{help_usage_evidence_state, HelpUsageEvidenceState};
 use super::super::inputs::{load_semantics_state, SemanticsLoadError};
@@ -7,11 +6,22 @@ use super::EvalState;
 use crate::enrich;
 use crate::scenarios;
 use crate::semantics;
-use crate::surface::{load_surface_inventory, validate_surface_inventory};
+use crate::surface::{load_surface_inventory, validate_surface_inventory, SurfaceInventory};
 use anyhow::Result;
 
 use meta::{apply_render_summary, load_meta};
-use surface::surface_is_multi_command;
+
+fn surface_is_multi_command(surface: &SurfaceInventory) -> bool {
+    // Multi-command surfaces have entry points: items whose id is in their context_argv
+    surface
+        .items
+        .iter()
+        .any(|item| item.context_argv.last().map(|s| s.as_str()) == Some(item.id.as_str()))
+        || surface
+            .blockers
+            .iter()
+            .any(|blocker| blocker.code == "surface_entry_points_missing")
+}
 
 pub(super) fn eval_man_page_requirement(
     state: &mut EvalState,

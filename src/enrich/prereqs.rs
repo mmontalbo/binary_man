@@ -11,9 +11,6 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-/// Current schema version for `enrich/prereqs.json`.
-pub const PREREQS_SCHEMA_VERSION: u32 = 1;
-
 /// LM-inferred prerequisite mappings for surface items.
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
@@ -52,15 +49,6 @@ pub struct ResolvedPrereq {
 }
 
 impl PrereqsFile {
-    /// Create a new empty prereqs file.
-    pub fn new() -> Self {
-        Self {
-            schema_version: PREREQS_SCHEMA_VERSION,
-            definitions: BTreeMap::new(),
-            surface_map: BTreeMap::new(),
-        }
-    }
-
     /// Resolve prereqs for a surface item.
     pub fn resolve(&self, surface_id: &str) -> ResolvedPrereq {
         // Get prereq keys from surface_map
@@ -154,7 +142,7 @@ mod tests {
 
     #[test]
     fn resolve_with_definitions() {
-        let mut prereqs = PrereqsFile::new();
+        let mut prereqs = PrereqsFile::default();
         prereqs.definitions.insert(
             "git_repo".to_string(),
             PrereqInferenceDefinition {

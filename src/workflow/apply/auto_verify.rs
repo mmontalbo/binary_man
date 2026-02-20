@@ -66,11 +66,14 @@ pub(super) fn auto_verification_scenarios(
 
     // Load prereqs for seed resolution and exclusion detection
     let paths = enrich::DocPackPaths::new(doc_pack_root.to_path_buf());
-    let prereqs = super::prereq_inference::load_prereqs_for_auto_verify(&paths).ok();
+    let prereqs = enrich::load_prereqs(&paths.prereqs_path())
+        .ok()
+        .flatten()
+        .unwrap_or_default();
 
     // Generate scenarios and detect prereq exclusions
     let result =
-        scenarios::auto_verification_scenarios(&targets, &semantics, &surface, prereqs.as_ref());
+        scenarios::auto_verification_scenarios(&targets, &semantics, &surface, Some(&prereqs));
 
     // Always write prereq exclusion overlays (even if we skip bare scenarios)
     // This ensures surfaces excluded via prereqs are reported as "excluded" in status
