@@ -5,7 +5,145 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M33 (next milestone TBD).
+Current focus: M33 (Minimal Viable Persistence).
+
+## M33 — Minimal Viable Persistence (in progress)
+
+Goal: Simplify behavior verification by consolidating prompts and persisting only
+concrete wins (working argvs, exclusions) rather than expanding prompt complexity.
+
+### Problem Statement
+
+The current prompt architecture has grown complex:
+- 6 behavior prompt files that must stay in sync
+- Reason-based branching (`no_scenario`, `outputs_equal`, `assertion_failed`, etc.)
+- Same guidance (co-dependent options, sandbox limits) duplicated across files
+- Each new insight requires updates to multiple prompts
+
+This complexity emerged from trying to give the LM different context based on
+verification state. But the LM doesn't need separate prompts—it needs examples
+of what works.
+
+### Proposed Approach: Learn from Success
+
+Instead of expanding prompts with more guidance, persist what actually worked:
+
+```rust
+struct LearnedHints {
+    // Per surface: what argv succeeded?
+    working_argvs: BTreeMap<String, Vec<String>>,
+
+    // Per surface: what was excluded and why?
+    exclusions: BTreeMap<String, String>,
+}
+```
+
+**Within a session**: LM accumulates context naturally through conversation history.
+When `--all` fails with "unknown option" but `["get", "--all", "user.name"]` succeeds,
+the LM sees this progression and applies the pattern to similar surfaces.
+
+**Across sessions**: Persist only the concrete wins—working argvs and exclusion
+decisions. On new session, load these as hints:
+
+```markdown
+# Generate Scenario for --regexp
+
+## Hints from Prior Sessions
+Working argv for similar options:
+- --all: ["git", "config", "get", "--all", "user.name"]
+- --fixed-value: ["git", "config", "get", "--fixed-value", "user.name", "Alice"]
+
+## Task
+Generate scenario for --regexp.
+The hints suggest "get" mode with a key argument works for modifier options.
+```
+
+### Key Insight
+
+The LM doesn't need to understand binary semantics—it needs examples of successful
+invocations. Working argvs are self-documenting: `["git", "config", "get", "--all", "user.name"]`
+encodes the pattern better than explanatory text ever could.
+
+### Changes
+
+**Phase 1: Consolidate prompts**
+
+| Current | Proposed |
+|---------|----------|
+| `behavior_base.md` | Keep (shared context) |
+| `behavior_reason_no_scenario.md` | Merge into `behavior_unified.md` |
+| `behavior_reason_initial_scenarios.md` | Merge into `behavior_unified.md` |
+| `behavior_reason_outputs_equal.md` | Merge into `behavior_unified.md` |
+| `behavior_reason_outputs_equal_retry.md` | Merge into `behavior_unified.md` |
+| `behavior_reason_assertion_failed.md` | Merge into `behavior_unified.md` |
+
+Single unified prompt with all context:
+- Current verification state (no scenario / outputs_equal / assertion_failed)
+- Hints from prior sessions (working argvs for this binary)
+- The option being verified and its description
+
+**Phase 2: Add hints persistence**
+
+Location: `enrich/learned_hints.json`
+
+```json
+{
+  "schema_version": 1,
+  "working_argvs": {
+    "--all": ["git", "config", "get", "--all", "user.name"],
+    "--fixed-value": ["git", "config", "get", "--fixed-value", "user.name", "Alice"]
+  },
+  "exclusions": {
+    "--edit": "interactive option requires terminal",
+    "-e": "alias for --edit"
+  }
+}
+```
+
+**Phase 3: Update workflow**
+
+- On verification success (`delta_seen`): record working argv
+- On exclusion: record reason
+- On new session: load hints into unified prompt
+- Remove reason-based prompt selection logic
+
+### Why This Works
+
+1. **Self-correcting**: LM sees what actually worked, not what we think should work
+2. **No guidance duplication**: Single prompt with dynamic hints
+3. **Compound learning**: Success on `--all` helps `--regexp`, `--fixed-value`, etc.
+4. **Minimal storage**: Just argvs and reasons, not facts/KB/understanding
+
+### What We're NOT Doing
+
+- Building parsers for SYNOPSIS/help text grammar
+- Extracting behavioral fingerprints via strace
+- Maintaining a knowledge base or fact store
+- Compressing "understanding" into structured schemas
+
+### Acceptance Criteria
+
+| Criterion | Status |
+|-----------|--------|
+| Consolidate 5 reason prompts into 1 unified prompt | todo |
+| Add `LearnedHints` struct and persistence | todo |
+| Record working argvs on `delta_seen` | todo |
+| Load hints on session start | todo |
+| Remove reason-based prompt selection | todo |
+| Regression tests pass (M32 baselines) | todo |
+
+### Risks
+
+1. **Hints may not generalize**: `--all` pattern might not apply to `--verbose`
+   - Mitigation: Include only "modifier option" hints, not all surfaces
+
+2. **Cold start**: First session has no hints
+   - Mitigation: Keep co-dependent guidance in base prompt; hints are additive
+
+3. **Stale hints**: Binary updates may invalidate old argvs
+   - Mitigation: Hints are suggestions, not requirements; LM adapts
+
+---
 
 ## M32 — Co-Dependent Surface Verification (done)
 
