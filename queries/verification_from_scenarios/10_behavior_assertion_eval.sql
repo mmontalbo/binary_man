@@ -42,7 +42,7 @@
       a.pattern as file_pattern,
       a.expected as expected_exit_code,
       a.kind in ('stdout_contains', 'stdout_lacks') as uses_seed_path_assertion,
-      a.kind in ('file_exists', 'file_missing', 'dir_exists', 'dir_missing', 'file_contains') as is_file_assertion,
+      a.kind in ('file_exists', 'file_missing', 'file_removed', 'dir_exists', 'dir_missing', 'file_contains') as is_file_assertion,
       a.kind = 'exit_code' as is_exit_code_assertion,
       -- Normalize stdout_contains/lacks based on run target, pass through others
       case
@@ -168,6 +168,21 @@
             when b.assertion_ready = 0 then 0
             when b.variant_files_checked is null then 0
             when b.file_path is null or b.file_path = '' then 0
+            when json_extract(b.variant_files_checked, '$."' || b.file_path || '".exists') = false then 1
+            else 0
+          end
+        -- File removed assertion (was in seed, should NOT exist after)
+        when b.normalized_kind = 'file_removed' then
+          case
+            when b.assertion_ready = 0 then 0
+            when b.variant_files_checked is null then 0
+            when b.file_path is null or b.file_path = '' then 0
+            -- Must have been in seed (existed before)
+            when not exists(
+              select 1 from scenario_seed_paths sp
+              where sp.scenario_id = b.scenario_id and sp.seed_path = b.file_path
+            ) then 0
+            -- Must not exist after
             when json_extract(b.variant_files_checked, '$."' || b.file_path || '".exists') = false then 1
             else 0
           end

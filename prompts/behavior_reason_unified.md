@@ -16,7 +16,8 @@ Don't exclude options just because bare usage fails - they may work with proper 
 
 **Common patterns by option type:**
 - Filters (tr, cut, sort): use `stdin`
-- File ops (touch, rm, mkdir): use `seed` + file assertions
+- File creation (touch, mkdir, cp): use `seed` + `file_exists`/`dir_exists` assertion
+- File removal (rm, mv source): use `seed` + `file_removed` assertion
 - Check/test (--check, grep): use `exit_code` assertion
 - Blocking (--follow): exclude with `blocks_indefinitely`
 - Interactive (--edit): exclude with `requires_interactive_tty`

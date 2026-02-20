@@ -412,6 +412,7 @@ fn check_file_assertion_paths(
         let (path, needs_content) = match assertion {
             BehaviorAssertion::FileExists { path } => (path.as_str(), false),
             BehaviorAssertion::FileMissing { path } => (path.as_str(), false),
+            BehaviorAssertion::FileRemoved { path } => (path.as_str(), false),
             BehaviorAssertion::DirExists { path } => (path.as_str(), false),
             BehaviorAssertion::DirMissing { path } => (path.as_str(), false),
             BehaviorAssertion::FileContains { path, .. } => (path.as_str(), true),

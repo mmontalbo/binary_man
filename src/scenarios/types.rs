@@ -384,6 +384,9 @@ pub enum BehaviorAssertion {
     FileExists { path: String },
     /// File should NOT exist after scenario run (variant only).
     FileMissing { path: String },
+    /// File was in seed but should NOT exist after scenario run (variant only).
+    /// Unlike FileMissing, this verifies the file was removed (existed before, gone after).
+    FileRemoved { path: String },
     /// Directory should exist after scenario run (variant only).
     DirExists { path: String },
     /// Directory should NOT exist after scenario run (variant only).
@@ -403,6 +406,7 @@ impl BehaviorAssertion {
             BehaviorAssertion::OutputsDiffer {}
             | BehaviorAssertion::FileExists { .. }
             | BehaviorAssertion::FileMissing { .. }
+            | BehaviorAssertion::FileRemoved { .. }
             | BehaviorAssertion::DirExists { .. }
             | BehaviorAssertion::DirMissing { .. }
             | BehaviorAssertion::FileContains { .. }
@@ -417,6 +421,7 @@ impl BehaviorAssertion {
             // File and exit code assertions are variant-only
             BehaviorAssertion::FileExists { .. }
             | BehaviorAssertion::FileMissing { .. }
+            | BehaviorAssertion::FileRemoved { .. }
             | BehaviorAssertion::DirExists { .. }
             | BehaviorAssertion::DirMissing { .. }
             | BehaviorAssertion::FileContains { .. }

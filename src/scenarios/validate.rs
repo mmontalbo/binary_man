@@ -208,6 +208,7 @@ fn validate_behavior_assertion(assertion: &BehaviorAssertion) -> Result<()> {
         BehaviorAssertion::OutputsDiffer {} => {}
         BehaviorAssertion::FileExists { path }
         | BehaviorAssertion::FileMissing { path }
+        | BehaviorAssertion::FileRemoved { path }
         | BehaviorAssertion::DirExists { path }
         | BehaviorAssertion::DirMissing { path } => {
             validate_file_assertion_path(path)?;
