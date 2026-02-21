@@ -5,143 +5,297 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M33 (Minimal Viable Persistence).
+Current focus: M33 (Behavioral Families).
 
-## M33 — Minimal Viable Persistence (in progress)
+## M33 — Behavioral Families: Emergent Prerequisite Discovery (in progress)
 
-Goal: Simplify behavior verification by consolidating prompts and persisting only
-concrete wins (working argvs, exclusions) rather than expanding prompt complexity.
+Goal: Enable verification of complex binaries (git, docker, kubectl) by discovering
+and reusing prerequisite state through emergent behavioral families—without embedding
+binary-specific semantics.
 
 ### Problem Statement
 
-The current prompt architecture has grown complex:
-- 6 behavior prompt files that must stay in sync
-- Reason-based branching (`no_scenario`, `outputs_equal`, `assertion_failed`, etc.)
-- Same guidance (co-dependent options, sandbox limits) duplicated across files
-- Each new insight requires updates to multiple prompts
+Complex binaries require prerequisite state before options can be meaningfully verified:
+- `git config --list` needs a git repository
+- `git rm file.txt` needs a repo with tracked files
+- `docker ps` needs a running daemon
 
-This complexity emerged from trying to give the LM different context based on
-verification state. But the LM doesn't need separate prompts—it needs examples
-of what works.
+Currently, each option must independently discover its prerequisites through trial
+and error. This is wasteful—options with similar needs should share setup.
 
-### Proposed Approach: Learn from Success
+The challenge: how to identify "similar needs" without hard-coding binary semantics
+like "subcommand" or "git-specific patterns"?
 
-Instead of expanding prompts with more guidance, persist what actually worked:
+### Core Insight
 
-```rust
-struct LearnedHints {
-    // Per surface: what argv succeeded?
-    working_argvs: BTreeMap<String, Vec<String>>,
+Let behavioral families **emerge from runtime failures**. Options that fail with
+similar errors likely need similar prerequisites. The LM clusters these dynamically
+based on semantic understanding, not structural artifacts.
 
-    // Per surface: what was excluded and why?
-    exclusions: BTreeMap<String, String>,
-}
-```
+Example: `git rm` and `git mv` both fail with "pathspec did not match" → they
+belong to the same behavioral family and share the same setup commands.
 
-**Within a session**: LM accumulates context naturally through conversation history.
-When `--all` fails with "unknown option" but `["get", "--all", "user.name"]` succeeds,
-the LM sees this progression and applies the pattern to similar surfaces.
+### Data Model
 
-**Across sessions**: Persist only the concrete wins—working argvs and exclusion
-decisions. On new session, load these as hints:
-
-```markdown
-# Generate Scenario for --regexp
-
-## Hints from Prior Sessions
-Working argv for similar options:
-- --all: ["git", "config", "get", "--all", "user.name"]
-- --fixed-value: ["git", "config", "get", "--fixed-value", "user.name", "Alice"]
-
-## Task
-Generate scenario for --regexp.
-The hints suggest "get" mode with a key argument works for modifier options.
-```
-
-### Key Insight
-
-The LM doesn't need to understand binary semantics—it needs examples of successful
-invocations. Working argvs are self-documenting: `["git", "config", "get", "--all", "user.name"]`
-encodes the pattern better than explanatory text ever could.
-
-### Changes
-
-**Phase 1: Consolidate prompts**
-
-| Current | Proposed |
-|---------|----------|
-| `behavior_base.md` | Keep (shared context) |
-| `behavior_reason_no_scenario.md` | Merge into `behavior_unified.md` |
-| `behavior_reason_initial_scenarios.md` | Merge into `behavior_unified.md` |
-| `behavior_reason_outputs_equal.md` | Merge into `behavior_unified.md` |
-| `behavior_reason_outputs_equal_retry.md` | Merge into `behavior_unified.md` |
-| `behavior_reason_assertion_failed.md` | Merge into `behavior_unified.md` |
-
-Single unified prompt with all context:
-- Current verification state (no scenario / outputs_equal / assertion_failed)
-- Hints from prior sessions (working argvs for this binary)
-- The option being verified and its description
-
-**Phase 2: Add hints persistence**
-
-Location: `enrich/learned_hints.json`
+**Location**: `enrich/learned_hints.json`
 
 ```json
 {
-  "schema_version": 1,
-  "working_argvs": {
-    "--all": ["git", "config", "get", "--all", "user.name"],
-    "--fixed-value": ["git", "config", "get", "--fixed-value", "user.name", "Alice"]
-  },
-  "exclusions": {
-    "--edit": "interactive option requires terminal",
-    "-e": "alias for --edit"
+  "behavioral_families": {
+    "git::needs_repo": {
+      "binary_scope": "git",
+      "description": "Commands requiring a git repository",
+      "quick_signals": ["not a git repository", "not a git repo"],
+      "setup": ["git init"],
+      "members": ["--list", "--get", "--add"],
+      "observation_count": 12,
+      "last_used": "2024-01-15"
+    },
+    "git::needs_tracked_files": {
+      "binary_scope": "git",
+      "description": "Commands requiring tracked files in the repository",
+      "quick_signals": ["pathspec", "did not match"],
+      "setup": ["git init", "echo content > file.txt", "git add file.txt"],
+      "members": ["git rm", "git mv"],
+      "observation_count": 5,
+      "last_used": "2024-01-14"
+    }
   }
 }
 ```
 
-**Phase 3: Update workflow**
+**Fields**:
+- `binary_scope`: Namespace to prevent cross-binary contamination
+- `description`: Human/LM readable explanation of what this family handles
+- `quick_signals`: Simple substrings for fast matching against stderr/stdout
+- `setup`: Commands to prepend to scenario's setup
+- `members`: Surface IDs that belong to this family
+- `observation_count`: Reinforcement counter
+- `last_used`: Staleness detection
 
-- On verification success (`delta_seen`): record working argv
-- On exclusion: record reason
-- On new session: load hints into unified prompt
-- Remove reason-based prompt selection logic
+### Discovery Flow
 
-### Why This Works
+```
+1. Surface fails with error E
+2. Fast match: check E.stderr against all family.quick_signals
+3. If match:
+   - Apply family.setup
+   - Retry
+   - On success: reinforce family (observation_count++, add member)
+   - On failure: evict, try next family or LM
+4. If no fast match:
+   - Include all families + error in LM prompt
+   - LM either:
+     a) Assigns to existing family (adds new quick_signal)
+     b) Proposes new family
+   - Retry with LM's suggestion
+```
 
-1. **Self-correcting**: LM sees what actually worked, not what we think should work
-2. **No guidance duplication**: Single prompt with dynamic hints
-3. **Compound learning**: Success on `--all` helps `--regexp`, `--fixed-value`, etc.
-4. **Minimal storage**: Just argvs and reasons, not facts/KB/understanding
+### Matching Algorithm
 
-### What We're NOT Doing
+```rust
+pub enum FamilyMatch {
+    QuickMatch { family_id: String },
+    NeedsLmMatch,
+}
 
-- Building parsers for SYNOPSIS/help text grammar
-- Extracting behavioral fingerprints via strace
-- Maintaining a knowledge base or fact store
-- Compressing "understanding" into structured schemas
+pub fn find_quick_match(
+    stderr: &str,
+    stdout: &str,
+    families: &BTreeMap<String, BehavioralFamily>,
+    binary_scope: &str,
+) -> FamilyMatch {
+    for (family_id, family) in families {
+        if family.binary_scope != binary_scope {
+            continue;
+        }
+        for signal in &family.quick_signals {
+            if stderr.contains(signal) || stdout.contains(signal) {
+                return FamilyMatch::QuickMatch { family_id: family_id.clone() };
+            }
+        }
+    }
+    FamilyMatch::NeedsLmMatch
+}
+```
+
+### LM Prompt Addition
+
+When no quick match found, include families in prompt:
+
+```markdown
+### Known Behavioral Families
+
+**git::needs_repo**
+- Description: Commands requiring a git repository
+- Setup: ["git init"]
+- Signals: ["not a git repository", "not a git repo"]
+
+**git::needs_tracked_files**
+- Description: Commands requiring tracked files in the repository
+- Setup: ["git init", "echo content > file.txt", "git add file.txt"]
+- Signals: ["pathspec", "did not match"]
+
+### Task
+
+Option `git rm --cached` failed with:
+- stderr: "fatal: not a git repository"
+
+Does this error match an existing family? If yes, which one?
+If no match, propose a new family with setup commands that would resolve this error.
+```
+
+### LM Response Schema
+
+Assign to existing family:
+```json
+{
+  "family_assignment": {
+    "family_id": "git::needs_repo",
+    "add_quick_signal": "fatal: not a git repo"
+  }
+}
+```
+
+Propose new family:
+```json
+{
+  "new_family": {
+    "id": "git::needs_commits",
+    "description": "Commands requiring at least one commit",
+    "quick_signals": ["does not have any commits yet"],
+    "setup": ["git init", "touch f", "git add f", "git commit -m init"]
+  }
+}
+```
+
+### Evolution Operations
+
+| Trigger | Operation | Effect |
+|---------|-----------|--------|
+| Member succeeds with family setup | **Reinforce** | observation_count++, add to members |
+| Member fails despite family setup | **Evict** | Remove from members |
+| LM assigns with new signal | **Expand** | Add to quick_signals |
+| LM proposes new family | **Create** | Add to behavioral_families |
+| No activity for 30 days | **Stale** | Revalidate before trusting |
+
+### Implementation
+
+| File | Changes |
+|------|---------|
+| `src/enrich/types.rs` | Add `BehavioralFamily` struct, extend `LearnedHints` |
+| `src/enrich/behavioral_families.rs` | **NEW** - Matching and prompt formatting |
+| `src/enrich/mod.rs` | Register new module |
+| `src/scenarios/seed.rs` | Add `merge_setup()` helper |
+| `src/workflow/apply/auto_verify.rs` | Integrate family retry loop |
+| `src/workflow/apply/progress.rs` | Add family CRUD functions |
+| `src/workflow/lm_client.rs` | Add `ask_family_match()` method |
+| `prompts/behavior_reason_unified.md` | Add family context section |
+
+**Estimated effort**: ~380 LOC
+
+### Properties
+
+| Property | How Achieved |
+|----------|--------------|
+| **No embedded semantics** | Families emerge from runtime behavior |
+| **Binary-agnostic** | Works for git, docker, kubectl, any CLI |
+| **Self-improving** | Each failure teaches about prerequisites |
+| **Fast common case** | Substring quick_signals avoid LM calls |
+| **Handles variation** | LM fallback for novel errors |
+| **Self-correcting** | Eviction on failure, reinforcement on success |
+
+### Example Runtime
+
+```
+1. Run `git rm file.txt` with no setup
+   → stderr: "fatal: not a git repository"
+   → Quick match: none (no families yet)
+   → LM proposes: git::needs_repo
+     - setup: ["git init"]
+     - quick_signals: ["not a git repository"]
+   → Retry with setup
+   → stderr: "pathspec 'file.txt' did not match"
+   → Quick match: none
+   → LM proposes: git::needs_tracked_files
+     - setup: ["git init", "echo x > file.txt", "git add file.txt"]
+     - quick_signals: ["pathspec", "did not match"]
+   → Retry with setup
+   → Success! Both families persisted.
+
+2. Run `git mv old.txt new.txt` with no setup
+   → stderr: "fatal: not a git repository"
+   → Quick match: git::needs_repo
+   → Retry with ["git init"]
+   → stderr: "pathspec 'old.txt' did not match"
+   → Quick match: git::needs_tracked_files
+   → Retry with full setup
+   → Success! Families reinforced, `git mv` added to members.
+```
 
 ### Acceptance Criteria
 
 | Criterion | Status |
 |-----------|--------|
-| Consolidate 5 reason prompts into 1 unified prompt | todo |
-| Add `LearnedHints` struct and persistence | todo |
-| Record working argvs on `delta_seen` | todo |
-| Load hints on session start | todo |
-| Remove reason-based prompt selection | todo |
+| Add `BehavioralFamily` struct to `LearnedHints` | todo |
+| Implement `find_quick_match()` in new module | todo |
+| Add `merge_setup()` for family + scenario setup | todo |
+| Include families in LM prompt context | todo |
+| Parse LM family assignment/proposal responses | todo |
+| Persist family updates (reinforce/evict/create) | todo |
+| Retry loop with family fallback | todo |
+| E2E test: git config with family discovery | todo |
 | Regression tests pass (M32 baselines) | todo |
+
+### Impact on Existing Coverage
+
+**Coreutils (100/104 complete)**: Behavioral families are designed for complex binaries
+like git, not coreutils. Impact assessment:
+
+| Category | Binaries | Family Impact |
+|----------|----------|---------------|
+| Already complete | 100 | None - families only apply on failure |
+| Permission-blocked | shred, chgrp | None - system capability issue |
+| Filesystem-blocked | cp (SELinux/reflink) | None - not a prereq issue |
+| No help | test | None - parsing issue |
+
+**Potential benefits for file-operating coreutils:**
+
+If we re-run `rm`, `mv`, `cp`, `ln` with families enabled, they could auto-discover
+shared prerequisites like "needs a file to operate on". Currently the LM independently
+figures this out for each binary. Families would let them share:
+
+```json
+{
+  "coreutils::needs_source_file": {
+    "quick_signals": ["cannot stat", "No such file"],
+    "setup": ["echo content > source.txt"],
+    "members": ["rm", "mv source", "cp source", "cat"]
+  }
+}
+```
+
+**Regression protection:**
+- Families only apply on failure (no impact on passing scenarios)
+- `binary_scope` prevents cross-binary contamination
+- M32 regression baselines will catch any degradation
 
 ### Risks
 
-1. **Hints may not generalize**: `--all` pattern might not apply to `--verbose`
-   - Mitigation: Include only "modifier option" hints, not all surfaces
+1. **Quick signals too broad**: "error" matches everything
+   - Mitigation: LM proposes signals; review for specificity
 
-2. **Cold start**: First session has no hints
-   - Mitigation: Keep co-dependent guidance in base prompt; hints are additive
+2. **Family explosion**: Every unique error creates new family
+   - Mitigation: LM clusters semantically similar errors
 
-3. **Stale hints**: Binary updates may invalidate old argvs
-   - Mitigation: Hints are suggestions, not requirements; LM adapts
+3. **Setup ordering sensitive**: Commands must run in correct order
+   - Mitigation: LM understands command dependencies
+
+4. **Cross-binary contamination**: Docker family applied to git
+   - Mitigation: `binary_scope` field filters families
+
+5. **Latency on simple binaries**: Family matching adds overhead
+   - Mitigation: Quick match is O(families × signals) substring checks; skip if no families
 
 ---
 
