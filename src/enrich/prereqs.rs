@@ -60,6 +60,7 @@ impl PrereqsFile {
 
         // Merge all referenced definitions
         let mut exclude = false;
+        let mut seed_setup = Vec::new();
         let mut seed_entries = Vec::new();
 
         for key in prereq_keys {
@@ -68,6 +69,12 @@ impl PrereqsFile {
                     exclude = true;
                 }
                 if let Some(seed) = &def.seed {
+                    // Merge setup commands (deduplicate)
+                    for cmd in &seed.setup {
+                        if !seed_setup.contains(cmd) {
+                            seed_setup.push(cmd.clone());
+                        }
+                    }
                     merge_seed_entries(&mut seed_entries, &seed.entries);
                 }
             }
@@ -75,11 +82,11 @@ impl PrereqsFile {
 
         ResolvedPrereq {
             exclude,
-            seed: if seed_entries.is_empty() {
+            seed: if seed_entries.is_empty() && seed_setup.is_empty() {
                 None
             } else {
                 Some(ScenarioSeedSpec {
-                    setup: Vec::new(),
+                    setup: seed_setup,
                     entries: seed_entries,
                 })
             },
@@ -196,5 +203,76 @@ mod tests {
         let resolved = prereqs.resolve("--unknown");
         assert!(!resolved.exclude);
         assert!(resolved.seed.is_none());
+    }
+
+    #[test]
+    fn resolve_merges_setup_commands() {
+        let mut prereqs = PrereqsFile::default();
+        prereqs.definitions.insert(
+            "git_repo".to_string(),
+            PrereqInferenceDefinition {
+                description: Some("git repository".to_string()),
+                seed: Some(ScenarioSeedSpec {
+                    setup: vec![
+                        vec!["git".to_string(), "init".to_string()],
+                        vec!["git".to_string(), "config".to_string(), "user.email".to_string(), "test@test.com".to_string()],
+                    ],
+                    entries: Vec::new(),
+                }),
+                exclude: false,
+            },
+        );
+        prereqs
+            .surface_map
+            .insert("--branch".to_string(), vec!["git_repo".to_string()]);
+
+        let resolved = prereqs.resolve("--branch");
+        assert!(!resolved.exclude);
+        assert!(resolved.seed.is_some());
+        let seed = resolved.seed.unwrap();
+        assert_eq!(seed.setup.len(), 2);
+        assert_eq!(seed.setup[0], vec!["git", "init"]);
+        assert_eq!(seed.setup[1], vec!["git", "config", "user.email", "test@test.com"]);
+    }
+
+    #[test]
+    fn resolve_deduplicates_setup_commands() {
+        let mut prereqs = PrereqsFile::default();
+        prereqs.definitions.insert(
+            "git_repo".to_string(),
+            PrereqInferenceDefinition {
+                description: Some("git repository".to_string()),
+                seed: Some(ScenarioSeedSpec {
+                    setup: vec![vec!["git".to_string(), "init".to_string()]],
+                    entries: Vec::new(),
+                }),
+                exclude: false,
+            },
+        );
+        prereqs.definitions.insert(
+            "git_with_commits".to_string(),
+            PrereqInferenceDefinition {
+                description: Some("git repo with commits".to_string()),
+                seed: Some(ScenarioSeedSpec {
+                    setup: vec![
+                        vec!["git".to_string(), "init".to_string()], // duplicate
+                        vec!["git".to_string(), "add".to_string(), ".".to_string()],
+                    ],
+                    entries: Vec::new(),
+                }),
+                exclude: false,
+            },
+        );
+        prereqs.surface_map.insert(
+            "--short".to_string(),
+            vec!["git_repo".to_string(), "git_with_commits".to_string()],
+        );
+
+        let resolved = prereqs.resolve("--short");
+        let seed = resolved.seed.unwrap();
+        // Should have 2 unique commands, not 3 (git init deduplicated)
+        assert_eq!(seed.setup.len(), 2);
+        assert_eq!(seed.setup[0], vec!["git", "init"]);
+        assert_eq!(seed.setup[1], vec!["git", "add", "."]);
     }
 }

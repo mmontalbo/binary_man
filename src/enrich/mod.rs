@@ -53,5 +53,7 @@ pub use lm_log::{
 pub use lock::{build_lock, hash_paths, load_lock, lock_status, now_epoch_ms, write_lock};
 pub use paths::DocPackPaths;
 pub use prereqs::{load_prereqs, PrereqsFile};
+#[allow(unused_imports)]
+pub use prereqs::PrereqInferenceDefinition;
 pub use learned_hints::{load_learned_hints, write_learned_hints, LearnedHints};
 pub use types::*;
