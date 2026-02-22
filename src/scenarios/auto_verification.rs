@@ -182,13 +182,8 @@ pub fn auto_verification_scenarios(
 
         let argv = existence_argv(semantics, surface_id, context_argv);
 
-        // Use prereq seed if available, otherwise empty seed
-        let seed = resolved
-            .and_then(|r| r.seed)
-            .unwrap_or_else(|| super::ScenarioSeedSpec {
-                setup: Vec::new(),
-                entries: Vec::new(),
-            });
+        // Use prereq seed if available, otherwise None to inherit from plan defaults
+        let seed = resolved.and_then(|r| r.seed);
 
         scenarios.push(ScenarioSpec {
             id: auto_scenario_id(surface_id),
@@ -197,8 +192,8 @@ pub fn auto_verification_scenarios(
             argv,
             env: std::collections::BTreeMap::new(),
             stdin: None,
-            // Use prereq seed or pin inline empty seed
-            seed: Some(seed),
+            // Use prereq seed if available, or None to allow defaults inheritance
+            seed,
             cwd: None,
             timeout_seconds: None,
             net_mode: None,
@@ -395,7 +390,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_verification_digest_ignores_behavior_defaults_seed_changes() {
+    fn auto_verification_inherits_defaults_seed_when_no_prereqs() {
         let base_plan = plan_with_policy();
         let surface = surface_with_option_and_subcommand();
         let targets = auto_verification_targets(&base_plan, &surface).unwrap();
@@ -408,6 +403,10 @@ mod tests {
             .cloned()
             .expect("auto scenario");
 
+        // Scenario should have seed: None (no prereqs provided)
+        assert!(scenario.seed.is_none(), "auto_verify scenario should have seed: None when no prereqs");
+
+        // Now test that effective_scenario_config inherits from defaults
         let mut plan_a = base_plan.clone();
         plan_a.defaults = Some(ScenarioDefaults {
             seed: Some(super::super::default_behavior_seed()),
@@ -427,7 +426,8 @@ mod tests {
         let digest_b = super::super::config::effective_scenario_config(&plan_b, &scenario)
             .expect("digest B")
             .scenario_digest;
-        assert_eq!(digest_a, digest_b);
+        // Digests should DIFFER because defaults seed is now inherited
+        assert_ne!(digest_a, digest_b, "digest should change when defaults seed changes");
     }
 
     #[test]
@@ -505,5 +505,56 @@ mod tests {
                 "--help".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn auto_verification_uses_prereqs_seed() {
+        use crate::enrich::{PrereqsFile, PrereqInferenceDefinition};
+        use crate::scenarios::{ScenarioSeedSpec, ScenarioSeedEntry, SeedEntryKind};
+
+        let plan = plan_with_policy();
+        let surface = surface_with_option_and_subcommand();
+        let targets = auto_verification_targets(&plan, &surface).unwrap();
+        let semantics: Semantics =
+            serde_json::from_str(crate::templates::ENRICH_SEMANTICS_JSON).unwrap();
+
+        // Create prereqs with seed for --color
+        let mut prereqs = PrereqsFile::default();
+        prereqs.definitions.insert(
+            "needs_setup".to_string(),
+            PrereqInferenceDefinition {
+                description: Some("requires setup".to_string()),
+                seed: Some(ScenarioSeedSpec {
+                    setup: vec![
+                        vec!["git".to_string(), "init".to_string()],
+                    ],
+                    entries: vec![
+                        ScenarioSeedEntry {
+                            path: "test.txt".to_string(),
+                            kind: SeedEntryKind::File,
+                            contents: Some("test content".to_string()),
+                            target: None,
+                            mode: None,
+                        },
+                    ],
+                }),
+                exclude: false,
+            },
+        );
+        prereqs.surface_map.insert("--color".to_string(), vec!["needs_setup".to_string()]);
+
+        let result = auto_verification_scenarios(&targets, &semantics, &surface, Some(&prereqs));
+        let scenario = result.scenarios
+            .iter()
+            .find(|s| s.id == "auto_verify::--color")
+            .expect("auto_verify::--color scenario");
+
+        // Scenario should have seed from prereqs
+        assert!(scenario.seed.is_some(), "auto_verify scenario should have seed from prereqs");
+        let seed = scenario.seed.as_ref().unwrap();
+        assert_eq!(seed.setup.len(), 1, "should have one setup command");
+        assert_eq!(seed.setup[0], vec!["git", "init"]);
+        assert_eq!(seed.entries.len(), 1, "should have one entry");
+        assert_eq!(seed.entries[0].path, "test.txt");
     }
 }
