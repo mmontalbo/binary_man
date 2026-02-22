@@ -5,89 +5,154 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M33 (LM Semantic Enrichment).
+Current focus: M34 (Post-Execution Behavior Judgment).
 
-## M33 — LM Semantic Enrichment (done)
+## M34 — Post-Execution Behavior Judgment (in progress)
 
-Goal: Improve verification of complex binaries (git, docker, kubectl) by having the
-LM generate prerequisite-aware scenarios **from documentation**, not from runtime
-failures.
+Goal: Meaningfully verify scenarios by adding a judgment step that checks whether
+outputs actually demonstrate the documented behavior, not just that they differ.
 
-### Core Insight
+### Problem
 
-Instead of **error-driven discovery** (run, fail, learn), use **documentation-driven
-generation** (read option description, generate appropriate setup). The LM already
-has access to option descriptions and can infer prerequisites semantically.
+Current verification marks scenarios as "verified" when `outputs_differ` passes,
+but doesn't check if the documented behavior was actually exercised:
+
+```
+--show-stash scenario: git init → run → outputs differ slightly → ✓ verified
+Reality: No stash existed, no stash info shown, option behavior not triggered
+```
+
+The assertion `outputs_differ` is necessary but not sufficient.
 
 ### Approach
 
-1. **Richer prompt context**: Include full option descriptions (not just IDs)
-2. **Semantic prereq hints**: LM prompt guidance for common prereq patterns
-3. **Working argv examples**: Show verified argvs from `learned_hints.json`
-4. **Better initial scenarios**: Generate prereq-aware scenarios on first pass
+Add a post-execution judgment step where an LM answers a factual question:
 
-### Example
+> "Does this output demonstrate the behavior described for this option?"
 
-**Before (error-driven):**
-```
-1. Generate bare scenario for `git rm`
-2. Run, fail: "not a git repository"
-3. LM proposes setup
-4. Retry with setup
-5. Fail: "pathspec did not match"
-6. LM proposes more setup
-7. Retry again
-8. Success (3 cycles)
-```
+The LM judges after seeing actual outputs, grounded in the option description.
+Failed judgments feed back into retry prompts with concrete improvement suggestions.
 
-**After (documentation-driven):**
+### Workflow
+
 ```
-1. LM sees option description: "Remove files from the working tree and index"
-2. LM infers: "this operates on tracked files, needs repo with files"
-3. Generates scenario with setup: git init, create file, git add
-4. Run, success (1 cycle)
+1. LM proposes scenario (existing)
+2. bman runs scenario (existing)
+3. outputs_differ? NO → retry (no judgment needed)
+4. outputs_differ? YES → call judge LM
+5. Judge: demonstrates_behavior?
+   - YES → VERIFIED
+   - NO  → store feedback, retry (max 3)
+6. Max retries exhausted → UNVERIFIABLE
 ```
 
-### Benefits
+### Judge Prompt
 
-- **Fewer cycles**: Generate correct scenario on first pass
-- **No runtime learning structures**: LM understands semantics directly
-- **Better generalization**: Works across binaries without family management
-- **Simpler code**: Removed ~400 LOC of unused infrastructure
+```markdown
+## Option
 
-### Implementation Direction
+Name: {{option_id}}
+Description: {{description}}
 
-| Priority | Change |
-|----------|--------|
-| High | Include option descriptions in all prompts (currently ID-only) |
-| High | Add prereq guidance section to `behavior_base.md` |
-| Medium | Pass `working_argvs` as examples (already implemented) |
-| Low | Consider context-aware seed templates |
+## Output
+
+{{variant_stdout}}
+
+## Question
+
+This option should: {{description}}
+
+Does the output above demonstrate this? Answer YES or NO, then explain briefly.
+
+If NO, what setup commands would trigger this behavior?
+
+## Response Format
+
+demonstrates_behavior: yes/no
+reason: one sentence
+suggested_setup: [list of commands] or null
+```
+
+### Retry Integration
+
+When judgment fails, next behavior prompt includes:
+
+```markdown
+## Previous Attempt for {{option_id}}
+
+Your scenario ran but did not demonstrate the expected behavior.
+
+Judgment: "{{reason}}"
+Suggested setup: {{suggested_setup}}
+
+Please propose an improved scenario that addresses this feedback.
+```
+
+### Format Option Skip
+
+Skip judgment for format-only options (mechanical pattern match on description):
+
+```rust
+fn is_format_option(desc: &str) -> bool {
+    let d = desc.to_lowercase();
+    d.contains("format") || d.contains("porcelain") ||
+    d.contains("machine-readable") || d.contains("column")
+}
+```
+
+These verify with `outputs_differ` alone.
+
+### Implementation
+
+| File | Change |
+|------|--------|
+| `src/workflow/apply/judge.rs` | NEW: judgment LM call |
+| `prompts/judge_behavior.md` | NEW: judge prompt template |
+| `src/workflow/apply/behavior.rs` | Insert judgment after outputs_differ passes |
+| `prompts/behavior_retry.md` | Add judgment feedback section |
+| `src/scenarios/types.rs` | Add `Judgment` to scenario result |
+
+### Termination
+
+- Max 3 judgment failures per option
+- After 3: mark `behavior_unverifiable` with accumulated reasons
+- Status output shows: "15/21 verified, 2/21 unverifiable, 4/21 pending"
+
+### Success Criteria
+
+| Criterion | Status |
+|-----------|--------|
+| Judge prompt implemented | todo |
+| Judgment call after outputs_differ | todo |
+| Failed judgments feed into retry | todo |
+| Format options skip judgment | todo |
+| --show-stash requires "stash" in output | todo |
+| --ignored requires "Ignored" in output | todo |
+| E2E: git status with meaningful verification | todo |
+
+---
+
+## M33 — LM Semantic Enrichment (done)
+
+Goal: Improve scenario generation by including option descriptions in prompts,
+enabling LM to infer prerequisites from documentation.
 
 ### Results
 
-**git status E2E test (comprehensive treatment):**
+- Added option descriptions to all behavior prompts
+- Added prereq inference guidance to `behavior_base.md`
+- Removed ~400 LOC of unused family infrastructure
 
-| Metric | Value |
-|--------|-------|
-| Total surfaces | 21 |
-| Verified | 21 (100%) |
-| Cycles | 4 |
-| Pack status | **complete** |
-
-All 21 options verified without exclusions. The LM successfully inferred prerequisites
-from descriptions (e.g., `git init` setup for branch-related options).
+**Note**: M33 achieved its goal (descriptions in prompts), but verification was
+shallow (`outputs_differ` only). M34 addresses meaningful verification.
 
 ### Acceptance Criteria
 
 | Criterion | Status |
 |-----------|--------|
-| Remove unused family infrastructure | done |
-| Keep working_argvs in learned_hints | done |
-| Document semantic enrichment direction | done |
 | Include descriptions in prompts | done |
 | Add prereq guidance to behavior prompts | done |
-| E2E test: git status with enriched prompts | done |
+| Remove unused family infrastructure | done |
 
 ---
 
