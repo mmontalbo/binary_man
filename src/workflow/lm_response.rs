@@ -543,6 +543,11 @@ pub fn validate_responses(
 ///
 /// If `argv` starts with the same elements as `prefix` (case-insensitive),
 /// strip that prefix from `argv` to avoid duplication.
+///
+/// Also handles the case where LM includes the full binary path:
+/// - prefix: `["status"]`
+/// - argv: `["git", "status", "-b"]`
+/// - result: `["-b"]` (strips binary + prefix)
 fn deduplicate_argv_prefix(prefix: &[String], argv: &[String]) -> Vec<String> {
     if prefix.is_empty() {
         return argv.to_vec();
@@ -557,10 +562,26 @@ fn deduplicate_argv_prefix(prefix: &[String], argv: &[String]) -> Vec<String> {
 
     if prefix_matches {
         // LM included prefix, skip it
-        argv[prefix.len()..].to_vec()
-    } else {
-        argv.to_vec()
+        return argv[prefix.len()..].to_vec();
     }
+
+    // Check if argv starts with binary + prefix (e.g., ["git", "status", ...])
+    // This handles the case where LM includes the full command path
+    if argv.len() > prefix.len() {
+        let argv_after_first = &argv[1..];
+        let binary_plus_prefix_matches = prefix.len() <= argv_after_first.len()
+            && prefix
+                .iter()
+                .zip(argv_after_first.iter())
+                .all(|(p, a)| p.eq_ignore_ascii_case(a));
+
+        if binary_plus_prefix_matches {
+            // LM included binary + prefix, skip both
+            return argv[1 + prefix.len()..].to_vec();
+        }
+    }
+
+    argv.to_vec()
 }
 
 /// Validate a scenario specification.
@@ -1008,6 +1029,31 @@ mod tests {
                 &["config".to_string(), "--list".to_string()]
             ),
             vec!["--list".to_string()]
+        );
+
+        // Binary + prefix in argv (LM includes full command path)
+        // prefix: ["status"], argv: ["git", "status", "-b"] -> ["-b"]
+        assert_eq!(
+            deduplicate_argv_prefix(
+                &["status".to_string()],
+                &["git".to_string(), "status".to_string(), "-b".to_string()]
+            ),
+            vec!["-b".to_string()]
+        );
+
+        // Binary + multi-element prefix
+        // prefix: ["config", "get"], argv: ["git", "config", "get", "--all"] -> ["--all"]
+        assert_eq!(
+            deduplicate_argv_prefix(
+                &["config".to_string(), "get".to_string()],
+                &[
+                    "git".to_string(),
+                    "config".to_string(),
+                    "get".to_string(),
+                    "--all".to_string()
+                ]
+            ),
+            vec!["--all".to_string()]
         );
     }
 
