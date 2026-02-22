@@ -558,16 +558,7 @@ fn run_decisions_output(paths: &enrich::DocPackPaths, binary_name: Option<&str>)
     )
     .context("compute verification ledger for decisions output")?;
 
-    // Load semantics for prereq suggestion matching (optional - don't fail if missing)
-    let semantics = crate::semantics::load_semantics(paths.root()).ok();
-
-    let output = decisions::build_decisions(
-        paths,
-        binary_name,
-        &ledger,
-        &surface_inventory,
-        semantics.as_ref(),
-    )?;
+    let output = decisions::build_decisions(paths, binary_name, &ledger, &surface_inventory)?;
     let text = serde_json::to_string_pretty(&output).context("serialize decisions output")?;
     println!("{text}");
 

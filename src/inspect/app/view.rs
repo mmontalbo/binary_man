@@ -418,10 +418,6 @@ impl App {
             lines.push(Line::from(format!("Stderr: {}", stderr)));
         }
 
-        if let Some(prereq) = &item.suggested_prereq {
-            lines.push(Line::from(format!("Suggested prereq: {}", prereq)));
-        }
-
         if let Some(scenario_id) = &item.scenario_id {
             lines.push(Line::from(format!("Scenario: {}", scenario_id)));
         }

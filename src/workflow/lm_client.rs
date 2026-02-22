@@ -54,7 +54,7 @@ use crate::workflow::lm_response::LmResponseBatch;
 use anyhow::{anyhow, Context, Result};
 use std::io::Write;
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 /// Result of an LM invocation with metadata for logging.
 #[derive(Debug)]
@@ -65,9 +65,6 @@ pub struct LmInvocationResult<T> {
     pub prompt: String,
     /// The raw response text from the LM.
     pub raw_response: String,
-    /// How long the LM call took.
-    #[allow(dead_code)]
-    pub duration: Duration,
 }
 
 /// Configuration for the local LM client.
@@ -103,7 +100,6 @@ pub fn invoke_lm_for_behavior(
     hints: Option<&LearnedHints>,
 ) -> Result<LmInvocationResult<LmResponseBatch>> {
     let binary_name = summary.binary_name.as_deref().unwrap_or("<binary>");
-    let start = Instant::now();
 
     let mut last_error: Option<String> = None;
     let mut last_response: Option<String> = None;
@@ -146,7 +142,6 @@ pub fn invoke_lm_for_behavior(
                     result: batch,
                     prompt: final_prompt,
                     raw_response: response_text,
-                    duration: start.elapsed(),
                 });
             }
             Err(e) => {

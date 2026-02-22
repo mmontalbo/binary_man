@@ -57,37 +57,17 @@ pub fn auto_verification_targets(
 
 /// Collect ids eligible for auto-verification in behavior tier.
 ///
-/// Uses semantics.auto_scenarios to determine which item shapes participate
-/// in behavior tier (based on id patterns like starting with `-` for options).
+/// Targets option-like surface items (ids starting with `-`) that aren't
+/// entry points or help-output items.
 pub fn auto_verification_targets_for_behavior(
     plan: &ScenarioPlan,
     surface: &SurfaceInventory,
-    semantics: &Semantics,
+    _semantics: &Semantics,
 ) -> Option<AutoVerificationTargets> {
     let policy = plan.verification.policy.as_ref()?;
-
-    // Check if any auto_scenarios template includes behavior tier
-    let has_behavior_templates = semantics
-        .verification
-        .auto_scenarios
-        .iter()
-        .any(|template| template.tiers.iter().any(|t| t == "behavior"));
-
-    // If no behavior templates defined, default to verifying option-like items
-    let verify_options = if has_behavior_templates {
-        semantics
-            .verification
-            .auto_scenarios
-            .iter()
-            .filter(|template| template.tiers.iter().any(|t| t == "behavior"))
-            .any(|template| template.kind == "option")
-    } else {
-        true // Default: verify options
-    };
-
     let (excluded, excluded_ids) = plan.collect_queue_exclusions();
 
-    // Collect non-entry-point surface ids that match behavior tier criteria
+    // Collect non-entry-point option-like surface ids
     let target_ids: Vec<String> = surface
         .items
         .iter()
@@ -100,19 +80,8 @@ pub fn auto_verification_targets_for_behavior(
             if item.is_help_output {
                 return false;
             }
-            // If we should verify options, include option-like items
-            if verify_options && looks_like_option(&item.id) {
-                return true;
-            }
-            // Otherwise check if there's a matching auto_scenario template
-            semantics
-                .verification
-                .auto_scenarios
-                .iter()
-                .any(|template| {
-                    template.tiers.iter().any(|t| t == "behavior")
-                        && matches_template_kind(&item.id, &template.kind)
-                })
+            // Only verify option-like items
+            looks_like_option(&item.id)
         })
         .map(|item| item.id.trim())
         .filter(|id| !id.is_empty() && !excluded_ids.contains(*id))
@@ -125,15 +94,6 @@ pub fn auto_verification_targets_for_behavior(
         excluded,
         excluded_ids,
     })
-}
-
-/// Check if an id matches a template kind using heuristics.
-fn matches_template_kind(id: &str, template_kind: &str) -> bool {
-    match template_kind {
-        "option" => looks_like_option(id),
-        "subcommand" | "command" => !looks_like_option(id),
-        _ => false,
-    }
 }
 
 /// Result of auto-verification scenario generation.
@@ -233,31 +193,7 @@ fn existence_argv(
     surface_id: &str,
     context_argv: &[String],
 ) -> Vec<String> {
-    // Determine if this looks like an option based on id shape
-    let is_option_like = looks_like_option(surface_id);
-    let template_kind = if is_option_like {
-        "option"
-    } else {
-        "subcommand"
-    };
-
-    // Try to find template in auto_scenarios first
-    if let Some(template) = semantics
-        .verification
-        .auto_scenarios
-        .iter()
-        .find(|t| t.kind == template_kind)
-    {
-        let mut argv = Vec::new();
-        argv.extend(template.argv_prefix.iter().cloned());
-        argv.extend(context_argv.iter().cloned());
-        argv.push(surface_id.to_string());
-        argv.extend(template.argv_suffix.iter().cloned());
-        return argv;
-    }
-
-    // Fall back to legacy fields for backward compatibility
-    let (prefix, suffix) = if is_option_like {
+    let (prefix, suffix) = if looks_like_option(surface_id) {
         (
             &semantics.verification.option_existence_argv_prefix,
             &semantics.verification.option_existence_argv_suffix,
@@ -431,36 +367,6 @@ mod tests {
     }
 
     #[test]
-    fn auto_scenarios_template_overrides_legacy_fields() {
-        let plan = plan_with_policy();
-        let surface = surface_with_option_and_subcommand();
-        let targets = auto_verification_targets(&plan, &surface).unwrap();
-
-        let mut semantics: Semantics =
-            serde_json::from_str(crate::templates::ENRICH_SEMANTICS_JSON).unwrap();
-        // Set legacy fields
-        semantics.verification.option_existence_argv_prefix = vec!["legacy".to_string()];
-        semantics.verification.option_existence_argv_suffix = vec!["--legacy".to_string()];
-        // Set auto_scenarios which should take precedence
-        semantics.verification.auto_scenarios = vec![crate::semantics::AutoScenarioTemplate {
-            kind: "option".to_string(),
-            argv_prefix: vec!["new".to_string()],
-            argv_suffix: vec!["--new".to_string()],
-            tiers: vec!["accepted".to_string(), "behavior".to_string()],
-        }];
-
-        let result = auto_verification_scenarios(&targets, &semantics, &surface, None);
-        assert_eq!(
-            scenario_argv_for_id(&result.scenarios, "auto_verify::--color"),
-            vec![
-                "new".to_string(),
-                "--color".to_string(),
-                "--new".to_string()
-            ]
-        );
-    }
-
-    #[test]
     fn context_argv_is_included_in_generated_scenario_argv() {
         // Surface item with context_argv representing "git config --global"
         let surface = SurfaceInventory {
@@ -488,15 +394,10 @@ mod tests {
 
         let mut semantics: Semantics =
             serde_json::from_str(crate::templates::ENRICH_SEMANTICS_JSON).unwrap();
-        semantics.verification.auto_scenarios = vec![crate::semantics::AutoScenarioTemplate {
-            kind: "option".to_string(),
-            argv_prefix: Vec::new(),
-            argv_suffix: vec!["--help".to_string()],
-            tiers: vec!["behavior".to_string()],
-        }];
+        semantics.verification.option_existence_argv_suffix = vec!["--help".to_string()];
 
         let result = auto_verification_scenarios(&targets, &semantics, &surface, None);
-        // Should be: context_argv + surface_id + suffix = ["config", "--global", "--help"]
+        // Should be: prefix + context_argv + surface_id + suffix = ["config", "--global", "--help"]
         assert_eq!(
             scenario_argv_for_id(&result.scenarios, "auto_verify::--global"),
             vec![
