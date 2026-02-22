@@ -7,7 +7,7 @@ that supports iterative static + dynamic passes from portable doc packs.
 
 Current focus: M33 (LM Semantic Enrichment).
 
-## M33 — LM Semantic Enrichment (planning)
+## M33 — LM Semantic Enrichment (done)
 
 Goal: Improve verification of complex binaries (git, docker, kubectl) by having the
 LM generate prerequisite-aware scenarios **from documentation**, not from runtime
@@ -64,6 +64,20 @@ has access to option descriptions and can infer prerequisites semantically.
 | Medium | Pass `working_argvs` as examples (already implemented) |
 | Low | Consider context-aware seed templates |
 
+### Results
+
+**git status E2E test (comprehensive treatment):**
+
+| Metric | Value |
+|--------|-------|
+| Total surfaces | 21 |
+| Verified | 21 (100%) |
+| Cycles | 4 |
+| Pack status | **complete** |
+
+All 21 options verified without exclusions. The LM successfully inferred prerequisites
+from descriptions (e.g., `git init` setup for branch-related options).
+
 ### Acceptance Criteria
 
 | Criterion | Status |
@@ -71,9 +85,9 @@ has access to option descriptions and can infer prerequisites semantically.
 | Remove unused family infrastructure | done |
 | Keep working_argvs in learned_hints | done |
 | Document semantic enrichment direction | done |
-| Include descriptions in prompts | todo |
-| Add prereq guidance to behavior prompts | todo |
-| E2E test: git config with enriched prompts | todo |
+| Include descriptions in prompts | done |
+| Add prereq guidance to behavior prompts | done |
+| E2E test: git status with enriched prompts | done |
 
 ---
 

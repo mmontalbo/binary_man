@@ -56,6 +56,46 @@ Seed fields (all optional):
 
 Use setup when an option needs pre-existing state that can't be created with just files/dirs (e.g., initialized repositories, databases, config that requires a command to generate).
 
+## Inferring Prerequisites from Descriptions
+
+**Read the option description** to determine what setup is needed. Common patterns:
+
+| Description mentions | Setup needed |
+|---------------------|--------------|
+| "repository", "commit", "branch" | `setup: [["git", "init"]]` and possibly tracked files |
+| "tracked file", "index", "staged" | `setup: [["git", "init"], ["git", "add", "."]]` with files |
+| "working tree", "worktree" | `setup: [["git", "init"]]` |
+| "remote", "fetch", "push" | Exclude with `fixture_gap` (needs network) |
+| "container", "image" | Exclude with `fixture_gap` (needs docker) |
+| "config file", "configuration" | `files: {"config": "key=value"}` |
+| "input file", "read from" | `files: {"input.txt": "content"}` + include in argv |
+| "output file", "write to" | Use `file_exists` or `file_contains` assertions |
+| "directory", "folder" | `dirs: ["mydir"]` |
+| "symlink", "link" | `symlinks: {"link": "target"}` |
+| "permission", "mode" | `files` with specific content to chmod |
+
+**Examples by description:**
+
+- "Remove files from the working tree and index" → needs git repo + tracked file
+  ```json
+  {"argv": ["--cached", "file.txt"], "seed": {"setup": [["git", "init"], ["git", "add", "."]], "files": {"file.txt": "content"}}}
+  ```
+
+- "Show commit logs" → needs git repo with commits
+  ```json
+  {"argv": ["--oneline"], "seed": {"setup": [["git", "init"], ["git", "commit", "--allow-empty", "-m", "init"]]}}
+  ```
+
+- "Sort lines of text files" → needs input file or stdin
+  ```json
+  {"argv": ["-n", "data.txt"], "seed": {"files": {"data.txt": "3\n1\n2"}}}
+  ```
+
+- "Display file contents with line numbers" → needs input file
+  ```json
+  {"argv": ["-n", "input.txt"], "seed": {"files": {"input.txt": "line1\nline2"}}}
+  ```
+
 **Sandbox limitations**: Setup runs in isolated sandbox with read-only home directory. Avoid:
 - `--global` config operations (use `--local` or `--add` instead)
 - Writing to `~` or user config files

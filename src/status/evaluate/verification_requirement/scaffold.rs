@@ -31,7 +31,9 @@ struct BehaviorScaffoldEditPayload {
     upsert_scenarios: Vec<scenarios::ScenarioSpec>,
 }
 
-/// Build scaffold context with value_required hints for target IDs.
+/// Build scaffold context with value_required hints and descriptions for target IDs.
+///
+/// Descriptions are included for all reason codes to support semantic prereq inference.
 pub(super) fn build_scaffold_context(
     surface: Option<&crate::surface::SurfaceInventory>,
     target_ids: &[String],
@@ -41,8 +43,9 @@ pub(super) fn build_scaffold_context(
     let is_no_scenario = reason_code == Some("no_scenario");
     let is_outputs_equal = reason_code == Some("outputs_equal");
     let is_initial_scenarios = reason_code == Some("initial_scenarios");
+    let is_assertion_failed = reason_code == Some("assertion_failed");
 
-    if !is_no_scenario && !is_outputs_equal && !is_initial_scenarios {
+    if !is_no_scenario && !is_outputs_equal && !is_initial_scenarios && !is_assertion_failed {
         return None;
     }
 
@@ -65,18 +68,17 @@ pub(super) fn build_scaffold_context(
             });
         }
 
-        // For initial_scenarios, include all surface items with descriptions
-        if is_initial_scenarios {
-            all_surface_items.push(enrich::SurfaceItemHint {
-                id: target_id.clone(),
-                description: item.description.clone(),
-                value_placeholder: if item.invocation.value_arity == "required" {
-                    item.invocation.value_placeholder.clone()
-                } else {
-                    None
-                },
-            });
-        }
+        // Include surface items with descriptions for ALL reason codes
+        // This enables semantic prereq inference from option descriptions
+        all_surface_items.push(enrich::SurfaceItemHint {
+            id: target_id.clone(),
+            description: item.description.clone(),
+            value_placeholder: if item.invocation.value_arity == "required" {
+                item.invocation.value_placeholder.clone()
+            } else {
+                None
+            },
+        });
     }
 
     let has_value_required = !value_required.is_empty();
