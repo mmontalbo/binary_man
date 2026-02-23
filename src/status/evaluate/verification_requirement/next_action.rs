@@ -5,7 +5,7 @@
 
 use crate::enrich;
 use crate::scenarios;
-use crate::status::verification_policy::BehaviorReasonKind;
+use crate::status::verification_policy::{BehaviorAction, BehaviorReasonKind};
 use crate::verification_progress::{
     build_action_signature, get_assertion_failed_no_progress_count, is_noop_action,
     load_verification_progress,
@@ -44,11 +44,14 @@ pub(super) struct BehaviorPayloadArgs<'a> {
     pub surface: Option<&'a crate::surface::SurfaceInventory>,
     pub target_ids: &'a [String],
     pub reason_code: Option<&'a str>,
+    /// Semantic action type being taken.
+    pub action_kind: Option<BehaviorAction>,
     pub retry_counts: &'a std::collections::BTreeMap<String, usize>,
     pub ledger_entries: &'a LedgerEntries,
     pub suggested_overlay_keys: &'a [&'a str],
     pub assertion_starters: Vec<enrich::BehaviorAssertionStarter>,
     pub suggested_exclusion_payload: Option<enrich::SuggestedBehaviorExclusionPayload>,
+    pub paths: &'a enrich::DocPackPaths,
 }
 
 /// Computed state from behavior evaluation used for setting next actions.
@@ -59,6 +62,185 @@ pub(super) struct BehaviorEvalState<'a> {
     pub outputs_equal_with_workaround_needs_rerun: &'a [String],
     pub outputs_equal_with_workaround_ready_for_exclusion: &'a [String],
     pub retry_counts: &'a std::collections::BTreeMap<String, usize>,
+    /// Surfaces that failed post-execution judgment and need retry with feedback.
+    pub judgment_retry_ids: &'a std::collections::BTreeSet<String>,
+}
+
+/// Result of determining the next behavior action.
+///
+/// This encapsulates the action type, target IDs, and reason kind for dispatch.
+pub(super) struct DeterminedAction {
+    pub action: BehaviorAction,
+    pub target_ids: Vec<String>,
+    pub reason_kind: BehaviorReasonKind,
+}
+
+/// Determine the next behavior action based on evaluation state.
+///
+/// This is the core state machine that decides what action to take next.
+/// Returns `None` if no action is needed.
+pub(super) fn determine_behavior_action(
+    ctx: &QueueVerificationContext<'_>,
+    state: &BehaviorEvalState<'_>,
+) -> Option<DeterminedAction> {
+    // Priority 1: Initial scenarios (surface exists but no behavior scenarios yet)
+    if is_initial_behavior_cycle(
+        ctx.plan,
+        state.required_ids,
+        state.lookup_ctx.ledger_entries,
+    ) {
+        let target_ids: Vec<String> = state
+            .required_ids
+            .iter()
+            .take(BEHAVIOR_BATCH_LIMIT)
+            .cloned()
+            .collect();
+        return Some(DeterminedAction {
+            action: BehaviorAction::GenerateScenarios,
+            target_ids,
+            reason_kind: BehaviorReasonKind::InitialScenarios,
+        });
+    }
+
+    // Priority 2: Outputs equal without workaround → add workaround
+    if !state.outputs_equal_without_workaround.is_empty() {
+        return Some(DeterminedAction {
+            action: BehaviorAction::AddWorkaround,
+            target_ids: state.outputs_equal_without_workaround.to_vec(),
+            reason_kind: BehaviorReasonKind::OutputsEqual,
+        });
+    }
+
+    // Priority 3: Outputs equal with workaround needs rerun
+    if !state.outputs_equal_with_workaround_needs_rerun.is_empty() {
+        let (cap_hit, needs_rerun) = partition_cap_hit(
+            state.outputs_equal_with_workaround_needs_rerun.to_vec(),
+            state.retry_counts,
+        );
+        // If cap hit, exclude; otherwise rerun
+        if !cap_hit.is_empty() {
+            return Some(DeterminedAction {
+                action: BehaviorAction::Exclude,
+                target_ids: cap_hit,
+                reason_kind: BehaviorReasonKind::OutputsEqual,
+            });
+        }
+        if !needs_rerun.is_empty() {
+            return Some(DeterminedAction {
+                action: BehaviorAction::Rerun,
+                target_ids: needs_rerun,
+                reason_kind: BehaviorReasonKind::OutputsEqual,
+            });
+        }
+    }
+
+    // Priority 4: Outputs equal ready for exclusion
+    if !state
+        .outputs_equal_with_workaround_ready_for_exclusion
+        .is_empty()
+    {
+        let (cap_hit, ready_for_exclusion) = partition_cap_hit(
+            state
+                .outputs_equal_with_workaround_ready_for_exclusion
+                .to_vec(),
+            state.retry_counts,
+        );
+        if !cap_hit.is_empty() {
+            return Some(DeterminedAction {
+                action: BehaviorAction::Exclude,
+                target_ids: cap_hit,
+                reason_kind: BehaviorReasonKind::OutputsEqual,
+            });
+        }
+        if !ready_for_exclusion.is_empty() {
+            return Some(DeterminedAction {
+                action: BehaviorAction::Exclude,
+                target_ids: ready_for_exclusion,
+                reason_kind: BehaviorReasonKind::OutputsEqual,
+            });
+        }
+    }
+
+    // Priority 5: Judgment retry targets
+    let judgment_retry_targets: Vec<String> = state
+        .required_ids
+        .iter()
+        .filter(|id| {
+            state.judgment_retry_ids.contains(*id)
+                && state.lookup_ctx.remaining_ids.contains(*id)
+        })
+        .take(BEHAVIOR_BATCH_LIMIT)
+        .cloned()
+        .collect();
+    if !judgment_retry_targets.is_empty() {
+        return Some(DeterminedAction {
+            action: BehaviorAction::Apply,
+            target_ids: judgment_retry_targets,
+            reason_kind: BehaviorReasonKind::JudgmentRetry,
+        });
+    }
+
+    // Priority 6: Reason-based targets (scenario_error, assertion_failed, no_scenario, outputs_equal)
+    if let Some(next_id) = first_behavior_reason_target(
+        state.required_ids,
+        state.lookup_ctx.remaining_ids,
+        state.lookup_ctx.needs_apply_ids,
+        state.lookup_ctx.ledger_entries,
+    ) {
+        let action_reason_kind = action_reason_kind_for_surface_id(
+            &next_id,
+            state.lookup_ctx.missing_value_examples,
+            state.lookup_ctx.ledger_entries,
+        );
+        // Batch targets for reason kinds that benefit from batching
+        let target_ids = if matches!(
+            action_reason_kind,
+            BehaviorReasonKind::NoScenario | BehaviorReasonKind::OutputsEqual
+        ) {
+            let batched = batched_target_ids_for_reason(
+                state.required_ids,
+                state.lookup_ctx.remaining_ids,
+                state.lookup_ctx.missing_value_examples,
+                state.lookup_ctx.needs_apply_ids,
+                state.lookup_ctx.ledger_entries,
+                action_reason_kind,
+                BEHAVIOR_BATCH_LIMIT,
+            );
+            if batched.is_empty() {
+                vec![next_id]
+            } else {
+                batched
+            }
+        } else {
+            vec![next_id]
+        };
+        // Map reason kind to action
+        let action = action_reason_kind.suggested_action();
+        return Some(DeterminedAction {
+            action,
+            target_ids,
+            reason_kind: action_reason_kind,
+        });
+    }
+
+    // Priority 7: Needs apply targets
+    let batched_needs_apply: Vec<String> = state
+        .required_ids
+        .iter()
+        .filter(|id| state.lookup_ctx.needs_apply_ids.contains(*id))
+        .take(BEHAVIOR_BATCH_LIMIT)
+        .cloned()
+        .collect();
+    if !batched_needs_apply.is_empty() {
+        return Some(DeterminedAction {
+            action: BehaviorAction::Apply,
+            target_ids: batched_needs_apply,
+            // Use NoScenario as a generic "needs work" reason
+            reason_kind: BehaviorReasonKind::NoScenario,
+        });
+    }
+
+    None
 }
 
 /// Get the latest delta path from a verification entry.
@@ -118,9 +300,15 @@ pub(super) fn behavior_payload(
     // Build scenario output for targets (for LM error feedback)
     let target_scenario_output = build_target_scenario_output(&target_ids, args.ledger_entries);
 
+    // Build judgment feedback for targets that failed judgment
+    let target_judgment_feedback = build_target_judgment_feedback(&target_ids, args.paths);
+
+    let action_kind = args.action_kind.map(|a| a.as_code().to_string());
+
     let payload = enrich::BehaviorNextActionPayload {
         target_ids,
         reason_code: reason_code_str,
+        action_kind,
         retry_count,
         latest_delta_path,
         suggested_overlay_keys,
@@ -128,6 +316,7 @@ pub(super) fn behavior_payload(
         suggested_exclusion_payload: args.suggested_exclusion_payload,
         scaffold_context,
         target_scenario_output,
+        target_judgment_feedback,
     };
     (!payload.is_empty()).then_some(payload)
 }
@@ -166,32 +355,60 @@ fn build_target_scenario_output(
         .collect()
 }
 
-/// Get the action reason code for a surface ID.
-fn action_reason_code_for_surface_id(
+/// Build judgment feedback for targets that failed behavior judgment.
+///
+/// Loads progress from consolidated `verification_progress.json` and extracts
+/// feedback for surfaces in `judgment_pending_retry` state.
+fn build_target_judgment_feedback(
+    target_ids: &[String],
+    paths: &enrich::DocPackPaths,
+) -> Vec<enrich::TargetJudgmentFeedback> {
+    let progress = crate::verification_progress::load_verification_progress(paths);
+
+    target_ids
+        .iter()
+        .filter_map(|surface_id| {
+            let feedback = progress.judgment_pending_retry.get(surface_id)?;
+            Some(enrich::TargetJudgmentFeedback {
+                surface_id: surface_id.clone(),
+                reason: feedback.reason.clone(),
+                suggested_setup: feedback.suggested_setup.clone(),
+                failure_count: feedback.failure_count,
+            })
+        })
+        .collect()
+}
+
+/// Get the action reason kind for a surface ID.
+///
+/// Returns the `BehaviorReasonKind` that determines what action should be taken.
+/// Normalizes `MissingValueExamples` to `NoScenario` when no scenario exists.
+fn action_reason_kind_for_surface_id(
     surface_id: &str,
     missing_value_examples: &std::collections::BTreeSet<String>,
     ledger_entries: &LedgerEntries,
-) -> String {
+) -> BehaviorReasonKind {
     let reason_code =
         behavior_reason_code_for_id(surface_id, missing_value_examples, ledger_entries);
+    let reason_kind = BehaviorReasonKind::from_code(Some(&reason_code));
     let entry = ledger_entries.get(surface_id);
     let scenario_missing = entry.is_some_and(|entry| entry.behavior_scenario_ids.is_empty());
     // Normalize missing_value_examples to no_scenario when scenario is absent
-    if scenario_missing && reason_code == "missing_value_examples" {
-        "no_scenario".to_string()
+    if scenario_missing && reason_kind == BehaviorReasonKind::MissingValueExamples {
+        BehaviorReasonKind::NoScenario
     } else {
-        reason_code
+        reason_kind
     }
 }
 
-/// Select target IDs that match a specific reason code.
+/// Select target IDs that match a specific reason kind.
 pub(super) fn batched_target_ids_for_reason(
     required_ids: &[String],
     remaining_set: &std::collections::BTreeSet<String>,
     missing_value_examples: &std::collections::BTreeSet<String>,
     needs_apply_ids: &std::collections::BTreeSet<String>,
     ledger_entries: &LedgerEntries,
-    reason_code: &str,
+    reason_kind: BehaviorReasonKind,
     limit: usize,
 ) -> Vec<String> {
     let mut selected = Vec::new();
@@ -207,11 +424,13 @@ pub(super) fn batched_target_ids_for_reason(
         }
         // Only skip missing_value_examples when not batching for no_scenario
         // (missing_value_examples normalizes to no_scenario when scenario is absent)
-        if missing_value_examples.contains(surface_id) && reason_code != "no_scenario" {
+        if missing_value_examples.contains(surface_id)
+            && reason_kind != BehaviorReasonKind::NoScenario
+        {
             continue;
         }
-        if action_reason_code_for_surface_id(surface_id, missing_value_examples, ledger_entries)
-            != reason_code
+        if action_reason_kind_for_surface_id(surface_id, missing_value_examples, ledger_entries)
+            != reason_kind
         {
             continue;
         }
@@ -273,11 +492,13 @@ pub(super) fn suggested_exclusion_only_next_action(
         surface: Some(ctx.surface),
         target_ids,
         reason_code: Some(reason_code),
+        action_kind: Some(BehaviorAction::Exclude),
         retry_counts,
         ledger_entries,
         suggested_overlay_keys: &["overlays[].behavior_exclusion"],
         assertion_starters: Vec::new(),
         suggested_exclusion_payload: Some(suggested),
+        paths: ctx.paths,
     });
     let root = ctx.paths.root().display();
     enrich::NextAction::Command {
@@ -434,7 +655,9 @@ fn reason_based_behavior_next_action(
         ordered_target_ids.push(target_id.to_string());
     }
     let next_id = ordered_target_ids.first()?.clone();
-    let reason_code = behavior_reason_code_for_id(&next_id, missing_value_examples, ledger_entries);
+    let reason_kind =
+        action_reason_kind_for_surface_id(&next_id, missing_value_examples, ledger_entries);
+    let reason_code = reason_kind.as_code();
     let entry = ledger_entries.get(&next_id);
     let scenario_missing = entry.is_some_and(|entry| entry.behavior_scenario_ids.is_empty());
     let scenario_id = entry
@@ -450,18 +673,16 @@ fn reason_based_behavior_next_action(
         entry.and_then(|entry| entry.behavior_unverified_assertion_kind.as_deref());
     let assertion_seed_path =
         entry.and_then(|entry| entry.behavior_unverified_assertion_seed_path.as_deref());
-    // Normalize missing_value_examples to no_scenario when scenario is absent
-    let action_reason_code = if scenario_missing && reason_code == "missing_value_examples" {
-        "no_scenario".to_string()
-    } else {
-        reason_code.clone()
-    };
     let retry_count = retry_counts.get(&next_id).copied().unwrap_or(0);
-    if reason_code == "missing_delta_assertion" && retry_count >= BEHAVIOR_RERUN_CAP {
+
+    // Early exit: MissingDeltaAssertion at cap goes to exclusion
+    if reason_kind == BehaviorReasonKind::MissingDeltaAssertion
+        && retry_count >= BEHAVIOR_RERUN_CAP
+    {
         return Some(suggested_exclusion_only_next_action(
             ctx,
             &[next_id],
-            "missing_delta_assertion",
+            reason_code,
             retry_counts,
             ledger_entries,
         ));
@@ -472,7 +693,7 @@ fn reason_based_behavior_next_action(
             ctx,
             &ordered_target_ids,
             ledger_entries,
-            &reason_code,
+            reason_code,
             false,
         );
         vec![
@@ -489,17 +710,11 @@ fn reason_based_behavior_next_action(
             crate::status::verification::behavior_baseline_stub(ctx.plan, ctx.surface),
         ]
     } else {
-        let assertion_repair_reason = matches!(
-            action_reason_code.as_str(),
-            "assertion_seed_path_not_seeded"
-                | "seed_signature_mismatch"
-                | "seed_mismatch"
-                | "assertion_failed"
-                | "missing_delta_assertion"
-        );
+        // Use enum method to check if this needs assertion repair
+        let needs_assertion_repair = reason_kind.needs_scenario_fix();
         // For assertion repair, prioritize scaffold that adds assertions
         let mut candidates = Vec::new();
-        if assertion_repair_reason {
+        if needs_assertion_repair {
             candidates.push(build_missing_assertions_scaffold_content(
                 ctx.plan,
                 ledger_entries,
@@ -525,7 +740,7 @@ fn reason_based_behavior_next_action(
     let content = first_valid_scaffold_content(ctx.plan, ctx.paths.root(), scaffold_candidates)?;
 
     // No-op guard for assertion_failed: detect repeated identical edits with no evidence change
-    if action_reason_code == "assertion_failed" {
+    if reason_kind == BehaviorReasonKind::AssertionFailed {
         let verification_progress = load_verification_progress(ctx.paths);
         let candidate_signature =
             build_action_signature(Some("assertion_failed"), &next_id, &content, entry);
@@ -553,11 +768,13 @@ fn reason_based_behavior_next_action(
                 surface: Some(ctx.surface),
                 target_ids: std::slice::from_ref(&next_id),
                 reason_code: Some("assertion_failed"),
+                action_kind: Some(BehaviorAction::Rerun),
                 retry_counts,
                 ledger_entries,
                 suggested_overlay_keys: &[],
                 assertion_starters: Vec::new(),
                 suggested_exclusion_payload: None,
+                paths: ctx.paths,
             });
             return Some(enrich::NextAction::Command {
                 command,
@@ -574,17 +791,18 @@ fn reason_based_behavior_next_action(
     }
 
     let mut reason = behavior_unverified_reason(
-        Some(&action_reason_code),
+        Some(reason_code),
         &scenario_id,
         &next_id,
         assertion_kind,
         assertion_seed_path,
     );
-    if action_reason_code == "required_value_missing" {
+    // Note: "required_value_missing" is a legacy code, keep string check for compatibility
+    if reason_code == "required_value_missing" {
         reason.push_str("; ");
         reason.push_str(&required_value_argv_rewrite_hint(ctx.surface, &next_id));
     }
-    if scenario_missing && reason_code == "missing_value_examples" {
+    if scenario_missing && reason_kind == BehaviorReasonKind::MissingValueExamples {
         reason.push_str(
             "; scaffold argv uses a placeholder value token (optional: add value_examples overlay later)",
         );
@@ -596,7 +814,7 @@ fn reason_based_behavior_next_action(
         ));
     }
     reason.push_str("; apply patch as merge/upsert by scenario.id");
-    let assertion_starters = if action_reason_code == "no_scenario" {
+    let assertion_starters = if reason_kind == BehaviorReasonKind::NoScenario {
         assertion_starters_for_missing_assertions(entry, ctx.include_full)
     } else {
         Vec::new()
@@ -604,12 +822,14 @@ fn reason_based_behavior_next_action(
     let payload = behavior_payload(BehaviorPayloadArgs {
         surface: Some(ctx.surface),
         target_ids: &ordered_target_ids,
-        reason_code: Some(&action_reason_code),
+        reason_code: Some(reason_code),
+        action_kind: Some(reason_kind.suggested_action()),
         retry_counts,
         ledger_entries,
         suggested_overlay_keys: &[],
         assertion_starters,
         suggested_exclusion_payload: None,
+        paths: ctx.paths,
     });
     Some(enrich::NextAction::Edit {
         path: "scenarios/plan.json".to_string(),
@@ -660,6 +880,8 @@ fn is_initial_behavior_cycle(
 }
 
 /// Maybe set behavior next action based on evaluation state.
+///
+/// Uses a state machine to determine the action, then dispatches to action-specific handlers.
 pub(super) fn maybe_set_behavior_next_action(
     ctx: &mut QueueVerificationContext<'_>,
     summary: &mut enrich::VerificationTriageSummary,
@@ -672,34 +894,67 @@ pub(super) fn maybe_set_behavior_next_action(
         return;
     }
 
-    // Check for initial scenarios: surface exists but no behavior scenarios yet
-    if is_initial_behavior_cycle(
-        ctx.plan,
-        state.required_ids,
-        state.lookup_ctx.ledger_entries,
-    ) {
-        let target_ids: Vec<String> = state
-            .required_ids
-            .iter()
-            .take(BEHAVIOR_BATCH_LIMIT)
-            .cloned()
-            .collect();
+    // Determine the action using the state machine
+    let Some(determined) = determine_behavior_action(ctx, state) else {
+        return;
+    };
+
+    // Dispatch based on action type
+    match determined.action {
+        BehaviorAction::GenerateScenarios => {
+            handle_generate_scenarios(ctx, summary, state, &determined);
+        }
+        BehaviorAction::AddWorkaround => {
+            handle_add_workaround(ctx, summary, state, &determined);
+        }
+        BehaviorAction::Rerun => {
+            handle_rerun(ctx, summary, state, &determined);
+        }
+        BehaviorAction::Exclude => {
+            handle_exclude(ctx, summary, state, &determined);
+        }
+        BehaviorAction::FixScenario => {
+            handle_fix_scenario(ctx, summary, state, &determined);
+        }
+        BehaviorAction::Apply => {
+            handle_apply(ctx, state, &determined);
+        }
+        BehaviorAction::Defer => {
+            // Deferred items are skipped - no action needed
+        }
+    }
+}
+
+/// Handle GenerateScenarios action.
+fn handle_generate_scenarios(
+    ctx: &mut QueueVerificationContext<'_>,
+    summary: &mut enrich::VerificationTriageSummary,
+    state: &BehaviorEvalState<'_>,
+    determined: &DeterminedAction,
+) {
+    let target_ids = &determined.target_ids;
+    let reason_code = determined.reason_kind.as_code();
+
+    // For initial scenarios, build scaffold
+    if determined.reason_kind == BehaviorReasonKind::InitialScenarios {
         let scaffold_context =
-            build_scaffold_context(Some(ctx.surface), &target_ids, Some("initial_scenarios"));
+            build_scaffold_context(Some(ctx.surface), target_ids, Some(reason_code));
         let payload = behavior_payload(BehaviorPayloadArgs {
             surface: Some(ctx.surface),
-            target_ids: &target_ids,
-            reason_code: Some("initial_scenarios"),
+            target_ids,
+            reason_code: Some(reason_code),
+            action_kind: Some(determined.action),
             retry_counts: state.retry_counts,
             ledger_entries: state.lookup_ctx.ledger_entries,
             suggested_overlay_keys: &[],
             assertion_starters: Vec::new(),
             suggested_exclusion_payload: None,
+            paths: ctx.paths,
         });
         let content = crate::status::verification::behavior_scenarios_batch_stub(
             ctx.plan,
             ctx.surface,
-            &target_ids,
+            target_ids,
         )
         .unwrap_or_default();
         *ctx.verification_next_action = Some(enrich::NextAction::Edit {
@@ -716,236 +971,210 @@ pub(super) fn maybe_set_behavior_next_action(
                 p
             }),
         });
-        return;
-    }
-
-    if !state.outputs_equal_without_workaround.is_empty() {
-        let content = surface_overlays_requires_argv_stub_batch(
-            ctx.paths,
-            ctx.surface,
-            state.outputs_equal_without_workaround,
-        );
-        summary.stub_blockers_preview = build_stub_blockers_preview(
-            ctx,
-            state.outputs_equal_without_workaround,
-            state.lookup_ctx.ledger_entries,
-            STUB_REASON_OUTPUTS_EQUAL_NEEDS_WORKAROUND,
-            true,
-        );
-        let payload = behavior_payload(BehaviorPayloadArgs {
-            surface: Some(ctx.surface),
-            target_ids: state.outputs_equal_without_workaround,
-            reason_code: Some("outputs_equal"),
-            retry_counts: state.retry_counts,
-            ledger_entries: state.lookup_ctx.ledger_entries,
-            suggested_overlay_keys: &["overlays[].invocation.requires_argv"],
-            assertion_starters: Vec::new(),
-            suggested_exclusion_payload: None,
-        });
-        *ctx.verification_next_action = Some(enrich::NextAction::Edit {
-            path: "inventory/surface.overlays.json".to_string(),
-            content,
-            reason: "add requires_argv workaround overlays in inventory/surface.overlays.json; see verification.stub_blockers_preview".to_string(),
-            hint: Some("Add requires_argv workaround overlays".to_string()),
-            edit_strategy: enrich::default_edit_strategy(),
-            payload,
-        });
-        return;
-    }
-
-    if !state.outputs_equal_with_workaround_needs_rerun.is_empty() {
-        let (cap_hit, needs_rerun) = partition_cap_hit(
-            state.outputs_equal_with_workaround_needs_rerun.to_vec(),
-            state.retry_counts,
-        );
-        if !set_outputs_equal_plateau_next_action(
-            ctx,
-            summary,
-            &cap_hit,
-            state.retry_counts,
-            state.lookup_ctx.ledger_entries,
-        ) && !needs_rerun.is_empty()
-        {
-            summary.stub_blockers_preview = build_stub_blockers_preview(
-                ctx,
-                &needs_rerun,
-                state.lookup_ctx.ledger_entries,
-                STUB_REASON_OUTPUTS_EQUAL_AFTER_WORKAROUND,
-                true,
-            );
-            let scenario_ids = {
-                let ids = rerun_scenario_ids_for_surface_ids(
-                    &needs_rerun,
-                    state.lookup_ctx.ledger_entries,
-                );
-                if ids.is_empty() {
-                    normalize_target_ids(&needs_rerun)
-                        .into_iter()
-                        .map(|surface_id| {
-                            format!(
-                                "verify_{}",
-                                surface_id.trim_start_matches('-').trim().replace('-', "_")
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                } else {
-                    ids
-                }
-            };
-            let command = targeted_outputs_equal_rerun_command(ctx.paths.root(), &scenario_ids);
-            let payload = behavior_payload(BehaviorPayloadArgs {
-                surface: Some(ctx.surface),
-                target_ids: &needs_rerun,
-                reason_code: Some("outputs_equal"),
-                retry_counts: state.retry_counts,
-                ledger_entries: state.lookup_ctx.ledger_entries,
-                suggested_overlay_keys: &["overlays[].behavior_exclusion"],
-                assertion_starters: Vec::new(),
-                suggested_exclusion_payload: None,
-            });
-            let retry = max_retry_count(&needs_rerun, state.retry_counts).unwrap_or(0);
-            *ctx.verification_next_action = Some(enrich::NextAction::Command {
-                command,
-                reason: format!(
-                    "requires_argv workaround is present but outputs_equal evidence has not progressed; rerun targeted behavior delta checks for {} scenario ids ({} targets, no-progress retry {}/{})",
-                    scenario_ids.len(),
-                    needs_rerun.len(),
-                    retry.saturating_add(1),
-                    BEHAVIOR_RERUN_CAP
-                ),
-                hint: Some("Rerun to verify workaround effect".to_string()),
-                payload,
-            });
-        }
-        return;
-    }
-
-    if !state
-        .outputs_equal_with_workaround_ready_for_exclusion
-        .is_empty()
-    {
-        let (cap_hit, ready_for_exclusion) = partition_cap_hit(
-            state
-                .outputs_equal_with_workaround_ready_for_exclusion
-                .to_vec(),
-            state.retry_counts,
-        );
-        if !set_outputs_equal_plateau_next_action(
-            ctx,
-            summary,
-            &cap_hit,
-            state.retry_counts,
-            state.lookup_ctx.ledger_entries,
-        ) && !ready_for_exclusion.is_empty()
-        {
-            let content = surface_overlays_behavior_exclusion_stub_batch(
-                ctx.paths,
-                ctx.surface,
-                &ready_for_exclusion,
-                state.lookup_ctx.ledger_entries,
-            );
-            summary.stub_blockers_preview = build_stub_blockers_preview(
-                ctx,
-                &ready_for_exclusion,
-                state.lookup_ctx.ledger_entries,
-                STUB_REASON_OUTPUTS_EQUAL_AFTER_WORKAROUND,
-                true,
-            );
-            let payload = behavior_payload(BehaviorPayloadArgs {
-                surface: Some(ctx.surface),
-                target_ids: &ready_for_exclusion,
-                reason_code: Some("outputs_equal"),
-                retry_counts: state.retry_counts,
-                ledger_entries: state.lookup_ctx.ledger_entries,
-                suggested_overlay_keys: &["overlays[].behavior_exclusion"],
-                assertion_starters: Vec::new(),
-                suggested_exclusion_payload: None,
-            });
-            *ctx.verification_next_action = Some(enrich::NextAction::Edit {
-                path: "inventory/surface.overlays.json".to_string(),
-                content,
-                reason: "record behavior exclusions in inventory/surface.overlays.json; see verification.stub_blockers_preview".to_string(),
-                hint: Some("Add behavior exclusion overlays".to_string()),
-                edit_strategy: enrich::default_edit_strategy(),
-                payload,
-            });
-        }
-        return;
-    }
-
-    if let Some(next_id) = first_behavior_reason_target(
-        state.required_ids,
-        state.lookup_ctx.remaining_ids,
-        state.lookup_ctx.needs_apply_ids,
-        state.lookup_ctx.ledger_entries,
-    ) {
-        let action_reason_code = action_reason_code_for_surface_id(
-            &next_id,
-            state.lookup_ctx.missing_value_examples,
-            state.lookup_ctx.ledger_entries,
-        );
-        let target_ids = if matches!(action_reason_code.as_str(), "no_scenario" | "outputs_equal") {
-            let batched = batched_target_ids_for_reason(
-                state.required_ids,
-                state.lookup_ctx.remaining_ids,
-                state.lookup_ctx.missing_value_examples,
-                state.lookup_ctx.needs_apply_ids,
-                state.lookup_ctx.ledger_entries,
-                &action_reason_code,
-                BEHAVIOR_BATCH_LIMIT,
-            );
-            if batched.is_empty() {
-                vec![next_id]
-            } else {
-                batched
-            }
-        } else {
-            vec![next_id]
-        };
+    } else {
+        // Other scenario generation (e.g., no_scenario) - use reason_based handler
         if let Some(action) = reason_based_behavior_next_action(
             ctx,
             summary,
-            &target_ids,
+            target_ids,
             state.lookup_ctx.missing_value_examples,
             state.retry_counts,
             state.lookup_ctx.ledger_entries,
         ) {
             *ctx.verification_next_action = Some(action);
         }
-        return;
     }
+}
 
-    // Batch all needs_apply targets instead of processing one at a time
-    let batched_needs_apply: Vec<String> = state
-        .required_ids
-        .iter()
-        .filter(|id| state.lookup_ctx.needs_apply_ids.contains(*id))
-        .take(BEHAVIOR_BATCH_LIMIT)
-        .cloned()
-        .collect();
+/// Handle AddWorkaround action.
+fn handle_add_workaround(
+    ctx: &mut QueueVerificationContext<'_>,
+    summary: &mut enrich::VerificationTriageSummary,
+    state: &BehaviorEvalState<'_>,
+    determined: &DeterminedAction,
+) {
+    let target_ids = &determined.target_ids;
+    let content = surface_overlays_requires_argv_stub_batch(ctx.paths, ctx.surface, target_ids);
+    summary.stub_blockers_preview = build_stub_blockers_preview(
+        ctx,
+        target_ids,
+        state.lookup_ctx.ledger_entries,
+        STUB_REASON_OUTPUTS_EQUAL_NEEDS_WORKAROUND,
+        true,
+    );
+    let payload = behavior_payload(BehaviorPayloadArgs {
+        surface: Some(ctx.surface),
+        target_ids,
+        reason_code: Some("outputs_equal"),
+        action_kind: Some(determined.action),
+        retry_counts: state.retry_counts,
+        ledger_entries: state.lookup_ctx.ledger_entries,
+        suggested_overlay_keys: &["overlays[].invocation.requires_argv"],
+        assertion_starters: Vec::new(),
+        suggested_exclusion_payload: None,
+        paths: ctx.paths,
+    });
+    *ctx.verification_next_action = Some(enrich::NextAction::Edit {
+        path: "inventory/surface.overlays.json".to_string(),
+        content,
+        reason: "add requires_argv workaround overlays in inventory/surface.overlays.json; see verification.stub_blockers_preview".to_string(),
+        hint: Some("Add requires_argv workaround overlays".to_string()),
+        edit_strategy: enrich::default_edit_strategy(),
+        payload,
+    });
+}
 
-    if !batched_needs_apply.is_empty() {
-        let root = ctx.paths.root().display();
-        let payload = behavior_payload(BehaviorPayloadArgs {
-            surface: Some(ctx.surface),
-            target_ids: &batched_needs_apply,
-            reason_code: Some("needs_apply"),
-            retry_counts: state.retry_counts,
-            ledger_entries: state.lookup_ctx.ledger_entries,
-            suggested_overlay_keys: &[],
-            assertion_starters: Vec::new(),
-            suggested_exclusion_payload: None,
-        });
-        let reason_preview = if batched_needs_apply.len() == 1 {
-            batched_needs_apply[0].clone()
+/// Handle Rerun action.
+fn handle_rerun(
+    ctx: &mut QueueVerificationContext<'_>,
+    summary: &mut enrich::VerificationTriageSummary,
+    state: &BehaviorEvalState<'_>,
+    determined: &DeterminedAction,
+) {
+    let target_ids = &determined.target_ids;
+    summary.stub_blockers_preview = build_stub_blockers_preview(
+        ctx,
+        target_ids,
+        state.lookup_ctx.ledger_entries,
+        STUB_REASON_OUTPUTS_EQUAL_AFTER_WORKAROUND,
+        true,
+    );
+    let scenario_ids = {
+        let ids = rerun_scenario_ids_for_surface_ids(target_ids, state.lookup_ctx.ledger_entries);
+        if ids.is_empty() {
+            normalize_target_ids(target_ids)
+                .into_iter()
+                .map(|surface_id| {
+                    format!(
+                        "verify_{}",
+                        surface_id.trim_start_matches('-').trim().replace('-', "_")
+                    )
+                })
+                .collect::<Vec<_>>()
         } else {
-            format!("{} targets", batched_needs_apply.len())
-        };
-        *ctx.verification_next_action = Some(enrich::NextAction::Command {
-            command: format!("bman apply --doc-pack {root}"),
-            reason: format!("run behavior verification for {reason_preview}"),
-            hint: Some("Run to execute behavior verification".to_string()),
-            payload,
-        });
+            ids
+        }
+    };
+    let command = targeted_outputs_equal_rerun_command(ctx.paths.root(), &scenario_ids);
+    let payload = behavior_payload(BehaviorPayloadArgs {
+        surface: Some(ctx.surface),
+        target_ids,
+        reason_code: Some("outputs_equal"),
+        action_kind: Some(determined.action),
+        retry_counts: state.retry_counts,
+        ledger_entries: state.lookup_ctx.ledger_entries,
+        suggested_overlay_keys: &["overlays[].behavior_exclusion"],
+        assertion_starters: Vec::new(),
+        suggested_exclusion_payload: None,
+        paths: ctx.paths,
+    });
+    let retry = max_retry_count(target_ids, state.retry_counts).unwrap_or(0);
+    *ctx.verification_next_action = Some(enrich::NextAction::Command {
+        command,
+        reason: format!(
+            "requires_argv workaround is present but outputs_equal evidence has not progressed; rerun targeted behavior delta checks for {} scenario ids ({} targets, no-progress retry {}/{})",
+            scenario_ids.len(),
+            target_ids.len(),
+            retry.saturating_add(1),
+            BEHAVIOR_RERUN_CAP
+        ),
+        hint: Some("Rerun to verify workaround effect".to_string()),
+        payload,
+    });
+}
+
+/// Handle Exclude action (auto-exclude after cap hit).
+fn handle_exclude(
+    ctx: &mut QueueVerificationContext<'_>,
+    summary: &mut enrich::VerificationTriageSummary,
+    state: &BehaviorEvalState<'_>,
+    determined: &DeterminedAction,
+) {
+    // Use the existing plateau handler for exclusions
+    set_outputs_equal_plateau_next_action(
+        ctx,
+        summary,
+        &determined.target_ids,
+        state.retry_counts,
+        state.lookup_ctx.ledger_entries,
+    );
+}
+
+/// Handle FixScenario action.
+fn handle_fix_scenario(
+    ctx: &mut QueueVerificationContext<'_>,
+    summary: &mut enrich::VerificationTriageSummary,
+    state: &BehaviorEvalState<'_>,
+    determined: &DeterminedAction,
+) {
+    // Delegate to the reason-based handler which handles assertion repair
+    if let Some(action) = reason_based_behavior_next_action(
+        ctx,
+        summary,
+        &determined.target_ids,
+        state.lookup_ctx.missing_value_examples,
+        state.retry_counts,
+        state.lookup_ctx.ledger_entries,
+    ) {
+        *ctx.verification_next_action = Some(action);
     }
+}
+
+/// Handle Apply action (run apply command).
+fn handle_apply(
+    ctx: &mut QueueVerificationContext<'_>,
+    state: &BehaviorEvalState<'_>,
+    determined: &DeterminedAction,
+) {
+    let target_ids = &determined.target_ids;
+    let reason_code = determined.reason_kind.as_code();
+    let root = ctx.paths.root().display();
+
+    let payload = behavior_payload(BehaviorPayloadArgs {
+        surface: Some(ctx.surface),
+        target_ids,
+        reason_code: Some(reason_code),
+        action_kind: Some(determined.action),
+        retry_counts: state.retry_counts,
+        ledger_entries: state.lookup_ctx.ledger_entries,
+        suggested_overlay_keys: &[],
+        assertion_starters: Vec::new(),
+        suggested_exclusion_payload: None,
+        paths: ctx.paths,
+    });
+
+    let (reason, hint) = match determined.reason_kind {
+        BehaviorReasonKind::JudgmentRetry => {
+            let reason_preview = if target_ids.len() == 1 {
+                target_ids[0].clone()
+            } else {
+                format!("{} targets", target_ids.len())
+            };
+            (
+                format!(
+                    "retry behavior verification for {} (failed post-execution judgment)",
+                    reason_preview
+                ),
+                "Retry with improved scenarios based on judgment feedback".to_string(),
+            )
+        }
+        _ => {
+            let reason_preview = if target_ids.len() == 1 {
+                target_ids[0].clone()
+            } else {
+                format!("{} targets", target_ids.len())
+            };
+            (
+                format!("run behavior verification for {reason_preview}"),
+                "Run to execute behavior verification".to_string(),
+            )
+        }
+    };
+
+    *ctx.verification_next_action = Some(enrich::NextAction::Command {
+        command: format!("bman apply --doc-pack {root}"),
+        reason,
+        hint: Some(hint),
+        payload,
+    });
 }

@@ -96,7 +96,7 @@ use selectors::{
 
 use crate::enrich;
 use crate::scenarios;
-use crate::verification_progress::load_verification_progress;
+use crate::verification_progress::{load_verification_progress, MAX_JUDGMENT_FAILURES};
 
 type LedgerEntries = std::collections::BTreeMap<String, scenarios::VerificationEntry>;
 
@@ -348,15 +348,40 @@ fn eval_behavior_verification(ctx: &mut QueueVerificationContext<'_>) -> Verific
         behavior_exclusions.excluded_by_id.keys().cloned().collect();
 
     let partition_result = partition_remaining_ids(required_ids, &excluded_set, ledger_entries);
-    let remaining_ids = partition_result.remaining_ids;
-    let behavior_verified_count = partition_result.verified_count;
+    let mut remaining_ids = partition_result.remaining_ids;
+    let mut behavior_verified_count = partition_result.verified_count;
     ctx.evidence.extend(partition_result.collected_evidence);
 
+    // Load consolidated progress (includes judgment state and retry counts)
+    let verification_progress = load_verification_progress(ctx.paths);
+
+    // Extract judgment-retryable surfaces - they produced outputs_differ
+    // but the output didn't demonstrate behavior, so we give them more chances.
+    let judgment_retry_ids: Vec<String> = verification_progress
+        .judgment_pending_retry
+        .iter()
+        .filter(|(_, feedback)| feedback.failure_count < MAX_JUDGMENT_FAILURES)
+        .map(|(id, _)| id.clone())
+        .filter(|id| !remaining_ids.contains(id))
+        .collect();
+
+    // Move judgment-failed surfaces from verified back to remaining
+    for surface_id in &judgment_retry_ids {
+        remaining_ids.push(surface_id.clone());
+        behavior_verified_count = behavior_verified_count.saturating_sub(1);
+    }
+    remaining_ids.sort();
+    remaining_ids.dedup();
+
     let remaining_set: std::collections::BTreeSet<String> = remaining_ids.iter().cloned().collect();
+    let judgment_retry_set: std::collections::BTreeSet<String> =
+        judgment_retry_ids.iter().cloned().collect();
     let remaining_preview = preview_ids(&remaining_ids);
     let missing_value_examples =
         collect_missing_value_examples(ctx.surface, &remaining_ids, ledger_entries);
-    let needs_apply_ids = needs_apply_ids(&plan_behavior_ids, &remaining_set, ledger_entries);
+    let mut needs_apply_ids = needs_apply_ids(&plan_behavior_ids, &remaining_set, ledger_entries);
+    // Judgment-failed surfaces need apply to retry with feedback
+    needs_apply_ids.extend(judgment_retry_set.iter().cloned());
     let lookup_ctx = BehaviorLookupContext {
         remaining_ids: &remaining_set,
         missing_value_examples: &missing_value_examples,
@@ -376,7 +401,6 @@ fn eval_behavior_verification(ctx: &mut QueueVerificationContext<'_>) -> Verific
         outputs_equal_partitions.with_workaround_needs_rerun;
     let outputs_equal_with_workaround_ready_for_exclusion =
         outputs_equal_partitions.with_workaround_ready_for_exclusion;
-    let verification_progress = load_verification_progress(ctx.paths);
     let outputs_equal_retry_ids = outputs_equal_without_workaround
         .iter()
         .chain(outputs_equal_with_workaround_needs_rerun.iter())
@@ -433,6 +457,7 @@ fn eval_behavior_verification(ctx: &mut QueueVerificationContext<'_>) -> Verific
         outputs_equal_with_workaround_ready_for_exclusion:
             &outputs_equal_with_workaround_ready_for_exclusion,
         retry_counts: &retry_counts,
+        judgment_retry_ids: &judgment_retry_set,
     };
     maybe_set_behavior_next_action(ctx, &mut summary, &eval_state);
 

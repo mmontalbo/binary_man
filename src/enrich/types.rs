@@ -416,6 +416,10 @@ pub struct BehaviorNextActionPayload {
     pub target_ids: Vec<String>,
     #[serde(default)]
     pub reason_code: Option<String>,
+    /// Semantic action type (e.g., "generate_scenarios", "fix_scenario", "rerun").
+    /// Corresponds to BehaviorAction enum codes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_kind: Option<String>,
     #[serde(default)]
     pub retry_count: Option<usize>,
     #[serde(default)]
@@ -431,6 +435,23 @@ pub struct BehaviorNextActionPayload {
     /// Per-target scenario output for error feedback.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub target_scenario_output: Vec<TargetScenarioOutput>,
+    /// Per-target judgment feedback from failed behavior judgments.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub target_judgment_feedback: Vec<TargetJudgmentFeedback>,
+}
+
+/// Judgment feedback for a target option, used for LM retry prompts.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct TargetJudgmentFeedback {
+    /// The surface_id this feedback belongs to.
+    pub surface_id: String,
+    /// Why the judgment failed.
+    pub reason: String,
+    /// Suggested setup commands from the judge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_setup: Option<Vec<String>>,
+    /// How many times judgment has failed.
+    pub failure_count: usize,
 }
 
 /// Scenario output for a target option, used for LM error feedback.

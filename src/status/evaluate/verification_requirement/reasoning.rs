@@ -41,6 +41,15 @@ pub(super) fn behavior_recommended_fix(reason_code: &str) -> &'static str {
         BehaviorReasonKind::AutoVerifyTimeout => {
             "deferred (auto_verify timed out, likely interactive command)"
         }
+        BehaviorReasonKind::MissingValueExamples => {
+            "add value_examples overlay or use placeholder token in argv"
+        }
+        BehaviorReasonKind::MissingDeltaAssertion => {
+            "add assertions to verify the delta output"
+        }
+        BehaviorReasonKind::JudgmentRetry => {
+            "retry with improved scenario based on judgment feedback"
+        }
     }
 }
 
@@ -285,10 +294,12 @@ pub(super) fn behavior_unverified_reason(
         BehaviorReasonKind::InitialScenarios => {
             format!("{reason_code}: {fix}")
         }
-        BehaviorReasonKind::NoScenario => {
+        BehaviorReasonKind::NoScenario | BehaviorReasonKind::MissingValueExamples => {
             format!("{reason_code}: {fix} for {surface_id}")
         }
-        BehaviorReasonKind::ScenarioError => {
+        BehaviorReasonKind::ScenarioError
+        | BehaviorReasonKind::MissingDeltaAssertion
+        | BehaviorReasonKind::JudgmentRetry => {
             format!("{reason_code}: {fix} for scenario {scenario_id}")
         }
         BehaviorReasonKind::AssertionFailed => {
