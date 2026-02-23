@@ -5,7 +5,170 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M35 (TBD).
+Current focus: M35.
+
+## M35 — Verification Stall Diagnostics
+
+Goal: Surface why each unverified option is stuck and what action to take.
+
+### Problem
+
+`bman status` currently shows aggregated counts without actionable detail:
+
+```
+verification: 78/101 behavior verified
+```
+
+This tells us nothing about:
+- Which 23 are unverified?
+- Why is each stuck?
+- What should we do about each one?
+
+During git log verification (M34 follow-up), we hit a plateau at 48% that required
+manual investigation to diagnose:
+- 16 options had **no scenario** (LM never attempted them)
+- 3 options had **setup failures** (silent `git checkout main` errors)
+- 2 options were **stuck** (3+ attempts, same `outputs_equal` outcome)
+
+The data existed in scenario files but wasn't surfaced.
+
+### Solution
+
+`bman status` shows diagnostics automatically when pack is incomplete:
+
+```
+verification: 78/101 behavior verified
+
+Unverified (23):
+
+  NO_SCENARIO (16) - never attempted:
+    --basic-regexp, --boundary, --first-parent, ...
+
+  SETUP_FAILED (3) - setup command errored:
+    --cherry: "git checkout main" → pathspec 'main' did not match
+    --date-order: "git checkout main" → pathspec 'main' did not match
+
+  OUTPUTS_EQUAL (2) - no observable difference:
+    --abbrev, --no-abbrev
+
+  STUCK (2) - 3+ attempts, same outcome:
+    --show-signature: outputs_equal × 3
+    --remotes: scenario_error × 3
+```
+
+JSON output includes `unverified_breakdown` array for automation:
+```json
+{
+  "unverified_breakdown": [
+    {"surface_id": "--cherry", "reason": "setup_failed", "attempts": 1,
+     "context": {"cmd": "git checkout main", "stderr": "pathspec 'main'..."}}
+  ]
+}
+```
+
+### Design Decisions
+
+1. **No new state for attempt tracking** - Count scenario files per surface
+   (`inventory/scenarios/verify_--option-*.json`). If files are deleted, count
+   resets - that's intentional (user wants fresh start).
+
+2. **Show diagnostics automatically** - No `--verbose` flag. Complete pack gets
+   terse output. Incomplete pack shows breakdown. Keeps common case clean.
+
+3. **Setup tracking is the only new data** - Classification reads existing
+   `delta_outcome` from verification cache. Only new capture is setup command
+   results.
+
+4. **JSON includes diagnostics** - `unverified_breakdown` array with
+   `{surface_id, reason, attempts, context}`. Text output is formatted view.
+
+### Changes
+
+**1. Track setup command results** (`src/scenarios/types.rs`, `src/scenarios/run/exec.rs`)
+
+```rust
+pub struct SetupResult {
+    pub command: Vec<String>,
+    pub exit_code: i32,
+    pub stderr: String,
+}
+
+// In ScenarioOutput:
+pub setup_results: Vec<SetupResult>,
+pub setup_failed: bool,
+```
+
+On any setup command failure: set `setup_failed = true`, skip main command,
+store which command failed and why.
+
+**2. Add `setup_failed` outcome** (`queries/.../10_behavior_assertion_eval.sql`)
+
+```sql
+WHEN scenario.setup_failed THEN 'setup_failed'
+```
+
+Distinct from `scenario_error` (schema/config issues).
+
+**3. Build unverified breakdown** (`src/status/evaluate/verification_requirement/reasoning.rs`)
+
+```rust
+pub struct UnverifiedEntry {
+    pub surface_id: String,
+    pub reason: UnverifiedReason,
+    pub attempts: u32,
+    pub context: Option<UnverifiedContext>,
+}
+
+pub enum UnverifiedReason {
+    NoScenario,
+    SetupFailed,
+    OutputsEqual,
+    AssertionFailed,
+    ScenarioError,
+    Stuck,
+}
+```
+
+Derive from:
+- Scenario file count → `attempts`, `NoScenario` if 0
+- `setup_failed` flag → `SetupFailed`
+- `delta_outcome` from cache → `OutputsEqual`, `AssertionFailed`, `ScenarioError`
+- 3+ attempts with same outcome → `Stuck`
+
+**4. Surface in status output** (`src/status.rs`)
+
+- Add `unverified_breakdown` to JSON output
+- Add grouped text output when incomplete
+- No change to output when complete
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `src/scenarios/types.rs` | Add `SetupResult`, `setup_results`, `setup_failed` |
+| `src/scenarios/run/exec.rs` | Capture setup command results |
+| `queries/.../10_behavior_assertion_eval.sql` | Add `setup_failed` outcome |
+| `src/status/evaluate/verification_requirement/reasoning.rs` | Add `UnverifiedEntry` builder |
+| `src/status.rs` | Add `unverified_breakdown` to JSON, grouped text when incomplete |
+
+### Acceptance Criteria
+
+| Criterion | Status |
+|-----------|--------|
+| Setup failures captured with failing command + stderr | |
+| `setup_failed` distinct from `scenario_error` in query | |
+| `--json` includes `unverified_breakdown` array | |
+| Text output shows grouped breakdown when incomplete | |
+| Text output unchanged when complete | |
+| Attempt count derived from scenario file count (no new state) | |
+
+### Out of Scope
+
+- Auto-exclusion of STUCK surfaces (future M36)
+- Priority formatting in LM prompts (future)
+- Cross-subcommand hint sharing (future)
+
+---
 
 ## M34 — Post-Execution Behavior Judgment (done)
 
