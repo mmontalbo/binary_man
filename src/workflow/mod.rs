@@ -2,7 +2,7 @@
 //!
 //! Each step is intentionally small so the CLI can remain thin and the
 //! artifact-driven flow stays predictable.
-mod apply;
+pub(crate) mod apply;
 mod context;
 mod decisions;
 mod init;

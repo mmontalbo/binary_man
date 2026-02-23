@@ -332,7 +332,7 @@ fn outputs_equal_retry_count_uses_verification_progress_state() {
     write_file(
         &root.join("inventory/verification_progress.json"),
         r#"{
-  "schema_version": 1,
+  "schema_version": 2,
   "outputs_equal_retries_by_surface": {
     "--color": {
       "retry_count": 2,
@@ -939,7 +939,7 @@ fn outputs_equal_status_is_read_only_and_pivots_only_from_persisted_cap() {
     write_file(
         &progress_path,
         r#"{
-  "schema_version": 1,
+  "schema_version": 2,
   "outputs_equal_retries_by_surface": {
     "--color": {
       "retry_count": 2,
@@ -980,7 +980,7 @@ fn outputs_equal_status_does_not_mutate_existing_retry_progress() {
     write_file(
         &progress_path,
         r#"{
-  "schema_version": 1,
+  "schema_version": 2,
   "outputs_equal_retries_by_surface": {
     "--color": {
       "retry_count": 1,

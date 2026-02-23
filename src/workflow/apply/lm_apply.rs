@@ -97,12 +97,19 @@ pub(super) fn invoke_lm_and_apply(
     )?;
 
     // Build set of valid unverified surface_ids
-    let valid_surface_ids: BTreeSet<String> = ledger
+    // Include both unverified surfaces AND the payload target_ids (which may include
+    // judgment-retry surfaces that are technically "verified" by outputs_differ but
+    // need new scenarios because they failed post-execution judgment).
+    let mut valid_surface_ids: BTreeSet<String> = ledger
         .entries
         .iter()
         .filter(|e| e.behavior_status != "verified" && e.behavior_status != "excluded")
         .map(|e| e.surface_id.clone())
         .collect();
+    // Add payload targets (judgment-retry surfaces may have behavior_status="verified")
+    for target_id in &payload.target_ids {
+        valid_surface_ids.insert(target_id.clone());
+    }
 
     // Build context_argv map from surface inventory
     let context_argv_map: BTreeMap<String, Vec<String>> = surface_inventory
