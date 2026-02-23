@@ -62,11 +62,14 @@
 
 mod auto_verify;
 mod cleanup;
+mod judge;
 mod ledgers;
 mod lm_apply;
 mod pack;
 mod progress;
 mod rendering;
+
+// Judgment types are now in crate::verification_progress
 
 // Re-export for tests
 #[cfg(test)]
@@ -95,6 +98,7 @@ use std::path::{Path, PathBuf};
 
 use auto_verify::{auto_verification_progress, auto_verification_scenarios};
 use cleanup::cleanup_txn_dirs;
+use judge::{run_post_apply_judgment, JudgmentArgs};
 use ledgers::{write_ledgers, LedgerArgs};
 use lm_apply::{apply_lm_response, invoke_lm_and_apply};
 use pack::refresh_pack_if_needed;
@@ -272,6 +276,7 @@ fn run_lm_cycle(
 /// 2. Checks status to see what's still unverified
 /// 3. If LM is configured and can help, invokes LM
 /// 4. Applies LM responses and repeats
+#[allow(clippy::cognitive_complexity)]
 fn run_apply_with_lm_loop(args: &ApplyArgs) -> Result<()> {
     let doc_pack_root = ensure_doc_pack_root(&args.doc_pack, false)?;
 
@@ -331,6 +336,30 @@ fn run_apply_with_lm_loop(args: &ApplyArgs) -> Result<()> {
             context: args.context.clone(),
         };
         run_apply_single(&single_apply_args)?;
+
+        // Run post-apply judgment on delta_seen entries
+        if let Some(ref lm_cmd) = lm_command {
+            let judgment_args = JudgmentArgs {
+                paths: &paths,
+                lm_command: lm_cmd,
+                verbose: args.verbose,
+            };
+            match run_post_apply_judgment(&judgment_args) {
+                Ok(failed_count) => {
+                    if args.verbose && failed_count > 0 {
+                        eprintln!(
+                            "apply: {} scenario(s) failed judgment, will retry",
+                            failed_count
+                        );
+                    }
+                }
+                Err(e) => {
+                    if args.verbose {
+                        eprintln!("apply: judgment error (non-fatal): {}", e);
+                    }
+                }
+            }
+        }
 
         // Check status
         let computation = status_summary_for_doc_pack(doc_pack_root.clone(), false, false)?;

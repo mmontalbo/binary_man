@@ -269,6 +269,13 @@ fn build_targets_section(payload: &BehaviorNextActionPayload) -> String {
         .map(|o| (o.surface_id.as_str(), o))
         .collect();
 
+    // Index judgment feedback by surface_id
+    let judgment_map: HashMap<&str, &crate::enrich::TargetJudgmentFeedback> = payload
+        .target_judgment_feedback
+        .iter()
+        .map(|f| (f.surface_id.as_str(), f))
+        .collect();
+
     payload
         .target_ids
         .iter()
@@ -291,6 +298,26 @@ fn build_targets_section(payload: &BehaviorNextActionPayload) -> String {
                     }
                     line.push(')');
                 }
+            }
+
+            // Add judgment feedback if this target failed judgment
+            if let Some(feedback) = judgment_map.get(id.as_str()) {
+                line.push_str(&format!(
+                    "\n  **Previous Attempt Failed**: \"{}\"\n",
+                    feedback.reason
+                ));
+                if let Some(setup) = &feedback.suggested_setup {
+                    if !setup.is_empty() {
+                        line.push_str(&format!(
+                            "  Suggested setup: {}\n",
+                            setup.join("; ")
+                        ));
+                    }
+                }
+                line.push_str(&format!(
+                    "  (attempt {}/3 - please propose an improved scenario)\n",
+                    feedback.failure_count
+                ));
             }
 
             line
