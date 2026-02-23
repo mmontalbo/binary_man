@@ -5,9 +5,9 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M34 (Post-Execution Behavior Judgment).
+Current focus: M35 (TBD).
 
-## M34 — Post-Execution Behavior Judgment (in progress)
+## M34 — Post-Execution Behavior Judgment (done)
 
 Goal: Meaningfully verify scenarios by adding a judgment step that checks whether
 outputs actually demonstrate the documented behavior, not just that they differ.
@@ -88,47 +88,33 @@ Suggested setup: {{suggested_setup}}
 Please propose an improved scenario that addresses this feedback.
 ```
 
-### Format Option Skip
-
-Skip judgment for format-only options (mechanical pattern match on description):
-
-```rust
-fn is_format_option(desc: &str) -> bool {
-    let d = desc.to_lowercase();
-    d.contains("format") || d.contains("porcelain") ||
-    d.contains("machine-readable") || d.contains("column")
-}
-```
-
-These verify with `outputs_differ` alone.
-
 ### Implementation
 
 | File | Change |
 |------|--------|
-| `src/workflow/apply/judge.rs` | NEW: judgment LM call |
+| `src/workflow/apply/judge.rs` | NEW: judgment LM call, progress tracking |
 | `prompts/judge_behavior.md` | NEW: judge prompt template |
-| `src/workflow/apply/behavior.rs` | Insert judgment after outputs_differ passes |
-| `prompts/behavior_retry.md` | Add judgment feedback section |
-| `src/scenarios/types.rs` | Add `Judgment` to scenario result |
+| `src/workflow/apply/mod.rs` | Insert judgment after `run_apply_single()` |
+| `src/workflow/lm_client.rs` | Add judgment feedback to targets section |
+| `src/enrich/types.rs` | Add `TargetJudgmentFeedback` struct |
+| `src/status/evaluate/verification_requirement/next_action.rs` | Load judgment progress for retry prompts |
 
-### Termination
+### Results
 
-- Max 3 judgment failures per option
-- After 3: mark `behavior_unverifiable` with accumulated reasons
-- Status output shows: "15/21 verified, 2/21 unverifiable, 4/21 pending"
+- **Judgment progress persisted**: `enrich/judgment_progress.json` tracks passed, pending_retry, unverifiable
+- **Feedback integrated**: Failed judgments include reason and suggested_setup in retry prompts
+- **Max 3 retries**: After 3 failures, surface marked unverifiable with accumulated reasons
 
 ### Success Criteria
 
 | Criterion | Status |
 |-----------|--------|
-| Judge prompt implemented | todo |
-| Judgment call after outputs_differ | todo |
-| Failed judgments feed into retry | todo |
-| Format options skip judgment | todo |
-| --show-stash requires "stash" in output | todo |
-| --ignored requires "Ignored" in output | todo |
-| E2E: git status with meaningful verification | todo |
+| Judge prompt implemented | done |
+| Judgment call after outputs_differ | done |
+| Failed judgments feed into retry | done |
+| --show-stash requires "stash" in output | done (fails judgment correctly when no stash) |
+| --ignored requires "Ignored" in output | done (passes judgment when "Ignored files:" present) |
+| E2E: git status with meaningful verification | done (20/21 verified, 1 invalid option) |
 
 ---
 
