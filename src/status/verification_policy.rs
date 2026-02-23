@@ -78,17 +78,29 @@ impl VerificationStatus {
     }
 }
 
-/// Behavior verification reason codes.
+/// Behavior verification status reasons (what state is the surface in).
+///
+/// These codes describe WHY a surface is unverified based on ledger evidence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BehaviorReasonKind {
     /// Initial scenario generation - surface exists but no behavior scenarios yet.
     InitialScenarios,
+    /// No scenario exists for this surface.
     NoScenario,
+    /// Scenario configuration is invalid.
     ScenarioError,
+    /// Delta was seen but assertion failed.
     AssertionFailed,
+    /// Scenario output equals baseline (no observable difference).
     OutputsEqual,
-    /// auto_verify timed out (likely interactive/hanging command)
+    /// auto_verify timed out (likely interactive/hanging command).
     AutoVerifyTimeout,
+    /// Option requires a value but no examples are provided.
+    MissingValueExamples,
+    /// Delta was seen but no assertion exists to verify it.
+    MissingDeltaAssertion,
+    /// Post-execution judgment failed, needs retry with feedback.
+    JudgmentRetry,
 }
 
 impl BehaviorReasonKind {
@@ -100,6 +112,9 @@ impl BehaviorReasonKind {
             Self::AssertionFailed => "assertion_failed",
             Self::OutputsEqual => "outputs_equal",
             Self::AutoVerifyTimeout => "auto_verify_timeout",
+            Self::MissingValueExamples => "missing_value_examples",
+            Self::MissingDeltaAssertion => "missing_delta_assertion",
+            Self::JudgmentRetry => "judgment_retry",
         }
     }
 
@@ -111,7 +126,73 @@ impl BehaviorReasonKind {
             "assertion_failed" => Self::AssertionFailed,
             "outputs_equal" => Self::OutputsEqual,
             "auto_verify_timeout" => Self::AutoVerifyTimeout,
+            "missing_value_examples" => Self::MissingValueExamples,
+            "missing_delta_assertion" => Self::MissingDeltaAssertion,
+            "judgment_retry" => Self::JudgmentRetry,
             _ => Self::NoScenario,
+        }
+    }
+
+    /// Returns the suggested action for this status reason.
+    pub(crate) fn suggested_action(self) -> BehaviorAction {
+        match self {
+            Self::InitialScenarios | Self::NoScenario | Self::MissingValueExamples => {
+                BehaviorAction::GenerateScenarios
+            }
+            Self::ScenarioError
+            | Self::AssertionFailed
+            | Self::MissingDeltaAssertion
+            | Self::JudgmentRetry => BehaviorAction::FixScenario,
+            Self::OutputsEqual => BehaviorAction::AddWorkaround,
+            Self::AutoVerifyTimeout => BehaviorAction::Defer,
+        }
+    }
+
+    /// Returns true if this reason indicates scenarios need to be created.
+    #[allow(dead_code)]
+    pub(crate) fn needs_scenario_generation(self) -> bool {
+        matches!(self.suggested_action(), BehaviorAction::GenerateScenarios)
+    }
+
+    /// Returns true if this reason indicates existing scenarios need fixes.
+    pub(crate) fn needs_scenario_fix(self) -> bool {
+        matches!(self.suggested_action(), BehaviorAction::FixScenario)
+    }
+}
+
+/// Behavior verification actions (what to do next).
+///
+/// These actions describe WHAT should be done to progress verification.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BehaviorAction {
+    /// Generate new scenarios (initial or missing).
+    GenerateScenarios,
+    /// Fix existing scenarios (assertions, seed, config).
+    FixScenario,
+    /// Add workaround (requires_argv) for outputs_equal.
+    AddWorkaround,
+    /// Rerun scenarios with updated config or feedback.
+    Rerun,
+    /// Exclude surface after exhausting options.
+    Exclude,
+    /// Run apply to execute scenarios.
+    Apply,
+    /// Defer verification (timeout, interactive command).
+    Defer,
+}
+
+impl BehaviorAction {
+    /// Convert action to string code (for serialization/logging).
+    #[allow(dead_code)]
+    pub(crate) fn as_code(self) -> &'static str {
+        match self {
+            Self::GenerateScenarios => "generate_scenarios",
+            Self::FixScenario => "fix_scenario",
+            Self::AddWorkaround => "add_workaround",
+            Self::Rerun => "rerun",
+            Self::Exclude => "exclude",
+            Self::Apply => "apply",
+            Self::Defer => "defer",
         }
     }
 }
