@@ -8,6 +8,7 @@ use crate::surface;
 use crate::surface::{build_exclusion_evidence, build_exclusion_note, derive_reason_code};
 use crate::verification_progress::{
     load_verification_progress, outputs_equal_delta_signature, write_verification_progress,
+    MAX_JUDGMENT_FAILURES,
 };
 use anyhow::{anyhow, Context, Result};
 use std::collections::{BTreeMap, BTreeSet};
@@ -134,15 +135,22 @@ pub(super) fn handle_lm_failure_for_targets(
     }
 
     // Auto-exclude surfaces that hit the cap
-    let excluded_count = to_auto_exclude.len();
-    if !to_auto_exclude.is_empty() {
-        if let Err(err) = auto_exclude_stuck_surfaces(paths, &to_auto_exclude, verbose) {
+    if to_auto_exclude.is_empty() {
+        return 0;
+    }
+
+    let excluded_count = match auto_exclude_stuck_surfaces(paths, &to_auto_exclude, verbose) {
+        Ok(count) => count,
+        Err(err) => {
             if verbose {
                 eprintln!("warning: failed to auto-exclude stuck surfaces: {}", err);
             }
             return 0;
         }
-        // Clear failure counts for excluded surfaces
+    };
+
+    // Clear failure counts for surfaces that were actually excluded
+    if excluded_count > 0 {
         for surface_id in &to_auto_exclude {
             progress.lm_failures_by_surface.remove(surface_id);
         }
@@ -212,15 +220,22 @@ pub(super) fn handle_lm_no_progress_for_targets(
     }
 
     // Auto-exclude surfaces that hit the cap
-    let excluded_count = to_auto_exclude.len();
-    if !to_auto_exclude.is_empty() {
-        if let Err(err) = auto_exclude_stuck_surfaces(paths, &to_auto_exclude, verbose) {
+    if to_auto_exclude.is_empty() {
+        return 0;
+    }
+
+    let excluded_count = match auto_exclude_stuck_surfaces(paths, &to_auto_exclude, verbose) {
+        Ok(count) => count,
+        Err(err) => {
             if verbose {
                 eprintln!("warning: failed to auto-exclude stuck surfaces: {}", err);
             }
             return 0;
         }
-        // Clear no-progress counts for excluded surfaces
+    };
+
+    // Clear no-progress counts for surfaces that were actually excluded
+    if excluded_count > 0 {
         for surface_id in &to_auto_exclude {
             progress.lm_no_progress_by_surface.remove(surface_id);
         }
@@ -258,12 +273,24 @@ fn load_cached_ledger_entries(
 }
 
 /// Auto-exclude surfaces that are stuck after repeated LM failures.
+/// Surfaces in judgment's pending_retry with retries remaining are NOT excluded -
+/// they still have a chance to produce valid behavior demonstrations.
+/// Returns the number of surfaces actually excluded.
 pub(super) fn auto_exclude_stuck_surfaces(
     paths: &enrich::DocPackPaths,
     surface_ids: &[String],
     verbose: bool,
-) -> Result<()> {
+) -> Result<usize> {
     let overlays_path = paths.surface_overlays_path();
+
+    // Load progress to check which surfaces still have judgment retries remaining
+    let progress = load_verification_progress(paths);
+    let judgment_retryable: BTreeSet<String> = progress
+        .judgment_pending_retry
+        .iter()
+        .filter(|(_, f)| f.failure_count < MAX_JUDGMENT_FAILURES)
+        .map(|(id, _)| id.clone())
+        .collect();
 
     // Load existing overlays or create new structure
     let mut overlays: serde_json::Value = if overlays_path.is_file() {
@@ -305,10 +332,22 @@ pub(super) fn auto_exclude_stuck_surfaces(
 
     // Load ledger entries for contextual notes
     let ledger_entries = load_cached_ledger_entries(paths);
+    let mut excluded_count = 0;
 
     for surface_id in surface_ids {
         let surface_id = surface_id.trim();
         if surface_id.is_empty() {
+            continue;
+        }
+
+        // Skip surfaces that judgment wants to retry - they still have a chance
+        if judgment_retryable.contains(surface_id) {
+            if verbose {
+                eprintln!(
+                    "  skipping auto-exclude for {}: judgment has retries remaining",
+                    surface_id
+                );
+            }
             continue;
         }
 
@@ -354,6 +393,7 @@ pub(super) fn auto_exclude_stuck_surfaces(
             "note": note,
             "evidence": evidence
         });
+        excluded_count += 1;
 
         if verbose {
             eprintln!("  auto-excluded {}: {}", surface_id, note);
@@ -364,7 +404,7 @@ pub(super) fn auto_exclude_stuck_surfaces(
     let overlays_json = serde_json::to_string_pretty(&overlays)?;
     fs::write(&overlays_path, overlays_json.as_bytes())?;
 
-    Ok(())
+    Ok(excluded_count)
 }
 
 /// Extract unverified count from status summary

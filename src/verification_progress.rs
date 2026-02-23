@@ -55,10 +55,13 @@
 use crate::enrich;
 use crate::scenarios;
 use anyhow::{Context, Result};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-pub(crate) const VERIFICATION_PROGRESS_SCHEMA_VERSION: u32 = 1;
+pub(crate) const VERIFICATION_PROGRESS_SCHEMA_VERSION: u32 = 2;
+
+/// Maximum judgment failures before marking unverifiable.
+pub const MAX_JUDGMENT_FAILURES: usize = 3;
 
 /// Signature for detecting no-op edit loops. Captures the essential identity
 /// of a next-action to detect repeated identical edits with no evidence change.
@@ -106,6 +109,20 @@ pub(crate) struct AssertionFailedProgressEntry {
     pub(crate) last_signature: ActionSignature,
 }
 
+/// Feedback from post-execution judgment failure.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct JudgmentFeedback {
+    /// The option/surface ID this feedback is for.
+    pub option_id: String,
+    /// Why the judgment failed.
+    pub reason: String,
+    /// Suggested commands to set up a better test environment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_setup: Option<Vec<String>>,
+    /// How many times judgment has failed for this option.
+    pub failure_count: usize,
+}
+
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub(crate) struct VerificationProgress {
     pub(crate) schema_version: u32,
@@ -120,6 +137,17 @@ pub(crate) struct VerificationProgress {
     /// Tracks how many cycles each surface has been targeted by LM without verification progress
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(crate) lm_no_progress_by_surface: BTreeMap<String, usize>,
+
+    // === Judgment tracking (consolidated from judgment_progress.json) ===
+    /// Surfaces that have passed post-execution judgment.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub(crate) judgment_passed: BTreeSet<String>,
+    /// Surfaces needing judgment retry with feedback.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) judgment_pending_retry: BTreeMap<String, JudgmentFeedback>,
+    /// Surfaces marked unverifiable after max judgment failures.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) judgment_unverifiable: BTreeMap<String, JudgmentFeedback>,
 }
 
 impl Default for VerificationProgress {
@@ -130,7 +158,50 @@ impl Default for VerificationProgress {
             assertion_failed_by_surface: BTreeMap::new(),
             lm_failures_by_surface: BTreeMap::new(),
             lm_no_progress_by_surface: BTreeMap::new(),
+            judgment_passed: BTreeSet::new(),
+            judgment_pending_retry: BTreeMap::new(),
+            judgment_unverifiable: BTreeMap::new(),
         }
+    }
+}
+
+impl VerificationProgress {
+    /// Record a judgment pass.
+    pub(crate) fn record_judgment_pass(&mut self, surface_id: &str) {
+        self.judgment_passed.insert(surface_id.to_string());
+        self.judgment_pending_retry.remove(surface_id);
+    }
+
+    /// Record a judgment failure.
+    pub(crate) fn record_judgment_failure(
+        &mut self,
+        surface_id: &str,
+        reason: &str,
+        suggested_setup: Option<Vec<String>>,
+    ) {
+        let feedback = self
+            .judgment_pending_retry
+            .entry(surface_id.to_string())
+            .or_insert_with(|| JudgmentFeedback {
+                option_id: surface_id.to_string(),
+                reason: String::new(),
+                suggested_setup: None,
+                failure_count: 0,
+            });
+        feedback.reason = reason.to_string();
+        feedback.suggested_setup = suggested_setup;
+        feedback.failure_count += 1;
+
+        // If max failures reached, move to unverifiable
+        if feedback.failure_count >= MAX_JUDGMENT_FAILURES {
+            let feedback = self.judgment_pending_retry.remove(surface_id).unwrap();
+            self.judgment_unverifiable.insert(surface_id.to_string(), feedback);
+        }
+    }
+
+    /// Check if a surface has passed judgment.
+    pub(crate) fn has_judgment_passed(&self, surface_id: &str) -> bool {
+        self.judgment_passed.contains(surface_id)
     }
 }
 
@@ -459,7 +530,7 @@ mod tests {
         let serialized = std::fs::read_to_string(paths.verification_progress_path())
             .expect("read serialized progress");
         let expected = r#"{
-  "schema_version": 1,
+  "schema_version": 2,
   "outputs_equal_retries_by_surface": {
     "--alpha": {
       "retry_count": 1,
