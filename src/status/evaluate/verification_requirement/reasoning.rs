@@ -50,6 +50,9 @@ pub(super) fn behavior_recommended_fix(reason_code: &str) -> &'static str {
         BehaviorReasonKind::JudgmentRetry => {
             "retry with improved scenario based on judgment feedback"
         }
+        BehaviorReasonKind::SetupFailed => {
+            "fix setup commands in seed.setup (command not found or failed)"
+        }
     }
 }
 
@@ -66,14 +69,27 @@ pub(super) fn build_behavior_unverified_preview(
         .into_iter()
         .map(|surface_id| {
             let entry = ledger_entries.get(&surface_id);
+            let reason_code = behavior_reason_code_for_id(
+                &surface_id,
+                missing_value_examples,
+                ledger_entries,
+            );
+            let attempts = entry.map(|e| e.behavior_scenario_paths.len()).unwrap_or(0);
+            // Stuck: 3+ attempts with a repeatable failure (not no_scenario)
+            let stuck = attempts >= 3
+                && matches!(
+                    reason_code.as_str(),
+                    "outputs_equal" | "assertion_failed" | "scenario_error" | "setup_failed"
+                );
             enrich::BehaviorUnverifiedPreview {
-                reason_code: behavior_reason_code_for_id(
-                    &surface_id,
-                    missing_value_examples,
-                    ledger_entries,
-                ),
+                reason_code,
+                attempts,
+                stuck,
                 auto_verify_exit_code: entry.and_then(|e| e.auto_verify_exit_code),
                 auto_verify_stderr: entry.and_then(|e| e.auto_verify_stderr.clone()),
+                behavior_exit_code: entry.and_then(|e| e.behavior_exit_code),
+                behavior_stderr: entry.and_then(|e| e.behavior_stderr.clone()),
+                scenario_path: entry.and_then(|e| e.delta_evidence_paths.first().cloned()),
                 surface_id,
             }
         })
@@ -310,6 +326,9 @@ pub(super) fn behavior_unverified_reason(
         }
         BehaviorReasonKind::AutoVerifyTimeout => {
             format!("{reason_code}: deferred (auto_verify timed out) for {surface_id}")
+        }
+        BehaviorReasonKind::SetupFailed => {
+            format!("{reason_code}: {fix} in scenario {scenario_id}")
         }
     }
 }

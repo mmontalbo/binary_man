@@ -41,8 +41,13 @@ fn slim_status_drops_rich_behavior_diagnostics() {
                 behavior_unverified_preview: vec![enrich::BehaviorUnverifiedPreview {
                     surface_id: "--color".to_string(),
                     reason_code: "assertion_failed".to_string(),
+                    attempts: 1,
+                    stuck: false,
                     auto_verify_exit_code: None,
                     auto_verify_stderr: None,
+                    behavior_exit_code: None,
+                    behavior_stderr: None,
+                    scenario_path: None,
                 }],
                 behavior_unverified_diagnostics: vec![enrich::BehaviorUnverifiedDiagnostic {
                     surface_id: "--color".to_string(),

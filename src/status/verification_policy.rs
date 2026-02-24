@@ -101,6 +101,8 @@ pub(crate) enum BehaviorReasonKind {
     MissingDeltaAssertion,
     /// Post-execution judgment failed, needs retry with feedback.
     JudgmentRetry,
+    /// A setup command failed before the main command ran.
+    SetupFailed,
 }
 
 impl BehaviorReasonKind {
@@ -115,6 +117,7 @@ impl BehaviorReasonKind {
             Self::MissingValueExamples => "missing_value_examples",
             Self::MissingDeltaAssertion => "missing_delta_assertion",
             Self::JudgmentRetry => "judgment_retry",
+            Self::SetupFailed => "setup_failed",
         }
     }
 
@@ -129,6 +132,7 @@ impl BehaviorReasonKind {
             "missing_value_examples" => Self::MissingValueExamples,
             "missing_delta_assertion" => Self::MissingDeltaAssertion,
             "judgment_retry" => Self::JudgmentRetry,
+            "setup_failed" => Self::SetupFailed,
             _ => Self::NoScenario,
         }
     }
@@ -142,7 +146,8 @@ impl BehaviorReasonKind {
             Self::ScenarioError
             | Self::AssertionFailed
             | Self::MissingDeltaAssertion
-            | Self::JudgmentRetry => BehaviorAction::FixScenario,
+            | Self::JudgmentRetry
+            | Self::SetupFailed => BehaviorAction::FixScenario,
             Self::OutputsEqual => BehaviorAction::AddWorkaround,
             Self::AutoVerifyTimeout => BehaviorAction::Defer,
         }

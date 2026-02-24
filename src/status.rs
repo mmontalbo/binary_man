@@ -573,6 +573,8 @@ mod tests {
             exit_code: Some(1),
             exit_signal: None,
             timed_out: false,
+            setup_failed: false,
+            setup_results: vec![],
             duration_ms: 1,
             stdout: String::new(),
             stderr: String::new(),

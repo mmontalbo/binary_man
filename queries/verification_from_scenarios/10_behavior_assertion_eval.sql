@@ -7,6 +7,7 @@
       s.scenario_id,
       s.baseline_scenario_id,
       coalesce(var.last_pass, false) as variant_last_pass,
+      coalesce(var.setup_failed, false) as variant_setup_failed,
       s.baseline_scenario_id is not null
         and coalesce(base.last_pass, false) as baseline_last_pass,
       s.baseline_scenario_id is not null
@@ -470,6 +471,7 @@
       ) as semantic_predicate_pass,
       coalesce(ctx.seed_signature_match, false) as seed_signature_match,
       coalesce(ctx.variant_last_pass, false) as variant_last_pass,
+      coalesce(ctx.variant_setup_failed, false) as variant_setup_failed,
       coalesce(ctx.baseline_last_pass, false) as baseline_last_pass,
       coalesce(ctx.outputs_equal, false) as outputs_equal
     from combined_scenarios s
@@ -591,6 +593,7 @@
       coalesce(b.outputs_equal, false) as outputs_equal,
       coalesce(b.seed_signature_match, false) as seed_signature_match,
       coalesce(b.variant_last_pass, false) as variant_last_pass,
+      coalesce(b.variant_setup_failed, false) as variant_setup_failed,
       coalesce(b.baseline_last_pass, false) as baseline_last_pass,
       -- File assertion fields
       coalesce(b.file_assertion_present, false) as file_assertion_present,

@@ -41,6 +41,44 @@ pub(crate) struct RunManifestScenario {
     /// Host path to the scenario's working directory.
     #[serde(default)]
     pub(crate) cwd_host: Option<String>,
+    /// Seed spec with setup results (if setup commands were run).
+    #[serde(default)]
+    pub(crate) seed_spec: Option<SeedSpecResult>,
+}
+
+/// Deserialize null or missing as empty vec.
+fn null_as_empty_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    Option::<Vec<T>>::deserialize(deserializer).map(|opt| opt.unwrap_or_default())
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct SeedSpecResult {
+    /// Results of setup commands that were run before the main command.
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
+    pub(crate) setup_results: Vec<SetupCommandResult>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct SetupCommandResult {
+    /// The command that was run.
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
+    pub argv: Vec<String>,
+    /// Whether the command succeeded.
+    #[serde(default)]
+    pub success: bool,
+    /// Exit code of the command.
+    #[serde(default)]
+    pub exit_code: Option<i32>,
+    /// Whether the command timed out.
+    #[serde(default)]
+    pub timed_out: bool,
+    /// Stderr output (if failed).
+    #[serde(default)]
+    pub stderr: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -49,6 +87,9 @@ pub(crate) struct RunResult {
     pub(crate) exit_signal: Option<i32>,
     #[serde(default)]
     pub(crate) timed_out: bool,
+    /// True if a setup command failed before the main command ran.
+    #[serde(default)]
+    pub(crate) setup_failed: bool,
 }
 
 /// Example report used to populate man page examples.
@@ -162,6 +203,12 @@ pub struct ScenarioEvidence {
     /// Keys are relative paths from scenario working directory.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub files_checked: BTreeMap<String, FileCheckResult>,
+    /// True if a setup command failed before the main command ran.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub setup_failed: bool,
+    /// Results of setup commands (populated when setup_failed is true).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub setup_results: Vec<SetupCommandResult>,
 }
 
 /// Index summarizing scenario runs for quick status checks.

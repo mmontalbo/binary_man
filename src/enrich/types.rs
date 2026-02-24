@@ -218,12 +218,31 @@ pub struct VerificationReasonSummary {
 pub struct BehaviorUnverifiedPreview {
     pub surface_id: String,
     pub reason_code: String,
+    /// Number of behavior scenario attempts for this surface.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub attempts: usize,
+    /// True if stuck (3+ attempts with same failing outcome).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stuck: bool,
     /// Auto-verify exit code (helps LM understand why auto_verify failed)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_verify_exit_code: Option<i64>,
     /// Auto-verify stderr preview (helps LM discover fixture requirements)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_verify_stderr: Option<String>,
+    /// Behavior scenario exit code (for setup_failed/scenario_error diagnostics)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behavior_exit_code: Option<i64>,
+    /// Behavior scenario stderr preview (for setup_failed/scenario_error diagnostics)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behavior_stderr: Option<String>,
+    /// Path to the latest delta scenario evidence file
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scenario_path: Option<String>,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 /// Rich behavior diagnostic for a single unverified surface id.

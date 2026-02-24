@@ -103,6 +103,12 @@ pub(super) fn build_success_execution(
     let observed_exit_code = run_manifest.result.exit_code;
     let observed_exit_signal = run_manifest.result.exit_signal;
     let observed_timed_out = run_manifest.result.timed_out;
+    let observed_setup_failed = run_manifest.result.setup_failed;
+    let setup_results = run_manifest
+        .scenario
+        .seed_spec
+        .map(|s| s.setup_results)
+        .unwrap_or_default();
 
     // Check file paths for file-based assertions
     let files_checked = check_file_assertion_paths(
@@ -159,6 +165,8 @@ pub(super) fn build_success_execution(
             stdout,
             stderr,
             files_checked,
+            setup_failed: observed_setup_failed,
+            setup_results,
         };
         let rel = stage_scenario_evidence(staging_root, &evidence)?;
         evidence_paths.push(rel);

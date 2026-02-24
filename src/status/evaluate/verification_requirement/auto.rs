@@ -51,10 +51,16 @@ pub(super) fn eval_auto_verification(
                 .into_iter()
                 .map(|surface_id| {
                     let entry = ledger_entries.get(&surface_id);
+                    let attempts = entry.map(|e| e.behavior_scenario_paths.len()).unwrap_or(0);
                     enrich::BehaviorUnverifiedPreview {
                         reason_code: "no_scenario".to_string(),
+                        attempts,
+                        stuck: false, // no_scenario can't be stuck
                         auto_verify_exit_code: entry.and_then(|e| e.auto_verify_exit_code),
                         auto_verify_stderr: entry.and_then(|e| e.auto_verify_stderr.clone()),
+                        behavior_exit_code: entry.and_then(|e| e.behavior_exit_code),
+                        behavior_stderr: entry.and_then(|e| e.behavior_stderr.clone()),
+                        scenario_path: entry.and_then(|e| e.delta_evidence_paths.first().cloned()),
                         surface_id,
                     }
                 })

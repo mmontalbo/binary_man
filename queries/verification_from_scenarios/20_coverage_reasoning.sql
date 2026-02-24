@@ -23,6 +23,7 @@
       outputs_equal,
       seed_signature_match,
       variant_last_pass,
+      variant_setup_failed,
       baseline_last_pass,
       last_pass,
       file_assertion_present,
@@ -61,6 +62,7 @@
       outputs_equal,
       seed_signature_match,
       variant_last_pass,
+      variant_setup_failed,
       baseline_last_pass,
       last_pass,
       file_assertion_present,
@@ -104,6 +106,7 @@
       max(case when coverage_tier = 'behavior' then 1 else 0 end) as has_behavior,
       max(case when coverage_tier = 'behavior'
         and variant_last_pass
+        and not variant_setup_failed
         and (
           -- Independent assertions (file-only or exit_code-only): don't require baseline
           ((file_assertion_only or exit_code_assertion_only) and assertions_pass)
@@ -120,10 +123,12 @@
           )
         ) then 1 else 0 end) as is_verified,
       max(case when coverage_tier = 'behavior' and has_evidence then 1 else 0 end) as has_evidence,
+      max(case when coverage_tier = 'behavior' and has_evidence and variant_setup_failed then 1 else 0 end) as has_setup_failed,
       max(case when coverage_tier = 'behavior' and delta_assertion_present and outputs_equal then 1 else 0 end) as has_outputs_equal,
       max(case when coverage_tier = 'behavior'
         and has_evidence
         and variant_last_pass
+        and not variant_setup_failed
         and (
           -- Independent assertions: check assertions_pass directly
           ((file_assertion_only or exit_code_assertion_only) and not assertions_pass)
@@ -249,6 +254,8 @@
         when t.surface_id is not null then 'auto_verify_timeout'
         -- no_scenario: no behavior scenario covers this surface
         when coalesce(b.has_behavior, 0) = 0 then 'no_scenario'
+        -- setup_failed: a setup command failed before main command ran
+        when b.has_setup_failed = 1 then 'setup_failed'
         -- outputs_equal: variant output same as baseline
         when b.has_outputs_equal = 1 then 'outputs_equal'
         -- assertion_failed: assertions ran but didn't pass
@@ -273,6 +280,20 @@
       10 as priority
     from covers_norm c
     where c.coverage_tier = 'behavior'
+    union all
+    -- setup_failed: setup command failed before main command ran
+    select
+      c.surface_id,
+      'setup_failed' as reason_code,
+      c.scenario_id,
+      cast(null as VARCHAR) as assertion_kind,
+      cast(null as VARCHAR) as assertion_seed_path,
+      cast(null as VARCHAR) as assertion_token,
+      2 as priority
+    from covers_norm c
+    where c.coverage_tier = 'behavior'
+      and c.has_evidence
+      and c.variant_setup_failed
     union all
     -- outputs_equal
     select
@@ -301,6 +322,7 @@
     where c.coverage_tier = 'behavior'
       and c.has_evidence
       and c.variant_last_pass
+      and not c.variant_setup_failed
       and c.baseline_last_pass
       and (not c.assertions_pass or not c.delta_proof_pass)
   ),
