@@ -308,10 +308,7 @@ fn build_targets_section(payload: &BehaviorNextActionPayload) -> String {
                 ));
                 if let Some(setup) = &feedback.suggested_setup {
                     if !setup.is_empty() {
-                        line.push_str(&format!(
-                            "  Suggested setup: {}\n",
-                            setup.join("; ")
-                        ));
+                        line.push_str(&format!("  Suggested setup: {}\n", setup.join("; ")));
                     }
                 }
                 line.push_str(&format!(

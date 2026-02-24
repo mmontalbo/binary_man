@@ -369,7 +369,10 @@ pub fn validate_responses(
                 }
 
                 // Build full argv with context (e.g., ["config"] for git config surfaces)
-                let context = context_argv_map.get(surface_id).cloned().unwrap_or_default();
+                let context = context_argv_map
+                    .get(surface_id)
+                    .cloned()
+                    .unwrap_or_default();
 
                 // Deduplicate: if LM included context at start, skip prepending
                 let deduped_argv = deduplicate_argv_prefix(&context, argv);
@@ -733,7 +736,8 @@ mod tests {
             }],
         };
 
-        let (validated, result) = validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
+        let (validated, result) =
+            validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
 
         assert_eq!(result.valid_count, 1);
         assert_eq!(result.errors.len(), 0);
@@ -755,7 +759,8 @@ mod tests {
             }],
         };
 
-        let (_, result) = validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
+        let (_, result) =
+            validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
 
         assert_eq!(result.valid_count, 0);
         assert_eq!(result.errors.len(), 1);
@@ -781,7 +786,8 @@ mod tests {
             }],
         };
 
-        let (validated, result) = validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
+        let (validated, result) =
+            validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
 
         assert_eq!(result.valid_count, 1);
         assert_eq!(validated.value_examples.get("--color").unwrap().len(), 3);
@@ -804,7 +810,8 @@ mod tests {
             }],
         };
 
-        let (validated, result) = validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
+        let (validated, result) =
+            validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
 
         assert_eq!(result.valid_count, 1);
         assert!(validated.exclusions.contains_key("--escape"));
@@ -828,7 +835,8 @@ mod tests {
             }],
         };
 
-        let (_, result) = validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
+        let (_, result) =
+            validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
 
         assert_eq!(result.valid_count, 0);
         assert_eq!(result.errors.len(), 1);
@@ -879,7 +887,8 @@ mod tests {
             }],
         };
 
-        let (validated, result) = validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
+        let (validated, result) =
+            validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
 
         assert_eq!(result.valid_count, 1);
         assert_eq!(result.errors.len(), 0);
@@ -905,7 +914,8 @@ mod tests {
             }],
         };
 
-        let (_, result) = validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
+        let (_, result) =
+            validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
 
         assert_eq!(result.valid_count, 0);
         assert_eq!(result.errors.len(), 1);
@@ -937,7 +947,8 @@ mod tests {
             }],
         };
 
-        let (_, result) = validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
+        let (_, result) =
+            validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
 
         assert_eq!(result.valid_count, 0);
         assert_eq!(result.errors.len(), 1);
@@ -980,7 +991,8 @@ mod tests {
             }],
         };
 
-        let (validated, result) = validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
+        let (validated, result) =
+            validate_responses(&batch, &surface_ids, &std::collections::BTreeMap::new());
 
         assert_eq!(result.valid_count, 1);
         assert_eq!(result.errors.len(), 0);
@@ -997,10 +1009,7 @@ mod tests {
 
         // Prefix not in argv - returns argv unchanged
         assert_eq!(
-            deduplicate_argv_prefix(
-                &["config".to_string()],
-                &["--list".to_string()]
-            ),
+            deduplicate_argv_prefix(&["config".to_string()], &["--list".to_string()]),
             vec!["--list".to_string()]
         );
 
@@ -1080,11 +1089,7 @@ mod tests {
             }],
         };
 
-        let (validated, result) = validate_responses(
-            &batch,
-            &surface_ids,
-            &context_argv_map,
-        );
+        let (validated, result) = validate_responses(&batch, &surface_ids, &context_argv_map);
 
         assert_eq!(result.valid_count, 1);
         assert_eq!(result.errors.len(), 0);

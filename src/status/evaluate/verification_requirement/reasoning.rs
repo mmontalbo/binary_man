@@ -44,9 +44,7 @@ pub(super) fn behavior_recommended_fix(reason_code: &str) -> &'static str {
         BehaviorReasonKind::MissingValueExamples => {
             "add value_examples overlay or use placeholder token in argv"
         }
-        BehaviorReasonKind::MissingDeltaAssertion => {
-            "add assertions to verify the delta output"
-        }
+        BehaviorReasonKind::MissingDeltaAssertion => "add assertions to verify the delta output",
         BehaviorReasonKind::JudgmentRetry => {
             "retry with improved scenario based on judgment feedback"
         }
@@ -69,11 +67,8 @@ pub(super) fn build_behavior_unverified_preview(
         .into_iter()
         .map(|surface_id| {
             let entry = ledger_entries.get(&surface_id);
-            let reason_code = behavior_reason_code_for_id(
-                &surface_id,
-                missing_value_examples,
-                ledger_entries,
-            );
+            let reason_code =
+                behavior_reason_code_for_id(&surface_id, missing_value_examples, ledger_entries);
             let attempts = entry.map(|e| e.behavior_scenario_paths.len()).unwrap_or(0);
             // Stuck: 3+ attempts with a repeatable failure (not no_scenario)
             let stuck = attempts >= 3

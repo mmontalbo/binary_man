@@ -78,12 +78,7 @@ pub(super) fn auto_verification_scenarios(
     // Always write prereq exclusion overlays (even if we skip bare scenarios)
     // This ensures surfaces excluded via prereqs are reported as "excluded" in status
     if !result.prereq_excluded_ids.is_empty() {
-        write_prereq_exclusion_overlays(
-            &paths,
-            &result.prereq_excluded_ids,
-            &surface,
-            verbose,
-        )?;
+        write_prereq_exclusion_overlays(&paths, &result.prereq_excluded_ids, &surface, verbose)?;
     }
 
     // Skip bare auto-verify in initial behavior cycle - LM should generate scenarios first.
@@ -319,7 +314,11 @@ pub(super) fn write_prereq_exclusion_overlays(
         let content = serde_json::to_string_pretty(&overlays)?;
         std::fs::write(&overlays_path, content)?;
         if verbose {
-            eprintln!("wrote {} prereq exclusion overlays to {}", added, overlays_path.display());
+            eprintln!(
+                "wrote {} prereq exclusion overlays to {}",
+                added,
+                overlays_path.display()
+            );
         }
     }
 

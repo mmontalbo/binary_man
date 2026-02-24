@@ -215,7 +215,12 @@ mod tests {
                 seed: Some(ScenarioSeedSpec {
                     setup: vec![
                         vec!["git".to_string(), "init".to_string()],
-                        vec!["git".to_string(), "config".to_string(), "user.email".to_string(), "test@test.com".to_string()],
+                        vec![
+                            "git".to_string(),
+                            "config".to_string(),
+                            "user.email".to_string(),
+                            "test@test.com".to_string(),
+                        ],
                     ],
                     entries: Vec::new(),
                 }),
@@ -232,7 +237,10 @@ mod tests {
         let seed = resolved.seed.unwrap();
         assert_eq!(seed.setup.len(), 2);
         assert_eq!(seed.setup[0], vec!["git", "init"]);
-        assert_eq!(seed.setup[1], vec!["git", "config", "user.email", "test@test.com"]);
+        assert_eq!(
+            seed.setup[1],
+            vec!["git", "config", "user.email", "test@test.com"]
+        );
     }
 
     #[test]

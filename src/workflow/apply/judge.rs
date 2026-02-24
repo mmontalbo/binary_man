@@ -76,10 +76,7 @@ const JUDGE_PROMPT: &str = include_str!(concat!(
 /// Invoke the LM to judge behavior.
 ///
 /// Returns the judgment result or an error if the LM fails.
-pub fn invoke_judge(
-    lm_command: &str,
-    context: &JudgmentContext,
-) -> Result<JudgmentResult> {
+pub fn invoke_judge(lm_command: &str, context: &JudgmentContext) -> Result<JudgmentResult> {
     let prompt = build_judge_prompt(context);
     let response = invoke_lm_command(lm_command, &prompt)?;
     parse_judgment_response(&response)
@@ -89,10 +86,7 @@ pub fn invoke_judge(
 fn build_judge_prompt(context: &JudgmentContext) -> String {
     let stderr_section = if let Some(stderr) = &context.variant_stderr {
         if !stderr.trim().is_empty() {
-            format!(
-                "### Stderr\n\n```\n{}\n```\n",
-                truncate_output(stderr, 500)
-            )
+            format!("### Stderr\n\n```\n{}\n```\n", truncate_output(stderr, 500))
         } else {
             String::new()
         }
@@ -105,7 +99,10 @@ fn build_judge_prompt(context: &JudgmentContext) -> String {
         .replace("{description}", &context.description)
         .replace("{command_line}", &context.command_line)
         .replace("{exit_code}", &context.exit_code.to_string())
-        .replace("{variant_stdout}", &truncate_output(&context.variant_stdout, 2000))
+        .replace(
+            "{variant_stdout}",
+            &truncate_output(&context.variant_stdout, 2000),
+        )
         .replace("{stderr_section}", &stderr_section)
 }
 
@@ -120,8 +117,8 @@ fn truncate_output(s: &str, max_len: usize) -> String {
 
 /// Invoke the LM command with the given prompt.
 fn invoke_lm_command(command: &str, prompt: &str) -> Result<String> {
-    let args = shell_words::split(command)
-        .with_context(|| format!("parse LM command: {command}"))?;
+    let args =
+        shell_words::split(command).with_context(|| format!("parse LM command: {command}"))?;
 
     if args.is_empty() {
         return Err(anyhow!("LM command is empty"));
@@ -160,12 +157,8 @@ fn invoke_lm_command(command: &str, prompt: &str) -> Result<String> {
 fn parse_judgment_response(text: &str) -> Result<JudgmentResult> {
     let json_text = extract_json(text);
 
-    serde_json::from_str(json_text).with_context(|| {
-        format!(
-            "parse judgment response: {}",
-            &text[..text.len().min(200)]
-        )
-    })
+    serde_json::from_str(json_text)
+        .with_context(|| format!("parse judgment response: {}", &text[..text.len().min(200)]))
 }
 
 /// Extract JSON from text that might have markdown code fences.
@@ -240,7 +233,10 @@ pub fn run_post_apply_judgment(args: &JudgmentArgs<'_>) -> Result<usize> {
         }
 
         // Skip if already unverifiable
-        if progress.judgment_unverifiable.contains_key(&entry.surface_id) {
+        if progress
+            .judgment_unverifiable
+            .contains_key(&entry.surface_id)
+        {
             continue;
         }
 
@@ -250,12 +246,14 @@ pub fn run_post_apply_judgment(args: &JudgmentArgs<'_>) -> Result<usize> {
             .cloned()
             .unwrap_or_default();
 
-
         // Load scenario evidence to get output
         let scenario_output = load_scenario_output(args.paths, entry)?;
         let Some(output) = scenario_output else {
             if args.verbose {
-                eprintln!("  judgment: skipped {} (no scenario output)", entry.surface_id);
+                eprintln!(
+                    "  judgment: skipped {} (no scenario output)",
+                    entry.surface_id
+                );
             }
             continue;
         };

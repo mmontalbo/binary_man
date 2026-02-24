@@ -195,7 +195,8 @@ impl VerificationProgress {
         // If max failures reached, move to unverifiable
         if feedback.failure_count >= MAX_JUDGMENT_FAILURES {
             let feedback = self.judgment_pending_retry.remove(surface_id).unwrap();
-            self.judgment_unverifiable.insert(surface_id.to_string(), feedback);
+            self.judgment_unverifiable
+                .insert(surface_id.to_string(), feedback);
         }
     }
 

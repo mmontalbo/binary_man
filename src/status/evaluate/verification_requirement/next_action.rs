@@ -166,8 +166,7 @@ pub(super) fn determine_behavior_action(
         .required_ids
         .iter()
         .filter(|id| {
-            state.judgment_retry_ids.contains(*id)
-                && state.lookup_ctx.remaining_ids.contains(*id)
+            state.judgment_retry_ids.contains(*id) && state.lookup_ctx.remaining_ids.contains(*id)
         })
         .take(BEHAVIOR_BATCH_LIMIT)
         .cloned()
@@ -676,8 +675,7 @@ fn reason_based_behavior_next_action(
     let retry_count = retry_counts.get(&next_id).copied().unwrap_or(0);
 
     // Early exit: MissingDeltaAssertion at cap goes to exclusion
-    if reason_kind == BehaviorReasonKind::MissingDeltaAssertion
-        && retry_count >= BEHAVIOR_RERUN_CAP
+    if reason_kind == BehaviorReasonKind::MissingDeltaAssertion && retry_count >= BEHAVIOR_RERUN_CAP
     {
         return Some(suggested_exclusion_only_next_action(
             ctx,

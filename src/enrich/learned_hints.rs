@@ -98,16 +98,14 @@ pub fn load_learned_hints(path: &Path) -> Result<LearnedHints> {
 
 /// Write learned hints to the doc-pack.
 pub fn write_learned_hints(path: &Path, hints: &LearnedHints) -> Result<()> {
-    let content = serde_json::to_string_pretty(hints)
-        .context("serialize learned hints")?;
+    let content = serde_json::to_string_pretty(hints).context("serialize learned hints")?;
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("create parent dir: {}", parent.display()))?;
     }
 
-    fs::write(path, content)
-        .with_context(|| format!("write learned hints: {}", path.display()))?;
+    fs::write(path, content).with_context(|| format!("write learned hints: {}", path.display()))?;
 
     Ok(())
 }
@@ -123,10 +121,7 @@ mod tests {
         let path = dir.path().join("learned_hints.json");
 
         let mut hints = LearnedHints::new();
-        hints.record_working_argv(
-            "--verbose",
-            vec!["--verbose".into(), "input.txt".into()],
-        );
+        hints.record_working_argv("--verbose", vec!["--verbose".into(), "input.txt".into()]);
 
         assert_eq!(hints.working_argv_count(), 1);
         assert!(!hints.is_empty());
