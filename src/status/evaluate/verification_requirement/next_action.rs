@@ -41,6 +41,15 @@ pub const ASSERTION_FAILED_NOOP_CAP: usize = 2;
 /// Fallback delta path when no evidence exists.
 const DELTA_PATH_FALLBACK: &str = "inventory/scenarios/<delta_variant>.json";
 
+/// Collect surface IDs that are already covered by behavior scenarios.
+fn collect_covered_surfaces(plan: &scenarios::ScenarioPlan) -> std::collections::BTreeSet<String> {
+    plan.scenarios
+        .iter()
+        .filter(|s| s.coverage_tier.as_deref() == Some("behavior"))
+        .flat_map(|s| s.covers.iter().cloned())
+        .collect()
+}
+
 /// Arguments for building a behavior next-action payload.
 pub(super) struct BehaviorPayloadArgs<'a> {
     pub surface: Option<&'a crate::surface::SurfaceInventory>,
@@ -77,49 +86,13 @@ pub(super) struct DeterminedAction {
     pub reason_kind: BehaviorReasonKind,
 }
 
-/// Determine the next behavior action based on evaluation state.
+/// Handle outputs_equal priority cases (priorities 2-4).
 ///
-/// This is the core state machine that decides what action to take next.
-/// Returns `None` if no action is needed.
-pub(super) fn determine_behavior_action(
-    ctx: &QueueVerificationContext<'_>,
-    state: &BehaviorEvalState<'_>,
-) -> Option<DeterminedAction> {
-    // Priority 1: Initial scenarios (surface exists but no behavior scenarios yet)
-    // Skip missing_value_examples surfaces - they need value examples first
-    if is_initial_behavior_cycle(
-        ctx.plan,
-        state.required_ids,
-        state.lookup_ctx.ledger_entries,
-    ) {
-        // Collect surfaces that already have behavior scenarios to avoid re-targeting
-        let covered_surfaces: std::collections::BTreeSet<String> = ctx
-            .plan
-            .scenarios
-            .iter()
-            .filter(|s| s.coverage_tier.as_deref() == Some("behavior"))
-            .flat_map(|s| s.covers.iter().cloned())
-            .collect();
-
-        let target_ids: Vec<String> = state
-            .required_ids
-            .iter()
-            .filter(|id| !state.lookup_ctx.missing_value_examples.contains(*id))
-            .filter(|id| !covered_surfaces.contains(*id)) // Skip already-covered surfaces
-            .take(BEHAVIOR_BATCH_LIMIT)
-            .cloned()
-            .collect();
-        // Only return if we have non-missing_value_examples targets
-        if !target_ids.is_empty() {
-            return Some(DeterminedAction {
-                action: BehaviorAction::GenerateScenarios,
-                target_ids,
-                reason_kind: BehaviorReasonKind::InitialScenarios,
-            });
-        }
-        // Fall through to reason-based targeting if all targets need value examples
-    }
-
+/// Returns a determined action for outputs_equal surfaces that need:
+/// - Workaround addition (Priority 2)
+/// - Rerun or exclusion after cap hit (Priority 3)
+/// - Exclusion when ready (Priority 4)
+fn handle_outputs_equal_priorities(state: &BehaviorEvalState<'_>) -> Option<DeterminedAction> {
     // Priority 2: Outputs equal without workaround → add workaround
     if !state.outputs_equal_without_workaround.is_empty() {
         return Some(DeterminedAction {
@@ -135,7 +108,6 @@ pub(super) fn determine_behavior_action(
             state.outputs_equal_with_workaround_needs_rerun.to_vec(),
             state.retry_counts,
         );
-        // If cap hit, exclude; otherwise rerun
         if !cap_hit.is_empty() {
             return Some(DeterminedAction {
                 action: BehaviorAction::Exclude,
@@ -177,6 +149,51 @@ pub(super) fn determine_behavior_action(
                 reason_kind: BehaviorReasonKind::OutputsEqual,
             });
         }
+    }
+
+    None
+}
+
+/// Determine the next behavior action based on evaluation state.
+///
+/// This is the core state machine that decides what action to take next.
+/// Returns `None` if no action is needed.
+pub(super) fn determine_behavior_action(
+    ctx: &QueueVerificationContext<'_>,
+    state: &BehaviorEvalState<'_>,
+) -> Option<DeterminedAction> {
+    // Priority 1: Initial scenarios (surface exists but no behavior scenarios yet)
+    // Skip missing_value_examples surfaces - they need value examples first
+    if is_initial_behavior_cycle(
+        ctx.plan,
+        state.required_ids,
+        state.lookup_ctx.ledger_entries,
+    ) {
+        // Collect surfaces that already have behavior scenarios to avoid re-targeting
+        let covered_surfaces = collect_covered_surfaces(ctx.plan);
+
+        let target_ids: Vec<String> = state
+            .required_ids
+            .iter()
+            .filter(|id| !state.lookup_ctx.missing_value_examples.contains(*id))
+            .filter(|id| !covered_surfaces.contains(*id)) // Skip already-covered surfaces
+            .take(BEHAVIOR_BATCH_LIMIT)
+            .cloned()
+            .collect();
+        // Only return if we have non-missing_value_examples targets
+        if !target_ids.is_empty() {
+            return Some(DeterminedAction {
+                action: BehaviorAction::GenerateScenarios,
+                target_ids,
+                reason_kind: BehaviorReasonKind::InitialScenarios,
+            });
+        }
+        // Fall through to reason-based targeting if all targets need value examples
+    }
+
+    // Priority 2-4: Outputs equal handling (workaround, rerun, exclusion)
+    if let Some(action) = handle_outputs_equal_priorities(state) {
+        return Some(action);
     }
 
     // Priority 5: Judgment retry targets
@@ -657,6 +674,134 @@ fn first_behavior_reason_target(
     .or_else(|| first_reason_id(required_ids, &lookup_ctx))
 }
 
+/// Build scaffold candidates for a reason-based action.
+///
+/// Returns candidate scaffold contents based on whether the scenario exists.
+#[allow(clippy::too_many_arguments)]
+fn build_scaffold_candidates_for_reason(
+    ctx: &mut QueueVerificationContext<'_>,
+    summary: &mut enrich::VerificationTriageSummary,
+    ordered_target_ids: &[String],
+    next_id: &str,
+    scenario_id: &str,
+    scenario_missing: bool,
+    reason_kind: BehaviorReasonKind,
+    ledger_entries: &LedgerEntries,
+) -> Vec<Option<String>> {
+    let reason_code = reason_kind.as_code();
+    if scenario_missing {
+        summary.stub_blockers_preview = build_stub_blockers_preview(
+            ctx,
+            ordered_target_ids,
+            ledger_entries,
+            reason_code,
+            false,
+        );
+        vec![
+            crate::status::verification::behavior_scenarios_batch_stub(
+                ctx.plan,
+                ctx.surface,
+                ordered_target_ids,
+            ),
+            crate::status::verification::behavior_scenarios_batch_stub(
+                ctx.plan,
+                ctx.surface,
+                std::slice::from_ref(&next_id.to_string()),
+            ),
+            crate::status::verification::behavior_baseline_stub(ctx.plan, ctx.surface),
+        ]
+    } else {
+        // Use enum method to check if this needs assertion repair
+        let needs_assertion_repair = reason_kind.needs_scenario_fix();
+        // For assertion repair, prioritize scaffold that adds assertions
+        let mut candidates = Vec::new();
+        if needs_assertion_repair {
+            candidates.push(build_missing_assertions_scaffold_content(
+                ctx.plan,
+                ledger_entries,
+                std::slice::from_ref(&next_id.to_string()),
+            ));
+        }
+        candidates.push(build_existing_behavior_scenarios_scaffold(
+            ctx.plan,
+            ledger_entries,
+            std::slice::from_ref(&next_id.to_string()),
+        ));
+        candidates.push(crate::status::verification::behavior_scenario_stub(
+            ctx.plan,
+            scenario_id,
+        ));
+        candidates.push(crate::status::verification::behavior_scenarios_batch_stub(
+            ctx.plan,
+            ctx.surface,
+            std::slice::from_ref(&next_id.to_string()),
+        ));
+        candidates
+    }
+}
+
+/// Handle assertion_failed no-op detection and pivot to rerun or exclusion.
+///
+/// Returns Some(NextAction) if we detect a no-op and need to pivot, None to continue.
+fn maybe_pivot_assertion_failed(
+    ctx: &QueueVerificationContext<'_>,
+    next_id: &str,
+    content: &str,
+    entry: Option<&scenarios::VerificationEntry>,
+    retry_counts: &std::collections::BTreeMap<String, usize>,
+    ledger_entries: &LedgerEntries,
+) -> Option<enrich::NextAction> {
+    let verification_progress = load_verification_progress(ctx.paths);
+    let candidate_signature =
+        build_action_signature(Some("assertion_failed"), next_id, content, entry);
+
+    if !is_noop_action(&verification_progress, next_id, &candidate_signature) {
+        return None;
+    }
+
+    let no_progress_count =
+        get_assertion_failed_no_progress_count(&verification_progress, next_id);
+
+    // If at/over cap, pivot to exclusion
+    if no_progress_count >= ASSERTION_FAILED_NOOP_CAP {
+        return Some(suggested_exclusion_only_next_action(
+            ctx,
+            &[next_id.to_string()],
+            "assertion_failed",
+            retry_counts,
+            ledger_entries,
+        ));
+    }
+
+    // Otherwise, pivot to targeted rerun command
+    let scenario_ids =
+        rerun_scenario_ids_for_surface_ids(std::slice::from_ref(&next_id.to_string()), ledger_entries);
+    let command = targeted_outputs_equal_rerun_command(ctx.paths.root(), &scenario_ids);
+    let payload = behavior_payload(BehaviorPayloadArgs {
+        surface: Some(ctx.surface),
+        target_ids: std::slice::from_ref(&next_id.to_string()),
+        reason_code: Some("assertion_failed"),
+        action_kind: Some(BehaviorAction::Rerun),
+        retry_counts,
+        ledger_entries,
+        suggested_overlay_keys: &[],
+        assertion_starters: Vec::new(),
+        suggested_exclusion_payload: None,
+        paths: ctx.paths,
+    });
+    Some(enrich::NextAction::Command {
+        command,
+        reason: format!(
+            "assertion_failed edit would be identical to previous with no evidence change; pivot to targeted rerun for {} scenario ids (no-progress attempt {}/{})",
+            scenario_ids.len(),
+            no_progress_count.saturating_add(1),
+            ASSERTION_FAILED_NOOP_CAP
+        ),
+        hint: Some("Rerun scenario to detect evidence changes".to_string()),
+        payload,
+    })
+}
+
 /// Build a reason-based behavior next action.
 fn reason_based_behavior_next_action(
     ctx: &mut QueueVerificationContext<'_>,
@@ -708,105 +853,24 @@ fn reason_based_behavior_next_action(
         ));
     }
 
-    let scaffold_candidates = if scenario_missing {
-        summary.stub_blockers_preview = build_stub_blockers_preview(
-            ctx,
-            &ordered_target_ids,
-            ledger_entries,
-            reason_code,
-            false,
-        );
-        vec![
-            crate::status::verification::behavior_scenarios_batch_stub(
-                ctx.plan,
-                ctx.surface,
-                &ordered_target_ids,
-            ),
-            crate::status::verification::behavior_scenarios_batch_stub(
-                ctx.plan,
-                ctx.surface,
-                std::slice::from_ref(&next_id),
-            ),
-            crate::status::verification::behavior_baseline_stub(ctx.plan, ctx.surface),
-        ]
-    } else {
-        // Use enum method to check if this needs assertion repair
-        let needs_assertion_repair = reason_kind.needs_scenario_fix();
-        // For assertion repair, prioritize scaffold that adds assertions
-        let mut candidates = Vec::new();
-        if needs_assertion_repair {
-            candidates.push(build_missing_assertions_scaffold_content(
-                ctx.plan,
-                ledger_entries,
-                std::slice::from_ref(&next_id),
-            ));
-        }
-        candidates.push(build_existing_behavior_scenarios_scaffold(
-            ctx.plan,
-            ledger_entries,
-            std::slice::from_ref(&next_id),
-        ));
-        candidates.push(crate::status::verification::behavior_scenario_stub(
-            ctx.plan,
-            &scenario_id,
-        ));
-        candidates.push(crate::status::verification::behavior_scenarios_batch_stub(
-            ctx.plan,
-            ctx.surface,
-            std::slice::from_ref(&next_id),
-        ));
-        candidates
-    };
+    let scaffold_candidates = build_scaffold_candidates_for_reason(
+        ctx,
+        summary,
+        &ordered_target_ids,
+        &next_id,
+        &scenario_id,
+        scenario_missing,
+        reason_kind,
+        ledger_entries,
+    );
     let content = first_valid_scaffold_content(ctx.plan, ctx.paths.root(), scaffold_candidates)?;
 
     // No-op guard for assertion_failed: detect repeated identical edits with no evidence change
     if reason_kind == BehaviorReasonKind::AssertionFailed {
-        let verification_progress = load_verification_progress(ctx.paths);
-        let candidate_signature =
-            build_action_signature(Some("assertion_failed"), &next_id, &content, entry);
-
-        if is_noop_action(&verification_progress, &next_id, &candidate_signature) {
-            let no_progress_count =
-                get_assertion_failed_no_progress_count(&verification_progress, &next_id);
-
-            // If at/over cap, pivot to exclusion
-            if no_progress_count >= ASSERTION_FAILED_NOOP_CAP {
-                return Some(suggested_exclusion_only_next_action(
-                    ctx,
-                    &[next_id],
-                    "assertion_failed",
-                    retry_counts,
-                    ledger_entries,
-                ));
-            }
-
-            // Otherwise, pivot to targeted rerun command
-            let scenario_ids =
-                rerun_scenario_ids_for_surface_ids(std::slice::from_ref(&next_id), ledger_entries);
-            let command = targeted_outputs_equal_rerun_command(ctx.paths.root(), &scenario_ids);
-            let payload = behavior_payload(BehaviorPayloadArgs {
-                surface: Some(ctx.surface),
-                target_ids: std::slice::from_ref(&next_id),
-                reason_code: Some("assertion_failed"),
-                action_kind: Some(BehaviorAction::Rerun),
-                retry_counts,
-                ledger_entries,
-                suggested_overlay_keys: &[],
-                assertion_starters: Vec::new(),
-                suggested_exclusion_payload: None,
-                paths: ctx.paths,
-            });
-            return Some(enrich::NextAction::Command {
-                command,
-                reason: format!(
-                    "assertion_failed edit would be identical to previous with no evidence change; pivot to targeted rerun for {} scenario ids (no-progress attempt {}/{})",
-                    scenario_ids.len(),
-                    no_progress_count.saturating_add(1),
-                    ASSERTION_FAILED_NOOP_CAP
-                ),
-                hint: Some("Rerun scenario to detect evidence changes".to_string()),
-                payload,
-            });
+        if let Some(pivot_action) =
+            maybe_pivot_assertion_failed(ctx, &next_id, &content, entry, retry_counts, ledger_entries)
+        {
+            return Some(pivot_action);
         }
     }
 
@@ -883,12 +947,7 @@ fn is_initial_behavior_cycle(
     }
 
     // Collect surfaces that already have behavior scenarios
-    let covered_surfaces: std::collections::BTreeSet<String> = plan
-        .scenarios
-        .iter()
-        .filter(|s| s.coverage_tier.as_deref() == Some("behavior"))
-        .flat_map(|s| s.covers.iter().cloned())
-        .collect();
+    let covered_surfaces = collect_covered_surfaces(plan);
 
     // Continue initial phase as long as there are required surfaces without scenarios.
     // This ensures we generate scenarios for ALL surfaces before transitioning to
