@@ -28,9 +28,12 @@
       s.surface_id,
       coalesce(p.behavior_paths, []::VARCHAR[]) as delta_evidence_paths,
       case
+        -- Verified: scenario demonstrated the option works (check FIRST)
+        -- If a scenario used a value successfully, we don't need explicit value_examples
+        when bs.status = 'verified' then 'delta_seen'
+        -- Missing value examples: option needs value but none provided AND not yet verified
         when s.value_arity = 'required'
           and coalesce(array_length(s.value_examples), 0) = 0 then 'missing_value_examples'
-        when bs.status = 'verified' then 'delta_seen'
         when br.behavior_unverified_reason_code = 'setup_failed' then 'setup_failed'
         when br.behavior_unverified_reason_code = 'outputs_equal' then 'outputs_equal'
         when br.behavior_unverified_reason_code = 'scenario_error' then 'scenario_error'

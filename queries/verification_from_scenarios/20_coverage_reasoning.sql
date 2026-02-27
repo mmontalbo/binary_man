@@ -237,8 +237,13 @@
       case
         -- Deferred: auto_verify timed out (likely interactive/hanging command)
         when t.surface_id is not null then 'deferred'
-        when coalesce(b.has_behavior, 0) = 0 then 'unknown'
+        -- Verified: scenario demonstrated the option works (check FIRST)
+        -- If a scenario used a value successfully, we don't need explicit value_examples
         when b.is_verified = 1 then 'verified'
+        -- Missing value examples: option needs value but none provided AND not yet verified
+        when s.value_arity = 'required'
+          and coalesce(array_length(s.value_examples), 0) = 0 then 'rejected'
+        when coalesce(b.has_behavior, 0) = 0 then 'unknown'
         when b.has_evidence = 1 then 'rejected'
         else 'recognized'
       end as status
@@ -252,6 +257,11 @@
       case
         -- auto_verify_timeout: auto_verify timed out (likely interactive/hanging)
         when t.surface_id is not null then 'auto_verify_timeout'
+        -- verified: no unverified reason if scenario already proved the option works
+        when b.is_verified = 1 then null
+        -- missing_value_examples: option needs value but none provided AND not yet verified
+        when s.value_arity = 'required'
+          and coalesce(array_length(s.value_examples), 0) = 0 then 'missing_value_examples'
         -- no_scenario: no behavior scenario covers this surface
         when coalesce(b.has_behavior, 0) = 0 then 'no_scenario'
         -- setup_failed: a setup command failed before main command ran

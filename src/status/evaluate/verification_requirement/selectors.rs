@@ -79,8 +79,13 @@ pub(super) fn first_reason_id_by_priority(
             if !ctx.remaining_ids.contains(surface_id) {
                 continue;
             }
+            // Skip needs_apply_ids (these need scenario execution first)
+            if ctx.needs_apply_ids.contains(surface_id) {
+                continue;
+            }
+            // Skip missing_value_examples surfaces UNLESS looking for MissingValueExamples reason
             if ctx.missing_value_examples.contains(surface_id)
-                || ctx.needs_apply_ids.contains(surface_id)
+                && *reason_kind != BehaviorReasonKind::MissingValueExamples
             {
                 continue;
             }
@@ -142,10 +147,18 @@ pub(super) fn collect_missing_value_examples(
         if !item.invocation.value_examples.is_empty() {
             continue;
         }
-        if let Some(entry) = ledger_entries.get(surface_id) {
-            if entry.behavior_scenario_ids.is_empty() {
-                missing.insert(surface_id.clone());
-            }
+        // Include if:
+        // 1. No ledger entry yet (surface not processed)
+        // 2. No behavior scenarios exist
+        // 3. Scenarios exist but delta_outcome is "missing_value_examples"
+        let entry = ledger_entries.get(surface_id);
+        if entry.is_none()
+            || entry.is_some_and(|e| {
+                e.behavior_scenario_ids.is_empty()
+                    || e.delta_outcome.as_deref() == Some("missing_value_examples")
+            })
+        {
+            missing.insert(surface_id.clone());
         }
     }
     missing
