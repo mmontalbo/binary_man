@@ -149,17 +149,13 @@ pub fn build_status_summary(args: BuildStatusSummaryArgs<'_>) -> Result<enrich::
         .filter(|_| config_exists)
     {
         action.clone()
-    } else if let Some(action) = eval
-        .man_usage_next_action
-        .as_ref()
-        .filter(|_| gating_ok && matches!(first_unmet.as_ref(), Some(enrich::RequirementId::ManPage)))
-    {
+    } else if let Some(action) = eval.man_usage_next_action.as_ref().filter(|_| {
+        gating_ok && matches!(first_unmet.as_ref(), Some(enrich::RequirementId::ManPage))
+    }) {
         action.clone()
-    } else if let Some(action) = eval
-        .coverage_next_action
-        .as_ref()
-        .filter(|_| gating_ok && matches!(first_unmet.as_ref(), Some(enrich::RequirementId::Coverage)))
-    {
+    } else if let Some(action) = eval.coverage_next_action.as_ref().filter(|_| {
+        gating_ok && matches!(first_unmet.as_ref(), Some(enrich::RequirementId::Coverage))
+    }) {
         action.clone()
     } else if let Some(action) = eval.verification_next_action.as_ref().filter(|_| {
         gating_ok
