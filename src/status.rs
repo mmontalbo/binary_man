@@ -505,6 +505,7 @@ mod tests {
             requirements: vec![enrich::RequirementId::ExamplesReport],
             verification_tier: None,
             lm_command: None,
+            behavior_batch_size: None,
         };
         enrich::write_config(&root, &config).unwrap();
 

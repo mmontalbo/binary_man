@@ -161,6 +161,11 @@ pub struct EnrichConfig {
     /// Can also be set via BMAN_LM_COMMAND environment variable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lm_command: Option<String>,
+    /// Maximum number of surfaces to target per LM invocation.
+    /// Lower values reduce LM response size (useful for complex binaries).
+    /// Default: 15. For complex binaries like `git log`, try 3-5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behavior_batch_size: Option<usize>,
 }
 
 /// Lock snapshot tying plan/apply to a stable set of inputs.
@@ -483,6 +488,9 @@ pub struct TargetScenarioOutput {
     /// Truncated stderr (first 200 chars).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stderr_preview: Option<String>,
+    /// True if setup commands failed before the main command ran.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub setup_failed: bool,
 }
 
 /// Contextual hints for LM-driven scaffold editing.

@@ -32,6 +32,7 @@ pub fn default_config() -> EnrichConfig {
         requirements: default_requirements(),
         verification_tier: Some("behavior".to_string()),
         lm_command: None,
+        behavior_batch_size: None,
     }
 }
 

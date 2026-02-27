@@ -224,6 +224,15 @@ fn build_state_context(reason_code: &str, payload: &BehaviorNextActionPayload) -
         "assertion_failed" => {
             "Assertion failed. Fix the assertion, fix the scenario, or exclude if unpredictable.".to_string()
         }
+        "setup_failed" => {
+            "Setup commands in `seed.setup` failed before the main command ran. Check the scenario and fix or simplify the setup commands.".to_string()
+        }
+        "scenario_error" => {
+            "Scenario configuration is invalid. Check argv, seed, and assertion syntax.".to_string()
+        }
+        "missing_value_examples" => {
+            "Option requires a value but no examples exist. Add value_examples to the overlay.".to_string()
+        }
         _ => format!("Handle these items based on the reason code: {reason_code}"),
     }
 }
@@ -284,7 +293,10 @@ fn build_targets_section(payload: &BehaviorNextActionPayload) -> String {
 
             // Add scenario output if available
             if let Some(output) = output_map.get(id.as_str()) {
-                if let Some(exit_code) = output.exit_code {
+                if output.setup_failed {
+                    // Setup commands failed before main command ran
+                    line.push_str(" (**setup_failed**: seed.setup commands failed - check scenario in plan.json)");
+                } else if let Some(exit_code) = output.exit_code {
                     line.push_str(&format!(" (exit_code: {exit_code}"));
                     if let Some(stderr) = &output.stderr_preview {
                         // Truncate and escape for display
@@ -497,6 +509,19 @@ fn invoke_lm_command(command: &str, prompt: &str) -> Result<String> {
     String::from_utf8(output.stdout).context("decode LM stdout as UTF-8")
 }
 
+/// Truncate a string to at most `max_bytes` without splitting multi-byte UTF-8 characters.
+fn truncate_to_char_boundary(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    // Find the last character boundary at or before max_bytes
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 /// Parse the LM response text into an LmResponseBatch.
 fn parse_lm_response(text: &str, binary_name: &str) -> Result<LmResponseBatch> {
     // Try to extract JSON from the response (LM might include markdown fences)
@@ -524,13 +549,16 @@ fn parse_lm_response(text: &str, binary_name: &str) -> Result<LmResponseBatch> {
                 "(empty response)".to_string()
             };
 
+            // Safely truncate to ~500 chars without splitting multi-byte characters
+            let truncated = truncate_to_char_boundary(text, 500);
+
             return Err(anyhow::anyhow!(
                 "parse LM response as JSON: {} at line {}, column {}\n\nContext: {}\n\nFirst 500 chars: {}",
                 e,
                 line,
                 col,
                 context,
-                &text[..text.len().min(500)]
+                truncated
             ));
         }
     };
