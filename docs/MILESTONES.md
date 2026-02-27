@@ -5,7 +5,144 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M36.
+Current focus: M37.
+
+## M37 — Judgment Feedback Loop for Comparison Commands
+
+Goal: Achieve comprehensive git diff coverage by improving how judgment feedback
+flows back to the LM.
+
+### Problem
+
+E2E test for `git diff` stalled at 74% (71/96 verified) after 23 cycles. The
+judgment process marked 68 surfaces as `unverifiable` with reasons like:
+
+```
+--color: "Output is empty, so color formatting cannot be observed..."
+--stat: "Output is empty, making it impossible to verify..."
+--patch: "Output is empty..."
+```
+
+The judgment correctly identified the issue (empty output) and even suggested
+fixes, but this feedback never reached the LM because:
+
+1. **Feedback dies at unverifiable**: After 3 failures, surfaces move to
+   `judgment_unverifiable` and are never retried
+2. **No cross-surface pattern visibility**: Each surface fails independently;
+   the LM doesn't see "5 surfaces all failed with empty output"
+3. **History not accumulated**: Only latest failure shown, not full history
+
+The root cause is semantic: `git diff` is a comparison command that only
+produces output when there ARE differences. The LM needs to understand this
+to generate scenarios that create observable state changes.
+
+### Solution
+
+Instead of hardcoding "comparison command" patterns, let the LM self-diagnose
+by showing it aggregated failure patterns:
+
+1. **Keep surfaces in retry pool longer**: Don't move to `unverifiable` after
+   3 failures. Keep retrying with accumulated feedback up to N attempts.
+
+2. **Aggregate failures by symptom**: Group surfaces with similar failure
+   reasons and show the pattern:
+   ```markdown
+   ## Failure Pattern: empty_output (5 surfaces)
+   --color, --stat, --patch, --name-only, --numstat
+
+   All produced 0 bytes of output. Command description: "Show changes between..."
+
+   What is the common root cause? Generate scenarios that address it.
+   ```
+
+3. **Show full judgment history per surface**:
+   ```markdown
+   ## Target: --color (attempt 4/6)
+   - Attempt 1: empty_output - "no changes visible"
+   - Attempt 2: empty_output - "still no output"
+   - Attempt 3: empty_output - "command needs observable changes"
+   Suggested: create uncommitted file modifications before diffing
+   ```
+
+4. **Include command NAME line**: Extract from man page, show in prompt header
+   to provide semantic context without hardcoding patterns.
+
+### Changes
+
+**1. Extend retry budget** (`src/workflow/apply/progress.rs`)
+
+- Increase max attempts from 3 to 6 before auto-exclude
+- Keep surfaces in `judgment_pending_retry` longer
+
+**2. Aggregate failures by reason** (`src/workflow/lm_client.rs`)
+
+- Group `judgment_pending_retry` entries by failure category
+- Add "Failure Pattern" section to prompt when 3+ surfaces share same symptom
+
+**3. Show full history per surface** (`src/workflow/lm_client.rs`)
+
+- Track all attempts in `verification_progress.json`, not just latest
+- Include history in prompt for each targeted surface
+
+**4. Extract command description** (`src/enrich/`)
+
+- Parse man page NAME line at init time
+- Store in pack metadata
+- Include in behavior prompt header
+
+### Implementation Status
+
+**Completed:**
+- Extended retry budget from 3 to 6 attempts (`src/verification_progress.rs`)
+- Added `JudgmentAttempt` struct with history tracking
+- Implemented `build_failure_patterns_section()` in `src/workflow/lm_client.rs`
+- Added `categorize_failure_reason()` for pattern detection
+- Wired failure patterns into behavior prompts via `{failure_patterns}` placeholder
+- Added `extract_man_name_line()` for command description extraction
+- 161 unit tests pass
+
+**Partially Working:**
+- Failure Patterns section: Implemented but needs E2E validation
+- Command Purpose section: Shows parent command instead of subcommand
+
+**Known Issue: Subcommand Man Pages**
+
+For subcommands like `git diff`, the Command Purpose section shows:
+```
+## Command Purpose
+[--exec-path[=<path>]] [--html-path] [--man-path]...
+```
+
+Instead of:
+```
+## Command Purpose
+git-diff - Show changes between commits, commit and working tree, etc
+```
+
+**Root cause:** binary_lens only exports the parent command's man page (`git.1`),
+not subcommand man pages (`git-diff.1`). The surface inventory has:
+- `binary_name: "git"` (parent)
+- `context_argv: ["diff"]` (subcommand)
+
+**Fix options:**
+1. **binary_lens enhancement**: Export subcommand man pages to `man/{binary}-{subcommand}.1`
+2. **bman workaround**: Parse subcommand help output for description (already available in surface items)
+
+**Recommended:** Option 2 is simpler since surface items already have descriptions from
+`git diff --help`. The `command_description` could come from aggregating these descriptions
+rather than parsing man pages.
+
+### Acceptance Criteria
+
+| Criterion | Status |
+|-----------|--------|
+| git diff reaches 90%+ verification | pending |
+| Judgment feedback visible in prompts | partial (needs E2E) |
+| Cross-surface patterns detected and shown | implemented |
+| No regression on git log, git commit | pending |
+| Command description in prompts | blocked (binary_lens) |
+
+---
 
 ## M36 — Targeting State Machine Hardening (done)
 
