@@ -437,16 +437,63 @@ fn behavior_priority_repairs_existing_rejections_before_missing_behavior_stubs()
     plan.scenarios
         .retain(|scenario| scenario.kind != scenarios::ScenarioKind::Behavior);
 
+    // Add behavior scenarios for both surfaces so we exit initial phase and test reason-based targeting
+    plan.scenarios.push(scenarios::ScenarioSpec {
+        id: "verify_new".to_string(),
+        kind: scenarios::ScenarioKind::Behavior,
+        publish: false,
+        argv: vec!["--new".to_string()],
+        env: BTreeMap::new(),
+        stdin: None,
+        seed: None,
+        cwd: None,
+        timeout_seconds: None,
+        net_mode: None,
+        no_sandbox: None,
+        no_strace: None,
+        snippet_max_lines: None,
+        snippet_max_bytes: None,
+        coverage_tier: Some("behavior".to_string()),
+        baseline_scenario_id: Some("baseline".to_string()),
+        assertions: Vec::new(),
+        covers: vec!["--new".to_string()],
+        coverage_ignore: false,
+        expect: scenarios::ScenarioExpect::default(),
+    });
+    plan.scenarios.push(scenarios::ScenarioSpec {
+        id: "verify_repair".to_string(),
+        kind: scenarios::ScenarioKind::Behavior,
+        publish: false,
+        argv: vec!["--repair".to_string()],
+        env: BTreeMap::new(),
+        stdin: None,
+        seed: None,
+        cwd: None,
+        timeout_seconds: None,
+        net_mode: None,
+        no_sandbox: None,
+        no_strace: None,
+        snippet_max_lines: None,
+        snippet_max_bytes: None,
+        coverage_tier: Some("behavior".to_string()),
+        baseline_scenario_id: Some("baseline".to_string()),
+        assertions: Vec::new(),
+        covers: vec!["--repair".to_string()],
+        coverage_ignore: false,
+        expect: scenarios::ScenarioExpect::default(),
+    });
+
     let surface = minimal_surface_with_ids(&["--new", "--repair"]);
     let mut ledger_entries = BTreeMap::new();
-    ledger_entries.insert(
-        "--new".to_string(),
-        verification_entry_with_reason("--new", "no_scenario"),
-    );
-    ledger_entries.insert(
-        "--repair".to_string(),
-        verification_entry_with_reason("--repair", "scenario_error"),
-    );
+    // Both have scenarios now, so ledger reasons drive targeting.
+    // Include behavior_scenario_paths so they're not marked as "needs apply".
+    let mut entry_new = verification_entry_with_reason("--new", "assertion_failed");
+    entry_new.behavior_scenario_paths = vec!["scenarios/delta/verify_new.json".to_string()];
+    ledger_entries.insert("--new".to_string(), entry_new);
+
+    let mut entry_repair = verification_entry_with_reason("--repair", "scenario_error");
+    entry_repair.behavior_scenario_paths = vec!["scenarios/delta/verify_repair.json".to_string()];
+    ledger_entries.insert("--repair".to_string(), entry_repair);
 
     let mut evidence = Vec::new();
     let mut local_blockers = Vec::new();
@@ -484,6 +531,7 @@ fn behavior_priority_repairs_existing_rejections_before_missing_behavior_stubs()
     match next_action {
         enrich::NextAction::Edit { payload, .. } => {
             let payload = payload.as_ref().expect("expected behavior payload");
+            // scenario_error has higher priority than assertion_failed
             assert_eq!(payload.target_ids, vec!["--repair".to_string()]);
             assert_eq!(payload.reason_code.as_deref(), Some("scenario_error"));
         }
@@ -506,12 +554,14 @@ fn no_scenario_next_action_payload_includes_assertion_starters() {
         serde_json::from_str(&scenarios::plan_stub(Some("bin"))).expect("parse plan stub");
     plan.scenarios
         .retain(|scenario| scenario.kind != scenarios::ScenarioKind::Behavior);
-    // Add a behavior scenario for --other to avoid triggering initial_scenarios path
+    // Add a behavior scenario for --color so we exit initial phase and test reason-based targeting.
+    // The ledger still has no_scenario reason, simulating a state where the scenario exists
+    // but the verification run hasn't progressed yet.
     plan.scenarios.push(scenarios::ScenarioSpec {
-        id: "verify_other".to_string(),
+        id: "verify_color".to_string(),
         kind: scenarios::ScenarioKind::Behavior,
         publish: false,
-        argv: vec!["--other".to_string()],
+        argv: vec!["--color".to_string()],
         env: BTreeMap::new(),
         stdin: None,
         seed: None,
@@ -525,16 +575,16 @@ fn no_scenario_next_action_payload_includes_assertion_starters() {
         coverage_tier: Some("behavior".to_string()),
         baseline_scenario_id: Some("baseline".to_string()),
         assertions: Vec::new(),
-        covers: vec!["--other".to_string()],
+        covers: vec!["--color".to_string()],
         coverage_ignore: false,
         expect: scenarios::ScenarioExpect::default(),
     });
     let surface = minimal_surface("--color");
     let mut ledger_entries = BTreeMap::new();
-    ledger_entries.insert(
-        "--color".to_string(),
-        verification_entry_with_reason("--color", "no_scenario"),
-    );
+    // Include behavior_scenario_paths so it's not marked as "needs apply"
+    let mut entry_color = verification_entry_with_reason("--color", "no_scenario");
+    entry_color.behavior_scenario_paths = vec!["scenarios/delta/verify_color.json".to_string()];
+    ledger_entries.insert("--color".to_string(), entry_color);
 
     let mut evidence = Vec::new();
     let mut local_blockers = Vec::new();
@@ -1014,3 +1064,340 @@ fn outputs_equal_status_does_not_mutate_existing_retry_progress() {
 // additional setup for behavior verification targets through auto_verification.
 // The core no-op detection logic is tested in verification_progress::tests.
 // The guard is wired into reason_based_behavior_next_action for assertion_failed.
+
+#[test]
+fn missing_value_examples_generates_scaffold_with_placeholder() {
+    let root = temp_doc_pack_root("bman-verification-missing-value-examples");
+    let paths = enrich::DocPackPaths::new(root.clone());
+    let mut plan: scenarios::ScenarioPlan =
+        serde_json::from_str(&scenarios::plan_stub(Some("bin"))).expect("parse plan stub");
+    plan.scenarios
+        .retain(|scenario| scenario.kind != scenarios::ScenarioKind::Behavior);
+
+    // Create surfaces with value_arity="required" but no value_examples
+    let surface_ids = vec!["--config", "--output", "--format"];
+    let items = surface_ids
+        .iter()
+        .map(|surface_id| surface::SurfaceItem {
+            id: (*surface_id).to_string(),
+            display: (*surface_id).to_string(),
+            description: Some("test option".to_string()),
+            parent_id: None,
+            context_argv: Vec::new(),
+            forms: vec![(*surface_id).to_string()],
+            invocation: surface::SurfaceInvocation {
+                value_arity: "required".to_string(),
+                value_separator: "space".to_string(),
+                value_placeholder: Some("VALUE".to_string()),
+                value_examples: Vec::new(), // Empty - triggers missing_value_examples
+                requires_argv: Vec::new(),
+            },
+            evidence: Vec::new(),
+            is_help_output: false,
+        })
+        .collect();
+    let surface = surface::SurfaceInventory {
+        schema_version: 2,
+        generated_at_epoch_ms: 0,
+        binary_name: Some("bin".to_string()),
+        inputs_hash: None,
+        discovery: Vec::new(),
+        items,
+        blockers: Vec::new(),
+    };
+
+    // Create ledger entries that report missing_value_examples
+    let mut ledger_entries = BTreeMap::new();
+    for surface_id in &surface_ids {
+        let mut entry = verification_entry_with_reason(surface_id, "missing_value_examples");
+        // No behavior scenarios exist yet
+        entry.behavior_scenario_ids = Vec::new();
+        ledger_entries.insert((*surface_id).to_string(), entry);
+    }
+
+    let next_action = eval_behavior_next_action(&plan, &surface, &ledger_entries, &paths);
+    match next_action {
+        enrich::NextAction::Edit {
+            content, payload, ..
+        } => {
+            let payload = payload.expect("expected behavior payload");
+            assert_eq!(
+                payload.reason_code.as_deref(),
+                Some("missing_value_examples")
+            );
+            assert!(!payload.target_ids.is_empty());
+            // Content should have a scaffold with placeholder value
+            assert!(
+                content.contains("__value__") || content.contains("VALUE"),
+                "scaffold should contain value placeholder, got: {content}"
+            );
+        }
+        enrich::NextAction::Command { payload, .. } => {
+            panic!(
+                "expected edit next action, got command with payload: {:?}",
+                payload
+            );
+        }
+        enrich::NextAction::AutoExclude { .. } => panic!("expected edit next action"),
+    };
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+// =============================================================================
+// Behavior Contract Tests
+// =============================================================================
+// These tests verify the core behavioral contracts of the targeting system.
+// They should remain stable even as implementation details change.
+
+/// Contract: Targeting selects highest-priority reason kind first.
+///
+/// Given surfaces with different reason codes (setup_failed, missing_value_examples),
+/// targeting should return setup_failed surfaces first (higher priority).
+#[test]
+fn targeting_selects_highest_priority_reason_kind() {
+    use super::selectors::{first_reason_id_by_priority, BehaviorLookupContext};
+    use crate::status::verification_policy::BehaviorReasonKind;
+
+    let root = temp_doc_pack_root("bman-priority-test");
+    let _paths = enrich::DocPackPaths::new(root.clone());
+
+    // Create surfaces with different reason codes
+    let surface_ids = ["--setup-opt", "--value-opt"];
+
+    // Ledger entries: one setup_failed, one missing_value_examples
+    let mut ledger_entries = BTreeMap::new();
+
+    // --setup-opt has setup_failed
+    let mut setup_entry = verification_entry_with_reason("--setup-opt", "setup_failed");
+    setup_entry.behavior_scenario_ids = vec!["verify_setup_opt".to_string()];
+    setup_entry.delta_outcome = Some("setup_failed".to_string());
+    ledger_entries.insert("--setup-opt".to_string(), setup_entry);
+
+    // --value-opt has missing_value_examples (no scenario yet)
+    let value_entry = verification_entry_with_reason("--value-opt", "missing_value_examples");
+    ledger_entries.insert("--value-opt".to_string(), value_entry);
+
+    let remaining: std::collections::BTreeSet<String> =
+        surface_ids.iter().map(|s| s.to_string()).collect();
+    let missing_value_examples: std::collections::BTreeSet<String> =
+        vec!["--value-opt".to_string()].into_iter().collect();
+    let needs_apply: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+
+    let ctx = BehaviorLookupContext {
+        remaining_ids: &remaining,
+        missing_value_examples: &missing_value_examples,
+        needs_apply_ids: &needs_apply,
+        ledger_entries: &ledger_entries,
+    };
+
+    let priority_order = [
+        BehaviorReasonKind::ScenarioError,
+        BehaviorReasonKind::SetupFailed,
+        BehaviorReasonKind::AssertionFailed,
+        BehaviorReasonKind::MissingValueExamples,
+        BehaviorReasonKind::NoScenario,
+        BehaviorReasonKind::OutputsEqual,
+    ];
+
+    let required_ids: Vec<String> = surface_ids.iter().map(|s| s.to_string()).collect();
+    let selected = first_reason_id_by_priority(&required_ids, &ctx, &priority_order);
+
+    // Should select setup_failed (priority #2) before missing_value_examples (priority #4)
+    assert_eq!(
+        selected,
+        Some("--setup-opt".to_string()),
+        "should select setup_failed surface first"
+    );
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+/// Contract: When higher-priority surfaces are not in remaining set,
+/// targeting falls through to lower-priority reason kinds.
+///
+/// This is the core contract that the bug violated - when setup_failed
+/// surfaces are stuck/excluded, missing_value_examples should be targeted.
+#[test]
+fn targeting_falls_through_when_higher_priority_not_remaining() {
+    use super::selectors::{first_reason_id_by_priority, BehaviorLookupContext};
+    use crate::status::verification_policy::BehaviorReasonKind;
+
+    let root = temp_doc_pack_root("bman-fallthrough-test");
+    let _paths = enrich::DocPackPaths::new(root.clone());
+
+    // Create surfaces with different reason codes
+    let surface_ids = ["--setup-opt", "--value-opt"];
+
+    // Ledger entries
+    let mut ledger_entries = BTreeMap::new();
+
+    let mut setup_entry = verification_entry_with_reason("--setup-opt", "setup_failed");
+    setup_entry.behavior_scenario_ids = vec!["verify_setup_opt".to_string()];
+    setup_entry.delta_outcome = Some("setup_failed".to_string());
+    ledger_entries.insert("--setup-opt".to_string(), setup_entry);
+
+    let value_entry = verification_entry_with_reason("--value-opt", "missing_value_examples");
+    ledger_entries.insert("--value-opt".to_string(), value_entry);
+
+    // KEY: Only --value-opt is in remaining (--setup-opt was excluded/resolved)
+    let remaining: std::collections::BTreeSet<String> =
+        vec!["--value-opt".to_string()].into_iter().collect();
+    let missing_value_examples: std::collections::BTreeSet<String> =
+        vec!["--value-opt".to_string()].into_iter().collect();
+    let needs_apply: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+
+    let ctx = BehaviorLookupContext {
+        remaining_ids: &remaining,
+        missing_value_examples: &missing_value_examples,
+        needs_apply_ids: &needs_apply,
+        ledger_entries: &ledger_entries,
+    };
+
+    let priority_order = [
+        BehaviorReasonKind::ScenarioError,
+        BehaviorReasonKind::SetupFailed,
+        BehaviorReasonKind::AssertionFailed,
+        BehaviorReasonKind::MissingValueExamples,
+        BehaviorReasonKind::NoScenario,
+        BehaviorReasonKind::OutputsEqual,
+    ];
+
+    let required_ids: Vec<String> = surface_ids.iter().map(|s| s.to_string()).collect();
+    let selected = first_reason_id_by_priority(&required_ids, &ctx, &priority_order);
+
+    // Should fall through to missing_value_examples since setup_failed not in remaining
+    assert_eq!(
+        selected,
+        Some("--value-opt".to_string()),
+        "should fall through to missing_value_examples when higher priority not remaining"
+    );
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+/// Contract: Multiple surfaces with same reason kind are batched together.
+///
+/// Note: Batching only happens for NoScenario and OutputsEqual reason kinds.
+/// Other reason kinds (like MissingValueExamples) process one surface at a time
+/// because each needs specific context (value examples, setup fixes, etc.).
+#[test]
+fn targeting_batches_same_reason_kind() {
+    let root = temp_doc_pack_root("bman-batch-test");
+    let paths = enrich::DocPackPaths::new(root.clone());
+    let mut plan: scenarios::ScenarioPlan =
+        serde_json::from_str(&scenarios::plan_stub(Some("bin"))).expect("parse plan stub");
+    plan.scenarios
+        .retain(|scenario| scenario.kind != scenarios::ScenarioKind::Behavior);
+
+    // Create 3 surfaces all with no_scenario (a reason kind that DOES batch)
+    let surface_ids = vec!["--opt-a", "--opt-b", "--opt-c"];
+    let surface = minimal_surface_with_ids(&surface_ids);
+
+    let mut ledger_entries = BTreeMap::new();
+    for id in &surface_ids {
+        // no_scenario: no behavior_scenario_ids, no behavior_scenario_paths
+        let entry = verification_entry_with_reason(id, "no_scenario");
+        ledger_entries.insert(id.to_string(), entry);
+    }
+
+    let next_action = eval_behavior_next_action(&plan, &surface, &ledger_entries, &paths);
+
+    match next_action {
+        enrich::NextAction::Edit { payload, .. } => {
+            let payload = payload.expect("expected behavior payload");
+            assert_eq!(payload.reason_code.as_deref(), Some("initial_scenarios"));
+            // All 3 should be batched (below BATCH_LIMIT of 15)
+            assert_eq!(
+                payload.target_ids.len(),
+                3,
+                "should batch all no_scenario surfaces together"
+            );
+        }
+        other => panic!("expected Edit action, got {:?}", other),
+    }
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+/// Contract: Each reason kind generates appropriate action type.
+///
+/// - missing_value_examples -> Edit (scaffold with placeholders)
+/// - setup_failed -> Edit (fix scenario)
+/// - no_scenario -> Edit (generate scenario)
+#[test]
+fn each_reason_kind_generates_appropriate_action() {
+    let root = temp_doc_pack_root("bman-action-type-test");
+    let paths = enrich::DocPackPaths::new(root.clone());
+    let mut plan: scenarios::ScenarioPlan =
+        serde_json::from_str(&scenarios::plan_stub(Some("bin"))).expect("parse plan stub");
+    plan.scenarios
+        .retain(|scenario| scenario.kind != scenarios::ScenarioKind::Behavior);
+
+    // Test missing_value_examples generates Edit
+    let surface = minimal_surface_with_ids(&["--value-opt"]);
+    let mut ledger_entries = BTreeMap::new();
+    let entry = verification_entry_with_reason("--value-opt", "missing_value_examples");
+    ledger_entries.insert("--value-opt".to_string(), entry);
+
+    // Modify surface to have value_arity=required (triggers missing_value_examples path)
+    let mut surface = surface;
+    surface.items[0].invocation.value_arity = "required".to_string();
+    surface.items[0].invocation.value_examples = Vec::new();
+
+    let next_action = eval_behavior_next_action(&plan, &surface, &ledger_entries, &paths);
+
+    match next_action {
+        enrich::NextAction::Edit { payload, .. } => {
+            let payload = payload.expect("expected payload");
+            assert_eq!(
+                payload.reason_code.as_deref(),
+                Some("missing_value_examples"),
+                "missing_value_examples should generate Edit with correct reason"
+            );
+        }
+        other => panic!(
+            "missing_value_examples should generate Edit, got {:?}",
+            other
+        ),
+    }
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+/// Contract: Surfaces with behavior_scenario_paths populated are not in needs_apply set.
+///
+/// This ensures surfaces that already have scenarios don't get re-scaffolded.
+#[test]
+fn surfaces_with_scenario_paths_excluded_from_needs_apply() {
+    use super::selectors::needs_apply_ids;
+
+    let root = temp_doc_pack_root("bman-needs-apply-test");
+    let _paths = enrich::DocPackPaths::new(root.clone());
+
+    let mut plan_behavior_ids = std::collections::BTreeSet::new();
+    plan_behavior_ids.insert("--with-scenario".to_string());
+    plan_behavior_ids.insert("--without-scenario".to_string());
+
+    let remaining: std::collections::BTreeSet<String> = plan_behavior_ids.clone();
+
+    let mut ledger_entries = BTreeMap::new();
+
+    // --with-scenario has behavior_scenario_paths populated
+    let mut with_entry = verification_entry_with_reason("--with-scenario", "outputs_equal");
+    with_entry.behavior_scenario_paths = vec!["inventory/scenarios/verify.json".to_string()];
+    ledger_entries.insert("--with-scenario".to_string(), with_entry);
+
+    // --without-scenario has empty scenario paths
+    let without_entry = verification_entry_with_reason("--without-scenario", "no_scenario");
+    ledger_entries.insert("--without-scenario".to_string(), without_entry);
+
+    let needs = needs_apply_ids(&plan_behavior_ids, &remaining, &ledger_entries);
+
+    assert!(
+        !needs.contains("--with-scenario"),
+        "surface with scenario paths should not be in needs_apply"
+    );
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}

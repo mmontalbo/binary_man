@@ -31,7 +31,9 @@ use super::selectors::{
 use super::{normalize_target_ids, LedgerEntries, QueueVerificationContext};
 
 /// Maximum targets to batch in a single next action.
-pub(super) const BEHAVIOR_BATCH_LIMIT: usize = 15;
+/// Kept low (5) to avoid LM response truncation for complex binaries.
+/// TODO: Make this configurable via EnrichConfig.behavior_batch_size
+pub(super) const BEHAVIOR_BATCH_LIMIT: usize = 5;
 
 /// Maximum no-progress retries for assertion_failed before pivoting to exclusion.
 pub const ASSERTION_FAILED_NOOP_CAP: usize = 2;
@@ -84,22 +86,38 @@ pub(super) fn determine_behavior_action(
     state: &BehaviorEvalState<'_>,
 ) -> Option<DeterminedAction> {
     // Priority 1: Initial scenarios (surface exists but no behavior scenarios yet)
+    // Skip missing_value_examples surfaces - they need value examples first
     if is_initial_behavior_cycle(
         ctx.plan,
         state.required_ids,
         state.lookup_ctx.ledger_entries,
     ) {
+        // Collect surfaces that already have behavior scenarios to avoid re-targeting
+        let covered_surfaces: std::collections::BTreeSet<String> = ctx
+            .plan
+            .scenarios
+            .iter()
+            .filter(|s| s.coverage_tier.as_deref() == Some("behavior"))
+            .flat_map(|s| s.covers.iter().cloned())
+            .collect();
+
         let target_ids: Vec<String> = state
             .required_ids
             .iter()
+            .filter(|id| !state.lookup_ctx.missing_value_examples.contains(*id))
+            .filter(|id| !covered_surfaces.contains(*id)) // Skip already-covered surfaces
             .take(BEHAVIOR_BATCH_LIMIT)
             .cloned()
             .collect();
-        return Some(DeterminedAction {
-            action: BehaviorAction::GenerateScenarios,
-            target_ids,
-            reason_kind: BehaviorReasonKind::InitialScenarios,
-        });
+        // Only return if we have non-missing_value_examples targets
+        if !target_ids.is_empty() {
+            return Some(DeterminedAction {
+                action: BehaviorAction::GenerateScenarios,
+                target_ids,
+                reason_kind: BehaviorReasonKind::InitialScenarios,
+            });
+        }
+        // Fall through to reason-based targeting if all targets need value examples
     }
 
     // Priority 2: Outputs equal without workaround → add workaround
@@ -179,10 +197,11 @@ pub(super) fn determine_behavior_action(
         });
     }
 
-    // Priority 6: Reason-based targets (scenario_error, assertion_failed, no_scenario, outputs_equal)
+    // Priority 6: Reason-based targets (scenario_error, assertion_failed, missing_value_examples, no_scenario, outputs_equal)
     if let Some(next_id) = first_behavior_reason_target(
         state.required_ids,
         state.lookup_ctx.remaining_ids,
+        state.lookup_ctx.missing_value_examples,
         state.lookup_ctx.needs_apply_ids,
         state.lookup_ctx.ledger_entries,
     ) {
@@ -192,9 +211,12 @@ pub(super) fn determine_behavior_action(
             state.lookup_ctx.ledger_entries,
         );
         // Batch targets for reason kinds that benefit from batching
+        // MissingValueExamples included so all MVE surfaces get scenarios in fewer cycles
         let target_ids = if matches!(
             action_reason_kind,
-            BehaviorReasonKind::NoScenario | BehaviorReasonKind::OutputsEqual
+            BehaviorReasonKind::NoScenario
+                | BehaviorReasonKind::OutputsEqual
+                | BehaviorReasonKind::MissingValueExamples
         ) {
             let batched = batched_target_ids_for_reason(
                 state.required_ids,
@@ -329,6 +351,11 @@ fn build_target_scenario_output(
         .iter()
         .filter_map(|surface_id| {
             let entry = ledger_entries.get(surface_id)?;
+            // Check if this is a setup_failed surface
+            let setup_failed = entry
+                .behavior_unverified_reason_code
+                .as_deref()
+                == Some("setup_failed");
             // Prefer behavior scenario output (from actual verification scenarios)
             // over auto_verify output (from initial auto-generated scenarios).
             // Behavior stderr has more useful error messages like "Two strings must be given".
@@ -341,14 +368,15 @@ fn build_target_scenario_output(
                         entry.auto_verify_stderr.clone(),
                     )
                 };
-            // Only include if we have useful output data
-            if exit_code.is_none() && stderr_preview.is_none() {
+            // Include if we have useful output data OR if setup failed
+            if exit_code.is_none() && stderr_preview.is_none() && !setup_failed {
                 return None;
             }
             Some(enrich::TargetScenarioOutput {
                 surface_id: surface_id.clone(),
                 exit_code,
                 stderr_preview,
+                setup_failed,
             })
         })
         .collect()
@@ -381,7 +409,6 @@ fn build_target_judgment_feedback(
 /// Get the action reason kind for a surface ID.
 ///
 /// Returns the `BehaviorReasonKind` that determines what action should be taken.
-/// Normalizes `MissingValueExamples` to `NoScenario` when no scenario exists.
 fn action_reason_kind_for_surface_id(
     surface_id: &str,
     missing_value_examples: &std::collections::BTreeSet<String>,
@@ -389,15 +416,7 @@ fn action_reason_kind_for_surface_id(
 ) -> BehaviorReasonKind {
     let reason_code =
         behavior_reason_code_for_id(surface_id, missing_value_examples, ledger_entries);
-    let reason_kind = BehaviorReasonKind::from_code(Some(&reason_code));
-    let entry = ledger_entries.get(surface_id);
-    let scenario_missing = entry.is_some_and(|entry| entry.behavior_scenario_ids.is_empty());
-    // Normalize missing_value_examples to no_scenario when scenario is absent
-    if scenario_missing && reason_kind == BehaviorReasonKind::MissingValueExamples {
-        BehaviorReasonKind::NoScenario
-    } else {
-        reason_kind
-    }
+    BehaviorReasonKind::from_code(Some(&reason_code))
 }
 
 /// Select target IDs that match a specific reason kind.
@@ -421,10 +440,9 @@ pub(super) fn batched_target_ids_for_reason(
         if needs_apply_ids.contains(surface_id) {
             continue;
         }
-        // Only skip missing_value_examples when not batching for no_scenario
-        // (missing_value_examples normalizes to no_scenario when scenario is absent)
+        // Skip missing_value_examples surfaces UNLESS batching for MissingValueExamples
         if missing_value_examples.contains(surface_id)
-            && reason_kind != BehaviorReasonKind::NoScenario
+            && reason_kind != BehaviorReasonKind::MissingValueExamples
         {
             continue;
         }
@@ -609,26 +627,30 @@ fn targeted_outputs_equal_rerun_command(
 fn first_behavior_reason_target(
     required_ids: &[String],
     remaining_set: &std::collections::BTreeSet<String>,
+    missing_value_examples: &std::collections::BTreeSet<String>,
     needs_apply_ids: &std::collections::BTreeSet<String>,
     ledger_entries: &LedgerEntries,
 ) -> Option<String> {
-    let empty = std::collections::BTreeSet::new();
     let lookup_ctx = BehaviorLookupContext {
         remaining_ids: remaining_set,
-        missing_value_examples: &empty,
+        missing_value_examples,
         needs_apply_ids,
         ledger_entries,
     };
-    // Priority: scenario_error > assertion_failed > no_scenario > outputs_equal
-    // NoScenario before OutputsEqual so we scaffold new scenarios first,
-    // then deal with outputs_equal (which often just need exclusion)
+    // Priority: scenario_error > assertion_failed > missing_value_examples > no_scenario > setup_failed > outputs_equal
+    // MissingValueExamples early so surfaces without valid values get scenarios first,
+    // NoScenario before SetupFailed so new scenarios are created before fixing broken ones,
+    // SetupFailed later because these often require complex fixtures the LM struggles with,
+    // outputs_equal last (often just need exclusion)
     first_reason_id_by_priority(
         required_ids,
         &lookup_ctx,
         &[
             BehaviorReasonKind::ScenarioError,
             BehaviorReasonKind::AssertionFailed,
+            BehaviorReasonKind::MissingValueExamples,
             BehaviorReasonKind::NoScenario,
+            BehaviorReasonKind::SetupFailed,
             BehaviorReasonKind::OutputsEqual,
         ],
     )
@@ -839,42 +861,41 @@ fn reason_based_behavior_next_action(
     })
 }
 
-/// Check if this is the initial behavior cycle (surface exists but no behavior scenarios).
+/// Check if this is the initial behavior cycle (surfaces need scenarios generated).
 ///
-/// Returns false if:
-/// - required_ids is empty
-/// - behavior scenarios exist in the plan
-/// - ledger entries show failure reasons that imply scenarios were run
+/// Returns true if there are required surfaces that don't yet have behavior scenarios.
+/// This ensures ALL required surfaces get scenarios generated (in batches) before we
+/// transition to reason-based targeting.
+///
+/// CRITICAL: Previously this checked for "any behavior scenarios exist" which caused
+/// a regression where only the first batch of surfaces got scenarios. After the first
+/// 5 scenarios were generated, this returned false, falling through to reason-based
+/// targeting which prioritizes missing_value_examples over no_scenario - leaving 80+
+/// surfaces without scenarios.
 fn is_initial_behavior_cycle(
     plan: &scenarios::ScenarioPlan,
     required_ids: &[String],
-    ledger_entries: &LedgerEntries,
+    _ledger_entries: &LedgerEntries,
 ) -> bool {
     // Must have some required surface items
     if required_ids.is_empty() {
         return false;
     }
-    // Check if any behavior scenarios exist in the plan
-    let has_behavior_scenarios = plan.scenarios.iter().any(|scenario| {
-        scenario.coverage_tier.as_deref() == Some("behavior") && !scenario.covers.is_empty()
-    });
-    if has_behavior_scenarios {
-        return false;
-    }
-    // Check if ledger entries show failure reasons that imply scenarios were run.
-    // Reasons like scenario_error, outputs_equal, assertion_failed mean scenarios ran.
-    let has_scenario_run_evidence = ledger_entries.values().any(|entry| {
-        entry
-            .behavior_unverified_reason_code
-            .as_deref()
-            .is_some_and(|code| {
-                matches!(
-                    code,
-                    "scenario_error" | "outputs_equal" | "assertion_failed" | "auto_verify_timeout"
-                )
-            })
-    });
-    !has_scenario_run_evidence
+
+    // Collect surfaces that already have behavior scenarios
+    let covered_surfaces: std::collections::BTreeSet<String> = plan
+        .scenarios
+        .iter()
+        .filter(|s| s.coverage_tier.as_deref() == Some("behavior"))
+        .flat_map(|s| s.covers.iter().cloned())
+        .collect();
+
+    // Continue initial phase as long as there are required surfaces without scenarios.
+    // This ensures we generate scenarios for ALL surfaces before transitioning to
+    // reason-based targeting (which handles repair: assertion_failed, scenario_error, etc.)
+    required_ids
+        .iter()
+        .any(|id| !covered_surfaces.contains(id))
 }
 
 /// Maybe set behavior next action based on evaluation state.
