@@ -5,9 +5,61 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: M35.
+Current focus: M36.
 
-## M35 — Verification Stall Diagnostics
+## M36 — Targeting State Machine Hardening (done)
+
+Goal: Fix targeting bugs that prevented complex binaries (git log) from reaching
+full coverage.
+
+### Problem
+
+Fresh e2e test for `git log` achieved only 17% coverage (17/102 verified) despite
+previous runs achieving 97%. Investigation revealed three targeting bugs:
+
+1. **Initial phase exit too early**: `is_initial_behavior_cycle()` returned false
+   after ANY behavior scenarios existed, not after all surfaces were covered
+2. **Duplicate targeting**: Same surfaces targeted repeatedly because no
+   deduplication of already-covered surfaces
+3. **MVE blocking**: `missing_value_examples` surfaces blocked by priority
+   ordering and single-target batching
+
+### Results
+
+| Metric | Before | After R1 | After R2 | After R3 |
+|--------|--------|----------|----------|----------|
+| Verified | 17 | 28 | 80 | **99** |
+| no_scenario | 80 | 41 | 1 | 0 |
+| MVE | 4 | 4 | 19 | **0** |
+| Rate | 17% | 27% | 78% | **97%** |
+
+### Fixes Applied
+
+| Round | Fix | Impact |
+|-------|-----|--------|
+| R1 | Check all surfaces covered, not just "any scenarios exist" | +11 verified |
+| R2 | Filter already-covered surfaces from targeting | +52 verified |
+| R3 | Batch MVE surfaces + reorder priority | +19 verified |
+
+### Key Commits
+
+- `3b625fb` targeting: fix behavior verification coverage for complex binaries
+- `046ba92` refactor: extract helper functions from behavior targeting state machine
+- `6269fa4` fix: improve missing_value_examples detection and verification priority
+- `f85ef3e` apply: reset no-progress counter when reason kind changes
+
+### Acceptance Criteria
+
+| Criterion | Status |
+|-----------|--------|
+| git log reaches 90%+ verification | done (97%) |
+| no_scenario < 5 after 30 cycles | done (0) |
+| MVE surfaces get scenarios | done (0 remaining) |
+| No regression on other binaries | done |
+
+---
+
+## M35 — Verification Stall Diagnostics (done)
 
 Goal: Surface why each unverified option is stuck and what action to take.
 
@@ -155,12 +207,12 @@ Derive from:
 
 | Criterion | Status |
 |-----------|--------|
-| Setup failures captured with failing command + stderr | |
-| `setup_failed` distinct from `scenario_error` in query | |
-| `--json` includes `unverified_breakdown` array | |
-| Text output shows grouped breakdown when incomplete | |
-| Text output unchanged when complete | |
-| Attempt count derived from scenario file count (no new state) | |
+| Setup failures captured with failing command + stderr | done |
+| `setup_failed` distinct from `scenario_error` in query | done |
+| `--json` includes `unverified_breakdown` array | done (`behavior_unverified_preview`) |
+| Text output shows grouped breakdown when incomplete | done |
+| Text output unchanged when complete | done |
+| Attempt count derived from scenario file count (no new state) | done |
 
 ### Out of Scope
 
