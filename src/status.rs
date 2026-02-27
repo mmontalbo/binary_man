@@ -143,26 +143,32 @@ pub fn build_status_summary(args: BuildStatusSummaryArgs<'_>) -> Result<enrich::
         });
     let mut next_action = if missing_inputs {
         next_action_for_missing_inputs(&paths, binary_name)
-    } else if config_exists && eval.man_semantics_next_action.is_some() {
-        eval.man_semantics_next_action.clone().unwrap()
-    } else if gating_ok
-        && matches!(first_unmet.as_ref(), Some(enrich::RequirementId::ManPage))
-        && eval.man_usage_next_action.is_some()
+    } else if let Some(action) = eval
+        .man_semantics_next_action
+        .as_ref()
+        .filter(|_| config_exists)
     {
-        eval.man_usage_next_action.clone().unwrap()
-    } else if gating_ok
-        && matches!(first_unmet.as_ref(), Some(enrich::RequirementId::Coverage))
-        && eval.coverage_next_action.is_some()
+        action.clone()
+    } else if let Some(action) = eval
+        .man_usage_next_action
+        .as_ref()
+        .filter(|_| gating_ok && matches!(first_unmet.as_ref(), Some(enrich::RequirementId::ManPage)))
     {
-        eval.coverage_next_action.clone().unwrap()
-    } else if gating_ok
-        && matches!(
-            first_unmet.as_ref(),
-            Some(enrich::RequirementId::Verification)
-        )
-        && eval.verification_next_action.is_some()
+        action.clone()
+    } else if let Some(action) = eval
+        .coverage_next_action
+        .as_ref()
+        .filter(|_| gating_ok && matches!(first_unmet.as_ref(), Some(enrich::RequirementId::Coverage)))
     {
-        eval.verification_next_action.clone().unwrap()
+        action.clone()
+    } else if let Some(action) = eval.verification_next_action.as_ref().filter(|_| {
+        gating_ok
+            && matches!(
+                first_unmet.as_ref(),
+                Some(enrich::RequirementId::Verification)
+            )
+    }) {
+        action.clone()
     } else if gating_ok {
         if let Some(action) = scenario_failure_next_action {
             action

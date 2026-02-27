@@ -1,3 +1,8 @@
+//! Embedded templates for SQL queries and JSON scaffolds.
+//!
+//! These constants are compiled into the binary via `include_str!` so the tool
+//! can bootstrap doc packs without requiring external template files.
+
 pub const USAGE_FROM_SCENARIOS_SQL: &str = include_str!("../queries/usage_from_scenarios.sql");
 pub const SURFACE_FROM_SCENARIOS_SQL: &str = include_str!("../queries/surface_from_scenarios.sql");
 pub const VERIFICATION_FROM_SCENARIOS_SQL: &str =

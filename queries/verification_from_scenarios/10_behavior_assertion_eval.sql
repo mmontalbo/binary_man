@@ -1,7 +1,19 @@
 -- Section 10: Behavior Assertion Evaluation
 -- Evaluates behavior scenario assertions by comparing variant runs against baselines.
 -- Key outputs: behavior_eval (per-scenario assertion results), scenario_eval (combined status).
+--
+-- CTE Pipeline Overview:
+-- 1. behavior_context: Join scenarios with evidence (stdout, exit codes, file checks)
+-- 2. behavior_assertions_raw: Unnest scenario assertions into individual rows
+-- 3. behavior_assertion_detail: Evaluate each assertion (pass/fail) with seed path validation
+-- 4. behavior_delta_pair: Group assertions to find delta pairs (baseline_lacks + variant_contains)
+-- 5. behavior_delta_pair_summary: Aggregate delta pair results per scenario
+-- 6. behavior_assertion_eval: Aggregate all assertion results per scenario
+-- 7. behavior_eval: Final behavior evaluation with semantic predicate tracking
+-- 8. rule_eval: Evaluate verification rules (accepted/rejected) against evidence
+-- 9. scenario_eval: Final scenario status combining behavior and rule evaluation
 
+  -- CTE 1: Build execution context for each scenario by joining with evidence
   behavior_context as (
     select
       s.scenario_id,
@@ -30,6 +42,7 @@
     left join scenario_seed_signature base_seed
       on base_seed.scenario_id = s.baseline_scenario_id
   ),
+  -- CTE 2: Flatten scenario assertions array into individual rows for evaluation
   behavior_assertions_raw as (
     select
       s.scenario_id,
@@ -66,6 +79,8 @@
       )[])) as t(a)
     where s.coverage_tier = 'behavior'
   ),
+  -- CTE 3: Evaluate each assertion - handles stdout_contains, outputs_differ, file_exists, exit_code, etc.
+  -- Returns assertion_pass (0/1) based on assertion kind and evidence
   behavior_assertion_detail as (
     select
       b.scenario_id,
@@ -347,6 +362,8 @@
         on ctx.scenario_id = b.scenario_id
     ) b
   ),
+  -- CTE 4: Identify delta pairs - assertions that prove option changed output
+  -- A delta pair is baseline_lacks + variant_contains (or vice versa) for same seed_path
   behavior_delta_pair as (
     select
       scenario_id,
@@ -364,6 +381,7 @@
     where uses_seed_path_assertion = true
     group by scenario_id, seed_path
   ),
+  -- CTE 5: Aggregate delta pair presence and pass status per scenario
   behavior_delta_pair_summary as (
     select
       scenario_id,
@@ -384,6 +402,7 @@
     from behavior_delta_pair
     group by scenario_id
   ),
+  -- CTE 6: Aggregate assertion counts and pass rates per scenario
   behavior_assertion_eval as (
     select
       scenario_id,
@@ -411,6 +430,8 @@
     from behavior_assertion_detail
     group by scenario_id
   ),
+  -- CTE 7: Final behavior evaluation - combines assertions, delta pairs, and context
+  -- Determines semantic_predicate_pass (did the option demonstrably change behavior?)
   behavior_eval as (
     select
       s.scenario_id,
@@ -482,6 +503,8 @@
     left join behavior_context ctx
       on ctx.scenario_id = s.scenario_id
   ),
+  -- CTE 8: Evaluate verification rules (from semantics) against scenario evidence
+  -- Rules can accept or reject scenarios based on exit_code, stdout/stderr patterns
   rule_eval as (
     select
       e.scenario_id,
@@ -571,6 +594,8 @@
     from latest_evidence e
     join verification_rules r on true
   ),
+  -- CTE 9: Final scenario evaluation - joins behavior_eval with rule_eval
+  -- Outputs: acceptance_outcome (accepted/rejected/inconclusive), all assertion metrics
   scenario_eval as (
     select
       p.scenario_id,

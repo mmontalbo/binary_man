@@ -1,3 +1,13 @@
+//! Tests for verification_requirement module.
+//!
+//! Test organization:
+//! - Helper functions for test setup (temp directories, file writing, fixtures)
+//! - Outputs Equal Tests: workaround, rerun detection, retry counting
+//! - Priority and Targeting Tests: reason kind ordering, batched targeting
+//! - Scenario Error Tests: scaffold generation for broken scenarios
+//! - Batching and Determinism Tests: bounded batches, deterministic output
+//! - Reason Kind Tests: action generation for each reason type
+
 use super::next_action::suggested_exclusion_only_next_action;
 use super::retry::{load_behavior_retry_counts, BEHAVIOR_RERUN_CAP};
 use super::{
@@ -11,6 +21,11 @@ use crate::verification_progress::load_verification_progress;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+// =============================================================================
+// Test Helpers
+// Shared utilities for creating test fixtures
+// =============================================================================
 
 fn temp_doc_pack_root(name: &str) -> std::path::PathBuf {
     let now = SystemTime::now()
@@ -284,6 +299,11 @@ fn eval_behavior_next_action(
         .expect("expected next action")
 }
 
+// =============================================================================
+// Outputs Equal Tests
+// Tests for outputs_equal workaround, rerun detection, and retry counting
+// =============================================================================
+
 #[test]
 fn outputs_equal_workaround_needs_rerun_when_overlays_are_newer_than_delta_evidence() {
     let root = temp_doc_pack_root("bman-verification-rerun");
@@ -427,6 +447,11 @@ fn cap_hit_suggestion_uses_command_with_delta_evidence() {
 
     std::fs::remove_dir_all(root).expect("cleanup");
 }
+
+// =============================================================================
+// Priority and Targeting Tests
+// Tests for reason kind priority ordering and batched targeting
+// =============================================================================
 
 #[test]
 fn behavior_priority_repairs_existing_rejections_before_missing_behavior_stubs() {
@@ -635,6 +660,11 @@ fn no_scenario_next_action_payload_includes_assertion_starters() {
     std::fs::remove_dir_all(root).expect("cleanup");
 }
 
+// =============================================================================
+// Scenario Error Tests
+// Tests for scenario_error handling and scaffold generation
+// =============================================================================
+
 #[test]
 fn scenario_error_next_action_includes_edit() {
     let root = temp_doc_pack_root("bman-verification-required-value-hint");
@@ -822,6 +852,11 @@ fn scenario_error_scaffold_projects_and_uses_seeded_assertions() {
 
     std::fs::remove_dir_all(root).expect("cleanup");
 }
+
+// =============================================================================
+// Batching and Determinism Tests
+// Tests for batched scenario generation and deterministic behavior
+// =============================================================================
 
 #[test]
 fn no_scenario_batches_are_deterministic_and_bounded() {
