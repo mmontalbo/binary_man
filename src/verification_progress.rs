@@ -61,7 +61,7 @@ use std::path::Path;
 pub(crate) const VERIFICATION_PROGRESS_SCHEMA_VERSION: u32 = 2;
 
 /// Maximum judgment failures before marking unverifiable.
-pub const MAX_JUDGMENT_FAILURES: usize = 3;
+pub const MAX_JUDGMENT_FAILURES: usize = 6;
 
 /// Signature for detecting no-op edit loops. Captures the essential identity
 /// of a next-action to detect repeated identical edits with no evidence change.
@@ -109,18 +109,39 @@ pub(crate) struct AssertionFailedProgressEntry {
     pub(crate) last_signature: ActionSignature,
 }
 
-/// Feedback from post-execution judgment failure.
+/// A single judgment failure attempt with reason and suggested fix.
+///
+/// Part of the judgment feedback loop that helps the LM understand
+/// why previous scenarios failed verification.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct JudgmentAttempt {
+    /// Why the judgment failed.
+    pub reason: String,
+    /// Suggested commands to set up a better test environment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_setup: Option<Vec<String>>,
+}
+
+/// Accumulated feedback from post-execution judgment failures.
+///
+/// Tracks the history of judgment attempts for a surface, enabling
+/// the LM to learn from previous failures and generate improved scenarios.
+/// The `reason` and `suggested_setup` fields duplicate `history.last()`
+/// for backwards compatibility with existing JSON files.
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct JudgmentFeedback {
     /// The option/surface ID this feedback is for.
     pub option_id: String,
-    /// Why the judgment failed.
+    /// Why the judgment failed (latest reason for backwards compatibility).
     pub reason: String,
     /// Suggested commands to set up a better test environment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suggested_setup: Option<Vec<String>>,
     /// How many times judgment has failed for this option.
     pub failure_count: usize,
+    /// Full history of judgment attempts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub history: Vec<JudgmentAttempt>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
@@ -187,7 +208,14 @@ impl VerificationProgress {
                 reason: String::new(),
                 suggested_setup: None,
                 failure_count: 0,
+                history: Vec::new(),
             });
+        // Append to history
+        feedback.history.push(JudgmentAttempt {
+            reason: reason.to_string(),
+            suggested_setup: suggested_setup.clone(),
+        });
+        // Update latest reason for backwards compatibility
         feedback.reason = reason.to_string();
         feedback.suggested_setup = suggested_setup;
         feedback.failure_count += 1;

@@ -1436,3 +1436,93 @@ fn surfaces_with_scenario_paths_excluded_from_needs_apply() {
 
     std::fs::remove_dir_all(root).expect("cleanup");
 }
+
+// =============================================================================
+// Man Page Extraction Tests
+// Tests for extract_man_name_line subcommand prioritization
+// =============================================================================
+
+#[test]
+fn extract_man_name_line_prioritizes_specific_binary_man_page() {
+    use super::next_action::extract_man_name_line;
+
+    let root = temp_doc_pack_root("bman-man-name-extraction");
+    let paths = enrich::DocPackPaths::new(root.clone());
+    let man_dir = root.join("man");
+    std::fs::create_dir_all(&man_dir).expect("create man dir");
+
+    // Create a parent command man page (git.1)
+    write_file(
+        &man_dir.join("git.1"),
+        r#".TH GIT 1
+.SH NAME
+git \- the stupid content tracker
+.SH SYNOPSIS
+..."#,
+    );
+
+    // Create a subcommand man page (git-diff.1)
+    write_file(
+        &man_dir.join("git-diff.1"),
+        r#".TH GIT-DIFF 1
+.SH NAME
+git-diff \- Show changes between commits, commit and working tree, etc
+.SH SYNOPSIS
+..."#,
+    );
+
+    // Without binary_name, should find any .1 file (may be git.1 or git-diff.1)
+    let desc_any = extract_man_name_line(&paths, None);
+    assert!(
+        desc_any.is_some(),
+        "should extract description without binary name"
+    );
+
+    // With binary_name="git-diff", should prioritize git-diff.1
+    let desc_specific = extract_man_name_line(&paths, Some("git-diff"));
+    assert_eq!(
+        desc_specific.as_deref(),
+        Some("Show changes between commits, commit and working tree, etc"),
+        "should extract description from specific man page"
+    );
+
+    // With binary_name="git", should use git.1
+    let desc_git = extract_man_name_line(&paths, Some("git"));
+    assert_eq!(
+        desc_git.as_deref(),
+        Some("the stupid content tracker"),
+        "should extract description from git.1"
+    );
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn extract_man_name_line_falls_back_when_specific_missing() {
+    use super::next_action::extract_man_name_line;
+
+    let root = temp_doc_pack_root("bman-man-name-fallback");
+    let paths = enrich::DocPackPaths::new(root.clone());
+    let man_dir = root.join("man");
+    std::fs::create_dir_all(&man_dir).expect("create man dir");
+
+    // Only create git.1 (no git-diff.1)
+    write_file(
+        &man_dir.join("git.1"),
+        r#".TH GIT 1
+.SH NAME
+git \- the stupid content tracker
+.SH SYNOPSIS
+..."#,
+    );
+
+    // Request git-diff (doesn't exist) - should fall back to git.1
+    let desc = extract_man_name_line(&paths, Some("git-diff"));
+    assert_eq!(
+        desc.as_deref(),
+        Some("the stupid content tracker"),
+        "should fall back to available man page"
+    );
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}

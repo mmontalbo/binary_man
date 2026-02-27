@@ -35,6 +35,81 @@ use super::{normalize_target_ids, LedgerEntries, QueueVerificationContext};
 /// TODO: Make this configurable via EnrichConfig.behavior_batch_size
 pub(super) const BEHAVIOR_BATCH_LIMIT: usize = 5;
 
+/// Extract the command description from the man page NAME section.
+///
+/// For subcommands (e.g., `git-diff`), prioritizes the specific man page
+/// over the parent command's man page. Falls back to the first `.1` file
+/// if no specific page is found.
+pub(super) fn extract_man_name_line(
+    paths: &enrich::DocPackPaths,
+    binary_name: Option<&str>,
+) -> Option<String> {
+    let man_dir = paths.man_dir();
+    if !man_dir.exists() {
+        return None;
+    }
+
+    // If we have a binary name, try to find its specific man page first
+    let man_file = if let Some(name) = binary_name {
+        let specific_path = man_dir.join(format!("{name}.1"));
+        if specific_path.exists() {
+            Some(specific_path)
+        } else {
+            // Fall back to finding any .1 file
+            find_first_man_file(&man_dir)
+        }
+    } else {
+        find_first_man_file(&man_dir)
+    };
+
+    let man_file = man_file?;
+    let content = std::fs::read_to_string(&man_file).ok()?;
+
+    // Look for NAME section and extract description
+    // Man pages typically have: .SH NAME\ncommand \- description
+    let mut in_name_section = false;
+    for line in content.lines() {
+        let line = line.trim();
+        if line.eq_ignore_ascii_case(".SH NAME") || line.eq_ignore_ascii_case(".sh name") {
+            in_name_section = true;
+            continue;
+        }
+        if in_name_section {
+            // Skip empty lines
+            if line.is_empty() {
+                continue;
+            }
+            // Check for next section
+            if line.starts_with(".SH") || line.starts_with(".sh") {
+                break;
+            }
+            // Look for " - " or " \\- " (escaped dash in roff)
+            if line.find(" - ").or_else(|| line.find(" \\- ")).is_some() {
+                let desc = if line.contains(" \\- ") {
+                    line.split(" \\- ").nth(1)?
+                } else {
+                    line.split(" - ").nth(1)?
+                };
+                let desc = desc.trim();
+                if !desc.is_empty() {
+                    return Some(desc.to_string());
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Find the first `.1` man page file in a directory.
+fn find_first_man_file(man_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    std::fs::read_dir(man_dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.extension().and_then(|e| e.to_str()) == Some("1"))
+}
+
 /// Maximum no-progress retries for assertion_failed before pivoting to exclusion.
 pub const ASSERTION_FAILED_NOOP_CAP: usize = 2;
 
@@ -341,11 +416,16 @@ pub(super) fn behavior_payload(
     // Build judgment feedback for targets that failed judgment
     let target_judgment_feedback = build_target_judgment_feedback(&target_ids, args.paths);
 
+    // Extract command description from man page (prioritize specific binary's man page)
+    let binary_name = args.surface.and_then(|s| s.binary_name.as_deref());
+    let command_description = extract_man_name_line(args.paths, binary_name);
+
     let action_kind = args.action_kind.map(|a| a.as_code().to_string());
 
     let payload = enrich::BehaviorNextActionPayload {
         target_ids,
         reason_code: reason_code_str,
+        command_description,
         action_kind,
         retry_count,
         latest_delta_path,
@@ -369,10 +449,8 @@ fn build_target_scenario_output(
         .filter_map(|surface_id| {
             let entry = ledger_entries.get(surface_id)?;
             // Check if this is a setup_failed surface
-            let setup_failed = entry
-                .behavior_unverified_reason_code
-                .as_deref()
-                == Some("setup_failed");
+            let setup_failed =
+                entry.behavior_unverified_reason_code.as_deref() == Some("setup_failed");
             // Prefer behavior scenario output (from actual verification scenarios)
             // over auto_verify output (from initial auto-generated scenarios).
             // Behavior stderr has more useful error messages like "Two strings must be given".
@@ -418,6 +496,7 @@ fn build_target_judgment_feedback(
                 reason: feedback.reason.clone(),
                 suggested_setup: feedback.suggested_setup.clone(),
                 failure_count: feedback.failure_count,
+                history: feedback.history.clone(),
             })
         })
         .collect()
@@ -759,8 +838,7 @@ fn maybe_pivot_assertion_failed(
         return None;
     }
 
-    let no_progress_count =
-        get_assertion_failed_no_progress_count(&verification_progress, next_id);
+    let no_progress_count = get_assertion_failed_no_progress_count(&verification_progress, next_id);
 
     // If at/over cap, pivot to exclusion
     if no_progress_count >= ASSERTION_FAILED_NOOP_CAP {
@@ -774,8 +852,10 @@ fn maybe_pivot_assertion_failed(
     }
 
     // Otherwise, pivot to targeted rerun command
-    let scenario_ids =
-        rerun_scenario_ids_for_surface_ids(std::slice::from_ref(&next_id.to_string()), ledger_entries);
+    let scenario_ids = rerun_scenario_ids_for_surface_ids(
+        std::slice::from_ref(&next_id.to_string()),
+        ledger_entries,
+    );
     let command = targeted_outputs_equal_rerun_command(ctx.paths.root(), &scenario_ids);
     let payload = behavior_payload(BehaviorPayloadArgs {
         surface: Some(ctx.surface),
@@ -867,9 +947,14 @@ fn reason_based_behavior_next_action(
 
     // No-op guard for assertion_failed: detect repeated identical edits with no evidence change
     if reason_kind == BehaviorReasonKind::AssertionFailed {
-        if let Some(pivot_action) =
-            maybe_pivot_assertion_failed(ctx, &next_id, &content, entry, retry_counts, ledger_entries)
-        {
+        if let Some(pivot_action) = maybe_pivot_assertion_failed(
+            ctx,
+            &next_id,
+            &content,
+            entry,
+            retry_counts,
+            ledger_entries,
+        ) {
             return Some(pivot_action);
         }
     }
@@ -952,9 +1037,7 @@ fn is_initial_behavior_cycle(
     // Continue initial phase as long as there are required surfaces without scenarios.
     // This ensures we generate scenarios for ALL surfaces before transitioning to
     // reason-based targeting (which handles repair: assertion_failed, scenario_error, etc.)
-    required_ids
-        .iter()
-        .any(|id| !covered_surfaces.contains(id))
+    required_ids.iter().any(|id| !covered_surfaces.contains(id))
 }
 
 /// Maybe set behavior next action based on evaluation state.

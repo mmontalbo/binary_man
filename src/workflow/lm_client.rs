@@ -184,6 +184,9 @@ fn build_behavior_prompt(
     // Build context section (scaffold hints, value requirements)
     let context_section = build_context_section(payload);
 
+    // Build failure patterns section (aggregate judgment feedback by category)
+    let failure_patterns = build_failure_patterns_section(payload);
+
     // Build target list with scenario output when available
     let targets = build_targets_section(payload);
 
@@ -192,6 +195,7 @@ fn build_behavior_prompt(
         .replace("{binary_name}", binary_name)
         .replace("{reason_code}", reason_code)
         .replace("{reason_section}", &reason_section)
+        .replace("{failure_patterns}", &failure_patterns)
         .replace("{context_section}", &context_section)
         .replace("{targets}", &targets)
 }
@@ -269,6 +273,7 @@ fn build_hints_section(hints: Option<&LearnedHints>) -> String {
 
 /// Build the targets section, including scenario output for error feedback.
 fn build_targets_section(payload: &BehaviorNextActionPayload) -> String {
+    use crate::verification_progress::MAX_JUDGMENT_FAILURES;
     use std::collections::HashMap;
 
     // Index scenario output by surface_id
@@ -315,18 +320,37 @@ fn build_targets_section(payload: &BehaviorNextActionPayload) -> String {
             // Add judgment feedback if this target failed judgment
             if let Some(feedback) = judgment_map.get(id.as_str()) {
                 line.push_str(&format!(
-                    "\n  **Previous Attempt Failed**: \"{}\"\n",
-                    feedback.reason
+                    "\n  **Judgment Failures** (attempt {}/{}):\n",
+                    feedback.failure_count, MAX_JUDGMENT_FAILURES
                 ));
-                if let Some(setup) = &feedback.suggested_setup {
-                    if !setup.is_empty() {
-                        line.push_str(&format!("  Suggested setup: {}\n", setup.join("; ")));
+
+                // Show full history if available
+                if !feedback.history.is_empty() {
+                    for (i, attempt) in feedback.history.iter().enumerate() {
+                        line.push_str(&format!(
+                            "  - Attempt {}: \"{}\"\n",
+                            i + 1,
+                            attempt.reason
+                        ));
+                        if let Some(setup) = &attempt.suggested_setup {
+                            if !setup.is_empty() {
+                                line.push_str(&format!(
+                                    "    Suggested: {}\n",
+                                    setup.join("; ")
+                                ));
+                            }
+                        }
+                    }
+                } else {
+                    // Fallback to latest reason if no history
+                    line.push_str(&format!("  - Latest: \"{}\"\n", feedback.reason));
+                    if let Some(setup) = &feedback.suggested_setup {
+                        if !setup.is_empty() {
+                            line.push_str(&format!("    Suggested: {}\n", setup.join("; ")));
+                        }
                     }
                 }
-                line.push_str(&format!(
-                    "  (attempt {}/3 - please propose an improved scenario)\n",
-                    feedback.failure_count
-                ));
+                line.push_str("  Please propose an improved scenario addressing these issues.\n");
             }
 
             line
@@ -335,9 +359,118 @@ fn build_targets_section(payload: &BehaviorNextActionPayload) -> String {
         .join("\n")
 }
 
+/// Build failure patterns section aggregating both judgment feedback and execution
+/// failures by category to help the LM identify systemic issues across surfaces.
+///
+/// Considers both:
+/// - `target_judgment_feedback`: Post-execution judgment failures
+/// - `target_scenario_output`: Execution failures (non-zero exit, stderr patterns)
+fn build_failure_patterns_section(payload: &BehaviorNextActionPayload) -> String {
+    use std::collections::BTreeMap;
+
+    // Group failures by category (combining both judgment feedback and execution output)
+    let mut categories: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+
+    // Aggregate from judgment feedback
+    for feedback in &payload.target_judgment_feedback {
+        let reason = feedback.reason.to_lowercase();
+        let category = categorize_failure_reason(&reason);
+        categories
+            .entry(category)
+            .or_default()
+            .push(feedback.surface_id.clone());
+    }
+
+    // Aggregate from scenario execution output (stderr patterns)
+    for output in &payload.target_scenario_output {
+        // Only consider failures (non-zero exit or setup_failed)
+        let is_failure = output.setup_failed || output.exit_code.is_some_and(|code| code != 0);
+        if !is_failure {
+            continue;
+        }
+
+        // Categorize based on stderr content
+        let stderr = output
+            .stderr_preview
+            .as_deref()
+            .unwrap_or("")
+            .to_lowercase();
+        let category = categorize_failure_reason(&stderr);
+
+        // Avoid duplicates if already added from judgment feedback
+        let surfaces = categories.entry(category).or_default();
+        if !surfaces.contains(&output.surface_id) {
+            surfaces.push(output.surface_id.clone());
+        }
+    }
+
+    // Only show categories with 2+ surfaces
+    let significant: Vec<_> = categories
+        .iter()
+        .filter(|(_, surfaces)| surfaces.len() >= 2)
+        .collect();
+
+    if significant.is_empty() {
+        return String::new();
+    }
+
+    let mut section = String::from("## Failure Patterns\n\n");
+    section.push_str("Multiple surfaces failed with similar issues:\n\n");
+
+    for (category, surfaces) in significant {
+        let guidance = match *category {
+            "empty_output" => {
+                "Command produced no output - ensure scenarios create observable state (seed files, stdin, assertions)"
+            }
+            "command_failed" => {
+                "Command failed to run - check argv syntax, required prerequisites, or seed setup"
+            }
+            "missing_setup" => {
+                "Missing required context - add setup commands (e.g., git init) or seed files"
+            }
+            _ => "Review scenario configuration",
+        };
+
+        section.push_str(&format!(
+            "- **{}** ({} surfaces): {}\n",
+            category,
+            surfaces.len(),
+            guidance
+        ));
+        // Show first 3 surface IDs as examples
+        let preview: Vec<_> = surfaces.iter().take(3).map(String::as_str).collect();
+        section.push_str(&format!("  Affected: {}\n", preview.join(", ")));
+    }
+
+    section.push('\n');
+    section
+}
+
+/// Categorize a failure reason or stderr message into a pattern category.
+fn categorize_failure_reason(text: &str) -> &'static str {
+    if text.contains("empty") || text.contains("no output") {
+        "empty_output"
+    } else if text.contains("not a")
+        || text.contains("repository")
+        || text.contains("not in a")
+        || text.contains("fatal:")
+    {
+        "missing_setup"
+    } else if text.contains("exit code") || text.contains("failed") || text.contains("error:") {
+        "command_failed"
+    } else {
+        "other"
+    }
+}
+
 /// Build the context section with scaffold hints and value requirements.
 fn build_context_section(payload: &BehaviorNextActionPayload) -> String {
     let mut context = String::new();
+
+    // Add command purpose from man page if available
+    if let Some(desc) = &payload.command_description {
+        context.push_str(&format!("## Command Purpose\n\n{}\n\n", desc));
+    }
 
     if let Some(ctx) = &payload.scaffold_context {
         if let Some(guidance) = &ctx.guidance {
@@ -764,5 +897,159 @@ mod tests {
         let batch = parse_lm_response(text, "test-binary").unwrap();
         assert_eq!(batch.responses.len(), 1);
         assert_eq!(batch.responses[0].surface_id, "--color");
+    }
+
+    #[test]
+    fn test_categorize_failure_reason() {
+        assert_eq!(categorize_failure_reason("output is empty"), "empty_output");
+        assert_eq!(
+            categorize_failure_reason("no output produced"),
+            "empty_output"
+        );
+        assert_eq!(
+            categorize_failure_reason("not a git repository"),
+            "missing_setup"
+        );
+        assert_eq!(
+            categorize_failure_reason("fatal: not in a git directory"),
+            "missing_setup"
+        );
+        assert_eq!(
+            categorize_failure_reason("error: invalid argument"),
+            "command_failed"
+        );
+        assert_eq!(
+            categorize_failure_reason("command failed with exit code 1"),
+            "command_failed"
+        );
+        assert_eq!(categorize_failure_reason("some unknown issue"), "other");
+    }
+
+    #[test]
+    fn test_failure_patterns_section_from_scenario_output() {
+        use crate::enrich::{BehaviorNextActionPayload, TargetScenarioOutput};
+
+        // Create a payload with scenario outputs showing "Not a git repository" errors
+        let payload = BehaviorNextActionPayload {
+            target_ids: vec![
+                "--opt1".to_string(),
+                "--opt2".to_string(),
+                "--opt3".to_string(),
+            ],
+            target_scenario_output: vec![
+                TargetScenarioOutput {
+                    surface_id: "--opt1".to_string(),
+                    exit_code: Some(128),
+                    stderr_preview: Some("fatal: not a git repository".to_string()),
+                    setup_failed: false,
+                },
+                TargetScenarioOutput {
+                    surface_id: "--opt2".to_string(),
+                    exit_code: Some(128),
+                    stderr_preview: Some("fatal: not a git repository".to_string()),
+                    setup_failed: false,
+                },
+                TargetScenarioOutput {
+                    surface_id: "--opt3".to_string(),
+                    exit_code: Some(0), // Success - should not be included
+                    stderr_preview: None,
+                    setup_failed: false,
+                },
+            ],
+            target_judgment_feedback: vec![], // Empty - testing scenario output aggregation
+            ..Default::default()
+        };
+
+        let section = build_failure_patterns_section(&payload);
+
+        assert!(
+            section.contains("Failure Patterns"),
+            "Section should appear with 2+ matching surfaces: {}",
+            section
+        );
+        assert!(
+            section.contains("missing_setup"),
+            "Should categorize as missing_setup: {}",
+            section
+        );
+        assert!(
+            section.contains("2 surfaces"),
+            "Should show 2 surfaces with this pattern: {}",
+            section
+        );
+    }
+
+    #[test]
+    fn test_failure_patterns_section_threshold() {
+        use crate::enrich::{BehaviorNextActionPayload, TargetScenarioOutput};
+
+        // Only 1 surface with failure - should NOT show pattern section
+        let payload = BehaviorNextActionPayload {
+            target_ids: vec!["--opt1".to_string()],
+            target_scenario_output: vec![TargetScenarioOutput {
+                surface_id: "--opt1".to_string(),
+                exit_code: Some(128),
+                stderr_preview: Some("fatal: not a git repository".to_string()),
+                setup_failed: false,
+            }],
+            target_judgment_feedback: vec![],
+            ..Default::default()
+        };
+
+        let section = build_failure_patterns_section(&payload);
+
+        assert!(
+            section.is_empty(),
+            "Section should not appear with only 1 surface: {}",
+            section
+        );
+    }
+
+    #[test]
+    fn test_failure_patterns_combines_judgment_and_scenario() {
+        use crate::enrich::{
+            BehaviorNextActionPayload, TargetJudgmentFeedback, TargetScenarioOutput,
+        };
+
+        // Combine judgment feedback and scenario output with same category
+        let payload = BehaviorNextActionPayload {
+            target_ids: vec![
+                "--opt1".to_string(),
+                "--opt2".to_string(),
+                "--opt3".to_string(),
+            ],
+            target_scenario_output: vec![TargetScenarioOutput {
+                surface_id: "--opt1".to_string(),
+                exit_code: Some(128),
+                stderr_preview: Some("fatal: not a git repository".to_string()),
+                setup_failed: false,
+            }],
+            target_judgment_feedback: vec![TargetJudgmentFeedback {
+                surface_id: "--opt2".to_string(),
+                reason: "not a git repository".to_string(),
+                suggested_setup: None,
+                failure_count: 1,
+                history: vec![],
+            }],
+            ..Default::default()
+        };
+
+        let section = build_failure_patterns_section(&payload);
+
+        assert!(
+            section.contains("Failure Patterns"),
+            "Should combine sources for pattern detection: {}",
+            section
+        );
+        assert!(
+            section.contains("missing_setup"),
+            "Should categorize correctly: {}",
+            section
+        );
+        assert!(
+            section.contains("2 surfaces"),
+            "Should count both surfaces: {}",
+            section
+        );
     }
 }

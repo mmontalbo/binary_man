@@ -8,6 +8,8 @@ Generate test scenarios or exclusions for unverified options.
 
 {context_section}
 
+{failure_patterns}
+
 ## Target Options
 
 {targets}

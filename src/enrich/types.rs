@@ -440,6 +440,9 @@ pub struct BehaviorNextActionPayload {
     pub target_ids: Vec<String>,
     #[serde(default)]
     pub reason_code: Option<String>,
+    /// Command description extracted from man page NAME section.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command_description: Option<String>,
     /// Semantic action type (e.g., "generate_scenarios", "fix_scenario", "rerun").
     /// Corresponds to BehaviorAction enum codes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -469,13 +472,16 @@ pub struct BehaviorNextActionPayload {
 pub struct TargetJudgmentFeedback {
     /// The surface_id this feedback belongs to.
     pub surface_id: String,
-    /// Why the judgment failed.
+    /// Why the judgment failed (latest reason).
     pub reason: String,
     /// Suggested setup commands from the judge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suggested_setup: Option<Vec<String>>,
     /// How many times judgment has failed.
     pub failure_count: usize,
+    /// Full history of judgment attempts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub history: Vec<crate::verification_progress::JudgmentAttempt>,
 }
 
 /// Scenario output for a target option, used for LM error feedback.
