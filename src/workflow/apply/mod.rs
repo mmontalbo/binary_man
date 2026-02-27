@@ -309,6 +309,8 @@ fn run_apply_with_lm_loop(args: &ApplyArgs) -> Result<()> {
     let paths = enrich::DocPackPaths::new(doc_pack_root.clone());
     // Track surfaces that LM has worked on - only increment no-progress after LM processes them
     let mut lm_processed_surfaces: BTreeSet<String> = BTreeSet::new();
+    // Track last reason kind to reset no_progress_count on reason kind rotation
+    let mut last_reason_kind: Option<String> = None;
 
     loop {
         cycle += 1;
@@ -456,6 +458,19 @@ fn run_apply_with_lm_loop(args: &ApplyArgs) -> Result<()> {
                 eprintln!("apply: no target IDs in payload, continuing");
             }
             continue;
+        }
+
+        // Reset no_progress_count when reason kind changes (enables reason kind rotation)
+        let current_reason_kind = payload.reason_code.clone();
+        if current_reason_kind != last_reason_kind {
+            if args.verbose && last_reason_kind.is_some() && no_progress_count > 0 {
+                eprintln!(
+                    "apply: reason kind changed from {:?} to {:?}, resetting no-progress counter",
+                    last_reason_kind, current_reason_kind
+                );
+            }
+            no_progress_count = 0;
+            last_reason_kind = current_reason_kind;
         }
 
         // For command actions without LM, just continue
