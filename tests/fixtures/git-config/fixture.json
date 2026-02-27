@@ -1,8 +1,0 @@
-{
-  "binary": "git",
-  "context": ["config"],
-  "baseline": {
-    "max_lm_cycles": 12,
-    "max_scenarios": 60
-  }
-}
