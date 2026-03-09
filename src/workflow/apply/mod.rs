@@ -98,7 +98,7 @@ use std::path::{Path, PathBuf};
 
 use auto_verify::{auto_verification_progress, auto_verification_scenarios};
 use cleanup::cleanup_txn_dirs;
-use judge::{run_post_apply_judgment, JudgmentArgs};
+use judge::{run_judgment_v2, run_post_apply_judgment, JudgmentArgs, JudgmentArgsV2};
 use ledgers::{write_ledgers, LedgerArgs};
 use lm_apply::{apply_lm_response, invoke_lm_and_apply};
 use pack::refresh_pack_if_needed;
@@ -339,26 +339,57 @@ fn run_apply_with_lm_loop(args: &ApplyArgs) -> Result<()> {
         };
         run_apply_single(&single_apply_args)?;
 
-        // Run post-apply judgment on delta_seen entries
+        // Run post-apply judgment (V2: outputs scenario specs directly)
         if let Some(ref lm_cmd) = lm_command {
-            let judgment_args = JudgmentArgs {
+            let judgment_args = JudgmentArgsV2 {
                 paths: &paths,
                 lm_command: lm_cmd,
                 verbose: args.verbose,
             };
-            match run_post_apply_judgment(&judgment_args) {
-                Ok(failed_count) => {
-                    if args.verbose && failed_count > 0 {
+            match run_judgment_v2(&judgment_args) {
+                Ok(judgment_result) => {
+                    if args.verbose && !judgment_result.passed.is_empty() {
                         eprintln!(
-                            "apply: {} scenario(s) failed judgment, will retry",
-                            failed_count
+                            "apply: {} scenario(s) passed judgment",
+                            judgment_result.passed.len()
                         );
+                    }
+                    if !judgment_result.scenarios_to_run.is_empty() {
+                        if args.verbose {
+                            eprintln!(
+                                "apply: judgment generated {} scenario(s) to run",
+                                judgment_result.scenarios_to_run.len()
+                            );
+                        }
+                        // Append scenarios to plan.json
+                        match append_judgment_scenarios(
+                            &paths,
+                            &judgment_result.scenarios_to_run,
+                            args.verbose,
+                        ) {
+                            Ok(ids) => {
+                                // Add to rerun list for next cycle
+                                rerun_scenario_ids.extend(ids);
+                            }
+                            Err(e) => {
+                                if args.verbose {
+                                    eprintln!("apply: failed to append judgment scenarios: {}", e);
+                                }
+                            }
+                        }
                     }
                 }
                 Err(e) => {
                     if args.verbose {
                         eprintln!("apply: judgment error (non-fatal): {}", e);
                     }
+                    // Fall back to V1 judgment
+                    let judgment_args_v1 = JudgmentArgs {
+                        paths: &paths,
+                        lm_command: lm_cmd,
+                        verbose: args.verbose,
+                    };
+                    let _ = run_post_apply_judgment(&judgment_args_v1);
                 }
             }
         }
@@ -990,6 +1021,47 @@ fn normalize_rerun_scenario_ids(raw: &[String]) -> Vec<String> {
     ids.sort();
     ids.dedup();
     ids
+}
+
+/// Append judgment-generated scenarios to plan.json.
+///
+/// Returns the list of scenario IDs that were added (for forced rerun).
+fn append_judgment_scenarios(
+    paths: &enrich::DocPackPaths,
+    scenarios_to_add: &[scenarios::ScenarioSpec],
+    verbose: bool,
+) -> Result<Vec<String>> {
+    if scenarios_to_add.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let plan_path = paths.scenarios_plan_path();
+    let mut plan = scenarios::load_plan(&plan_path, paths.root())?;
+
+    let mut added_ids = Vec::new();
+    for scenario in scenarios_to_add {
+        // Check if scenario already exists (by ID)
+        if let Some(existing) = plan.scenarios.iter_mut().find(|s| s.id == scenario.id) {
+            // Update existing scenario
+            *existing = scenario.clone();
+            if verbose {
+                eprintln!("  judgment: updated scenario {}", scenario.id);
+            }
+        } else {
+            // Add new scenario
+            plan.scenarios.push(scenario.clone());
+            if verbose {
+                eprintln!("  judgment: added scenario {}", scenario.id);
+            }
+        }
+        added_ids.push(scenario.id.clone());
+    }
+
+    // Write updated plan
+    let plan_json = serde_json::to_string_pretty(&plan)?;
+    fs::write(&plan_path, plan_json.as_bytes())?;
+
+    Ok(added_ids)
 }
 
 /// Record learned hints from successful verifications.
