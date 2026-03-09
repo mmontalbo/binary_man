@@ -5,7 +5,6 @@
 pub(crate) mod apply;
 mod context;
 mod decisions;
-mod init;
 pub(crate) mod lm_client;
 pub(crate) mod lm_response;
 mod plan;
@@ -15,7 +14,6 @@ mod validate;
 
 pub(crate) use apply::run_apply;
 pub(crate) use context::{load_manifest_optional, EnrichContext};
-pub(crate) use init::run_init;
 pub(crate) use plan::run_plan;
 pub use run::run_run;
 pub use status::{run_status, status_summary_for_doc_pack};

@@ -509,7 +509,12 @@ mod tests {
             lm_command: None,
             behavior_batch_size: None,
         };
-        enrich::write_config(&root, &config).unwrap();
+        let config_json = serde_json::to_string_pretty(&config).unwrap();
+        fs::write(
+            root.join("enrich").join("config.json"),
+            config_json.as_bytes(),
+        )
+        .unwrap();
 
         let scenario = scenarios::ScenarioSpec {
             id: "fail".to_string(),

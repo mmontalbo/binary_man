@@ -63,18 +63,6 @@ pub fn load_config(doc_pack_root: &Path) -> Result<EnrichConfig> {
     Ok(config)
 }
 
-/// Persist a config to disk in a stable JSON format.
-pub fn write_config(doc_pack_root: &Path, config: &EnrichConfig) -> Result<()> {
-    let paths = DocPackPaths::new(doc_pack_root.to_path_buf());
-    let path = paths.config_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).context("create enrich dir")?;
-    }
-    let text = serde_json::to_string_pretty(config).context("serialize enrich config")?;
-    fs::write(&path, text.as_bytes()).with_context(|| format!("write {}", path.display()))?;
-    Ok(())
-}
-
 /// Normalize requirements to defaults when the config omits them.
 pub fn normalized_requirements(config: &EnrichConfig) -> Vec<RequirementId> {
     if config.requirements.is_empty() {

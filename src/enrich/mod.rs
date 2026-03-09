@@ -42,7 +42,7 @@ mod types;
 
 pub use config::{
     config_stub, default_config, load_config, normalized_requirements, resolve_inputs,
-    resolve_lm_command, validate_config, write_config,
+    resolve_lm_command, validate_config,
 };
 pub use evidence::{dedupe_evidence_refs, evidence_from_path, evidence_from_rel};
 pub use history::{append_history, write_report};

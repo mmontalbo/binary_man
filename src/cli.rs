@@ -127,27 +127,6 @@ pub struct StatusArgs {
     pub decisions: bool,
 }
 
-/// Init command inputs for bootstrapping a pack.
-#[derive(Parser, Debug)]
-#[command(about = "Initialize a doc-pack (pack + enrichment config)")]
-pub struct InitArgs {
-    /// Doc pack root containing pack, scenarios, fixtures, and outputs
-    #[arg(long, value_name = "DIR")]
-    pub doc_pack: PathBuf,
-
-    /// Binary to analyze when generating a new pack
-    #[arg(long, value_name = "BIN")]
-    pub binary: Option<String>,
-
-    /// Overwrite an existing config.json
-    #[arg(long)]
-    pub force: bool,
-
-    /// Nix flake reference for binary_lens
-    #[arg(long, value_name = "REF", default_value = DEFAULT_LENS_FLAKE)]
-    pub lens_flake: String,
-}
-
 /// Validate command inputs used to snapshot and lock current config.
 #[derive(Parser, Debug)]
 #[command(about = "Advanced/debug: validate enrich config and write lock.json")]
