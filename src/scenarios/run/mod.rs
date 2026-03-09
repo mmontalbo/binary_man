@@ -1,17 +1,16 @@
 //! Scenario execution engine.
 //!
 //! Runs scenarios deterministically and emits evidence blobs without interpreting
-//! meaning beyond pack-owned expectations.
+//! meaning beyond pack-owned expectations. Uses direct subprocess execution.
 mod cache;
 mod exec;
 mod validate;
 
 use super::config::{effective_scenario_config, ScenarioRunConfig};
 use super::evidence::{
-    load_scenario_index_state, read_runs_index, write_scenario_index_if_needed, ExamplesReport,
-    ScenarioIndexEntry, ScenarioOutcome,
+    load_scenario_index_state, write_scenario_index_if_needed, ExamplesReport, ScenarioIndexEntry,
+    ScenarioOutcome,
 };
-use super::seed::to_binary_lens_seed_spec;
 use super::{ScenarioKind, ScenarioRunMode, ScenarioSpec};
 use crate::util::display_path;
 use anyhow::{anyhow, Context, Result};
@@ -20,18 +19,15 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cache::{load_previous_outcomes, should_run_scenario};
-use exec::{
-    build_failed_execution, build_run_kv_args, build_success_execution, invoke_binary_lens_run,
-    warm_lens_flake,
-};
+use exec::{build_execution_from_direct_run, run_scenario_direct};
 
 /// Inputs needed to execute a batch of scenarios.
 pub struct RunScenariosArgs<'a> {
     pub pack_root: &'a Path,
     pub run_root: &'a Path,
     pub binary_name: &'a str,
+    pub binary_path: &'a str,
     pub scenarios_path: &'a Path,
-    pub lens_flake: &'a str,
     pub display_root: Option<&'a Path>,
     pub staging_root: Option<&'a Path>,
     pub kind_filter: Option<ScenarioKind>,
@@ -65,7 +61,6 @@ pub(super) struct ScenarioRunContext<'a> {
     pub(super) scenario: &'a ScenarioSpec,
     pub(super) run_config: &'a ScenarioRunConfig,
     pub(super) run_argv0: &'a str,
-    pub(super) duration_ms: u128,
 }
 
 pub(super) struct ScenarioExecution {
@@ -138,10 +133,6 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<RunScenariosResult> 
         .pack_root
         .canonicalize()
         .with_context(|| format!("resolve pack root {}", args.pack_root.display()))?;
-
-    // Pre-warm the lens flake to ensure Nix store is populated before scenario loop.
-    // This moves the one-time fetch/build cost out of per-scenario execution.
-    warm_lens_flake(args.lens_flake, args.verbose)?;
 
     let scenarios_index_path = args
         .run_root
@@ -241,60 +232,33 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<RunScenariosResult> 
 
         let run_argv0 = args.binary_name.to_string();
 
-        // Convert seed spec to JSON for sandbox-side materialization
-        let seed_spec_json = if let Some(seed) = run_config.seed.as_ref() {
-            let seed_spec = to_binary_lens_seed_spec(seed)
-                .with_context(|| format!("convert seed spec for scenario {}", scenario.id))?;
-            Some(
-                serde_json::to_string(&seed_spec)
-                    .with_context(|| format!("serialize seed spec for scenario {}", scenario.id))?,
-            )
-        } else {
-            None
-        };
-
-        let run_kv_args = build_run_kv_args(
-            &run_argv0,
-            seed_spec_json.as_deref(),
-            scenario.stdin.as_deref(),
-            run_config.cwd.as_deref(),
-            run_config.timeout_seconds,
-            run_config.net_mode.as_deref(),
-            run_config.no_sandbox,
-            run_config.no_strace,
-        )?;
-        let before = read_runs_index(&pack_root).context("read runs index (before)")?;
-
-        let started = std::time::Instant::now();
-        let status = invoke_binary_lens_run(
-            &pack_root,
-            args.run_root,
-            args.lens_flake,
-            &run_kv_args,
+        // Run scenario directly using subprocess execution (sandbox by default)
+        let run_result = run_scenario_direct(
+            &scenario.id,
+            args.binary_path,
             &scenario.argv,
+            run_config.seed.as_ref(),
+            scenario.stdin.as_deref(),
             &run_config.env,
+            run_config.timeout_seconds,
+            run_config.no_sandbox.unwrap_or(false),
+            run_config.net_mode.as_deref(),
         )
-        .with_context(|| format!("invoke binary_lens for scenario {}", scenario.id))?;
-        let duration_ms = started.elapsed().as_millis();
+        .with_context(|| format!("run scenario {}", scenario.id))?;
+
         let context = ScenarioRunContext {
             scenario,
             run_config: &run_config,
             run_argv0: &run_argv0,
-            duration_ms,
         };
-        let execution = if !status.success() {
-            build_failed_execution(&context, &status)?
-        } else {
-            let after = read_runs_index(&pack_root).context("read runs index (after)")?;
-            build_success_execution(
-                &pack_root,
-                args.staging_root,
-                &context,
-                &before,
-                &after,
-                args.verbose,
-            )?
-        };
+
+        let execution = build_execution_from_direct_run(
+            args.staging_root,
+            &context,
+            &run_result,
+            args.verbose,
+        )?;
+
         if let Some(outcome) = execution.outcome {
             outcomes.push(outcome);
         }
@@ -340,13 +304,8 @@ pub fn run_scenarios(args: &RunScenariosArgs<'_>) -> Result<RunScenariosResult> 
             fail_count
         );
     }
-    let mut run_id_set = BTreeSet::new();
-    for outcome in &outcomes {
-        if let Some(run_id) = outcome.run_id.as_ref() {
-            run_id_set.insert(run_id.clone());
-        }
-    }
-    let run_ids: Vec<String> = run_id_set.into_iter().collect();
+    // No longer tracking run_ids since we don't use binary_lens
+    let run_ids: Vec<String> = Vec::new();
     let generated_at_epoch_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .context("compute timestamp")?
