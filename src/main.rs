@@ -26,6 +26,7 @@ mod pack;
 mod render;
 mod scenarios;
 mod semantics;
+mod simple_verify;
 mod staging;
 mod status;
 mod surface;
