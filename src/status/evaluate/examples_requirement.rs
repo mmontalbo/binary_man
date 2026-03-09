@@ -1,16 +1,11 @@
+//! Examples report requirement evaluation.
+//!
+//! Checks if scenario evidence exists in the inventory.
+
 use super::EvalState;
 use crate::enrich;
 use crate::scenarios;
 use anyhow::Result;
-use serde::Deserialize;
-
-#[derive(Deserialize)]
-struct RunsIndex {
-    #[serde(default)]
-    run_count: Option<usize>,
-    #[serde(default)]
-    runs: Vec<serde_json::Value>,
-}
 
 pub(super) fn eval_examples_report_requirement(
     state: &mut EvalState,
@@ -20,12 +15,14 @@ pub(super) fn eval_examples_report_requirement(
     let missing_artifacts = &mut *state.missing_artifacts;
     let blockers = &mut *state.blockers;
 
-    let runs_index_path = paths.pack_root().join("runs").join("index.json");
-    let runs_evidence = paths.evidence_from_path(&runs_index_path)?;
-    let mut evidence = vec![runs_evidence.clone()];
-    let mut local_blockers = Vec::new();
+    // Check for scenario evidence in inventory/scenarios/index.json
+    let scenarios_index_path = paths.inventory_scenarios_dir().join("index.json");
+    let scenarios_index_evidence = paths.evidence_from_path(&scenarios_index_path)?;
+    let mut evidence = vec![scenarios_index_evidence.clone()];
+    let local_blockers: Vec<enrich::Blocker> = Vec::new();
     let mut unmet = Vec::new();
 
+    // Check scenarios plan exists
     let scenarios_path = paths.scenarios_plan_path();
     let scenarios_evidence = paths.evidence_from_path(&scenarios_path)?;
     evidence.push(scenarios_evidence.clone());
@@ -34,31 +31,14 @@ pub(super) fn eval_examples_report_requirement(
         unmet.push("scenarios plan missing".to_string());
     }
 
-    let runs_index_bytes = scenarios::read_runs_index_bytes(&paths.pack_root())?;
-    if let Some(bytes) = runs_index_bytes {
-        let index: RunsIndex = match serde_json::from_slice(&bytes) {
-            Ok(index) => index,
-            Err(err) => {
-                let blocker = enrich::Blocker {
-                    code: "runs_index_parse_error".to_string(),
-                    message: err.to_string(),
-                    evidence: vec![runs_evidence],
-                    next_action: None,
-                };
-                local_blockers.push(blocker);
-                RunsIndex {
-                    run_count: Some(0),
-                    runs: Vec::new(),
-                }
-            }
-        };
-        let count = index.run_count.unwrap_or(index.runs.len());
-        if count == 0 {
-            unmet.push("no scenario runs recorded".to_string());
+    // Check if scenario evidence index exists
+    if let Ok(Some(index)) = scenarios::read_scenario_index(&scenarios_index_path) {
+        if index.scenarios.is_empty() {
+            unmet.push("no scenario evidence recorded".to_string());
         }
-    } else {
-        missing_artifacts.push(runs_evidence.path);
-        unmet.push("scenario runs index missing".to_string());
+    } else if !scenarios_index_path.is_file() {
+        missing_artifacts.push(scenarios_index_evidence.path);
+        unmet.push("scenario evidence index missing".to_string());
     }
 
     let (status, reason) = if !local_blockers.is_empty() {
@@ -74,10 +54,10 @@ pub(super) fn eval_examples_report_requirement(
     } else {
         (
             enrich::RequirementState::Met,
-            "scenario runs present".to_string(),
+            "scenario evidence present".to_string(),
         )
     };
-    blockers.extend(local_blockers.clone());
+    blockers.extend(local_blockers);
     Ok(enrich::RequirementStatus {
         id: req,
         status,
@@ -90,6 +70,6 @@ pub(super) fn eval_examples_report_requirement(
         behavior_unverified_count: None,
         verification: None,
         evidence,
-        blockers: local_blockers,
+        blockers: Vec::new(),
     })
 }

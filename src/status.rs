@@ -31,7 +31,6 @@
 //! - [`evaluate`]: Requirement evaluation framework and implementations
 //! - [`help`]: Help text extraction from binary
 //! - [`inputs`]: Input loading for status computation
-//! - [`lens`]: binary_lens integration
 //! - [`plan`]: Plan status and action computation
 //! - [`scenario_failures`]: Scenario failure analysis
 //! - [`verification`]: Verification status computation
@@ -457,7 +456,6 @@ mod tests {
         fs::create_dir_all(root.join("scenarios")).unwrap();
         fs::create_dir_all(root.join("inventory").join("scenarios")).unwrap();
         fs::create_dir_all(root.join("binary.lens").join("runs")).unwrap();
-        fs::create_dir_all(root.join("binary_lens")).unwrap();
         fs::create_dir_all(root.join("queries")).unwrap();
         fs::write(
             root.join("queries").join("usage_from_scenarios.sql"),
@@ -495,12 +493,6 @@ mod tests {
             "-- test section\n".as_bytes(),
         )
         .unwrap();
-        fs::write(
-            root.join("binary_lens").join("export_plan.json"),
-            "{}".as_bytes(),
-        )
-        .unwrap();
-
         let config = enrich::EnrichConfig {
             schema_version: enrich::CONFIG_SCHEMA_VERSION,
             usage_lens_template: enrich::SCENARIO_USAGE_LENS_TEMPLATE_REL.to_string(),

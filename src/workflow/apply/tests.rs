@@ -13,7 +13,6 @@ fn apply_args(refresh_pack: bool) -> ApplyArgs {
         rerun_all: false,
         rerun_failed: false,
         rerun_scenario_id: Vec::new(),
-        lens_flake: "unused".to_string(),
         lm_response: None,
         max_cycles: 0,
         lm: None,

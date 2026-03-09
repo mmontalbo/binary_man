@@ -103,16 +103,6 @@ impl DocPackPaths {
         self.pack_root().join("manifest.json")
     }
 
-    /// Return the `binary_lens/` config directory path.
-    pub fn binary_lens_dir(&self) -> PathBuf {
-        self.root.join("binary_lens")
-    }
-
-    /// Return the `binary_lens/export_plan.json` path.
-    pub fn binary_lens_export_plan_path(&self) -> PathBuf {
-        self.binary_lens_dir().join("export_plan.json")
-    }
-
     /// Return the `inventory/` directory path.
     pub fn inventory_dir(&self) -> PathBuf {
         self.root.join("inventory")

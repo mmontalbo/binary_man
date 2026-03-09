@@ -23,9 +23,6 @@ pub const VERIFICATION_FROM_SCENARIOS_20_COVERAGE_REASONING_SQL: &str =
 #[cfg(test)]
 pub const VERIFICATION_FROM_SCENARIOS_30_ROLLUPS_OUTPUT_SQL: &str =
     include_str!("../queries/verification_from_scenarios/30_rollups_output.sql");
-#[cfg(test)]
-pub const BINARY_LENS_EXPORT_PLAN_JSON: &str =
-    include_str!("../templates/binary_lens_export_plan.json");
 
 // Production templates (used in non-test code)
 pub const ENRICH_SEMANTICS_JSON: &str = include_str!("../templates/enrich_semantics.json");

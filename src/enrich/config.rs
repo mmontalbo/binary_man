@@ -20,7 +20,6 @@ fn default_requirements() -> Vec<RequirementId> {
 }
 
 const SCENARIOS_PLAN_REL: &str = "scenarios/plan.json";
-const BINARY_LENS_EXPORT_PLAN_REL: &str = "binary_lens/export_plan.json";
 
 /// Build the default config used when a pack is first initialized.
 ///
@@ -107,7 +106,6 @@ pub fn resolve_inputs(config: &EnrichConfig, doc_pack_root: &Path) -> Result<Vec
         required_inputs.push(rel.to_string());
     }
     required_inputs.push(SCENARIOS_PLAN_REL.to_string());
-    required_inputs.push(BINARY_LENS_EXPORT_PLAN_REL.to_string());
     let mut inputs = Vec::new();
     for rel in required_inputs {
         validate_relative_path(&rel, "input")?;

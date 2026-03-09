@@ -1,87 +1,15 @@
+//! Seed validation and utilities for scenario execution.
+//!
+//! Seeds define the filesystem state needed before running a scenario.
+//! This module provides validation logic to ensure seeds are safe and well-formed.
+
 use anyhow::{anyhow, Context, Result};
-use serde::Serialize;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use super::{
     ScenarioSeedEntry, ScenarioSeedSpec, SeedEntryKind, MAX_SEED_ENTRIES, MAX_SEED_TOTAL_BYTES,
 };
-
-/// Seed spec format expected by binary_lens (created inside sandbox).
-#[derive(Debug, Serialize)]
-pub(crate) struct BinaryLensSeedSpec {
-    /// Setup commands to run before creating entries.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub setup: Vec<Vec<String>>,
-    pub entries: Vec<BinaryLensSeedEntry>,
-}
-
-/// Single seed entry in binary_lens format.
-#[derive(Debug, Serialize)]
-pub(crate) struct BinaryLensSeedEntry {
-    pub path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub encoding: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub target: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mode: Option<u32>,
-}
-
-/// Convert bman's ScenarioSeedSpec to binary_lens format.
-pub(crate) fn to_binary_lens_seed_spec(seed: &ScenarioSeedSpec) -> Result<BinaryLensSeedSpec> {
-    validate_seed_spec(seed).context("validate seed spec")?;
-
-    let entries = seed
-        .entries
-        .iter()
-        .map(|entry| {
-            let path = normalize_seed_path(&entry.path)?;
-            Ok(match entry.kind {
-                SeedEntryKind::File => BinaryLensSeedEntry {
-                    path,
-                    kind: None, // default when content present
-                    content: Some(entry.contents.clone().unwrap_or_default()),
-                    encoding: None,
-                    target: None,
-                    mode: entry.mode,
-                },
-                SeedEntryKind::Dir => BinaryLensSeedEntry {
-                    path,
-                    kind: Some("dir".to_string()),
-                    content: None,
-                    encoding: None,
-                    target: None,
-                    mode: entry.mode,
-                },
-                SeedEntryKind::Symlink => {
-                    let target = entry
-                        .target
-                        .as_ref()
-                        .ok_or_else(|| anyhow!("symlink missing target"))?;
-                    let target_normalized = normalize_seed_path(target)?;
-                    BinaryLensSeedEntry {
-                        path,
-                        kind: Some("symlink".to_string()),
-                        content: None,
-                        encoding: None,
-                        target: Some(target_normalized),
-                        mode: None,
-                    }
-                }
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-
-    Ok(BinaryLensSeedSpec {
-        setup: seed.setup.clone(),
-        entries,
-    })
-}
 
 pub(crate) const DEFAULT_BEHAVIOR_SEED_DIR: &str = "work";
 const DEFAULT_BEHAVIOR_SEED_FILE1: &str = "work/file1.txt";

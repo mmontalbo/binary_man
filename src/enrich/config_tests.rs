@@ -53,10 +53,6 @@ fn write_required_inputs(root: &std::path::Path, config: &enrich::EnrichConfig) 
         &root.join("scenarios/plan.json"),
         &crate::scenarios::plan_stub(Some("bin")),
     );
-    write_file(
-        &root.join("binary_lens/export_plan.json"),
-        templates::BINARY_LENS_EXPORT_PLAN_JSON,
-    );
     write_file(&root.join("enrich/config.json"), "{}");
 }
 

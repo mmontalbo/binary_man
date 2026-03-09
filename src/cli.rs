@@ -5,9 +5,6 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-/// Default nix flake ref for binary_lens so packs are reproducible by default.
-pub const DEFAULT_LENS_FLAKE: &str = "../binary_lens#binary_lens";
-
 /// Root CLI entrypoint for the enrichment workflow.
 ///
 /// Keeping a single `RootArgs` type makes command routing obvious and avoids
@@ -63,10 +60,6 @@ pub struct RunArgs {
     /// Force refresh of the pack before enrichment
     #[arg(long)]
     pub refresh: bool,
-
-    /// Nix flake reference for binary_lens
-    #[arg(long, value_name = "REF", default_value = DEFAULT_LENS_FLAKE)]
-    pub lens_flake: String,
 
     /// LM command to invoke for behavior verification.
     /// Defaults to BMAN_LM_COMMAND env var, then "claude -p --model haiku".
@@ -184,10 +177,6 @@ pub struct ApplyArgs {
     /// Force rerun for an exact scenario ID (repeatable)
     #[arg(long = "rerun-scenario-id", value_name = "ID")]
     pub rerun_scenario_id: Vec<String>,
-
-    /// Nix flake reference for binary_lens
-    #[arg(long, value_name = "REF", default_value = DEFAULT_LENS_FLAKE)]
-    pub lens_flake: String,
 
     /// Path to LM response JSON file (from `bman status --decisions` workflow)
     #[arg(long, value_name = "FILE")]

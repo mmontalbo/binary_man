@@ -5,67 +5,17 @@
 use crate::staging::write_staged_json;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::ScenarioExpect;
 
-#[derive(Debug, Deserialize)]
-struct RunsIndex {
-    #[serde(default)]
-    runs: Vec<RunIndexEntry>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct RunIndexEntry {
-    pub(crate) run_id: String,
-    #[serde(default)]
-    pub(crate) manifest_ref: Option<String>,
-    #[serde(default)]
-    pub(crate) stdout_ref: Option<String>,
-    #[serde(default)]
-    pub(crate) stderr_ref: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct RunManifest {
-    #[serde(default)]
-    pub(crate) result: RunResult,
-    #[serde(default)]
-    pub(crate) scenario: RunManifestScenario,
-}
-
-#[derive(Debug, Default, Deserialize)]
-pub(crate) struct RunManifestScenario {
-    /// Host path to the scenario's working directory.
-    #[serde(default)]
-    pub(crate) cwd_host: Option<String>,
-    /// Seed spec with setup results (if setup commands were run).
-    #[serde(default)]
-    pub(crate) seed_spec: Option<SeedSpecResult>,
-}
-
-/// Deserialize null or missing as empty vec.
-fn null_as_empty_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: serde::Deserialize<'de>,
-{
-    Option::<Vec<T>>::deserialize(deserializer).map(|opt| opt.unwrap_or_default())
-}
-
-#[derive(Debug, Default, Deserialize)]
-pub(crate) struct SeedSpecResult {
-    /// Results of setup commands that were run before the main command.
-    #[serde(default, deserialize_with = "null_as_empty_vec")]
-    pub(crate) setup_results: Vec<SetupCommandResult>,
-}
-
+/// Result of running a setup command before the main scenario command.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SetupCommandResult {
     /// The command that was run.
-    #[serde(default, deserialize_with = "null_as_empty_vec")]
+    #[serde(default)]
     pub argv: Vec<String>,
     /// Whether the command succeeded.
     #[serde(default)]
@@ -79,17 +29,6 @@ pub struct SetupCommandResult {
     /// Stderr output (if failed).
     #[serde(default)]
     pub stderr: String,
-}
-
-#[derive(Debug, Default, Deserialize)]
-pub(crate) struct RunResult {
-    pub(crate) exit_code: Option<i32>,
-    pub(crate) exit_signal: Option<i32>,
-    #[serde(default)]
-    pub(crate) timed_out: bool,
-    /// True if a setup command failed before the main command ran.
-    #[serde(default)]
-    pub(crate) setup_failed: bool,
 }
 
 /// Example report used to populate man page examples.
@@ -249,23 +188,6 @@ fn scenario_output_rel_path(scenario_id: &str, generated_at_epoch_ms: u128) -> S
     )
 }
 
-pub(crate) fn read_runs_index_bytes(pack_root: &Path) -> Result<Option<Vec<u8>>> {
-    let index_path = pack_root.join("runs").join("index.json");
-    if !index_path.is_file() {
-        return Ok(None);
-    }
-    let bytes = fs::read(&index_path).with_context(|| format!("read {}", index_path.display()))?;
-    Ok(Some(bytes))
-}
-
-pub(crate) fn read_runs_index(pack_root: &Path) -> Result<Vec<RunIndexEntry>> {
-    let Some(bytes) = read_runs_index_bytes(pack_root)? else {
-        return Ok(Vec::new());
-    };
-    let index: RunsIndex = serde_json::from_slice(&bytes).context("parse runs index JSON")?;
-    Ok(index.runs)
-}
-
 pub(crate) fn read_scenario_index(path: &Path) -> Result<Option<ScenarioIndex>> {
     if !path.is_file() {
         return Ok(None);
@@ -341,51 +263,3 @@ pub(crate) fn write_scenario_index_if_needed(
     Ok(())
 }
 
-pub(crate) fn resolve_new_run(
-    before: &[RunIndexEntry],
-    after: &[RunIndexEntry],
-) -> Result<(String, RunIndexEntry)> {
-    let before_ids: HashSet<&str> = before.iter().map(|entry| entry.run_id.as_str()).collect();
-    let mut new_entries: Vec<&RunIndexEntry> = after
-        .iter()
-        .filter(|entry| !before_ids.contains(entry.run_id.as_str()))
-        .collect();
-    if new_entries.is_empty() {
-        return Err(anyhow!("runs index did not append a new run"));
-    }
-    let picked = new_entries
-        .pop()
-        .ok_or_else(|| anyhow!("runs index did not append a new run"))?;
-    Ok((
-        picked.run_id.clone(),
-        RunIndexEntry {
-            run_id: picked.run_id.clone(),
-            manifest_ref: picked.manifest_ref.clone(),
-            stdout_ref: picked.stdout_ref.clone(),
-            stderr_ref: picked.stderr_ref.clone(),
-        },
-    ))
-}
-
-pub(crate) fn read_ref_bytes(pack_root: &Path, reference: &str) -> Result<Vec<u8>> {
-    let path = resolve_ref(pack_root, reference);
-    fs::read(&path).with_context(|| format!("read {}", path.display()))
-}
-
-pub(crate) fn read_json<T: for<'de> Deserialize<'de>>(
-    pack_root: &Path,
-    reference: &str,
-) -> Result<T> {
-    let bytes = read_ref_bytes(pack_root, reference)?;
-    let parsed = serde_json::from_slice(&bytes).context("parse JSON")?;
-    Ok(parsed)
-}
-
-fn resolve_ref(pack_root: &Path, reference: &str) -> PathBuf {
-    let ref_path = Path::new(reference);
-    if ref_path.is_absolute() {
-        ref_path.to_path_buf()
-    } else {
-        pack_root.join(ref_path)
-    }
-}

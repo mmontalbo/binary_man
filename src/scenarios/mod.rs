@@ -38,7 +38,7 @@ pub(crate) use seed::{default_behavior_seed, DEFAULT_BEHAVIOR_SEED_DIR};
 pub use evidence::{
     publishable_examples_report, ExamplesReport, ScenarioIndex, ScenarioIndexEntry,
 };
-pub(crate) use evidence::{read_runs_index_bytes, read_scenario_index};
+pub(crate) use evidence::read_scenario_index;
 pub use run::{
     run_scenarios, AutoVerificationKindProgress, AutoVerificationProgress, RunScenariosArgs,
 };

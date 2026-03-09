@@ -41,7 +41,6 @@ pub struct SurfaceDiscoveryArgs<'a> {
     pub staging_root: &'a Path,
     pub inputs_hash: Option<&'a str>,
     pub manifest: Option<&'a pack::PackManifest>,
-    pub lens_flake: &'a str,
     pub verbose: bool,
     /// Entry points to explicitly explore (e.g., `["config"]` for `git config`).
     pub explore_hints: &'a [String],
@@ -92,7 +91,6 @@ pub fn apply_surface_discovery(args: &SurfaceDiscoveryArgs<'_>) -> Result<()> {
         paths: &paths,
         plan_state: &plan_state,
         manifest: args.manifest,
-        lens_flake: args.lens_flake,
         verbose: args.verbose,
         pack_has_scenarios,
         staging_has_scenarios,
@@ -129,8 +127,8 @@ pub fn apply_surface_discovery(args: &SurfaceDiscoveryArgs<'_>) -> Result<()> {
                         pack_root: &paths.pack_root(),
                         run_root: args.doc_pack_root,
                         binary_name: &manifest.binary_name,
+                        binary_path: &manifest.binary_path,
                         scenarios_path: &plan_state.plan_path,
-                        lens_flake: args.lens_flake,
                         display_root: Some(args.doc_pack_root),
                         staging_root: Some(args.staging_root),
                         kind_filter: Some(scenarios::ScenarioKind::Help),
@@ -171,8 +169,8 @@ pub fn apply_surface_discovery(args: &SurfaceDiscoveryArgs<'_>) -> Result<()> {
 
         // Run help scenarios for discovered subcommands
         if let Some(manifest) = args.manifest {
-            let binary_path = PathBuf::from(&manifest.binary_path);
-            if binary_path.is_file() && paths.pack_root().is_dir() {
+            let binary_path_buf = PathBuf::from(&manifest.binary_path);
+            if binary_path_buf.is_file() && paths.pack_root().is_dir() {
                 let extra_scenarios: Vec<scenarios::ScenarioSpec> = needs_help
                     .iter()
                     .map(|argv| build_help_discovery_scenario(argv))
@@ -190,8 +188,8 @@ pub fn apply_surface_discovery(args: &SurfaceDiscoveryArgs<'_>) -> Result<()> {
                     pack_root: &paths.pack_root(),
                     run_root: args.doc_pack_root,
                     binary_name: &manifest.binary_name,
+                    binary_path: &manifest.binary_path,
                     scenarios_path: &plan_state.plan_path,
-                    lens_flake: args.lens_flake,
                     display_root: Some(args.doc_pack_root),
                     staging_root: Some(args.staging_root),
                     kind_filter: Some(scenarios::ScenarioKind::Help),
@@ -309,7 +307,6 @@ struct AutoRunHelpScenariosArgs<'a> {
     paths: &'a enrich::DocPackPaths,
     plan_state: &'a PlanState,
     manifest: Option<&'a pack::PackManifest>,
-    lens_flake: &'a str,
     verbose: bool,
     pack_has_scenarios: bool,
     staging_has_scenarios: bool,
@@ -323,7 +320,6 @@ fn maybe_auto_run_help_scenarios(args: AutoRunHelpScenariosArgs<'_>) -> Result<b
         paths,
         plan_state,
         manifest,
-        lens_flake,
         verbose,
         pack_has_scenarios,
         mut staging_has_scenarios,
@@ -331,30 +327,28 @@ fn maybe_auto_run_help_scenarios(args: AutoRunHelpScenariosArgs<'_>) -> Result<b
     } = args;
     if !pack_has_scenarios && !staging_has_scenarios && plan_state.help_scenarios_present {
         if let Some(manifest) = manifest {
-            let binary_path = PathBuf::from(&manifest.binary_path);
-            if !binary_path.is_file() {
+            let binary_path_buf = PathBuf::from(&manifest.binary_path);
+            if !binary_path_buf.is_file() {
                 state.blockers.push(enrich::Blocker {
                     code: "scenario_missing_binary".to_string(),
-                    message: format!("binary_path {} not found", binary_path.display()),
+                    message: format!("binary_path {} not found", binary_path_buf.display()),
                     evidence: vec![paths.evidence_from_path(&paths.pack_manifest_path())?],
-                    next_action: Some(
-                        "regenerate binary.lens pack to refresh manifest".to_string(),
-                    ),
+                    next_action: Some("rebuild binary or update manifest".to_string()),
                 });
             } else if !paths.pack_root().is_dir() {
                 state.blockers.push(enrich::Blocker {
                     code: "scenario_missing_pack".to_string(),
                     message: "pack root missing; cannot run scenarios".to_string(),
                     evidence: vec![paths.evidence_from_path(&paths.pack_manifest_path())?],
-                    next_action: Some("generate binary.lens pack under the doc pack".to_string()),
+                    next_action: Some("run bman apply to create pack directory".to_string()),
                 });
             } else {
                 let _report = scenarios::run_scenarios(&scenarios::RunScenariosArgs {
                     pack_root: &paths.pack_root(),
                     run_root: doc_pack_root,
                     binary_name: &manifest.binary_name,
+                    binary_path: &manifest.binary_path,
                     scenarios_path: &plan_state.plan_path,
-                    lens_flake,
                     display_root: Some(doc_pack_root),
                     staging_root: Some(staging_root),
                     kind_filter: Some(scenarios::ScenarioKind::Help),

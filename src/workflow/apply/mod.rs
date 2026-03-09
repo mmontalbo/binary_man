@@ -35,7 +35,6 @@
 //!
 //! - [`cleanup`]: Transaction directory cleanup after publish
 //! - [`ledgers`]: Writes coverage and verification ledgers
-//! - [`pack`]: Pack refresh via binary_lens
 //! - [`rendering`]: Man page rendering and examples report
 //!
 //! # Transaction Model
@@ -65,7 +64,6 @@ mod cleanup;
 mod judge;
 mod ledgers;
 mod lm_apply;
-mod pack;
 mod progress;
 mod rendering;
 
@@ -89,7 +87,6 @@ use crate::semantics;
 use crate::staging::publish_staging;
 use crate::status::{build_status_summary, plan_status, planned_actions_from_requirements};
 use crate::surface::apply_surface_discovery;
-use crate::util::resolve_flake_ref;
 use crate::workflow::{run_plan, run_validate, status_summary_for_doc_pack};
 use anyhow::{anyhow, Context, Result};
 use std::collections::{BTreeMap, BTreeSet};
@@ -101,7 +98,6 @@ use cleanup::cleanup_txn_dirs;
 use judge::{run_judgment_v2, run_post_apply_judgment, JudgmentArgs, JudgmentArgsV2};
 use ledgers::{write_ledgers, LedgerArgs};
 use lm_apply::{apply_lm_response, invoke_lm_and_apply};
-use pack::refresh_pack_if_needed;
 use progress::{
     check_progress, get_excluded_count, get_unverified_count, handle_lm_no_progress_for_targets,
     process_lm_result, CycleProgress,
@@ -330,7 +326,6 @@ fn run_apply_with_lm_loop(args: &ApplyArgs) -> Result<()> {
             rerun_all: args.rerun_all,
             rerun_failed: args.rerun_failed,
             rerun_scenario_id: cycle_rerun_ids,
-            lens_flake: args.lens_flake.clone(),
             lm_response: args.lm_response.clone(),
             max_cycles: 0,
             lm: args.lm.clone(),
@@ -572,12 +567,11 @@ fn run_apply_single(args: &ApplyArgs) -> Result<()> {
 
 /// Core apply logic (extracted from original run_apply).
 fn run_apply_core(args: &ApplyArgs) -> Result<()> {
-    let lens_flake = resolve_flake_ref(&args.lens_flake)?;
     let doc_pack_root = ensure_doc_pack_root(&args.doc_pack, false)?;
     let mut ctx = EnrichContext::load(doc_pack_root)?;
     ctx.require_config()?;
     enrich::validate_config(&ctx.config)?;
-    let mut manifest = ctx.manifest.clone();
+    let manifest = ctx.manifest.clone();
     let mut lock_status = ctx.lock_status.clone();
     let plan_state = plan_status(ctx.lock.as_ref(), ctx.plan.as_ref());
     let preflight = run_apply_preflight(
@@ -585,7 +579,7 @@ fn run_apply_core(args: &ApplyArgs) -> Result<()> {
         &lock_status,
         &plan_state,
         || {
-            manifest = refresh_pack_if_needed(&ctx, manifest.as_ref(), &lens_flake)?;
+            // Pack refresh is no longer needed - direct scenario execution
             Ok(())
         },
         || {
@@ -644,7 +638,6 @@ fn run_apply_core(args: &ApplyArgs) -> Result<()> {
         planned_actions: planned_actions.as_slice(),
         plan: &plan,
         manifest: manifest.as_ref(),
-        lens_flake: &lens_flake,
         binary_name: binary_name.as_deref(),
         staging_root: &staging_root,
         args,
@@ -786,7 +779,6 @@ struct ApplyInputs<'a> {
     planned_actions: &'a [enrich::PlannedAction],
     plan: &'a enrich::EnrichPlan,
     manifest: Option<&'a crate::pack::PackManifest>,
-    lens_flake: &'a str,
     binary_name: Option<&'a str>,
     staging_root: &'a Path,
     args: &'a ApplyArgs,
@@ -806,7 +798,6 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<ApplyPlanActionsResult
     let actions = inputs.planned_actions;
     let plan = inputs.plan;
     let manifest = inputs.manifest;
-    let lens_flake = inputs.lens_flake;
     let binary_name = inputs.binary_name;
     let staging_root = inputs.staging_root;
     let args = inputs.args;
@@ -860,7 +851,6 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<ApplyPlanActionsResult
             staging_root,
             inputs_hash: Some(plan.lock.inputs_hash.as_str()),
             manifest,
-            lens_flake,
             verbose: args.verbose,
             explore_hints: &args.explore,
             scope_context: &args.context,
@@ -908,12 +898,15 @@ fn apply_plan_actions(inputs: &ApplyInputs<'_>) -> Result<ApplyPlanActionsResult
             ));
             extra_scenarios.extend(batch.scenarios);
         }
+        let binary_path = manifest
+            .map(|m| m.binary_path.as_str())
+            .ok_or_else(|| anyhow!("binary path unavailable; manifest missing"))?;
         let run_result = scenarios::run_scenarios(&scenarios::RunScenariosArgs {
             pack_root: &pack_root,
             run_root: ctx.paths.root(),
             binary_name,
+            binary_path,
             scenarios_path: &scenarios_path,
-            lens_flake,
             display_root: Some(ctx.paths.root()),
             staging_root: Some(staging_root),
             kind_filter: None,

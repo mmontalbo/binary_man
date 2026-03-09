@@ -6,9 +6,7 @@ use super::config::{resolve_inputs, validate_config};
 use super::paths::rel_path;
 use super::{DocPackPaths, EnrichConfig, EnrichLock, LockStatus, LOCK_SCHEMA_VERSION};
 use anyhow::{Context, Result};
-use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -146,41 +144,9 @@ fn hash_path(hasher: &mut Sha256, root: &Path, path: &Path) -> Result<()> {
         hasher.update(b"file:");
         hasher.update(rel.to_string_lossy().as_bytes());
         let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
-        if is_binary_lens_manifest_path(path) {
-            if let Some(stable_bytes) = stable_binary_lens_manifest_bytes(&bytes) {
-                hasher.update(b":stable_manifest:");
-                hasher.update(&stable_bytes);
-                return Ok(());
-            }
-        }
         hasher.update(&bytes);
         return Ok(());
     }
     Ok(())
 }
 
-fn is_binary_lens_manifest_path(path: &Path) -> bool {
-    path.file_name() == Some(OsStr::new("manifest.json"))
-        && path
-            .parent()
-            .and_then(|parent| parent.file_name())
-            .is_some_and(|name| name == OsStr::new("binary.lens"))
-}
-
-fn stable_binary_lens_manifest_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
-    let mut manifest: Value = serde_json::from_slice(bytes).ok()?;
-    if let Some(digest) = manifest
-        .get("export_config_digest")
-        .and_then(|v| v.as_str())
-    {
-        return serde_json::to_vec(&serde_json::json!({ "export_config_digest": digest })).ok();
-    }
-
-    if let Some(obj) = manifest.as_object_mut() {
-        obj.remove("created_at");
-        obj.remove("created_at_epoch_seconds");
-        obj.remove("created_at_source");
-        obj.remove("coverage_summary");
-    }
-    serde_json::to_vec(&manifest).ok()
-}
