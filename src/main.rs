@@ -24,6 +24,7 @@ mod inspect;
 mod output;
 mod pack;
 mod render;
+mod sandbox;
 mod scenarios;
 mod semantics;
 mod simple_verify;
