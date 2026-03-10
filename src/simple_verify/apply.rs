@@ -149,7 +149,24 @@ fn compute_outcome(option_evidence: &Evidence, control_evidence: &Evidence) -> O
         };
     }
 
-    // Handle crashes (non-zero exit with no stdout) in the option run
+    // Compare option evidence to control evidence FIRST
+    // This ensures options that intentionally change exit code (like --quiet)
+    // are recognized as verified rather than crashed
+    let stdout_differs = option_evidence.stdout != control_evidence.stdout;
+    let stderr_differs = option_evidence.stderr != control_evidence.stderr;
+    let exit_differs = option_evidence.exit_code != control_evidence.exit_code;
+
+    if stdout_differs || stderr_differs || exit_differs {
+        let diff_kind = match (stdout_differs, stderr_differs, exit_differs) {
+            (true, false, false) => DiffKind::Stdout,
+            (false, true, false) => DiffKind::Stderr,
+            (false, false, true) => DiffKind::ExitCode,
+            _ => DiffKind::Multiple,
+        };
+        return Outcome::Verified { diff_kind };
+    }
+
+    // No difference from control - check if both crashed the same way
     if let Some(exit_code) = option_evidence.exit_code {
         if exit_code != 0 && option_evidence.stdout.is_empty() {
             return Outcome::Crashed {
@@ -162,22 +179,7 @@ fn compute_outcome(option_evidence: &Evidence, control_evidence: &Evidence) -> O
         }
     }
 
-    // Compare option evidence to control evidence
-    let stdout_differs = option_evidence.stdout != control_evidence.stdout;
-    let stderr_differs = option_evidence.stderr != control_evidence.stderr;
-    let exit_differs = option_evidence.exit_code != control_evidence.exit_code;
-
-    if stdout_differs || stderr_differs || exit_differs {
-        let diff_kind = match (stdout_differs, stderr_differs, exit_differs) {
-            (true, false, false) => DiffKind::Stdout,
-            (false, true, false) => DiffKind::Stderr,
-            (false, false, true) => DiffKind::ExitCode,
-            _ => DiffKind::Multiple,
-        };
-        Outcome::Verified { diff_kind }
-    } else {
-        Outcome::OutputsEqual
-    }
+    Outcome::OutputsEqual
 }
 
 #[cfg(test)]
