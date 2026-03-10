@@ -194,13 +194,13 @@ pub fn run(
 /// Format an action for display.
 fn format_action_desc(action: &super::lm::LmAction) -> String {
     match action {
-        super::lm::LmAction::SetBaseline { argv, .. } => {
-            format!("SetBaseline argv={:?}", argv)
+        super::lm::LmAction::SetBaseline { args, .. } => {
+            format!("SetBaseline args={:?}", args)
         }
         super::lm::LmAction::Test {
-            surface_id, argv, ..
+            surface_id, args, ..
         } => {
-            format!("Test {} argv={:?}", surface_id, argv)
+            format!("Test {} args={:?}", surface_id, args)
         }
         super::lm::LmAction::Exclude { surface_id, reason } => {
             format!("Exclude {} ({})", surface_id, reason)
@@ -295,6 +295,7 @@ mod tests {
                 SurfaceEntry {
                     id: "-a".to_string(),
                     description: "A".to_string(),
+                    context: None,
                     value_hint: None,
                     status: Status::Verified,
                     attempts: vec![],
@@ -302,6 +303,7 @@ mod tests {
                 SurfaceEntry {
                     id: "-b".to_string(),
                     description: "B".to_string(),
+                    context: None,
                     value_hint: None,
                     status: Status::Pending,
                     attempts: vec![],
@@ -309,6 +311,7 @@ mod tests {
                 SurfaceEntry {
                     id: "-c".to_string(),
                     description: "C".to_string(),
+                    context: None,
                     value_hint: None,
                     status: Status::Excluded {
                         reason: "test".to_string(),
@@ -337,14 +340,14 @@ mod tests {
         use crate::simple_verify::types::Seed;
 
         let action = LmAction::SetBaseline {
-            argv: vec!["diff".to_string()],
+            args: vec![],
             seed: Seed::default(),
         };
         assert!(format_action_desc(&action).contains("SetBaseline"));
 
         let action = LmAction::Test {
             surface_id: "--stat".to_string(),
-            argv: vec!["diff".to_string(), "--stat".to_string()],
+            args: vec!["--stat".to_string()],
             seed: Seed::default(),
         };
         assert!(format_action_desc(&action).contains("Test"));

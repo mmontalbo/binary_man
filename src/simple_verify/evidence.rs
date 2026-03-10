@@ -229,15 +229,6 @@ pub fn write_evidence(pack_path: &Path, relative_path: &str, evidence: &Evidence
         .with_context(|| format!("write evidence to {}", full_path.display()))
 }
 
-/// Load evidence from a file in the pack.
-pub fn load_evidence(pack_path: &Path, relative_path: &str) -> Result<Evidence> {
-    let full_path = pack_path.join(relative_path);
-    let content = fs::read_to_string(&full_path)
-        .with_context(|| format!("read evidence from {}", full_path.display()))?;
-    serde_json::from_str(&content)
-        .with_context(|| format!("parse evidence from {}", full_path.display()))
-}
-
 /// Truncate a string to a maximum number of characters.
 pub fn truncate_str(s: &str, max_chars: usize) -> String {
     if s.len() <= max_chars {
@@ -343,7 +334,11 @@ mod tests {
         };
 
         write_evidence(temp_pack.path(), "evidence/test.json", &evidence).unwrap();
-        let loaded = load_evidence(temp_pack.path(), "evidence/test.json").unwrap();
+
+        // Load and verify
+        let full_path = temp_pack.path().join("evidence/test.json");
+        let content = std::fs::read_to_string(&full_path).unwrap();
+        let loaded: Evidence = serde_json::from_str(&content).unwrap();
 
         assert_eq!(loaded.argv, evidence.argv);
         assert_eq!(loaded.stdout, evidence.stdout);

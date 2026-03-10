@@ -11,7 +11,11 @@ use std::fs;
 use std::path::Path;
 
 /// Current schema version for state serialization.
-pub const STATE_SCHEMA_VERSION: u32 = 1;
+///
+/// Version history:
+/// - v1: Initial schema
+/// - v2: Added context to SurfaceEntry, output previews to Attempt
+pub const STATE_SCHEMA_VERSION: u32 = 2;
 
 /// Complete verification state for a binary.
 ///
@@ -73,8 +77,11 @@ pub struct BaselineRecord {
 pub struct SurfaceEntry {
     /// Unique identifier (typically the option name, e.g., "--stat").
     pub id: String,
-    /// Human-readable description from help output.
+    /// Human-readable description from help output (multi-line descriptions joined).
     pub description: String,
+    /// Surrounding context (nearby options) for additional hints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
     /// Hint about expected value type (e.g., "<n>", "<file>").
     pub value_hint: Option<String>,
     /// Current verification status.
@@ -88,14 +95,25 @@ pub struct SurfaceEntry {
 pub struct Attempt {
     /// Cycle number when this attempt was made.
     pub cycle: u32,
-    /// Command arguments used.
-    pub argv: Vec<String>,
+    /// Arguments provided by the LM (appended to base command).
+    pub args: Vec<String>,
+    /// Full argv used for execution (context_argv + args).
+    pub full_argv: Vec<String>,
     /// Seed configuration used.
     pub seed: Seed,
     /// Relative path to evidence file within the pack.
     pub evidence_path: String,
     /// Result of the attempt.
     pub outcome: Outcome,
+    /// Preview of stdout from the option run (first ~200 chars).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stdout_preview: Option<String>,
+    /// Preview of stderr from the option run (first ~200 chars).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stderr_preview: Option<String>,
+    /// Preview of stdout from the control run (for comparison).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_stdout_preview: Option<String>,
 }
 
 /// Environment setup before scenario execution.
@@ -196,6 +214,7 @@ mod tests {
             entries: vec![SurfaceEntry {
                 id: "--verbose".to_string(),
                 description: "Enable verbose output".to_string(),
+                context: None,
                 value_hint: None,
                 status: Status::Pending,
                 attempts: vec![],

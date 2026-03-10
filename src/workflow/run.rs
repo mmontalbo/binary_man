@@ -1,7 +1,6 @@
-//! Convenience workflow for the `bman run <binary>` command.
+//! Entry point for `bman <binary>` command.
 //!
-//! Uses the simplified LM-driven verification loop:
-//! bootstrap → [gather pending → lm_call → apply actions → save]* → done
+//! Runs the LM-driven verification loop to document a binary.
 
 use crate::cli::{OutputFormat, RunArgs};
 use crate::simple_verify;

@@ -1,25 +1,19 @@
-//! Simplified behavior verification workflow.
+//! LM-driven behavior verification.
 //!
-//! This module implements a radically simpler alternative to the main verification
-//! system. Instead of 11 state files, 7 priorities, and complex decision trees,
-//! it uses a single LM-driven loop:
-//!
+//! Core verification loop:
 //! ```text
-//! bootstrap (--help only) → [gather pending → lm_call → apply actions → run scenarios → save]* → done
+//! bootstrap → [gather pending → lm_call → apply actions → save]* → done
 //! ```
 //!
-//! # Key Simplifications
+//! # Design
 //!
 //! - **Single state file**: `state.json` captures all verification progress
-//! - **No decision tree**: The LM decides all actions
-//! - **No SQL queries**: In-memory state only
-//! - **Simple evidence**: Direct subprocess execution, no binary_lens
+//! - **LM decides actions**: The LM determines what to test and how
+//! - **In-memory state**: No external databases or queries
 //!
 //! # Usage
 //!
 //! ```ignore
-//! use simple_verify::run;
-//!
 //! let result = run("git", &["diff"], pack_path, 20, "claude -p", true)?;
 //! ```
 

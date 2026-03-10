@@ -9,6 +9,9 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::process::Command;
 
+/// Maximum number of surrounding options to include as context.
+const CONTEXT_WINDOW_SIZE: usize = 2;
+
 /// Bootstrap a new verification state for a binary.
 ///
 /// This runs both `--help` and `-h` to discover surface items, merging results
@@ -32,6 +35,7 @@ pub fn bootstrap(binary: &str, context_argv: &[String]) -> Result<State> {
         .map(|s| SurfaceEntry {
             id: s.id,
             description: s.description,
+            context: s.context,
             value_hint: s.value_hint,
             status: Status::Pending,
             attempts: vec![],
@@ -53,8 +57,10 @@ pub fn bootstrap(binary: &str, context_argv: &[String]) -> Result<State> {
 struct DiscoveredSurface {
     /// Option name (e.g., "--stat", "-v").
     id: String,
-    /// Description from help text.
+    /// Full description from help text (multi-line descriptions joined).
     description: String,
+    /// Surrounding context (nearby options) for additional hints.
+    context: Option<String>,
     /// Value hint (e.g., "<n>", "<file>").
     value_hint: Option<String>,
 }
@@ -173,19 +179,58 @@ fn help_likelihood_score(text: &str) -> usize {
     score
 }
 
+/// An option block parsed from help text.
+#[derive(Debug, Clone)]
+struct OptionBlock {
+    /// Option ID (e.g., "--stat", "-v").
+    id: String,
+    /// Full description with continuation lines joined.
+    description: String,
+    /// Value hint (e.g., "<n>", "<file>").
+    value_hint: Option<String>,
+}
+
 /// Parse surface items from help output text.
 ///
-/// This is a simple regex-based parser that looks for common option patterns:
-/// - Short options: -x, -v
-/// - Long options: --verbose, --color=<when>
-/// - Combined: -v, --verbose
+/// This parser handles multi-line descriptions by detecting continuation lines
+/// (lines that are indented more than the option line or start with whitespace only).
+///
+/// It also captures surrounding context from neighboring options.
 fn parse_surfaces_from_help(help_text: &str) -> Vec<DiscoveredSurface> {
+    // First pass: parse all option blocks with full multi-line descriptions
+    let blocks = parse_option_blocks(help_text);
+
+    // Second pass: convert to surfaces with surrounding context
     let mut surfaces = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
+    for (i, block) in blocks.iter().enumerate() {
+        if seen.contains(&block.id) || is_help_option(&block.id) {
+            continue;
+        }
+        seen.insert(block.id.clone());
+
+        // Build surrounding context from neighboring options
+        let context = build_context(&blocks, i);
+
+        surfaces.push(DiscoveredSurface {
+            id: block.id.clone(),
+            description: block.description.clone(),
+            context,
+            value_hint: block.value_hint.clone(),
+        });
+    }
+
+    surfaces
+}
+
+/// Parse help text into option blocks, joining multi-line descriptions.
+fn parse_option_blocks(help_text: &str) -> Vec<OptionBlock> {
+    let mut blocks = Vec::new();
+
     // Pattern for long options (optionally with short)
     let long_pattern = regex::Regex::new(
-        r"^\s*(?P<short>-[a-zA-Z0-9])?\s*,?\s*(?P<long>--[a-zA-Z0-9][a-zA-Z0-9_-]*)(?:[=\s](?P<value>[<\[]\S+[>\]]))?(?:\s+(?P<desc>.*))?",
+        r"^\s*(?:-[a-zA-Z0-9])?\s*,?\s*(?P<long>--[a-zA-Z0-9][a-zA-Z0-9_-]*)(?:[=\s](?P<value>[<\[]\S+[>\]]))?(?:\s+(?P<desc>.*))?",
     )
     .expect("valid regex");
 
@@ -195,60 +240,152 @@ fn parse_surfaces_from_help(help_text: &str) -> Vec<DiscoveredSurface> {
     )
     .expect("valid regex");
 
-    for line in help_text.lines() {
-        // Skip lines that don't look like option definitions
+    let lines: Vec<&str> = help_text.lines().collect();
+    let mut i = 0;
+
+    while i < lines.len() {
+        let line = lines[i];
         let trimmed = line.trim_start();
+
+        // Skip lines that don't look like option definitions
         if !trimmed.starts_with('-') {
+            i += 1;
             continue;
         }
 
-        // Try long option pattern first
-        if let Some(caps) = long_pattern.captures(line) {
-            let long_opt = caps.name("long").map(|m| m.as_str());
+        let line_indent = leading_whitespace_count(line);
 
-            if let Some(long) = long_opt {
+        // Try to match an option
+        let parsed = if let Some(caps) = long_pattern.captures(line) {
+            caps.name("long").map(|long| {
                 let value_hint = caps.name("value").map(|m| m.as_str().to_string());
-                let description = caps
+                let desc_start = caps
                     .name("desc")
                     .map(|m| m.as_str().trim().to_string())
                     .unwrap_or_default();
-
-                let id = long.to_string();
-                if !seen.contains(&id) && !is_help_option(&id) {
-                    seen.insert(id.clone());
-                    surfaces.push(DiscoveredSurface {
-                        id,
-                        description,
-                        value_hint,
-                    });
-                }
-                continue;
-            }
-        }
-
-        // Try short-only option pattern
-        if let Some(caps) = short_pattern.captures(line) {
-            if let Some(short) = caps.name("short").map(|m| m.as_str()) {
+                (long.as_str().to_string(), value_hint, desc_start)
+            })
+        } else if let Some(caps) = short_pattern.captures(line) {
+            caps.name("short").map(|short| {
                 let value_hint = caps.name("value").map(|m| m.as_str().to_string());
-                let description = caps
+                let desc_start = caps
                     .name("desc")
                     .map(|m| m.as_str().trim().to_string())
                     .unwrap_or_default();
+                (short.as_str().to_string(), value_hint, desc_start)
+            })
+        } else {
+            None
+        };
 
-                let id = short.to_string();
-                if !seen.contains(&id) && !is_help_option(&id) {
-                    seen.insert(id.clone());
-                    surfaces.push(DiscoveredSurface {
-                        id,
-                        description,
-                        value_hint,
-                    });
+        if let Some((id, value_hint, mut description)) = parsed {
+            // Look for continuation lines
+            i += 1;
+            while i < lines.len() {
+                let next_line = lines[i];
+                let next_trimmed = next_line.trim_start();
+
+                // Stop if we hit another option definition
+                // Check for -X (short) or --foo (long) patterns
+                if next_trimmed.starts_with('-')
+                    && next_trimmed
+                        .chars()
+                        .nth(1)
+                        .map(|c| c.is_alphanumeric() || c == '-')
+                        .unwrap_or(false)
+                {
+                    break;
+                }
+
+                // Stop if we hit an empty line
+                if next_trimmed.is_empty() {
+                    i += 1;
+                    break;
+                }
+
+                let next_indent = leading_whitespace_count(next_line);
+
+                // Continuation lines are typically more indented or at description indent
+                // For man-page style, descriptions start on the next line with more indent
+                if next_indent > line_indent || (line_indent == 0 && next_indent >= 8) {
+                    // Join with space, trimming excessive whitespace
+                    if !description.is_empty() {
+                        description.push(' ');
+                    }
+                    description.push_str(next_trimmed);
+                    i += 1;
+                } else {
+                    break;
                 }
             }
+
+            blocks.push(OptionBlock {
+                id,
+                description,
+                value_hint,
+            });
+        } else {
+            i += 1;
         }
     }
 
-    surfaces
+    blocks
+}
+
+/// Count leading whitespace characters.
+fn leading_whitespace_count(s: &str) -> usize {
+    s.chars().take_while(|c| c.is_whitespace()).count()
+}
+
+/// Build context string from surrounding option blocks.
+fn build_context(blocks: &[OptionBlock], current_idx: usize) -> Option<String> {
+    if blocks.len() <= 1 {
+        return None;
+    }
+
+    let mut context_parts = Vec::new();
+
+    // Get previous options (up to CONTEXT_WINDOW_SIZE)
+    let start = current_idx.saturating_sub(CONTEXT_WINDOW_SIZE);
+    for block in blocks.iter().skip(start).take(current_idx - start) {
+        let short_desc = truncate_context_desc(&block.description, 60);
+        if short_desc.is_empty() {
+            context_parts.push(block.id.clone());
+        } else {
+            context_parts.push(format!("{}: {}", block.id, short_desc));
+        }
+    }
+
+    // Get next options (up to CONTEXT_WINDOW_SIZE)
+    for block in blocks.iter().skip(current_idx + 1).take(CONTEXT_WINDOW_SIZE) {
+        let short_desc = truncate_context_desc(&block.description, 60);
+        if short_desc.is_empty() {
+            context_parts.push(block.id.clone());
+        } else {
+            context_parts.push(format!("{}: {}", block.id, short_desc));
+        }
+    }
+
+    if context_parts.is_empty() {
+        None
+    } else {
+        Some(format!("Related options: {}", context_parts.join("; ")))
+    }
+}
+
+/// Truncate a description for context display.
+fn truncate_context_desc(desc: &str, max_len: usize) -> String {
+    if desc.len() <= max_len {
+        desc.to_string()
+    } else {
+        // Find a word boundary
+        let truncated = &desc[..max_len];
+        if let Some(last_space) = truncated.rfind(' ') {
+            format!("{}...", &desc[..last_space])
+        } else {
+            format!("{}...", truncated)
+        }
+    }
 }
 
 /// Check if an option is a help/version option that shouldn't be verified.
@@ -379,5 +516,87 @@ usage: git diff [<options>] [<commit>] [--] [<path>...]
         assert!(surfaces.iter().any(|s| s.id == "--stat"));
         assert!(surfaces.iter().any(|s| s.id == "--compact-summary"));
         assert!(surfaces.iter().any(|s| s.id == "--numstat"));
+    }
+
+    #[test]
+    fn test_parse_multiline_descriptions() {
+        // Test that multi-line descriptions are joined properly
+        let help = r#"
+  -L, --dereference          when showing file information for a symbolic
+                               link, show information for the file the link
+                               references rather than for the link itself
+  -H                         follow symbolic links on command line
+"#;
+
+        let surfaces = parse_surfaces_from_help(help);
+
+        let deref = surfaces.iter().find(|s| s.id == "--dereference").unwrap();
+        // Description should be joined into a single string
+        assert!(deref.description.contains("when showing file information"));
+        assert!(deref.description.contains("references rather than"));
+        // Should not have excessive newlines
+        assert!(!deref.description.contains('\n'));
+    }
+
+    #[test]
+    fn test_surrounding_context() {
+        let help = r#"
+  -a, --all                  do not ignore entries starting with .
+  -A, --almost-all           do not list implied . and ..
+  -B, --ignore-backups       do not list implied entries ending with ~
+  -C                         list entries by columns
+  -d, --directory            list directories themselves, not their contents
+"#;
+
+        let surfaces = parse_surfaces_from_help(help);
+
+        // Find --ignore-backups which is in the middle
+        let backups = surfaces.iter().find(|s| s.id == "--ignore-backups").unwrap();
+
+        // Should have context from surrounding options
+        assert!(backups.context.is_some());
+        let ctx = backups.context.as_ref().unwrap();
+        assert!(ctx.contains("Related options:"));
+        // Should include neighbors
+        assert!(ctx.contains("--almost-all") || ctx.contains("--all"));
+        assert!(ctx.contains("-C") || ctx.contains("--directory"));
+    }
+
+    #[test]
+    fn test_man_page_multiline() {
+        // Man page style where description is on next line
+        let help = r#"
+       --stat[=<width>[,<name-width>[,<count>]]]
+           Generate a diffstat. By default, as much space as necessary
+           will be used for the filename part, and the rest for the graph
+           part. Maximum width defaults to terminal width.
+       --compact-summary
+           Output a condensed summary of extended header information
+"#;
+
+        let surfaces = parse_surfaces_from_help(help);
+
+        let stat = surfaces.iter().find(|s| s.id == "--stat").unwrap();
+        // Should capture the full multi-line description
+        assert!(stat.description.contains("Generate a diffstat"));
+        assert!(stat.description.contains("Maximum width defaults"));
+    }
+
+    #[test]
+    fn test_leading_whitespace_count() {
+        assert_eq!(leading_whitespace_count("hello"), 0);
+        assert_eq!(leading_whitespace_count("  hello"), 2);
+        assert_eq!(leading_whitespace_count("\thello"), 1);
+        assert_eq!(leading_whitespace_count("    "), 4);
+    }
+
+    #[test]
+    fn test_truncate_context_desc() {
+        assert_eq!(truncate_context_desc("short", 10), "short");
+        assert_eq!(
+            truncate_context_desc("this is a longer description", 15),
+            "this is a..."
+        );
+        assert_eq!(truncate_context_desc("nospaces", 5), "nospa...");
     }
 }

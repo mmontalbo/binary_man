@@ -1,39 +1,9 @@
-//! Doc-pack enrichment workflow entrypoint.
+//! bman - Binary documentation generator.
 //!
-//! The binary keeps orchestration thin: the core loop (init → apply → status, with validate/plan
-//! auto-run by apply) is deterministic and driven by pack-owned artifacts (JSON + SQL). This
-//! makes the CLI a small dispatch layer so other consumers (e.g., the inspector) can reuse the
-//! same internal logic.
-#![warn(
-    clippy::too_many_lines,
-    clippy::cognitive_complexity,
-    clippy::too_many_arguments,
-    clippy::type_complexity,
-    clippy::large_types_passed_by_value,
-    clippy::needless_pass_by_value,
-    clippy::redundant_clone,
-    clippy::cloned_instead_of_copied,
-    clippy::if_then_some_else_none,
-    clippy::match_bool
-)]
+//! Uses LM-driven verification to document CLI binaries.
 
 mod cli;
-mod docpack;
-mod enrich;
-mod inspect;
-mod output;
-mod pack;
-mod render;
-mod sandbox;
-mod scenarios;
-mod semantics;
 mod simple_verify;
-mod staging;
-mod status;
-mod surface;
-mod templates;
-mod util;
-mod verification_progress;
 mod workflow;
 
 use anyhow::Result;
@@ -47,27 +17,6 @@ fn main() -> Result<()> {
         .with_target(false)
         .init();
 
-    // Check if first arg is an explicit subcommand or help flag
-    let args: Vec<String> = std::env::args().collect();
-    let explicit_subcommands = ["status", "apply", "inspect", "help"];
-    let root_help_flags = ["-h", "--help", "-V", "--version"];
-
-    let is_explicit_subcommand = args.len() > 1 && {
-        let first = &args[1];
-        explicit_subcommands.contains(&first.as_str()) || root_help_flags.contains(&first.as_str())
-    };
-
-    if is_explicit_subcommand {
-        // Parse as subcommand
-        let root_args = cli::RootArgs::parse();
-        match root_args.command {
-            cli::Command::Apply(args) => workflow::run_apply(&args),
-            cli::Command::Status(args) => workflow::run_status(&args),
-            cli::Command::Inspect(args) => inspect::run(&args),
-        }
-    } else {
-        // Default: parse as RunArgs directly (bman [OPTIONS] <binary> [entrypoint...])
-        let run_args = cli::RunArgs::parse();
-        workflow::run_run(&run_args)
-    }
+    let run_args = cli::RunArgs::parse();
+    workflow::run_run(&run_args)
 }

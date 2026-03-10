@@ -2,6 +2,9 @@
 //!
 //! Before applying an LM action, we validate it against the current state
 //! to catch common mistakes early and provide helpful error messages.
+//!
+//! Note: The system automatically prepends context_argv to LM-provided args,
+//! so we don't need to validate that the LM included the context prefix.
 
 use super::lm::LmAction;
 use super::types::{State, Status};
@@ -16,10 +19,10 @@ pub fn validate_action(action: &LmAction, state: &State) -> Result<(), String> {
             if state.baseline.is_some() {
                 return Err("Baseline already exists".to_string());
             }
-            // Empty argv is valid for binaries like `ls` that work with no args
+            // args can be empty for baseline (just runs context_argv)
         }
         LmAction::Test {
-            surface_id, argv, ..
+            surface_id, args, ..
         } => {
             // Surface must exist
             if !state.entries.iter().any(|e| &e.id == surface_id) {
@@ -34,8 +37,9 @@ pub fn validate_action(action: &LmAction, state: &State) -> Result<(), String> {
                     ));
                 }
             }
-            if argv.is_empty() {
-                return Err(format!("Empty argv for surface {}", surface_id));
+            // Test must have args (the option being tested)
+            if args.is_empty() {
+                return Err(format!("Empty args for surface {}", surface_id));
             }
         }
         LmAction::Exclude { surface_id, reason } => {
@@ -75,6 +79,7 @@ mod tests {
                 SurfaceEntry {
                     id: "--verbose".to_string(),
                     description: "Be verbose".to_string(),
+                    context: None,
                     value_hint: None,
                     status: Status::Pending,
                     attempts: vec![],
@@ -82,6 +87,7 @@ mod tests {
                 SurfaceEntry {
                     id: "--quiet".to_string(),
                     description: "Be quiet".to_string(),
+                    context: None,
                     value_hint: None,
                     status: Status::Verified,
                     attempts: vec![],
@@ -95,7 +101,7 @@ mod tests {
     fn test_validate_set_baseline_ok() {
         let state = test_state();
         let action = LmAction::SetBaseline {
-            argv: vec!["arg".to_string()],
+            args: vec!["arg".to_string()],
             seed: Seed::default(),
         };
         assert!(validate_action(&action, &state).is_ok());
@@ -111,7 +117,7 @@ mod tests {
         });
 
         let action = LmAction::SetBaseline {
-            argv: vec!["arg".to_string()],
+            args: vec!["arg".to_string()],
             seed: Seed::default(),
         };
         let result = validate_action(&action, &state);
@@ -120,11 +126,11 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_set_baseline_empty_argv_ok() {
-        // Empty argv is valid for binaries like `ls` that work with no arguments
+    fn test_validate_set_baseline_empty_args_ok() {
+        // Empty args is valid - baseline just runs context_argv
         let state = test_state();
         let action = LmAction::SetBaseline {
-            argv: vec![],
+            args: vec![],
             seed: Seed::default(),
         };
         assert!(validate_action(&action, &state).is_ok());
@@ -135,7 +141,7 @@ mod tests {
         let state = test_state();
         let action = LmAction::Test {
             surface_id: "--verbose".to_string(),
-            argv: vec!["--verbose".to_string()],
+            args: vec!["--verbose".to_string()],
             seed: Seed::default(),
         };
         assert!(validate_action(&action, &state).is_ok());
@@ -146,7 +152,7 @@ mod tests {
         let state = test_state();
         let action = LmAction::Test {
             surface_id: "--unknown".to_string(),
-            argv: vec!["--unknown".to_string()],
+            args: vec!["--unknown".to_string()],
             seed: Seed::default(),
         };
         let result = validate_action(&action, &state);
@@ -159,12 +165,25 @@ mod tests {
         let state = test_state();
         let action = LmAction::Test {
             surface_id: "--quiet".to_string(), // This one is Verified
-            argv: vec!["--quiet".to_string()],
+            args: vec!["--quiet".to_string()],
             seed: Seed::default(),
         };
         let result = validate_action(&action, &state);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not pending"));
+    }
+
+    #[test]
+    fn test_validate_test_empty_args() {
+        let state = test_state();
+        let action = LmAction::Test {
+            surface_id: "--verbose".to_string(),
+            args: vec![], // Empty args for Test should fail
+            seed: Seed::default(),
+        };
+        let result = validate_action(&action, &state);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Empty args"));
     }
 
     #[test]
@@ -187,5 +206,34 @@ mod tests {
         let result = validate_action(&action, &state);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Empty exclusion reason"));
+    }
+
+    #[test]
+    fn test_validate_with_context_argv() {
+        // With the new interface, context_argv is handled by the system
+        // LM just provides args, which get appended
+        let mut state = test_state();
+        state.context_argv = vec!["diff".to_string()];
+
+        // LM just provides the option, system prepends context
+        let action = LmAction::Test {
+            surface_id: "--verbose".to_string(),
+            args: vec!["--verbose".to_string()],
+            seed: Seed::default(),
+        };
+        assert!(validate_action(&action, &state).is_ok());
+    }
+
+    #[test]
+    fn test_validate_baseline_with_context() {
+        let mut state = test_state();
+        state.context_argv = vec!["diff".to_string()];
+
+        // Baseline with empty args is valid - system uses context_argv
+        let action = LmAction::SetBaseline {
+            args: vec![],
+            seed: Seed::default(),
+        };
+        assert!(validate_action(&action, &state).is_ok());
     }
 }

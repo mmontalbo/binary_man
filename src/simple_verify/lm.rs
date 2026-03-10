@@ -26,8 +26,8 @@ pub struct LmResponse {
 pub enum LmAction {
     /// Set the baseline scenario (required first, exactly once).
     SetBaseline {
-        /// Command arguments WITHOUT the surface being tested.
-        argv: Vec<String>,
+        /// Additional arguments appended to base command (usually empty).
+        args: Vec<String>,
         /// Seed setup for the baseline.
         seed: Seed,
     },
@@ -35,8 +35,8 @@ pub enum LmAction {
     Test {
         /// Which surface to test.
         surface_id: String,
-        /// Full command with the surface option.
-        argv: Vec<String>,
+        /// Arguments appended to base command (system prepends context_argv).
+        args: Vec<String>,
         /// Seed setup for this test.
         seed: Seed,
     },
@@ -268,13 +268,13 @@ mod tests {
             "actions": [
                 {
                     "kind": "SetBaseline",
-                    "argv": ["diff"],
+                    "args": [],
                     "seed": {"setup": [["git", "init"]], "files": []}
                 },
                 {
                     "kind": "Test",
                     "surface_id": "--stat",
-                    "argv": ["diff", "--stat"],
+                    "args": ["--stat"],
                     "seed": {"setup": [["git", "init"]], "files": []}
                 }
             ]
@@ -284,18 +284,18 @@ mod tests {
         assert_eq!(response.actions.len(), 2);
 
         match &response.actions[0] {
-            LmAction::SetBaseline { argv, .. } => {
-                assert_eq!(argv, &["diff"]);
+            LmAction::SetBaseline { args, .. } => {
+                assert!(args.is_empty());
             }
             _ => panic!("Expected SetBaseline"),
         }
 
         match &response.actions[1] {
             LmAction::Test {
-                surface_id, argv, ..
+                surface_id, args, ..
             } => {
                 assert_eq!(surface_id, "--stat");
-                assert_eq!(argv, &["diff", "--stat"]);
+                assert_eq!(args, &["--stat"]);
             }
             _ => panic!("Expected Test"),
         }
