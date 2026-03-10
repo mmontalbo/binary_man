@@ -5,9 +5,10 @@
 
 use super::apply::apply_action;
 use super::bootstrap::bootstrap;
+use super::evidence::{run_scenario, truncate_str, write_evidence};
 use super::lm::{invoke_lm, log_prompt, log_response};
 use super::prompt::build_prompt;
-use super::types::{State, Status};
+use super::types::{Attempt, DiffKind, Outcome, State, Status};
 use super::validate::validate_action;
 use anyhow::{Context, Result};
 use std::fs;
@@ -18,6 +19,16 @@ const MAX_ATTEMPTS: usize = 5;
 
 /// Maximum surfaces to include in each LM batch.
 const BATCH_SIZE: usize = 5;
+
+/// Modifier flags to probe when an option consistently produces OutputsEqual.
+/// These are common CLI modifiers that change output format/verbosity.
+const PROBE_MODIFIERS: &[&str] = &["-l", "-v", "-a", "-1", "--verbose"];
+
+/// Minimum attempts with OutputsEqual before trying modifier probing.
+const PROBE_THRESHOLD: usize = 3;
+
+/// Maximum length for output previews stored in Attempt records.
+const OUTPUT_PREVIEW_MAX_LEN: usize = 200;
 
 /// Result of a verification run.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +83,11 @@ pub fn run(
             state.save(pack_path)?;
             return Ok(RunResult::HitMaxCycles);
         }
+
+        // Modifier probing: try combining options with modifier flags
+        // when they've hit PROBE_THRESHOLD attempts with all OutputsEqual.
+        // This runs BEFORE auto-exhaust, giving options a chance to be verified.
+        probe_entries_with_modifiers(&mut state, pack_path, verbose)?;
 
         // Auto-exhaust surfaces over attempt limit
         for entry in &mut state.entries {
@@ -184,6 +200,211 @@ pub fn run(
             );
         }
     }
+}
+
+/// Probe entries that have hit PROBE_THRESHOLD with all OutputsEqual outcomes.
+///
+/// For each such entry, try combining the option with modifier flags to find
+/// a context where it produces different output. This is a mechanical probe
+/// with no LM calls.
+fn probe_entries_with_modifiers(
+    state: &mut State,
+    pack_path: &Path,
+    verbose: bool,
+) -> Result<()> {
+    // Find entries eligible for probing:
+    // - Status::Pending
+    // - Exactly PROBE_THRESHOLD attempts
+    // - All attempts have OutputsEqual outcome
+    let probe_candidates: Vec<(usize, String)> = state
+        .entries
+        .iter()
+        .enumerate()
+        .filter(|(_, entry)| {
+            matches!(entry.status, Status::Pending)
+                && entry.attempts.len() == PROBE_THRESHOLD
+                && entry
+                    .attempts
+                    .iter()
+                    .all(|a| matches!(a.outcome, Outcome::OutputsEqual))
+        })
+        .map(|(idx, entry)| (idx, entry.id.clone()))
+        .collect();
+
+    if probe_candidates.is_empty() {
+        return Ok(());
+    }
+
+    if verbose {
+        eprintln!(
+            "Probing {} option(s) with modifier flags...",
+            probe_candidates.len()
+        );
+    }
+
+    for (entry_idx, surface_id) in probe_candidates {
+        // Get the seed from the most recent attempt
+        let seed = state.entries[entry_idx]
+            .attempts
+            .last()
+            .map(|a| a.seed.clone())
+            .unwrap_or_default();
+
+        if verbose {
+            eprintln!("  Probing {} with modifiers...", surface_id);
+        }
+
+        for modifier in PROBE_MODIFIERS {
+            // Skip if the modifier is the same as the option being tested
+            if *modifier == surface_id {
+                continue;
+            }
+
+            // Build control argv: context_argv + modifier
+            let control_argv: Vec<String> = state
+                .context_argv
+                .iter()
+                .cloned()
+                .chain(std::iter::once(modifier.to_string()))
+                .collect();
+
+            // Build variant argv: context_argv + modifier + option
+            let variant_argv: Vec<String> = state
+                .context_argv
+                .iter()
+                .cloned()
+                .chain(std::iter::once(modifier.to_string()))
+                .chain(std::iter::once(surface_id.clone()))
+                .collect();
+
+            // Run control scenario
+            let probe_id = format!(
+                "{}_probe_{}_c{}",
+                sanitize_id(&surface_id),
+                sanitize_id(modifier),
+                state.cycle
+            );
+            let control_id = format!("{}_control", probe_id);
+
+            let control_evidence = match run_scenario(
+                pack_path,
+                &control_id,
+                &state.binary,
+                &control_argv,
+                &seed,
+            ) {
+                Ok(ev) => ev,
+                Err(_) => continue, // Skip this modifier on error
+            };
+
+            // Run variant scenario
+            let variant_evidence =
+                match run_scenario(pack_path, &probe_id, &state.binary, &variant_argv, &seed) {
+                    Ok(ev) => ev,
+                    Err(_) => continue, // Skip this modifier on error
+                };
+
+            // Compare outputs
+            let stdout_differs = variant_evidence.stdout != control_evidence.stdout;
+            let stderr_differs = variant_evidence.stderr != control_evidence.stderr;
+            let exit_differs = variant_evidence.exit_code != control_evidence.exit_code;
+
+            if stdout_differs || stderr_differs || exit_differs {
+                // Found a difference! Record the attempt and mark as verified.
+                let diff_kind = match (stdout_differs, stderr_differs, exit_differs) {
+                    (true, false, false) => DiffKind::Stdout,
+                    (false, true, false) => DiffKind::Stderr,
+                    (false, false, true) => DiffKind::ExitCode,
+                    _ => DiffKind::Multiple,
+                };
+
+                if verbose {
+                    eprintln!(
+                        "    Probe {} + {}: outputs differ! ({:?})",
+                        modifier, surface_id, diff_kind
+                    );
+                }
+
+                // Write evidence files
+                let control_path = format!("evidence/{}.json", control_id);
+                let variant_path = format!("evidence/{}.json", probe_id);
+                write_evidence(pack_path, &control_path, &control_evidence)?;
+                write_evidence(pack_path, &variant_path, &variant_evidence)?;
+
+                // Capture output previews
+                let stdout_preview = if variant_evidence.stdout.is_empty() {
+                    None
+                } else {
+                    Some(truncate_str(
+                        &variant_evidence.stdout,
+                        OUTPUT_PREVIEW_MAX_LEN,
+                    ))
+                };
+                let stderr_preview = if variant_evidence.stderr.is_empty() {
+                    None
+                } else {
+                    Some(truncate_str(
+                        &variant_evidence.stderr,
+                        OUTPUT_PREVIEW_MAX_LEN,
+                    ))
+                };
+                let control_stdout_preview = if control_evidence.stdout.is_empty() {
+                    None
+                } else {
+                    Some(truncate_str(
+                        &control_evidence.stdout,
+                        OUTPUT_PREVIEW_MAX_LEN,
+                    ))
+                };
+
+                // Record the successful probe attempt
+                let entry = &mut state.entries[entry_idx];
+                entry.attempts.push(Attempt {
+                    cycle: state.cycle,
+                    args: vec![modifier.to_string(), surface_id.clone()],
+                    full_argv: variant_argv,
+                    seed,
+                    evidence_path: variant_path,
+                    outcome: Outcome::Verified {
+                        diff_kind: diff_kind.clone(),
+                    },
+                    stdout_preview,
+                    stderr_preview,
+                    control_stdout_preview,
+                });
+
+                // Mark as verified
+                entry.status = Status::Verified;
+
+                if verbose {
+                    eprintln!("    Verified {} via modifier probe", surface_id);
+                }
+
+                // Break on first success - no need to try more modifiers
+                break;
+            }
+        }
+    }
+
+    // Save state after probing
+    state.save(pack_path)?;
+
+    Ok(())
+}
+
+/// Sanitize a surface ID for use in filenames.
+fn sanitize_id(id: &str) -> String {
+    let trimmed = id.trim_start_matches('-');
+    trimmed
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 /// Format an action for display.
