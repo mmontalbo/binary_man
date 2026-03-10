@@ -92,9 +92,6 @@ fn print_result(result: &simple_verify::RunResult) {
         simple_verify::RunResult::HitMaxCycles => {
             println!("\nResult: Hit max cycles limit");
         }
-        simple_verify::RunResult::LmGaveUp => {
-            println!("\nResult: LM gave up (returned no actions)");
-        }
     }
 }
 

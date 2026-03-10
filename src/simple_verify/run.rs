@@ -26,8 +26,6 @@ pub enum RunResult {
     Complete,
     /// Reached max_cycles limit.
     HitMaxCycles,
-    /// LM returned no actions for pending surfaces.
-    LmGaveUp,
 }
 
 /// Run the verification loop.
@@ -71,6 +69,7 @@ pub fn run(
             if verbose {
                 eprintln!("Hit max cycles limit ({})", max_cycles);
             }
+            state.save(pack_path)?;
             return Ok(RunResult::HitMaxCycles);
         }
 
@@ -99,6 +98,7 @@ pub fn run(
             if verbose {
                 eprintln!("All surfaces processed - complete!");
             }
+            state.save(pack_path)?;
             return Ok(RunResult::Complete);
         }
 
@@ -124,20 +124,15 @@ pub fn run(
         let response = invoke_lm(lm_command, &prompt)?;
         log_response(pack_path, state.cycle, &response)?;
 
-        // Handle empty response
+        // Handle empty response - continue to next cycle instead of giving up
+        // Empty actions can mean LM parse failed (graceful degradation) or LM
+        // genuinely had nothing to say. Either way, try again next cycle.
         if response.actions.is_empty() {
             if verbose {
-                eprintln!("  LM returned no actions - giving up on remaining surfaces");
-            }
-            for entry in &mut state.entries {
-                if matches!(entry.status, Status::Pending) {
-                    entry.status = Status::Excluded {
-                        reason: "LM provided no actions".into(),
-                    };
-                }
+                eprintln!("  LM returned no actions - continuing to next cycle");
             }
             state.save(pack_path)?;
-            return Ok(RunResult::LmGaveUp);
+            continue;
         }
 
         if verbose {
