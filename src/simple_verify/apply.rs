@@ -331,6 +331,7 @@ mod tests {
             stderr: "".to_string(),
             exit_code: Some(0),
             setup_failed: false,
+            setup_results: Vec::new(),
             execution_error: None,
             captured_at_ms: 0,
         };
@@ -343,6 +344,7 @@ mod tests {
             stderr: "".to_string(),
             exit_code: Some(0),
             setup_failed: false,
+            setup_results: Vec::new(),
             execution_error: None,
             captured_at_ms: 0,
         };
@@ -361,6 +363,7 @@ mod tests {
             stderr: "".to_string(),
             exit_code: Some(0),
             setup_failed: false,
+            setup_results: Vec::new(),
             execution_error: None,
             captured_at_ms: 0,
         };
@@ -373,6 +376,7 @@ mod tests {
             stderr: "".to_string(),
             exit_code: Some(0),
             setup_failed: false,
+            setup_results: Vec::new(),
             execution_error: None,
             captured_at_ms: 0,
         };

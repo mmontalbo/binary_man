@@ -18,6 +18,19 @@ const DEFAULT_TIMEOUT_SECS: u64 = 30;
 /// Maximum bytes to capture for stdout/stderr.
 const MAX_OUTPUT_BYTES: usize = 64 * 1024;
 
+/// Result of a single setup command execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetupResult {
+    /// Index in the setup commands array.
+    pub index: usize,
+    /// The command that was run.
+    pub argv: Vec<String>,
+    /// Exit code (None if couldn't be determined).
+    pub exit_code: Option<i32>,
+    /// Standard error output (truncated to ~200 chars).
+    pub stderr: String,
+}
+
 /// Evidence captured from a scenario execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Evidence {
@@ -33,6 +46,9 @@ pub struct Evidence {
     pub exit_code: Option<i32>,
     /// Whether seed setup commands failed.
     pub setup_failed: bool,
+    /// Per-command setup results (only populated on failure).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub setup_results: Vec<SetupResult>,
     /// Execution infrastructure error (not command error).
     pub execution_error: Option<String>,
     /// Timestamp when evidence was captured.
@@ -78,30 +94,64 @@ pub fn run_scenario(
             .with_context(|| format!("write seed file {}", file.path))?;
     }
 
-    // Run seed setup commands
+    // Run seed setup commands, capturing per-command results
+    let mut setup_results = Vec::new();
     let mut setup_failed = false;
-    for setup_cmd in &seed.setup {
+    let mut failed_cmd_summary = String::new();
+
+    for (index, setup_cmd) in seed.setup.iter().enumerate() {
         if setup_cmd.is_empty() {
             continue;
         }
 
-        let status = Command::new(&setup_cmd[0])
+        let output = Command::new(&setup_cmd[0])
             .args(&setup_cmd[1..])
             .current_dir(work_dir)
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
-            .status();
+            .output();
 
-        match status {
-            Ok(s) if !s.success() => {
+        match output {
+            Ok(out) => {
+                let exit_code = out.status.code();
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let stderr_truncated = if stderr.len() > 200 {
+                    format!("{}...", &stderr[..200])
+                } else {
+                    stderr.to_string()
+                };
+
+                if !out.status.success() {
+                    setup_results.push(SetupResult {
+                        index,
+                        argv: setup_cmd.clone(),
+                        exit_code,
+                        stderr: stderr_truncated.clone(),
+                    });
+                    failed_cmd_summary = format!(
+                        "Setup command #{} failed: {:?}\nstderr: {}",
+                        index,
+                        setup_cmd,
+                        stderr_truncated.trim()
+                    );
+                    setup_failed = true;
+                    break;
+                }
+            }
+            Err(e) => {
+                setup_results.push(SetupResult {
+                    index,
+                    argv: setup_cmd.clone(),
+                    exit_code: None,
+                    stderr: e.to_string(),
+                });
+                failed_cmd_summary = format!(
+                    "Setup command #{} failed to execute: {:?}\nerror: {}",
+                    index, setup_cmd, e
+                );
                 setup_failed = true;
                 break;
             }
-            Err(_) => {
-                setup_failed = true;
-                break;
-            }
-            _ => {}
         }
     }
 
@@ -111,9 +161,10 @@ pub fn run_scenario(
             argv: argv.to_vec(),
             seed: seed.clone(),
             stdout: String::new(),
-            stderr: "Setup commands failed".to_string(),
+            stderr: failed_cmd_summary,
             exit_code: None,
             setup_failed: true,
+            setup_results,
             execution_error: None,
             captured_at_ms,
         });
@@ -137,6 +188,7 @@ pub fn run_scenario(
                 stderr: String::new(),
                 exit_code: None,
                 setup_failed: false,
+                setup_results: Vec::new(),
                 execution_error: Some(e.to_string()),
                 captured_at_ms,
             });
@@ -155,6 +207,7 @@ pub fn run_scenario(
         stderr,
         exit_code,
         setup_failed: false,
+        setup_results: Vec::new(),
         execution_error: None,
         captured_at_ms,
     })
@@ -329,6 +382,7 @@ mod tests {
             stderr: "".to_string(),
             exit_code: Some(0),
             setup_failed: false,
+            setup_results: Vec::new(),
             execution_error: None,
             captured_at_ms: 12345,
         };
