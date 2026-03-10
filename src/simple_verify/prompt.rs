@@ -126,32 +126,18 @@ const INSTRUCTIONS: &str = r#"## Instructions
 
 For each surface, provide ONE action:
 
-1. **SetBaseline** (required first, once only):
-   - args: Additional arguments for baseline (usually empty `[]`)
+1. **SetBaseline** (required first, once only): Define the baseline scenario
+   - args: Arguments to append to base command (usually empty [])
    - seed: Setup commands and files needed
 
 2. **Test**: Test a surface
    - surface_id: Which surface to test
-   - args: The argument(s) to test (e.g., `["--all"]` or `["-l", "--human-readable"]`)
-   - seed: Setup that exercises the option's behavior
+   - args: Arguments to append to base command (include the option being tested)
+   - seed: Setup commands (copy baseline's seed if same setup works)
 
 3. **Exclude**: Give up on a surface
    - surface_id: Which surface
    - reason: Why it can't be verified
-
-## How args work
-
-Your `args` are APPENDED to the base command shown above. You don't need to include the binary or subcommand.
-
-Example for `ls`:
-- Base command: `ls`
-- Your args: `["--all"]`
-- Full command executed: `ls --all`
-
-Example for `git diff`:
-- Base command: `git diff`
-- Your args: `["--stat"]`
-- Full command executed: `git diff --stat`
 
 ## Execution Model
 
@@ -159,7 +145,7 @@ Each test runs TWO scenarios with the SAME seed:
 1. Control run: base command (no extra args)
 2. Option run: base command + your args
 
-The option is verified if outputs DIFFER.
+The option is **verified if outputs DIFFER**.
 
 Each scenario runs in a fresh empty temp directory. ALL commands run in this SAME directory:
 - seed.files are written first
@@ -173,18 +159,16 @@ Respond with JSON:
 {
   "actions": [
     { "kind": "SetBaseline", "args": [], "seed": { "setup": [["touch", "file.txt"]], "files": [] } },
-    { "kind": "Test", "surface_id": "--all", "args": ["--all"], "seed": { "setup": [["touch", ".hidden"]], "files": [] } }
+    { "kind": "Test", "surface_id": "--example", "args": ["--example"], "seed": { "setup": [["touch", "file.txt"]], "files": [] } },
+    { "kind": "Exclude", "surface_id": "--other", "reason": "requires root" }
   ]
 }
 ```
 
-**CRITICAL FORMAT RULES:**
-- Each setup command is an ARRAY of strings: `["cmd", "arg1", "arg2"]`, NOT a string
-- Files must be objects with path and content: `{"path": "file.txt", "content": "hello"}`
-- WRONG: `"files": ["file.txt"]`
-- RIGHT: `"files": [{"path": "file.txt", "content": "hello"}]`
+CRITICAL: Each setup command is an ARRAY of strings: `["cmd", "arg1", "arg2"]`, NOT a single string.
 
-Key principles:
+## Key Principles
+
 - Output must DIFFER from control (same seed, no extra args) to verify a surface
 - Craft seeds that EXERCISE the option's behavior:
   - For `ls -B` (ignore backups): seed must include backup files like `file.txt~`
@@ -225,7 +209,7 @@ mod tests {
         assert!(prompt.contains("No baseline set"));
         assert!(prompt.contains("--stat"));
         assert!(prompt.contains("Show diffstat"));
-        assert!(prompt.contains("SetBaseline"));
+        assert!(prompt.contains("baseline"));
         // Check base command is shown
         assert!(prompt.contains("Base command:"));
         assert!(prompt.contains("`git diff`"));
