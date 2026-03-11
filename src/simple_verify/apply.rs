@@ -5,12 +5,115 @@
 
 use super::evidence::{run_scenario, truncate_str, write_evidence, Evidence};
 use super::lm::LmAction;
-use super::types::{Attempt, BaselineRecord, DiffKind, Outcome, State, Status};
+use super::types::{Attempt, BaselineRecord, DiffKind, Outcome, Seed, State, Status};
 use anyhow::Result;
 use std::path::Path;
 
 /// Maximum length for output previews stored in Attempt records.
 const OUTPUT_PREVIEW_MAX_LEN: usize = 200;
+
+/// Result of running a test scenario (for parallel execution).
+///
+/// Contains all data needed to update state after parallel execution.
+#[derive(Debug)]
+pub struct TestResult {
+    pub surface_id: String,
+    pub args: Vec<String>,
+    pub full_argv: Vec<String>,
+    pub seed: Seed,
+    pub evidence_path: String,
+    pub outcome: Outcome,
+    pub stdout_preview: Option<String>,
+    pub stderr_preview: Option<String>,
+    pub control_stdout_preview: Option<String>,
+}
+
+/// Run a test scenario without mutating state.
+///
+/// This is the parallelizable part of Test action execution.
+/// Returns a TestResult that can be merged into state later.
+pub fn run_test_scenario(
+    pack_path: &Path,
+    binary: &str,
+    context_argv: &[String],
+    cycle: u32,
+    surface_id: &str,
+    args: Vec<String>,
+    seed: Seed,
+) -> Result<TestResult> {
+    let scenario_id = format!("{}_c{}", sanitize_id(surface_id), cycle);
+
+    // Control run: just context_argv (no extra args)
+    let control_id = format!("{}_control", scenario_id);
+    let control_argv: Vec<String> = context_argv.to_vec();
+    let control_evidence = run_scenario(pack_path, &control_id, binary, &control_argv, &seed)?;
+    let control_path = format!("evidence/{}.json", control_id);
+    write_evidence(pack_path, &control_path, &control_evidence)?;
+
+    // Option run: context_argv + args
+    let full_argv: Vec<String> = context_argv.iter().chain(args.iter()).cloned().collect();
+    let evidence = run_scenario(pack_path, &scenario_id, binary, &full_argv, &seed)?;
+    let evidence_path = format!("evidence/{}.json", scenario_id);
+    write_evidence(pack_path, &evidence_path, &evidence)?;
+
+    // Compute outcome by comparing option to control (same seed, different argv)
+    let outcome = compute_outcome(&evidence, &control_evidence);
+
+    // Capture output previews for debugging
+    let stdout_preview = if evidence.stdout.is_empty() {
+        None
+    } else {
+        Some(truncate_str(&evidence.stdout, OUTPUT_PREVIEW_MAX_LEN))
+    };
+    let stderr_preview = if evidence.stderr.is_empty() {
+        None
+    } else {
+        Some(truncate_str(&evidence.stderr, OUTPUT_PREVIEW_MAX_LEN))
+    };
+    let control_stdout_preview = if control_evidence.stdout.is_empty() {
+        None
+    } else {
+        Some(truncate_str(
+            &control_evidence.stdout,
+            OUTPUT_PREVIEW_MAX_LEN,
+        ))
+    };
+
+    Ok(TestResult {
+        surface_id: surface_id.to_string(),
+        args,
+        full_argv,
+        seed,
+        evidence_path,
+        outcome,
+        stdout_preview,
+        stderr_preview,
+        control_stdout_preview,
+    })
+}
+
+/// Merge a test result into state.
+///
+/// This is the fast, sequential part after parallel execution.
+pub fn merge_test_result(state: &mut State, result: TestResult) {
+    if let Some(entry) = state.entries.iter_mut().find(|e| e.id == result.surface_id) {
+        entry.attempts.push(Attempt {
+            cycle: state.cycle,
+            args: result.args,
+            full_argv: result.full_argv,
+            seed: result.seed,
+            evidence_path: result.evidence_path,
+            outcome: result.outcome.clone(),
+            stdout_preview: result.stdout_preview,
+            stderr_preview: result.stderr_preview,
+            control_stdout_preview: result.control_stdout_preview,
+        });
+
+        if matches!(result.outcome, Outcome::Verified { .. }) {
+            entry.status = Status::Verified;
+        }
+    }
+}
 
 /// Apply an action to the state.
 ///
