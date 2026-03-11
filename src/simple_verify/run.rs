@@ -3,16 +3,17 @@
 //! This module implements the core verification loop:
 //! bootstrap → [gather pending → lm_call → apply actions → save]* → done
 
-use super::apply::apply_action;
+use super::apply::{apply_action, merge_test_result, run_test_scenario};
 use super::bootstrap::bootstrap;
 use super::evidence::{run_scenario, truncate_str, write_evidence};
-use super::lm::{invoke_lm, log_prompt, log_response};
+use super::lm::{invoke_lm, log_prompt, log_response, LmAction};
 use super::prompt::build_prompt;
 use super::types::{Attempt, DiffKind, Outcome, State, Status};
 use super::validate::validate_action;
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
+use std::thread;
 
 /// Maximum verification attempts per surface before auto-exhausting.
 const MAX_ATTEMPTS: usize = 5;
@@ -155,27 +156,125 @@ pub fn run(
             eprintln!("  LM returned {} action(s)", response.actions.len());
         }
 
-        // Apply actions (save after each for crash recovery)
+        // Partition and validate actions
+        let mut baselines = Vec::new();
+        let mut tests = Vec::new();
+        let mut excludes = Vec::new();
+
         for action in response.actions {
-            // Validate first
             if let Err(e) = validate_action(&action, &state) {
                 eprintln!("  Skipping invalid action: {}", e);
                 continue;
             }
-
-            // Apply
-            let action_desc = format_action_desc(&action);
-            if verbose {
-                eprintln!("  Applying: {}", action_desc);
+            match &action {
+                LmAction::SetBaseline { .. } => baselines.push(action),
+                LmAction::Test { .. } => tests.push(action),
+                LmAction::Exclude { .. } => excludes.push(action),
             }
+        }
 
+        // 1. Apply baselines first (must complete before tests)
+        for action in baselines {
+            if verbose {
+                eprintln!("  Applying: {}", format_action_desc(&action));
+            }
             if let Err(e) = apply_action(&mut state, pack_path, action) {
                 eprintln!("  Action failed: {}", e);
             }
-
-            // Save after each action
             state.save(pack_path)?;
         }
+
+        // 2. Run tests in parallel
+        if !tests.is_empty() {
+            if verbose {
+                eprintln!("  Running {} test(s) in parallel...", tests.len());
+            }
+
+            // Extract test parameters for parallel execution
+            let test_params: Vec<_> = tests
+                .into_iter()
+                .filter_map(|action| {
+                    if let LmAction::Test {
+                        surface_id,
+                        args,
+                        seed,
+                    } = action
+                    {
+                        Some((surface_id, args, seed))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            // Run scenarios in parallel using thread::scope
+            let results: Vec<_> = thread::scope(|s| {
+                let handles: Vec<_> = test_params
+                    .into_iter()
+                    .map(|(surface_id, args, seed)| {
+                        let binary = &state.binary;
+                        let context_argv = &state.context_argv;
+                        let cycle = state.cycle;
+                        s.spawn(move || {
+                            run_test_scenario(
+                                pack_path,
+                                binary,
+                                context_argv,
+                                cycle,
+                                &surface_id,
+                                args,
+                                seed,
+                            )
+                        })
+                    })
+                    .collect();
+
+                handles
+                    .into_iter()
+                    .filter_map(|h| match h.join() {
+                        Ok(Ok(result)) => Some(result),
+                        Ok(Err(e)) => {
+                            eprintln!("  Test scenario failed: {}", e);
+                            None
+                        }
+                        Err(_) => {
+                            eprintln!("  Test thread panicked");
+                            None
+                        }
+                    })
+                    .collect()
+            });
+
+            // Merge results into state (sequential, fast)
+            for result in results {
+                if verbose {
+                    eprintln!(
+                        "  {} → {:?}",
+                        result.surface_id,
+                        match &result.outcome {
+                            Outcome::Verified { diff_kind } => format!("Verified ({:?})", diff_kind),
+                            Outcome::OutputsEqual => "OutputsEqual".to_string(),
+                            Outcome::SetupFailed { .. } => "SetupFailed".to_string(),
+                            Outcome::Crashed { .. } => "Crashed".to_string(),
+                            Outcome::ExecutionError { .. } => "ExecutionError".to_string(),
+                        }
+                    );
+                }
+                merge_test_result(&mut state, result);
+            }
+            state.save(pack_path)?;
+        }
+
+        // 3. Apply excludes (fast, just state mutation)
+        for action in excludes {
+            if verbose {
+                eprintln!("  Applying: {}", format_action_desc(&action));
+            }
+            if let Err(e) = apply_action(&mut state, pack_path, action) {
+                eprintln!("  Action failed: {}", e);
+            }
+        }
+        state.save(pack_path)?;
 
         // Report progress
         if verbose {
