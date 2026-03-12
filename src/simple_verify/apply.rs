@@ -3,14 +3,14 @@
 //! This module applies LM actions to the state, running scenarios and
 //! computing outcomes by comparing option runs to control runs.
 
-use super::evidence::{run_scenario, truncate_str, write_evidence, Evidence};
+use super::evidence::{
+    compute_outcome, make_output_preview, run_scenario, sanitize_id, write_evidence,
+    OUTPUT_PREVIEW_MAX_LEN,
+};
 use super::lm::LmAction;
-use super::types::{Attempt, BaselineRecord, DiffKind, Outcome, Seed, State, Status};
+use super::types::{Attempt, BaselineRecord, Outcome, Seed, State, Status};
 use anyhow::Result;
 use std::path::Path;
-
-/// Maximum length for output previews stored in Attempt records.
-const OUTPUT_PREVIEW_MAX_LEN: usize = 200;
 
 /// Result of running a test scenario (for parallel execution).
 ///
@@ -60,24 +60,10 @@ pub fn run_test_scenario(
     let outcome = compute_outcome(&evidence, &control_evidence);
 
     // Capture output previews for debugging
-    let stdout_preview = if evidence.stdout.is_empty() {
-        None
-    } else {
-        Some(truncate_str(&evidence.stdout, OUTPUT_PREVIEW_MAX_LEN))
-    };
-    let stderr_preview = if evidence.stderr.is_empty() {
-        None
-    } else {
-        Some(truncate_str(&evidence.stderr, OUTPUT_PREVIEW_MAX_LEN))
-    };
-    let control_stdout_preview = if control_evidence.stdout.is_empty() {
-        None
-    } else {
-        Some(truncate_str(
-            &control_evidence.stdout,
-            OUTPUT_PREVIEW_MAX_LEN,
-        ))
-    };
+    let stdout_preview = make_output_preview(&evidence.stdout, OUTPUT_PREVIEW_MAX_LEN);
+    let stderr_preview = make_output_preview(&evidence.stderr, OUTPUT_PREVIEW_MAX_LEN);
+    let control_stdout_preview =
+        make_output_preview(&control_evidence.stdout, OUTPUT_PREVIEW_MAX_LEN);
 
     Ok(TestResult {
         surface_id: surface_id.to_string(),
@@ -171,21 +157,10 @@ pub fn apply_action(state: &mut State, pack_path: &Path, action: LmAction) -> Re
             let outcome = compute_outcome(&evidence, &control_evidence);
 
             // Capture output previews for debugging
-            let stdout_preview = if evidence.stdout.is_empty() {
-                None
-            } else {
-                Some(truncate_str(&evidence.stdout, OUTPUT_PREVIEW_MAX_LEN))
-            };
-            let stderr_preview = if evidence.stderr.is_empty() {
-                None
-            } else {
-                Some(truncate_str(&evidence.stderr, OUTPUT_PREVIEW_MAX_LEN))
-            };
-            let control_stdout_preview = if control_evidence.stdout.is_empty() {
-                None
-            } else {
-                Some(truncate_str(&control_evidence.stdout, OUTPUT_PREVIEW_MAX_LEN))
-            };
+            let stdout_preview = make_output_preview(&evidence.stdout, OUTPUT_PREVIEW_MAX_LEN);
+            let stderr_preview = make_output_preview(&evidence.stderr, OUTPUT_PREVIEW_MAX_LEN);
+            let control_stdout_preview =
+                make_output_preview(&control_evidence.stdout, OUTPUT_PREVIEW_MAX_LEN);
 
             // Update entry
             if let Some(entry) = state.entries.iter_mut().find(|e| e.id == surface_id) {
@@ -216,79 +191,11 @@ pub fn apply_action(state: &mut State, pack_path: &Path, action: LmAction) -> Re
     Ok(())
 }
 
-/// Sanitize a surface ID for use in filenames.
-fn sanitize_id(id: &str) -> String {
-    // Leading dashes are common in option names but problematic in filenames
-    let trimmed = id.trim_start_matches('-');
-    trimmed
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
-/// Compute the outcome by comparing option evidence to control evidence.
-///
-/// The control evidence is from running the same seed with just context_argv (no option).
-/// The option evidence is from running with the full argv including the option.
-/// This isolates the effect of the option by keeping everything else constant.
-fn compute_outcome(option_evidence: &Evidence, control_evidence: &Evidence) -> Outcome {
-    // Handle execution errors in the option run
-    if let Some(error) = &option_evidence.execution_error {
-        return Outcome::ExecutionError {
-            error: error.clone(),
-        };
-    }
-
-    // Handle setup failures in the option run
-    if option_evidence.setup_failed {
-        return Outcome::SetupFailed {
-            hint: truncate_str(&option_evidence.stderr, 200),
-        };
-    }
-
-    // Compare option evidence to control evidence FIRST
-    // This ensures options that intentionally change exit code (like --quiet)
-    // are recognized as verified rather than crashed
-    let stdout_differs = option_evidence.stdout != control_evidence.stdout;
-    let stderr_differs = option_evidence.stderr != control_evidence.stderr;
-    let exit_differs = option_evidence.exit_code != control_evidence.exit_code;
-
-    if stdout_differs || stderr_differs || exit_differs {
-        let diff_kind = match (stdout_differs, stderr_differs, exit_differs) {
-            (true, false, false) => DiffKind::Stdout,
-            (false, true, false) => DiffKind::Stderr,
-            (false, false, true) => DiffKind::ExitCode,
-            _ => DiffKind::Multiple,
-        };
-        return Outcome::Verified { diff_kind };
-    }
-
-    // No difference from control - check if both crashed the same way
-    if let Some(exit_code) = option_evidence.exit_code {
-        if exit_code != 0 && option_evidence.stdout.is_empty() {
-            return Outcome::Crashed {
-                hint: format!(
-                    "exit={}, stderr: {}",
-                    exit_code,
-                    truncate_str(&option_evidence.stderr, 150)
-                ),
-            };
-        }
-    }
-
-    Outcome::OutputsEqual
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simple_verify::types::{Seed, SurfaceEntry, STATE_SCHEMA_VERSION};
+    use crate::simple_verify::evidence::Evidence;
+    use crate::simple_verify::types::{DiffKind, Seed, SurfaceEntry, STATE_SCHEMA_VERSION};
 
     #[test]
     fn test_sanitize_id() {
