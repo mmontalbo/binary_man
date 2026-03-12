@@ -357,7 +357,11 @@ fn build_context(blocks: &[OptionBlock], current_idx: usize) -> Option<String> {
     }
 
     // Get next options (up to CONTEXT_WINDOW_SIZE)
-    for block in blocks.iter().skip(current_idx + 1).take(CONTEXT_WINDOW_SIZE) {
+    for block in blocks
+        .iter()
+        .skip(current_idx + 1)
+        .take(CONTEXT_WINDOW_SIZE)
+    {
         let short_desc = truncate_context_desc(&block.description, 60);
         if short_desc.is_empty() {
             context_parts.push(block.id.clone());
@@ -551,7 +555,10 @@ usage: git diff [<options>] [<commit>] [--] [<path>...]
         let surfaces = parse_surfaces_from_help(help);
 
         // Find --ignore-backups which is in the middle
-        let backups = surfaces.iter().find(|s| s.id == "--ignore-backups").unwrap();
+        let backups = surfaces
+            .iter()
+            .find(|s| s.id == "--ignore-backups")
+            .unwrap();
 
         // Should have context from surrounding options
         assert!(backups.context.is_some());
