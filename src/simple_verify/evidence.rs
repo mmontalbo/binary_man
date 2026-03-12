@@ -1,8 +1,11 @@
 //! Scenario execution and evidence capture.
 //!
-//! This module handles running commands and capturing their outputs. We use
-//! a simple subprocess model rather than the full binary_lens infrastructure,
-//! trading some isolation guarantees for simplicity.
+//! This module handles running commands and capturing their outputs in a
+//! sandboxed environment using bubblewrap (bwrap). Tests run with:
+//! - Network isolation (no external requests)
+//! - Read-only root filesystem
+//! - Writable work directory only
+//! - Process isolation
 
 use super::types::Seed;
 use anyhow::{Context, Result};
@@ -14,6 +17,41 @@ use std::time::Duration;
 
 /// Default timeout for scenario execution in seconds.
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
+
+/// Build a bwrap command with full sandbox isolation.
+///
+/// The sandbox provides:
+/// - Read-only root filesystem
+/// - Writable work directory
+/// - No network access
+/// - Isolated /tmp
+/// - Process dies with parent
+fn build_sandbox_command(work_dir: &Path) -> Command {
+    let mut cmd = Command::new("bwrap");
+
+    // Core filesystem setup
+    cmd.args(["--ro-bind", "/", "/"]); // Read-only root
+    cmd.args(["--dev", "/dev"]); // Device access
+    cmd.args(["--proc", "/proc"]); // Proc filesystem
+    cmd.args(["--tmpfs", "/tmp"]); // Isolated /tmp
+
+    // Make work directory writable
+    let work_dir_str = work_dir.to_string_lossy();
+    cmd.args(["--bind", &work_dir_str, &work_dir_str]);
+
+    // Security isolation
+    cmd.arg("--unshare-net"); // No network
+    cmd.arg("--die-with-parent"); // Cleanup on parent exit
+    cmd.arg("--new-session"); // Signal isolation
+
+    // Set working directory
+    cmd.args(["--chdir", &work_dir_str]);
+
+    // Separator before actual command
+    cmd.arg("--");
+
+    cmd
+}
 
 /// Maximum bytes to capture for stdout/stderr.
 const MAX_OUTPUT_BYTES: usize = 64 * 1024;
@@ -104,12 +142,14 @@ pub fn run_scenario(
             continue;
         }
 
-        let output = Command::new(&setup_cmd[0])
-            .args(&setup_cmd[1..])
-            .current_dir(work_dir)
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .output();
+        // Run setup commands in sandbox to prevent malicious actions
+        let mut cmd = build_sandbox_command(work_dir);
+        cmd.arg(&setup_cmd[0]);
+        cmd.args(&setup_cmd[1..]);
+        cmd.stdout(Stdio::null());
+        cmd.stderr(Stdio::piped());
+
+        let output = cmd.output();
 
         match output {
             Ok(out) => {
@@ -170,10 +210,10 @@ pub fn run_scenario(
         });
     }
 
-    // Build the main command
-    let mut cmd = Command::new(binary);
+    // Build the main command with full sandbox isolation
+    let mut cmd = build_sandbox_command(work_dir);
+    cmd.arg(binary);
     cmd.args(argv);
-    cmd.current_dir(work_dir);
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
@@ -295,6 +335,89 @@ pub fn truncate_str(s: &str, max_chars: usize) -> String {
     }
 }
 
+/// Maximum length for output previews stored in Attempt records.
+pub const OUTPUT_PREVIEW_MAX_LEN: usize = 200;
+
+/// Create an output preview, returning None if empty.
+pub fn make_output_preview(output: &str, max_len: usize) -> Option<String> {
+    if output.is_empty() {
+        None
+    } else {
+        Some(truncate_str(output, max_len))
+    }
+}
+
+/// Sanitize a surface ID for use in filenames.
+pub fn sanitize_id(id: &str) -> String {
+    // Leading dashes are common in option names but problematic in filenames
+    let trimmed = id.trim_start_matches('-');
+    trimmed
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+use super::types::{DiffKind, Outcome};
+
+/// Compute the outcome by comparing option evidence to control evidence.
+///
+/// The control evidence is from running the same seed with just context_argv (no option).
+/// The option evidence is from running with the full argv including the option.
+/// This isolates the effect of the option by keeping everything else constant.
+pub fn compute_outcome(option_evidence: &Evidence, control_evidence: &Evidence) -> Outcome {
+    // Handle execution errors in the option run
+    if let Some(error) = &option_evidence.execution_error {
+        return Outcome::ExecutionError {
+            error: error.clone(),
+        };
+    }
+
+    // Handle setup failures in the option run
+    if option_evidence.setup_failed {
+        return Outcome::SetupFailed {
+            hint: truncate_str(&option_evidence.stderr, 200),
+        };
+    }
+
+    // Compare option evidence to control evidence FIRST
+    // This ensures options that intentionally change exit code (like --quiet)
+    // are recognized as verified rather than crashed
+    let stdout_differs = option_evidence.stdout != control_evidence.stdout;
+    let stderr_differs = option_evidence.stderr != control_evidence.stderr;
+    let exit_differs = option_evidence.exit_code != control_evidence.exit_code;
+
+    if stdout_differs || stderr_differs || exit_differs {
+        let diff_kind = match (stdout_differs, stderr_differs, exit_differs) {
+            (true, false, false) => DiffKind::Stdout,
+            (false, true, false) => DiffKind::Stderr,
+            (false, false, true) => DiffKind::ExitCode,
+            _ => DiffKind::Multiple,
+        };
+        return Outcome::Verified { diff_kind };
+    }
+
+    // No difference from control - check if both crashed the same way
+    if let Some(exit_code) = option_evidence.exit_code {
+        if exit_code != 0 && option_evidence.stdout.is_empty() {
+            return Outcome::Crashed {
+                hint: format!(
+                    "exit={}, stderr: {}",
+                    exit_code,
+                    truncate_str(&option_evidence.stderr, 150)
+                ),
+            };
+        }
+    }
+
+    Outcome::OutputsEqual
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -403,5 +526,88 @@ mod tests {
     fn test_truncate_str() {
         assert_eq!(truncate_str("hello", 10), "hello");
         assert_eq!(truncate_str("hello world", 5), "hello...");
+    }
+
+    #[test]
+    fn test_sanitize_id() {
+        assert_eq!(sanitize_id("--verbose"), "verbose");
+        assert_eq!(sanitize_id("-v"), "v");
+        assert_eq!(sanitize_id("--color=always"), "color_always");
+        assert_eq!(sanitize_id("normal-id"), "normal-id");
+    }
+
+    #[test]
+    fn test_make_output_preview() {
+        assert_eq!(make_output_preview("", 100), None);
+        assert_eq!(make_output_preview("hello", 100), Some("hello".to_string()));
+        assert_eq!(
+            make_output_preview("hello world", 5),
+            Some("hello...".to_string())
+        );
+    }
+
+    #[test]
+    fn test_compute_outcome_outputs_equal() {
+        let control = Evidence {
+            argv: vec!["test".to_string()],
+            seed: Seed::default(),
+            stdout: "output".to_string(),
+            stderr: "".to_string(),
+            exit_code: Some(0),
+            setup_failed: false,
+            setup_results: Vec::new(),
+            execution_error: None,
+            captured_at_ms: 0,
+        };
+
+        let option = Evidence {
+            argv: vec!["--opt".to_string(), "test".to_string()],
+            seed: Seed::default(),
+            stdout: "output".to_string(),
+            stderr: "".to_string(),
+            exit_code: Some(0),
+            setup_failed: false,
+            setup_results: Vec::new(),
+            execution_error: None,
+            captured_at_ms: 0,
+        };
+
+        let outcome = compute_outcome(&option, &control);
+        assert!(matches!(outcome, Outcome::OutputsEqual));
+    }
+
+    #[test]
+    fn test_compute_outcome_stdout_differs() {
+        let control = Evidence {
+            argv: vec!["test".to_string()],
+            seed: Seed::default(),
+            stdout: "original".to_string(),
+            stderr: "".to_string(),
+            exit_code: Some(0),
+            setup_failed: false,
+            setup_results: Vec::new(),
+            execution_error: None,
+            captured_at_ms: 0,
+        };
+
+        let option = Evidence {
+            argv: vec!["--opt".to_string(), "test".to_string()],
+            seed: Seed::default(),
+            stdout: "different".to_string(),
+            stderr: "".to_string(),
+            exit_code: Some(0),
+            setup_failed: false,
+            setup_results: Vec::new(),
+            execution_error: None,
+            captured_at_ms: 0,
+        };
+
+        let outcome = compute_outcome(&option, &control);
+        match outcome {
+            Outcome::Verified { diff_kind } => {
+                assert!(matches!(diff_kind, DiffKind::Stdout));
+            }
+            _ => panic!("Expected Verified with Stdout diff"),
+        }
     }
 }
