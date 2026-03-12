@@ -5,15 +5,20 @@
 
 use super::apply::{apply_action, merge_test_result, run_test_scenario};
 use super::bootstrap::bootstrap;
-use super::evidence::{run_scenario, truncate_str, write_evidence};
-use super::lm::{invoke_lm, log_prompt, log_response, LmAction};
-use super::prompt::build_prompt;
+use super::evidence::{
+    make_output_preview, run_scenario, sanitize_id, write_evidence, OUTPUT_PREVIEW_MAX_LEN,
+};
+use super::lm::{log_prompt, log_response, parse_lm_response, LmAction, LmResponse};
+use super::prompt::{build_incremental_prompt, build_prompt};
 use super::types::{Attempt, DiffKind, Outcome, State, Status};
 use super::validate::validate_action;
-use anyhow::{Context, Result};
+use crate::cli::ContextMode;
+use crate::lm::{create_plugin, LmConfig, LmPlugin};
+use anyhow::{anyhow, Context, Result};
 use std::fs;
 use std::path::Path;
 use std::thread;
+use std::time::Duration;
 
 /// Maximum verification attempts per surface before auto-exhausting.
 const MAX_ATTEMPTS: usize = 5;
@@ -28,9 +33,6 @@ const PROBE_MODIFIERS: &[&str] = &["-l", "-v", "-a", "-1", "--verbose"];
 /// Minimum attempts with OutputsEqual before trying modifier probing.
 const PROBE_THRESHOLD: usize = 3;
 
-/// Maximum length for output previews stored in Attempt records.
-const OUTPUT_PREVIEW_MAX_LEN: usize = 200;
-
 /// Result of a verification run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunResult {
@@ -40,6 +42,12 @@ pub enum RunResult {
     HitMaxCycles,
 }
 
+/// Default LM timeout in seconds.
+const LM_TIMEOUT_SECS: u64 = 120;
+
+/// Maximum retry attempts for LM calls.
+const MAX_LM_RETRIES: usize = 3;
+
 /// Run the verification loop.
 ///
 /// This is the main entry point for the simplified verification workflow.
@@ -48,8 +56,9 @@ pub fn run(
     context_argv: &[String],
     pack_path: &Path,
     max_cycles: u32,
-    lm_command: &str,
+    lm_config: &LmConfig,
     verbose: bool,
+    context_mode: ContextMode,
 ) -> Result<RunResult> {
     // Create pack directory structure
     fs::create_dir_all(pack_path.join("evidence")).context("create evidence directory")?;
@@ -75,6 +84,63 @@ pub fn run(
     // Save initial state
     state.save(pack_path)?;
 
+    // Create and initialize the LM plugin
+    let mut plugin = create_plugin(lm_config);
+    plugin.init().context("initialize LM plugin")?;
+
+    // Run the sequential verification loop
+    let result = run_sequential(
+        pack_path,
+        &mut *plugin,
+        &mut state,
+        max_cycles,
+        verbose,
+        context_mode,
+    );
+    plugin.shutdown().ok();
+    result
+}
+
+/// Invoke LM with retry logic.
+///
+/// Retries up to MAX_LM_RETRIES times, resetting the plugin on the second-to-last attempt.
+fn invoke_lm_with_retry(plugin: &mut dyn LmPlugin, prompt: &str, verbose: bool) -> Result<String> {
+    let timeout = Duration::from_secs(LM_TIMEOUT_SECS);
+
+    for attempt in 1..=MAX_LM_RETRIES {
+        match plugin.prompt(prompt, timeout) {
+            Ok(response) => return Ok(response),
+            Err(e) => {
+                if attempt < MAX_LM_RETRIES {
+                    if verbose {
+                        eprintln!("  LM retry {}/{} ({})", attempt, MAX_LM_RETRIES - 1, e);
+                    }
+                    if attempt == MAX_LM_RETRIES - 1 {
+                        if verbose {
+                            eprintln!("  Resetting LM session...");
+                        }
+                        plugin.reset().ok();
+                    }
+                } else {
+                    return Err(e);
+                }
+            }
+        }
+    }
+    Err(anyhow!("LM invocation failed after retries"))
+}
+
+/// Run the sequential verification loop (original behavior for streams=1).
+fn run_sequential(
+    pack_path: &Path,
+    plugin: &mut dyn LmPlugin,
+    state: &mut State,
+    max_cycles: u32,
+    verbose: bool,
+    context_mode: ContextMode,
+) -> Result<RunResult> {
+    // Track last response for incremental mode
+    let mut last_response: Option<LmResponse> = None;
     loop {
         // Check cycle limit
         if state.cycle >= max_cycles {
@@ -88,7 +154,7 @@ pub fn run(
         // Modifier probing: try combining options with modifier flags
         // when they've hit PROBE_THRESHOLD attempts with all OutputsEqual.
         // This runs BEFORE auto-exhaust, giving options a chance to be verified.
-        probe_entries_with_modifiers(&mut state, pack_path, verbose)?;
+        probe_entries_with_modifiers(state, pack_path, verbose)?;
 
         // Auto-exhaust surfaces over attempt limit
         for entry in &mut state.entries {
@@ -131,15 +197,71 @@ pub fn run(
             );
         }
 
-        // Build LM context and call
-        let prompt = build_prompt(&state, &pending_ids);
+        // Resolve auto mode based on plugin type
+        let effective_mode = match context_mode {
+            ContextMode::Auto if plugin.is_stateful() => ContextMode::Incremental,
+            ContextMode::Auto => ContextMode::Full,
+            other => other,
+        };
+
+        // Build prompt based on effective context mode
+        let prompt = match effective_mode {
+            ContextMode::Full | ContextMode::Reset => {
+                // Full mode: always send complete state
+                // Reset mode: also sends complete state (but resets after)
+                build_prompt(state, &pending_ids)
+            }
+            ContextMode::Incremental if plugin.is_stateful() && last_response.is_some() => {
+                // Incremental mode for stateful plugins: send only delta
+                build_incremental_prompt(state, &pending_ids, last_response.as_ref())
+            }
+            ContextMode::Incremental | ContextMode::Auto => {
+                // First cycle or non-stateful plugin: send full prompt
+                build_prompt(state, &pending_ids)
+            }
+        };
         log_prompt(pack_path, state.cycle, &prompt)?;
 
         if verbose {
             eprintln!("  Invoking LM...");
         }
-        let response = invoke_lm(lm_command, &prompt)?;
+        let response_text = invoke_lm_with_retry(plugin, &prompt, verbose)?;
+
+        // Parse response with graceful degradation
+        let response = match parse_lm_response(&response_text) {
+            Ok(r) => r,
+            Err(_e) => {
+                // LM may produce prose instead of JSON. Try a short follow-up reminder.
+                if verbose {
+                    eprintln!("  Parse error, sending JSON reminder...");
+                }
+                // Short follow-up that doesn't resend the whole prompt
+                let reminder = "Please provide your response as valid JSON only. \
+                    Format: {\"actions\": [...]}. No explanations or prose.";
+                match invoke_lm_with_retry(plugin, reminder, verbose)
+                    .and_then(|text| parse_lm_response(&text))
+                {
+                    Ok(r) => r,
+                    Err(_) => {
+                        if verbose {
+                            eprintln!(
+                                "  LM still not producing JSON, continuing with empty actions"
+                            );
+                        }
+                        LmResponse { actions: vec![] }
+                    }
+                }
+            }
+        };
         log_response(pack_path, state.cycle, &response)?;
+
+        // Reset mode: reset plugin after each successful call
+        if matches!(effective_mode, ContextMode::Reset) && plugin.is_stateful() {
+            if verbose {
+                eprintln!("  Resetting LM session (context_mode=reset)");
+            }
+            plugin.reset()?;
+        }
 
         // Handle empty response - continue to next cycle instead of giving up
         // Empty actions can mean LM parse failed (graceful degradation) or LM
@@ -148,6 +270,7 @@ pub fn run(
             if verbose {
                 eprintln!("  LM returned no actions - continuing to next cycle");
             }
+            last_response = Some(response);
             state.save(pack_path)?;
             continue;
         }
@@ -156,13 +279,16 @@ pub fn run(
             eprintln!("  LM returned {} action(s)", response.actions.len());
         }
 
+        // Save response for incremental mode before consuming actions
+        let response_for_tracking = response.clone();
+
         // Partition and validate actions
         let mut baselines = Vec::new();
         let mut tests = Vec::new();
         let mut excludes = Vec::new();
 
         for action in response.actions {
-            if let Err(e) = validate_action(&action, &state) {
+            if let Err(e) = validate_action(&action, state) {
                 eprintln!("  Skipping invalid action: {}", e);
                 continue;
             }
@@ -178,7 +304,7 @@ pub fn run(
             if verbose {
                 eprintln!("  Applying: {}", format_action_desc(&action));
             }
-            if let Err(e) = apply_action(&mut state, pack_path, action) {
+            if let Err(e) = apply_action(state, pack_path, action) {
                 eprintln!("  Action failed: {}", e);
             }
             state.save(pack_path)?;
@@ -252,7 +378,8 @@ pub fn run(
                         "  {} → {:?}",
                         result.surface_id,
                         match &result.outcome {
-                            Outcome::Verified { diff_kind } => format!("Verified ({:?})", diff_kind),
+                            Outcome::Verified { diff_kind } =>
+                                format!("Verified ({:?})", diff_kind),
                             Outcome::OutputsEqual => "OutputsEqual".to_string(),
                             Outcome::SetupFailed { .. } => "SetupFailed".to_string(),
                             Outcome::Crashed { .. } => "Crashed".to_string(),
@@ -260,7 +387,7 @@ pub fn run(
                         }
                     );
                 }
-                merge_test_result(&mut state, result);
+                merge_test_result(state, result);
             }
             state.save(pack_path)?;
         }
@@ -270,11 +397,14 @@ pub fn run(
             if verbose {
                 eprintln!("  Applying: {}", format_action_desc(&action));
             }
-            if let Err(e) = apply_action(&mut state, pack_path, action) {
+            if let Err(e) = apply_action(state, pack_path, action) {
                 eprintln!("  Action failed: {}", e);
             }
         }
         state.save(pack_path)?;
+
+        // Track response for incremental mode
+        last_response = Some(response_for_tracking);
 
         // Report progress
         if verbose {
@@ -306,11 +436,7 @@ pub fn run(
 /// For each such entry, try combining the option with modifier flags to find
 /// a context where it produces different output. This is a mechanical probe
 /// with no LM calls.
-fn probe_entries_with_modifiers(
-    state: &mut State,
-    pack_path: &Path,
-    verbose: bool,
-) -> Result<()> {
+fn probe_entries_with_modifiers(state: &mut State, pack_path: &Path, verbose: bool) -> Result<()> {
     // Find entries eligible for probing:
     // - Status::Pending
     // - Exactly PROBE_THRESHOLD attempts
@@ -385,16 +511,11 @@ fn probe_entries_with_modifiers(
             );
             let control_id = format!("{}_control", probe_id);
 
-            let control_evidence = match run_scenario(
-                pack_path,
-                &control_id,
-                &state.binary,
-                &control_argv,
-                &seed,
-            ) {
-                Ok(ev) => ev,
-                Err(_) => continue, // Skip this modifier on error
-            };
+            let control_evidence =
+                match run_scenario(pack_path, &control_id, &state.binary, &control_argv, &seed) {
+                    Ok(ev) => ev,
+                    Err(_) => continue, // Skip this modifier on error
+                };
 
             // Run variant scenario
             let variant_evidence =
@@ -431,30 +552,12 @@ fn probe_entries_with_modifiers(
                 write_evidence(pack_path, &variant_path, &variant_evidence)?;
 
                 // Capture output previews
-                let stdout_preview = if variant_evidence.stdout.is_empty() {
-                    None
-                } else {
-                    Some(truncate_str(
-                        &variant_evidence.stdout,
-                        OUTPUT_PREVIEW_MAX_LEN,
-                    ))
-                };
-                let stderr_preview = if variant_evidence.stderr.is_empty() {
-                    None
-                } else {
-                    Some(truncate_str(
-                        &variant_evidence.stderr,
-                        OUTPUT_PREVIEW_MAX_LEN,
-                    ))
-                };
-                let control_stdout_preview = if control_evidence.stdout.is_empty() {
-                    None
-                } else {
-                    Some(truncate_str(
-                        &control_evidence.stdout,
-                        OUTPUT_PREVIEW_MAX_LEN,
-                    ))
-                };
+                let stdout_preview =
+                    make_output_preview(&variant_evidence.stdout, OUTPUT_PREVIEW_MAX_LEN);
+                let stderr_preview =
+                    make_output_preview(&variant_evidence.stderr, OUTPUT_PREVIEW_MAX_LEN);
+                let control_stdout_preview =
+                    make_output_preview(&control_evidence.stdout, OUTPUT_PREVIEW_MAX_LEN);
 
                 // Record the successful probe attempt
                 let entry = &mut state.entries[entry_idx];
@@ -489,21 +592,6 @@ fn probe_entries_with_modifiers(
     state.save(pack_path)?;
 
     Ok(())
-}
-
-/// Sanitize a surface ID for use in filenames.
-fn sanitize_id(id: &str) -> String {
-    let trimmed = id.trim_start_matches('-');
-    trimmed
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
 }
 
 /// Format an action for display.

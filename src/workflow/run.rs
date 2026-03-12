@@ -3,6 +3,7 @@
 //! Runs the LM-driven verification loop to document a binary.
 
 use crate::cli::{OutputFormat, RunArgs};
+use crate::lm;
 use crate::simple_verify;
 use anyhow::{anyhow, Result};
 use std::path::{Path, PathBuf};
@@ -29,9 +30,9 @@ pub fn run_run(args: &RunArgs) -> Result<()> {
         return Ok(());
     }
 
-    // Resolve LM command
-    let lm_command = resolve_lm_command(args.lm.as_deref())
-        .ok_or_else(|| anyhow!("LM command required: use --lm or set BMAN_LM_COMMAND"))?;
+    // Resolve LM plugin config
+    let env_lm = std::env::var("BMAN_LM_COMMAND").ok();
+    let lm_config = lm::parse_lm_arg(&args.lm, env_lm.as_deref());
 
     if args.verbose {
         eprintln!("Binary: {}", binary_name);
@@ -39,7 +40,8 @@ pub fn run_run(args: &RunArgs) -> Result<()> {
             eprintln!("Context: {}", context_argv.join(" "));
         }
         eprintln!("Pack: {}", pack_path.display());
-        eprintln!("LM: {}", lm_command);
+        eprintln!("LM: {:?}", lm_config);
+        eprintln!("Context mode: {:?}", args.context_mode);
         eprintln!("Max cycles: {}", args.max_cycles);
     }
 
@@ -49,8 +51,9 @@ pub fn run_run(args: &RunArgs) -> Result<()> {
         &context_argv,
         &pack_path,
         args.max_cycles as u32,
-        &lm_command,
+        &lm_config,
         args.verbose,
+        args.context_mode,
     )?;
 
     // Load final state for output
@@ -128,12 +131,4 @@ fn resolve_pack_path(
     };
 
     Ok(data_dir.join("bman").join("packs").join(pack_name))
-}
-
-/// Resolve LM command with fallback: explicit arg > env var > default.
-fn resolve_lm_command(explicit: Option<&str>) -> Option<String> {
-    explicit
-        .map(|s| s.to_string())
-        .or_else(|| std::env::var("BMAN_LM_COMMAND").ok())
-        .or_else(|| Some("claude -p --model haiku".to_string()))
 }
