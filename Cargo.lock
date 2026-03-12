@@ -104,6 +104,7 @@ dependencies = [
  "clap",
  "crossterm",
  "dirs",
+ "libc",
  "ratatui",
  "regex",
  "serde",

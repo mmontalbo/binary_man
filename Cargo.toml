@@ -3,10 +3,11 @@ name = "binary-man"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Static man page generator from binary_lens packs"
+description = "LM-driven binary documentation generator"
 
 [dependencies]
 anyhow = "1.0"
+libc = "0.2"
 base64 = "0.22"
 clap = { version = "4.5", features = ["derive"] }
 dirs = "5.0"

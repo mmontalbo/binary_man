@@ -1,0 +1,159 @@
+//! LM plugin system for bman verification.
+//!
+//! Provides a trait-based abstraction over different LM backends:
+//! - `ClaudeCodePlugin`: Native Claude CLI integration with persistent process
+//! - `CommandPlugin`: Legacy external command (BMAN_LM_COMMAND compatible)
+
+mod claude_code;
+mod command;
+
+pub use claude_code::ClaudeCodePlugin;
+pub use command::CommandPlugin;
+
+use anyhow::Result;
+use std::time::Duration;
+
+/// A language model plugin for bman verification.
+///
+/// Plugins manage the lifecycle of LM connections and provide prompt/response
+/// functionality with timeout support.
+pub trait LmPlugin: Send {
+    /// Initialize the plugin (spawn processes, establish connections, etc).
+    fn init(&mut self) -> Result<()>;
+
+    /// Send a prompt and get a response with timeout.
+    fn prompt(&mut self, prompt: &str, timeout: Duration) -> Result<String>;
+
+    /// Reset the session (restart underlying process on errors).
+    fn reset(&mut self) -> Result<()>;
+
+    /// Clean shutdown.
+    fn shutdown(&mut self) -> Result<()>;
+
+    /// Whether this plugin maintains conversation state across prompts.
+    /// Stateful plugins accumulate context, so incremental prompts can be used.
+    /// Stateless plugins (command) need full context each time.
+    fn is_stateful(&self) -> bool;
+}
+
+/// Plugin configuration parsed from CLI arguments.
+#[derive(Debug, Clone)]
+pub enum LmConfig {
+    /// Native Claude Code integration: "claude:haiku", "claude:sonnet"
+    Claude { model: String },
+    /// Legacy external command
+    Command { cmd: String },
+}
+
+/// Parse --lm argument into config.
+///
+/// Format: "claude:model" for native, or raw command string for legacy.
+///
+/// # Examples
+/// - `"claude:haiku"` -> `LmConfig::Claude { model: "haiku" }`
+/// - `"claude:sonnet"` -> `LmConfig::Claude { model: "sonnet" }`
+/// - `"my-lm-script"` -> `LmConfig::Command { cmd: "my-lm-script" }`
+/// - `"/path/to/lm"` -> `LmConfig::Command { cmd: "/path/to/lm" }`
+pub fn parse_lm_arg(arg: &str, env_fallback: Option<&str>) -> LmConfig {
+    // Check for native Claude plugin syntax
+    if let Some(model) = arg.strip_prefix("claude:") {
+        return LmConfig::Claude {
+            model: model.to_string(),
+        };
+    }
+
+    // Looks like a command (has space, starts with path)
+    if arg.contains(' ') || arg.starts_with('/') || arg.starts_with('.') {
+        return LmConfig::Command {
+            cmd: arg.to_string(),
+        };
+    }
+
+    // If arg doesn't match native format, check environment fallback
+    if let Some(env_cmd) = env_fallback {
+        return LmConfig::Command {
+            cmd: env_cmd.to_string(),
+        };
+    }
+
+    // Default to Claude haiku
+    LmConfig::Claude {
+        model: "haiku".to_string(),
+    }
+}
+
+/// Create a plugin instance from config.
+pub fn create_plugin(config: &LmConfig) -> Box<dyn LmPlugin> {
+    match config {
+        LmConfig::Claude { model } => Box::new(ClaudeCodePlugin::new(model)),
+        LmConfig::Command { cmd } => Box::new(CommandPlugin::new(cmd)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_claude_haiku() {
+        let config = parse_lm_arg("claude:haiku", None);
+        match config {
+            LmConfig::Claude { model } => assert_eq!(model, "haiku"),
+            _ => panic!("Expected Claude config"),
+        }
+    }
+
+    #[test]
+    fn test_parse_claude_sonnet() {
+        let config = parse_lm_arg("claude:sonnet", None);
+        match config {
+            LmConfig::Claude { model } => assert_eq!(model, "sonnet"),
+            _ => panic!("Expected Claude config"),
+        }
+    }
+
+    #[test]
+    fn test_parse_command_with_space() {
+        let config = parse_lm_arg("my-lm -p --model haiku", None);
+        match config {
+            LmConfig::Command { cmd } => assert_eq!(cmd, "my-lm -p --model haiku"),
+            _ => panic!("Expected Command config"),
+        }
+    }
+
+    #[test]
+    fn test_parse_command_absolute_path() {
+        let config = parse_lm_arg("/usr/bin/my-lm", None);
+        match config {
+            LmConfig::Command { cmd } => assert_eq!(cmd, "/usr/bin/my-lm"),
+            _ => panic!("Expected Command config"),
+        }
+    }
+
+    #[test]
+    fn test_parse_command_relative_path() {
+        let config = parse_lm_arg("./my-lm", None);
+        match config {
+            LmConfig::Command { cmd } => assert_eq!(cmd, "./my-lm"),
+            _ => panic!("Expected Command config"),
+        }
+    }
+
+    #[test]
+    fn test_parse_env_fallback() {
+        let config = parse_lm_arg("unknown", Some("env-command arg"));
+        match config {
+            LmConfig::Command { cmd } => assert_eq!(cmd, "env-command arg"),
+            _ => panic!("Expected Command config from env"),
+        }
+    }
+
+    #[test]
+    fn test_parse_default_claude() {
+        let config = parse_lm_arg("unknown", None);
+        match config {
+            LmConfig::Claude { model } => assert_eq!(model, "haiku"),
+            _ => panic!("Expected default Claude config"),
+        }
+    }
+}

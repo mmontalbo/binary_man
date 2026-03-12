@@ -3,6 +3,7 @@
 //! Uses LM-driven verification to document CLI binaries.
 
 mod cli;
+mod lm;
 mod simple_verify;
 mod workflow;
 
