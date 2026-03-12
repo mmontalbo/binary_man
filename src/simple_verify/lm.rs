@@ -20,15 +20,10 @@
 //! - Args as array `["--stat"]` (correct) or string `"--stat"` (auto-split)
 
 use super::types::{FileEntry, Seed};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Stdio};
-
-/// Maximum number of retry attempts for malformed LM responses.
-const MAX_LM_RETRIES: usize = 2;
 
 /// Response from the LM containing actions to execute.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,133 +61,33 @@ pub enum LmAction {
     },
 }
 
-/// Invoke the LM with a prompt and parse the response.
-///
-/// Implements retry logic for parse errors with retry prompts that include context.
-/// On complete failure, returns empty actions instead of crashing (graceful degradation).
-pub fn invoke_lm(command: &str, prompt: &str) -> Result<LmResponse> {
-    let mut last_error: Option<String> = None;
-    let mut last_response: Option<String> = None;
-
-    for attempt in 0..=MAX_LM_RETRIES {
-        let actual_prompt = if attempt == 0 {
-            prompt.to_string()
-        } else {
-            eprintln!(
-                "  LM retry {}/{} (previous response had error)",
-                attempt, MAX_LM_RETRIES
-            );
-            build_retry_prompt(prompt, last_error.as_deref().unwrap_or("unknown error"))
-        };
-
-        let response_text = match invoke_lm_command(command, &actual_prompt) {
-            Ok(text) => text,
-            Err(e) => {
-                // Command execution error - don't retry, likely a config issue
-                return Err(e);
-            }
-        };
-
-        match parse_lm_response(&response_text) {
-            Ok(response) => {
-                if attempt > 0 {
-                    eprintln!("  LM retry succeeded");
-                }
-                return Ok(response);
-            }
-            Err(e) => {
-                last_error = Some(e.to_string());
-                last_response = Some(response_text);
-            }
-        }
-    }
-
-    // Graceful degradation: return empty actions instead of crashing
-    eprintln!(
-        "  ⚠ LM produced no valid JSON after {} attempts",
-        MAX_LM_RETRIES + 1
-    );
-    eprintln!("  Continuing with empty actions for this cycle");
-
-    // Log what we received for debugging
-    if let Some(resp) = &last_response {
-        let preview = truncate_safe(resp, 200);
-        tracing::warn!(
-            response_preview = preview,
-            error = last_error.as_deref().unwrap_or("unknown"),
-            "LM failed to produce valid JSON, returning empty actions"
-        );
-    }
-
-    Ok(LmResponse { actions: vec![] })
-}
-
-/// Invoke the LM command with stdin/stdout.
-fn invoke_lm_command(command: &str, prompt: &str) -> Result<String> {
-    let args =
-        shell_words::split(command).with_context(|| format!("parse LM command: {command}"))?;
-
-    if args.is_empty() {
-        return Err(anyhow!("LM command is empty"));
-    }
-
-    let start = std::time::Instant::now();
-    let mut child = Command::new(&args[0])
-        .args(&args[1..])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| format!("spawn LM command: {}", args[0]))?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(prompt.as_bytes())
-            .context("write prompt to LM stdin")?;
-    }
-
-    let output = child.wait_with_output().context("wait for LM command")?;
-    let elapsed_ms = start.elapsed().as_millis();
-
-    tracing::info!(
-        elapsed_ms,
-        prompt_bytes = prompt.len(),
-        response_bytes = output.stdout.len(),
-        "lm invoke complete"
-    );
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!(
-            "LM command failed with status {}: {}",
-            output.status,
-            stderr.trim()
-        ));
-    }
-
-    String::from_utf8(output.stdout).context("decode LM stdout as UTF-8")
-}
-
 /// Parse the LM response text into an LmResponse.
 ///
-/// Tries nested JSON `{"actions": [...]}` format first (primary), then falls
-/// back to extracting individual JSON objects from prose.
-fn parse_lm_response(text: &str) -> Result<LmResponse> {
-    // Extract JSON from markdown code fences if present
+/// Tries multiple extraction strategies to handle LM responses that include
+/// prose before/after the JSON. Strategies in order:
+/// 1. Extract from markdown code fences
+/// 2. Find `{"actions":` pattern anywhere in text
+/// 3. Extract individual JSON objects from prose
+pub fn parse_lm_response(text: &str) -> Result<LmResponse> {
+    // Strategy 1: Extract JSON from markdown code fences if present
     let json_text = extract_json(text);
     let fixed_json = fix_common_typos(&json_text);
     let fixed_json = fix_json_errors(&fixed_json);
 
     // Try parsing as {"actions": [...]} format (primary path)
     if let Ok(mut response) = serde_json::from_str::<LmResponse>(&fixed_json) {
-        // Post-process to handle flexible setup/args formats
         for action in &mut response.actions {
             normalize_action(action)?;
         }
         return Ok(response);
     }
 
-    // Fallback: extract individual JSON objects from prose/JSONL
+    // Strategy 2: Look for {"actions": pattern anywhere in text
+    if let Some(response) = extract_actions_json(text) {
+        return Ok(response);
+    }
+
+    // Strategy 3: Extract individual JSON objects from prose/JSONL
     if let Ok(response) = parse_extracted_objects(text) {
         if !response.actions.is_empty() {
             return Ok(response);
@@ -204,6 +99,63 @@ fn parse_lm_response(text: &str) -> Result<LmResponse> {
         "parse LM response: no valid JSON found. First 500 chars: {}",
         truncate_safe(text, 500)
     ))
+}
+
+/// Try to find and extract {"actions": [...]} from anywhere in text.
+/// Handles cases where LM outputs prose before/after the JSON.
+fn extract_actions_json(text: &str) -> Option<LmResponse> {
+    // Look for the start of an actions JSON object
+    let patterns = [r#"{"actions":"#, r#"{ "actions":"#, r#"{"actions" :"#];
+
+    for pattern in patterns {
+        if let Some(start) = text.find(pattern) {
+            // Find the matching closing brace
+            let json_start = &text[start..];
+            if let Some(json_str) = extract_balanced_json(json_start) {
+                let fixed = fix_common_typos(&json_str);
+                let fixed = fix_json_errors(&fixed);
+                if let Ok(mut response) = serde_json::from_str::<LmResponse>(&fixed) {
+                    for action in &mut response.actions {
+                        let _ = normalize_action(action);
+                    }
+                    return Some(response);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Extract a balanced JSON object starting with '{'.
+fn extract_balanced_json(text: &str) -> Option<String> {
+    if !text.starts_with('{') {
+        return None;
+    }
+
+    let mut depth = 0;
+    let mut in_string = false;
+    let mut escape_next = false;
+
+    for (i, ch) in text.char_indices() {
+        if escape_next {
+            escape_next = false;
+            continue;
+        }
+
+        match ch {
+            '\\' if in_string => escape_next = true,
+            '"' => in_string = !in_string,
+            '{' if !in_string => depth += 1,
+            '}' if !in_string => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(text[..=i].to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Normalize action fields to handle flexible LM output.
@@ -368,7 +320,10 @@ fn parse_shell_args(value: Option<&Value>) -> Result<Vec<String>> {
         }
         Some(Value::Array(arr)) => {
             // Legacy array format - extract strings
-            Ok(arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            Ok(arr
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect())
         }
         _ => Ok(vec![]),
     }
@@ -469,23 +424,39 @@ fn parse_files(value: Option<&Value>) -> Result<Vec<FileEntry>> {
 fn extract_json(text: &str) -> String {
     let text = text.trim();
 
-    let extracted = if let Some(start) = text.find("```json") {
-        let start = start + 7;
-        if let Some(end) = text[start..].find("```") {
-            text[start..start + end].trim()
+    // Try to extract content from markdown code fences
+    let extracted = if let Some(fence_start) = text.find("```json") {
+        let content_start = fence_start + 7;
+        // Skip any whitespace/newline after ```json
+        let content_start = text[content_start..]
+            .find(|c: char| !c.is_whitespace() || c == '\n')
+            .map(|i| content_start + i)
+            .unwrap_or(content_start);
+        let content_start = if text[content_start..].starts_with('\n') {
+            content_start + 1
         } else {
-            text
+            content_start
+        };
+
+        if let Some(end) = text[content_start..].find("```") {
+            text[content_start..content_start + end].trim()
+        } else {
+            // No closing fence - still strip the opening ```json
+            text[content_start..].trim()
         }
-    } else if let Some(start) = text.find("```") {
-        let start = start + 3;
-        let start = text[start..]
+    } else if let Some(fence_start) = text.find("```") {
+        let after_fence = fence_start + 3;
+        // Skip language identifier and newline
+        let content_start = text[after_fence..]
             .find('\n')
-            .map(|i| start + i + 1)
-            .unwrap_or(start);
-        if let Some(end) = text[start..].find("```") {
-            text[start..start + end].trim()
+            .map(|i| after_fence + i + 1)
+            .unwrap_or(after_fence);
+
+        if let Some(end) = text[content_start..].find("```") {
+            text[content_start..content_start + end].trim()
         } else {
-            text
+            // No closing fence - still strip the opening ```
+            text[content_start..].trim()
         }
     } else {
         text
@@ -507,24 +478,6 @@ fn fix_common_typos(json: &str) -> String {
         .replace("\"set_baseline\"", "\"SetBaseline\"")
         .replace("\"test\"", "\"Test\"")
         .replace("\"exclude\"", "\"Exclude\"")
-}
-
-/// Build a retry prompt that includes the original context plus correction instructions.
-///
-/// We include the full original prompt because without context, the LM doesn't know
-/// what surfaces to work on and produces meaningless responses.
-fn build_retry_prompt(original_prompt: &str, error: &str) -> String {
-    format!(
-        r#"{original_prompt}
-
----
-
-⚠️ RETRY: Your previous response could not be parsed as JSON.
-
-Error: {error}
-
-Please respond with ONLY a valid JSON object. No explanations before or after."#
-    )
 }
 
 /// Truncate a string safely without splitting UTF-8 characters.
@@ -899,10 +852,10 @@ That should work!
         // Correct format: nested arrays
         let value = serde_json::json!([["git", "init"], ["touch", "file.txt"]]);
         let commands = parse_setup_commands(Some(&value)).unwrap();
-        assert_eq!(commands, vec![
-            vec!["git", "init"],
-            vec!["touch", "file.txt"]
-        ]);
+        assert_eq!(
+            commands,
+            vec![vec!["git", "init"], vec!["touch", "file.txt"]]
+        );
     }
 
     #[test]
@@ -910,10 +863,10 @@ That should work!
         // LM mistake: flat array of shell strings
         let value = serde_json::json!(["git init", "touch file.txt"]);
         let commands = parse_setup_commands(Some(&value)).unwrap();
-        assert_eq!(commands, vec![
-            vec!["git", "init"],
-            vec!["touch", "file.txt"]
-        ]);
+        assert_eq!(
+            commands,
+            vec![vec!["git", "init"], vec!["touch", "file.txt"]]
+        );
     }
 
     #[test]
@@ -921,10 +874,10 @@ That should work!
         // LM mistake: single shell string with &&
         let value = serde_json::json!("git init && touch file.txt");
         let commands = parse_setup_commands(Some(&value)).unwrap();
-        assert_eq!(commands, vec![
-            vec!["git", "init"],
-            vec!["touch", "file.txt"]
-        ]);
+        assert_eq!(
+            commands,
+            vec![vec!["git", "init"], vec!["touch", "file.txt"]]
+        );
     }
 
     #[test]
