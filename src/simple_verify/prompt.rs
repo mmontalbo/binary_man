@@ -45,7 +45,11 @@ fn extract_known_issues(state: &State) -> Vec<KnownIssue> {
         .collect();
 
     // Sort by count descending, then by command for stability
-    issues.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.command.cmp(&b.command)));
+    issues.sort_by(|a, b| {
+        b.count
+            .cmp(&a.count)
+            .then_with(|| a.command.cmp(&b.command))
+    });
 
     // Return top 5
     issues.truncate(5);
@@ -244,7 +248,10 @@ pub fn build_prompt(state: &State, target_ids: &[String]) -> String {
 
             // Show all attempts with detailed output information
             if !entry.attempts.is_empty() {
-                prompt.push_str(&format!("\n**Attempts:** {} total\n\n", entry.attempts.len()));
+                prompt.push_str(&format!(
+                    "\n**Attempts:** {} total\n\n",
+                    entry.attempts.len()
+                ));
 
                 for (i, attempt) in entry.attempts.iter().enumerate() {
                     prompt.push_str(&format!(
@@ -309,6 +316,125 @@ fn format_outcome(outcome: &Outcome) -> String {
         Outcome::Crashed { hint } => format!("Crashed: {}", hint),
         Outcome::ExecutionError { error } => format!("ExecutionError: {}", error),
     }
+}
+
+/// Build an incremental prompt for stateful LM plugins.
+///
+/// This is a much shorter prompt that assumes the LM has context from previous cycles.
+/// It only sends:
+/// - Results from the last cycle
+/// - Remaining pending surfaces (brief list)
+/// - Request for next actions
+pub fn build_incremental_prompt(
+    state: &State,
+    target_ids: &[String],
+    last_response: Option<&super::lm::LmResponse>,
+) -> String {
+    let mut prompt = String::new();
+
+    prompt.push_str("# Cycle Update\n\n");
+
+    // Show what happened with the last actions
+    if let Some(response) = last_response {
+        prompt.push_str("## Previous Actions Results\n\n");
+        for action in &response.actions {
+            match action {
+                super::lm::LmAction::SetBaseline { .. } => {
+                    if state.baseline.is_some() {
+                        prompt.push_str("- SetBaseline: ✓ Baseline established\n");
+                    } else {
+                        prompt.push_str("- SetBaseline: ✗ Failed\n");
+                    }
+                }
+                super::lm::LmAction::Test { surface_id, .. } => {
+                    if let Some(entry) = state.entries.iter().find(|e| &e.id == surface_id) {
+                        match &entry.status {
+                            super::types::Status::Verified => {
+                                prompt.push_str(&format!("- Test {}: ✓ Verified\n", surface_id));
+                            }
+                            super::types::Status::Pending => {
+                                // Get the last attempt outcome
+                                if let Some(attempt) = entry.attempts.last() {
+                                    prompt.push_str(&format!(
+                                        "- Test {}: {:?} - try different approach\n",
+                                        surface_id,
+                                        format_outcome(&attempt.outcome)
+                                    ));
+                                } else {
+                                    prompt.push_str(&format!(
+                                        "- Test {}: Still pending\n",
+                                        surface_id
+                                    ));
+                                }
+                            }
+                            super::types::Status::Excluded { reason } => {
+                                prompt.push_str(&format!(
+                                    "- Test {}: Excluded ({})\n",
+                                    surface_id, reason
+                                ));
+                            }
+                        }
+                    }
+                }
+                super::lm::LmAction::Exclude { surface_id, .. } => {
+                    prompt.push_str(&format!("- Exclude {}: ✓ Marked excluded\n", surface_id));
+                }
+            }
+        }
+        prompt.push('\n');
+    }
+
+    // Brief state summary
+    let verified = state
+        .entries
+        .iter()
+        .filter(|e| matches!(e.status, super::types::Status::Verified))
+        .count();
+    let excluded = state
+        .entries
+        .iter()
+        .filter(|e| matches!(e.status, super::types::Status::Excluded { .. }))
+        .count();
+    let pending = state
+        .entries
+        .iter()
+        .filter(|e| matches!(e.status, super::types::Status::Pending))
+        .count();
+
+    prompt.push_str(&format!(
+        "**Progress:** {} verified, {} excluded, {} pending\n\n",
+        verified, excluded, pending
+    ));
+
+    // Surfaces needing work (brief version)
+    prompt.push_str("## Next Surfaces to Work On\n\n");
+    for id in target_ids {
+        if let Some(entry) = state.entries.iter().find(|e| &e.id == id) {
+            prompt.push_str(&format!("- **{}**: {}\n", entry.id, entry.description));
+            if !entry.attempts.is_empty() {
+                let last = entry.attempts.last().unwrap();
+                prompt.push_str(&format!(
+                    "  Last attempt: {:?} with args {:?}\n",
+                    format_outcome(&last.outcome),
+                    last.args
+                ));
+            }
+        }
+    }
+    prompt.push('\n');
+
+    // Short instructions reminder
+    prompt.push_str(
+        r#"Provide your next actions as JSON:
+```json
+{"actions": [{"kind": "Test", "surface_id": "...", "args": [...], "seed": {...}}, ...]}
+```
+
+Remember: Output must DIFFER from control run to verify. Try different seeds if OutputsEqual.
+"#,
+    );
+
+    prompt
 }
 
 const INSTRUCTIONS: &str = r#"## Instructions
