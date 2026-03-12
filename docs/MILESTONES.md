@@ -5,7 +5,213 @@ This document tracks the static-first roadmap for generating man pages from
 validation, coverage tracking, and (eventually) a structured "enrichment loop"
 that supports iterative static + dynamic passes from portable doc packs.
 
-Current focus: none (M37 complete).
+Current focus: M38 (Native LM Plugin Interface).
+
+## M38 — Native LM Plugin Interface with Prompt Caching
+
+Goal: Reduce LM call latency by 50-70% through direct API integration and prompt
+caching, replacing the shell-based `BMAN_LM_COMMAND` interface with a native plugin
+system.
+
+### Problem
+
+Current LM invocation via `BMAN_LM_COMMAND` (e.g., `claude -p --model haiku`) has
+significant overhead:
+
+| Component | Time | % of Call |
+|-----------|------|-----------|
+| Node.js CLI startup | ~0.5-1s | 15-30% |
+| Network round-trip | ~0.5s | 15% |
+| API overhead | ~0.5s | 15% |
+| Inference (Haiku) | ~1-2s | 30-40% |
+| **Total** | ~3-5s | 100% |
+
+For a 20-cycle verification run with 15-37 LM calls, this adds 15-60 seconds of
+pure CLI overhead. Additionally, each call resends the full prompt context even
+though 80%+ is static (system instructions, surface descriptions, hints).
+
+### Solution
+
+1. **Native LM Plugin Interface**: Define a shell-script interface that plugins
+   implement, enabling optimized LM integrations without modifying bman core.
+
+2. **Haiku Reference Plugin**: First-party plugin using direct `reqwest` HTTP
+   calls with connection pooling and Anthropic prompt caching.
+
+### Part 1: Native Plugin Interface
+
+Plugins are executables that implement a simple JSON-over-stdio protocol:
+
+```bash
+# Plugin invocation
+echo "$REQUEST_JSON" | bman-lm-haiku
+
+# Request format
+{
+  "prompt": "...",
+  "cache_prefix": "...",      # Static content to cache
+  "cache_ttl": "5m",          # Cache TTL (5m or 1h)
+  "max_tokens": 4096
+}
+
+# Response format
+{
+  "content": "...",
+  "usage": {
+    "input_tokens": 1234,
+    "output_tokens": 567,
+    "cache_read_tokens": 1000,
+    "cache_write_tokens": 234
+  }
+}
+```
+
+**Configuration:**
+
+```bash
+# Environment variable (existing, still works)
+BMAN_LM_COMMAND="bman-lm-haiku"
+
+# Or in .claude/settings.local.json
+{
+  "lm_plugin": {
+    "command": "bman-lm-haiku",
+    "cache_enabled": true
+  }
+}
+```
+
+### Part 2: Haiku Reference Plugin
+
+Standalone Rust binary `bman-lm-haiku` that:
+
+1. **Eliminates CLI overhead**: Direct HTTP via `reqwest` (~0.5-1s saved/call)
+2. **Connection pooling**: Reuses TCP/TLS connections across calls
+3. **Prompt caching**: Uses Anthropic's `cache_control` for static prompt prefix
+
+```rust
+// Pseudocode for plugin
+static CLIENT: Lazy<Client> = Lazy::new(|| {
+    Client::builder()
+        .pool_idle_timeout(Duration::from_secs(60))
+        .pool_max_idle_per_host(4)
+        .build()
+        .unwrap()
+});
+
+fn call_anthropic(request: PluginRequest) -> Result<PluginResponse> {
+    let body = json!({
+        "model": "claude-3-5-haiku-20241022",
+        "max_tokens": request.max_tokens,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": request.cache_prefix,
+                    "cache_control": {"type": "ephemeral"}
+                },
+                {
+                    "type": "text",
+                    "text": request.prompt
+                }
+            ]
+        }]
+    });
+
+    CLIENT.post(API_URL)
+        .header("x-api-key", &*API_KEY)
+        .header("anthropic-version", "2023-06-01")
+        .header("anthropic-beta", "prompt-caching-2024-07-31")
+        .json(&body)
+        .send()?
+        .json()
+}
+```
+
+### Expected Gains
+
+| Optimization | Latency Saved | Cost Saved |
+|--------------|---------------|------------|
+| Direct API (no CLI) | ~0.5-1s/call | - |
+| Connection pooling | ~0.2s/call | - |
+| Prompt caching | ~50-70% of input processing | ~70-80% input tokens |
+
+**Projected e2e improvement:**
+
+| Binary | Current | With Plugin | Speedup |
+|--------|---------|-------------|---------|
+| ls (15 calls) | 234s | ~150s | 1.5x |
+| git diff (37 calls) | 423s | ~250s | 1.7x |
+
+### Changes
+
+**1. Plugin interface** (`src/simple_verify/lm.rs`)
+
+- Add `PluginRequest` and `PluginResponse` types
+- Split prompt into `cache_prefix` (static) and `prompt` (dynamic)
+- Detect plugin mode vs legacy `BMAN_LM_COMMAND` mode
+
+**2. Prompt restructuring** (`src/simple_verify/prompt.rs`)
+
+- Separate static content (system instructions, surface list, hints)
+- Dynamic content (current cycle attempts, pending surfaces)
+- Return `(cache_prefix, dynamic_prompt)` tuple
+
+**3. Haiku plugin** (`tools/bman-lm-haiku/`)
+
+- Standalone Rust binary
+- Direct Anthropic API via `reqwest`
+- Connection pooling
+- Prompt caching with `cache_control`
+- Usage stats in response
+
+**4. Documentation**
+
+- Plugin interface specification
+- How to implement custom plugins (local LLMs, other providers)
+- Migration guide from `BMAN_LM_COMMAND`
+
+### Acceptance Criteria
+
+| Criterion | Status |
+|-----------|--------|
+| Plugin interface defined and documented | |
+| Legacy `BMAN_LM_COMMAND` still works | |
+| `bman-lm-haiku` plugin implemented | |
+| Connection pooling verified (tcpdump) | |
+| Prompt caching verified (usage stats show cache hits) | |
+| e2e test shows ≥30% latency reduction | |
+| No regression in verification rate | |
+
+### Out of Scope
+
+- Parallel streams optimization (explored in prototype, mixed results)
+- Local LLM plugins (future milestone)
+- Streaming responses (future optimization)
+
+### Background: Parallel Streams Prototype
+
+During investigation, we prototyped `--streams N` for parallel LM calls. Results:
+
+| Test | Streams | Time | Verified | Rate |
+|------|---------|------|----------|------|
+| ls | 1 | 234s | 55 | 96% |
+| ls | 2 | 107s | 57 | 100% |
+| ls | 3 | 104s | 55 | 96% |
+| git diff | 1 | 289s | 59 | 70% |
+| git diff | 2 | 423s | 54 | 64% |
+
+**Findings:**
+- Parallel streams help simple binaries (ls: 2.2x speedup)
+- Parallel streams hurt complex binaries (git diff: slower, worse quality)
+- Context splitting degrades LM decision quality for complex surfaces
+- Network overhead (~60-70% of call time) is the primary bottleneck
+
+**Decision:** Keep `--streams` as experimental flag, prioritize plugin interface
+for latency reduction without quality tradeoffs.
+
+---
 
 ## M37 — Judgment Feedback Loop for Comparison Commands (done)
 
