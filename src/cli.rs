@@ -28,14 +28,37 @@ pub struct RunArgs {
     #[arg(long, default_value = "man")]
     pub output: OutputFormat,
 
-    /// LM command to invoke for behavior verification.
-    /// Defaults to BMAN_LM_COMMAND env var, then "claude -p --model haiku".
-    #[arg(long, value_name = "CMD")]
-    pub lm: Option<String>,
+    /// LM plugin to use for verification.
+    /// Native: "claude:haiku", "claude:sonnet" (persistent process, faster).
+    /// Legacy: any command string (or set BMAN_LM_COMMAND env var).
+    #[arg(long, value_name = "LM", default_value = "claude:haiku")]
+    pub lm: String,
+
+    /// Context mode for stateful LM plugins.
+    /// auto: Use incremental for stateful plugins, full for stateless (default).
+    /// full: Send complete state every cycle (works with all plugins).
+    /// reset: Reset LM session after each cycle (stateless behavior for native plugins).
+    /// incremental: Send only changes since last cycle (efficient for stateful plugins).
+    #[arg(long, default_value = "auto")]
+    pub context_mode: ContextMode,
 
     /// Command to document: <binary> [entry-point...]
     #[arg(value_name = "COMMAND", required = true, num_args = 1..)]
     pub invocation: Vec<String>,
+}
+
+/// Context handling mode for LM plugins.
+#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
+pub enum ContextMode {
+    /// Auto-select: incremental for stateful plugins, full for stateless
+    #[default]
+    Auto,
+    /// Send complete state every cycle (works with all plugins)
+    Full,
+    /// Reset LM session after each cycle (stateless behavior for native plugins)
+    Reset,
+    /// Send only changes since last cycle (efficient for stateful plugins)
+    Incremental,
 }
 
 /// Output format for the run command.
