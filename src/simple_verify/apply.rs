@@ -4,8 +4,8 @@
 //! computing outcomes by comparing option runs to control runs.
 
 use super::evidence::{
-    compute_outcome, make_output_preview, run_scenario, sanitize_id, write_evidence,
-    OUTPUT_PREVIEW_MAX_LEN,
+    compute_outcome, make_output_preview, run_scenario, sanitize_id, write_evidence, FsDiff,
+    OutputMetrics, OUTPUT_PREVIEW_MAX_LEN,
 };
 use super::lm::LmAction;
 use super::types::{Attempt, BaselineRecord, Outcome, Seed, State, Status};
@@ -26,6 +26,9 @@ pub struct TestResult {
     pub stdout_preview: Option<String>,
     pub stderr_preview: Option<String>,
     pub control_stdout_preview: Option<String>,
+    pub fs_diff: Option<FsDiff>,
+    pub stdout_metrics: Option<OutputMetrics>,
+    pub stderr_metrics: Option<OutputMetrics>,
 }
 
 /// Run a test scenario without mutating state.
@@ -46,9 +49,10 @@ pub fn run_test_scenario(
     // Control run: context_argv + extra args (excluding the option being tested)
     // This isolates the effect of just the option by keeping everything else constant
     let control_id = format!("{}_control", scenario_id);
+    let surface_with_eq = format!("{}=", surface_id);
     let extra_args: Vec<String> = args
         .iter()
-        .filter(|a| *a != surface_id)
+        .filter(|a| *a != surface_id && !a.starts_with(&surface_with_eq))
         .cloned()
         .collect();
     let control_argv: Vec<String> = context_argv
@@ -75,6 +79,11 @@ pub fn run_test_scenario(
     let control_stdout_preview =
         make_output_preview(&control_evidence.stdout, OUTPUT_PREVIEW_MAX_LEN);
 
+    // Capture fs_diff and output metrics from evidence
+    let fs_diff = evidence.fs_diff.clone();
+    let stdout_metrics = evidence.stdout_metrics.clone();
+    let stderr_metrics = evidence.stderr_metrics.clone();
+
     Ok(TestResult {
         surface_id: surface_id.to_string(),
         args,
@@ -85,6 +94,9 @@ pub fn run_test_scenario(
         stdout_preview,
         stderr_preview,
         control_stdout_preview,
+        fs_diff,
+        stdout_metrics,
+        stderr_metrics,
     })
 }
 
@@ -103,6 +115,9 @@ pub fn merge_test_result(state: &mut State, result: TestResult) {
             stdout_preview: result.stdout_preview,
             stderr_preview: result.stderr_preview,
             control_stdout_preview: result.control_stdout_preview,
+            fs_diff: result.fs_diff,
+            stdout_metrics: result.stdout_metrics,
+            stderr_metrics: result.stderr_metrics,
         });
 
         if matches!(result.outcome, Outcome::Verified { .. }) {
@@ -146,9 +161,10 @@ pub fn apply_action(state: &mut State, pack_path: &Path, action: LmAction) -> Re
 
             // Control run: context_argv + extra args (excluding the option being tested)
             let control_id = format!("{}_control", scenario_id);
+            let surface_with_eq = format!("{}=", surface_id);
             let extra_args: Vec<String> = args
                 .iter()
-                .filter(|a| *a != &surface_id)
+                .filter(|a| *a != &surface_id && !a.starts_with(&surface_with_eq))
                 .cloned()
                 .collect();
             let control_argv: Vec<String> = state
@@ -182,6 +198,11 @@ pub fn apply_action(state: &mut State, pack_path: &Path, action: LmAction) -> Re
             let control_stdout_preview =
                 make_output_preview(&control_evidence.stdout, OUTPUT_PREVIEW_MAX_LEN);
 
+            // Capture fs_diff and output metrics from evidence
+            let fs_diff = evidence.fs_diff.clone();
+            let stdout_metrics = evidence.stdout_metrics.clone();
+            let stderr_metrics = evidence.stderr_metrics.clone();
+
             // Update entry
             if let Some(entry) = state.entries.iter_mut().find(|e| e.id == surface_id) {
                 entry.attempts.push(Attempt {
@@ -194,6 +215,9 @@ pub fn apply_action(state: &mut State, pack_path: &Path, action: LmAction) -> Re
                     stdout_preview,
                     stderr_preview,
                     control_stdout_preview,
+                    fs_diff,
+                    stdout_metrics,
+                    stderr_metrics,
                 });
 
                 if matches!(outcome, Outcome::Verified { .. }) {
@@ -216,6 +240,7 @@ mod tests {
     use super::*;
     use crate::simple_verify::evidence::Evidence;
     use crate::simple_verify::types::{DiffKind, Seed, SurfaceEntry, STATE_SCHEMA_VERSION};
+    use std::collections::HashMap;
 
     #[test]
     fn test_sanitize_id() {
@@ -366,6 +391,10 @@ mod tests {
             setup_results: Vec::new(),
             execution_error: None,
             captured_at_ms: 0,
+            fs_diff: None,
+            stdout_metrics: None,
+            stderr_metrics: None,
+            env: HashMap::new(),
         };
 
         // Option evidence with same output
@@ -379,6 +408,10 @@ mod tests {
             setup_results: Vec::new(),
             execution_error: None,
             captured_at_ms: 0,
+            fs_diff: None,
+            stdout_metrics: None,
+            stderr_metrics: None,
+            env: HashMap::new(),
         };
 
         let outcome = compute_outcome(&option_evidence, &control_evidence);
@@ -398,6 +431,10 @@ mod tests {
             setup_results: Vec::new(),
             execution_error: None,
             captured_at_ms: 0,
+            fs_diff: None,
+            stdout_metrics: None,
+            stderr_metrics: None,
+            env: HashMap::new(),
         };
 
         // Option evidence with different output
@@ -411,6 +448,10 @@ mod tests {
             setup_results: Vec::new(),
             execution_error: None,
             captured_at_ms: 0,
+            fs_diff: None,
+            stdout_metrics: None,
+            stderr_metrics: None,
+            env: HashMap::new(),
         };
 
         let outcome = compute_outcome(&option_evidence, &control_evidence);
