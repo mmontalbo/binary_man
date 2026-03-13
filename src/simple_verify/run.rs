@@ -66,7 +66,10 @@ const PARSE_ERROR_RESET_THRESHOLD: usize = 2;
 
 /// Reset excluded surfaces to Pending for retry with fresh LM session.
 /// Returns the count and a map of surface_id -> prior attempts for history.
-fn retry_excluded_surfaces(state: &mut State, verbose: bool) -> (usize, std::collections::HashMap<String, Vec<Attempt>>) {
+fn retry_excluded_surfaces(
+    state: &mut State,
+    verbose: bool,
+) -> (usize, std::collections::HashMap<String, Vec<Attempt>>) {
     let mut count = 0;
     let mut prior_attempts = std::collections::HashMap::new();
     for entry in &mut state.entries {
@@ -237,10 +240,8 @@ pub fn run(
         } else {
             retry_ids.len()
         };
-        let retry_chunks: Vec<Vec<String>> = retry_ids
-            .chunks(chunk_size)
-            .map(|c| c.to_vec())
-            .collect();
+        let retry_chunks: Vec<Vec<String>> =
+            retry_ids.chunks(chunk_size).map(|c| c.to_vec()).collect();
         let num_retry_chunks = retry_chunks.len();
 
         // Run retry chunks in parallel or sequential (same as main phase)
@@ -489,10 +490,7 @@ fn run_parallel_sessions(
             .collect();
 
         // Collect results from all threads
-        handles
-            .into_iter()
-            .filter_map(|h| h.join().ok())
-            .collect()
+        handles.into_iter().filter_map(|h| h.join().ok()).collect()
     });
 
     // Merge updates back into main state
@@ -1492,6 +1490,9 @@ fn probe_entries_with_modifiers(state: &mut State, pack_path: &Path, verbose: bo
                     stdout_preview,
                     stderr_preview,
                     control_stdout_preview,
+                    fs_diff: variant_evidence.fs_diff.clone(),
+                    stdout_metrics: variant_evidence.stdout_metrics.clone(),
+                    stderr_metrics: variant_evidence.stderr_metrics.clone(),
                 });
 
                 // Mark as verified

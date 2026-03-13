@@ -241,11 +241,7 @@ fn format_seed_summary(seed: &super::types::Seed) -> String {
 
     // Include setup commands
     if !seed.setup.is_empty() {
-        let setup_cmds: Vec<String> = seed
-            .setup
-            .iter()
-            .map(|cmd| cmd.join(" "))
-            .collect();
+        let setup_cmds: Vec<String> = seed.setup.iter().map(|cmd| cmd.join(" ")).collect();
         parts.push(format!("setup:{:?}", setup_cmds));
     }
 
@@ -387,6 +383,23 @@ pub fn build_prompt(state: &State, target_ids: &[String]) -> String {
                         if let Some(control) = &attempt.control_stdout_preview {
                             prompt.push_str(&format!("    control_stdout: {:?}\n", control));
                         }
+
+                        // Show output metrics to help LM understand output characteristics
+                        if let Some(metrics) = &attempt.stdout_metrics {
+                            prompt.push_str(&format!(
+                                "    (Outputs identical: {} lines, {} bytes)\n",
+                                metrics.line_count, metrics.byte_count
+                            ));
+                        }
+
+                        // Show fs_diff if any files were created/modified
+                        if let Some(fs_diff) = &attempt.fs_diff {
+                            prompt.push_str(&format!(
+                                "    fs_diff: created={:?}, modified={:?}\n",
+                                fs_diff.created, fs_diff.modified
+                            ));
+                        }
+
                         prompt.push_str(
                             "    → Outputs matched! Try a different seed that exercises the option's effect.\n",
                         );
@@ -431,7 +444,11 @@ const MAX_PRIOR_ATTEMPTS: usize = 2;
 ///
 /// This is used during the retry pass for surfaces that were previously excluded.
 /// Each surface only sees its own attempt history (no cross-surface hints).
-pub fn build_retry_prompt(state: &State, target_ids: &[String], prior_attempts: &std::collections::HashMap<String, Vec<Attempt>>) -> String {
+pub fn build_retry_prompt(
+    state: &State,
+    target_ids: &[String],
+    prior_attempts: &std::collections::HashMap<String, Vec<Attempt>>,
+) -> String {
     let mut prompt = String::new();
 
     // Header with full base command
@@ -440,7 +457,10 @@ pub fn build_retry_prompt(state: &State, target_ids: &[String], prior_attempts: 
     } else {
         format!("{} {}", state.binary, state.context_argv.join(" "))
     };
-    prompt.push_str(&format!("# Behavior Verification (Retry): {}\n\n", base_command));
+    prompt.push_str(&format!(
+        "# Behavior Verification (Retry): {}\n\n",
+        base_command
+    ));
 
     // Show base command clearly
     prompt.push_str(&format!(
@@ -471,7 +491,9 @@ pub fn build_retry_prompt(state: &State, target_ids: &[String], prior_attempts: 
 
     // Target surfaces with prior attempt history
     prompt.push_str("## Surfaces Needing Retry\n\n");
-    prompt.push_str("These surfaces were previously excluded. Try a different/creative approach.\n\n");
+    prompt.push_str(
+        "These surfaces were previously excluded. Try a different/creative approach.\n\n",
+    );
 
     for id in target_ids {
         if let Some(entry) = state.entries.iter().find(|e| &e.id == id) {
@@ -487,7 +509,10 @@ pub fn build_retry_prompt(state: &State, target_ids: &[String], prior_attempts: 
             // Include prior attempt history if available (each surface only sees its own)
             if let Some(attempts) = prior_attempts.get(id) {
                 if !attempts.is_empty() {
-                    prompt.push_str(&format!("\n{}", format_attempt_history(attempts, MAX_PRIOR_ATTEMPTS)));
+                    prompt.push_str(&format!(
+                        "\n{}",
+                        format_attempt_history(attempts, MAX_PRIOR_ATTEMPTS)
+                    ));
                 }
             }
 
@@ -778,6 +803,9 @@ mod tests {
                     stdout_preview: None,
                     stderr_preview: None,
                     control_stdout_preview: None,
+                    fs_diff: None,
+                    stdout_metrics: None,
+                    stderr_metrics: None,
                 }],
                 retried: false,
             }],
@@ -865,6 +893,9 @@ mod tests {
                     stdout_preview: Some("file1.txt\nfile2.txt\n".to_string()),
                     stderr_preview: None,
                     control_stdout_preview: Some("file1.txt\nfile2.txt\n".to_string()),
+                    fs_diff: None,
+                    stdout_metrics: None,
+                    stderr_metrics: None,
                 }],
                 retried: false,
             }],
@@ -909,6 +940,9 @@ mod tests {
                         stdout_preview: Some("output1".to_string()),
                         stderr_preview: None,
                         control_stdout_preview: Some("output1".to_string()),
+                        fs_diff: None,
+                        stdout_metrics: None,
+                        stderr_metrics: None,
                     },
                     Attempt {
                         cycle: 2,
@@ -920,6 +954,9 @@ mod tests {
                         stdout_preview: Some("output2".to_string()),
                         stderr_preview: None,
                         control_stdout_preview: Some("output2".to_string()),
+                        fs_diff: None,
+                        stdout_metrics: None,
+                        stderr_metrics: None,
                     },
                 ],
                 retried: false,
@@ -1003,6 +1040,9 @@ stderr: error: pathspec 'main' did not match"#
             stdout_preview: None,
             stderr_preview: None,
             control_stdout_preview: None,
+            fs_diff: None,
+            stdout_metrics: None,
+            stderr_metrics: None,
         };
 
         let state = State {
@@ -1076,6 +1116,9 @@ stderr: error: already a git repo"#
                     stdout_preview: None,
                     stderr_preview: None,
                     control_stdout_preview: None,
+                    fs_diff: None,
+                    stdout_metrics: None,
+                    stderr_metrics: None,
                 }],
                 retried: false,
             }],
@@ -1117,6 +1160,9 @@ stderr: pathspec 'main' did not match"#
             stdout_preview: None,
             stderr_preview: None,
             control_stdout_preview: None,
+            fs_diff: None,
+            stdout_metrics: None,
+            stderr_metrics: None,
         };
 
         let state = State {
@@ -1245,6 +1291,9 @@ stderr: pathspec 'main' did not match"#
             stdout_preview: None,
             stderr_preview: None,
             control_stdout_preview: None,
+            fs_diff: None,
+            stdout_metrics: None,
+            stderr_metrics: None,
         }];
 
         let history = super::format_attempt_history(&attempts, 2);
@@ -1267,13 +1316,26 @@ stderr: pathspec 'main' did not match"#
             stdout_preview: None,
             stderr_preview: None,
             control_stdout_preview: None,
+            fs_diff: None,
+            stdout_metrics: None,
+            stderr_metrics: None,
         };
 
         let attempts = vec![
             make_attempt(1, Outcome::OutputsEqual),
-            make_attempt(2, Outcome::SetupFailed { hint: "error 1".to_string() }),
+            make_attempt(
+                2,
+                Outcome::SetupFailed {
+                    hint: "error 1".to_string(),
+                },
+            ),
             make_attempt(3, Outcome::OutputsEqual),
-            make_attempt(4, Outcome::Crashed { hint: "crash".to_string() }),
+            make_attempt(
+                4,
+                Outcome::Crashed {
+                    hint: "crash".to_string(),
+                },
+            ),
         ];
 
         // With max=2, should only show attempts 3 and 4
@@ -1293,12 +1355,26 @@ stderr: pathspec 'main' did not match"#
             setup: vec![
                 vec!["git".to_string(), "init".to_string()],
                 vec!["git".to_string(), "add".to_string(), ".".to_string()],
-                vec!["git".to_string(), "commit".to_string(), "-m".to_string(), "initial".to_string()],
+                vec![
+                    "git".to_string(),
+                    "commit".to_string(),
+                    "-m".to_string(),
+                    "initial".to_string(),
+                ],
             ],
             files: vec![
-                FileEntry { path: "file1.txt".to_string(), content: "a".repeat(100) },
-                FileEntry { path: "file2.txt".to_string(), content: "b".repeat(100) },
-                FileEntry { path: "very_long_file_name_that_takes_up_space.txt".to_string(), content: "c".to_string() },
+                FileEntry {
+                    path: "file1.txt".to_string(),
+                    content: "a".repeat(100),
+                },
+                FileEntry {
+                    path: "file2.txt".to_string(),
+                    content: "b".repeat(100),
+                },
+                FileEntry {
+                    path: "very_long_file_name_that_takes_up_space.txt".to_string(),
+                    content: "c".to_string(),
+                },
             ],
         };
 
@@ -1347,6 +1423,9 @@ stderr: pathspec 'main' did not match"#
                     stdout_preview: None,
                     stderr_preview: None,
                     control_stdout_preview: None,
+                    fs_diff: None,
+                    stdout_metrics: None,
+                    stderr_metrics: None,
                 },
                 Attempt {
                     cycle: 2,
@@ -1357,10 +1436,15 @@ stderr: pathspec 'main' did not match"#
                         files: vec![],
                     },
                     evidence_path: "evidence/all_c2.json".to_string(),
-                    outcome: Outcome::SetupFailed { hint: "touch failed".to_string() },
+                    outcome: Outcome::SetupFailed {
+                        hint: "touch failed".to_string(),
+                    },
                     stdout_preview: None,
                     stderr_preview: None,
                     control_stdout_preview: None,
+                    fs_diff: None,
+                    stdout_metrics: None,
+                    stderr_metrics: None,
                 },
             ],
         );

@@ -10,13 +10,36 @@
 use super::types::Seed;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
 /// Default timeout for scenario execution in seconds.
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
+
+/// Filesystem changes detected between before/after command execution.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FsDiff {
+    pub created: Vec<String>,
+    pub modified: Vec<String>,
+    pub deleted: Vec<String>,
+}
+
+impl FsDiff {
+    pub fn has_changes(&self) -> bool {
+        !self.created.is_empty() || !self.modified.is_empty() || !self.deleted.is_empty()
+    }
+}
+
+/// Metrics about command output (stdout/stderr).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OutputMetrics {
+    pub line_count: usize,
+    pub byte_count: usize,
+    pub is_empty: bool,
+}
 
 /// Build a bwrap command with full sandbox isolation.
 ///
@@ -24,16 +47,20 @@ const DEFAULT_TIMEOUT_SECS: u64 = 30;
 /// - Read-only root filesystem
 /// - Writable work directory
 /// - No network access
-/// - Isolated /tmp
+/// - Observable /tmp (bound to workspace/tmp)
 /// - Process dies with parent
-fn build_sandbox_command(work_dir: &Path) -> Command {
+fn build_sandbox_command(work_dir: &Path, sandbox_tmp: &Path) -> Command {
     let mut cmd = Command::new("bwrap");
 
     // Core filesystem setup
     cmd.args(["--ro-bind", "/", "/"]); // Read-only root
     cmd.args(["--dev", "/dev"]); // Device access
     cmd.args(["--proc", "/proc"]); // Proc filesystem
-    cmd.args(["--tmpfs", "/tmp"]); // Isolated /tmp
+
+    // Bind workspace/tmp to /tmp for observability
+    // This allows fs_diff to capture files written to /tmp
+    let sandbox_tmp_str = sandbox_tmp.to_string_lossy();
+    cmd.args(["--bind", &sandbox_tmp_str, "/tmp"]);
 
     // Make work directory writable
     let work_dir_str = work_dir.to_string_lossy();
@@ -91,6 +118,18 @@ pub struct Evidence {
     pub execution_error: Option<String>,
     /// Timestamp when evidence was captured.
     pub captured_at_ms: u128,
+    /// Filesystem changes detected during command execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fs_diff: Option<FsDiff>,
+    /// Output metrics for stdout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stdout_metrics: Option<OutputMetrics>,
+    /// Output metrics for stderr.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stderr_metrics: Option<OutputMetrics>,
+    /// Environment variables visible to the command.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub env: HashMap<String, String>,
 }
 
 /// Run a scenario and capture evidence.
@@ -121,6 +160,26 @@ pub fn run_scenario(
 
     let work_dir = temp_dir.path();
 
+    // Create workspace/tmp directory for observable /tmp inside sandbox
+    let sandbox_tmp = work_dir.join("tmp");
+    fs::create_dir_all(&sandbox_tmp).context("create workspace/tmp directory")?;
+
+    // Capture environment variables that will be visible in the sandbox
+    // We capture a subset of relevant env vars for telemetry
+    let env: HashMap<String, String> = std::env::vars()
+        .filter(|(k, _)| {
+            // Capture locale, timezone, and commonly-relevant vars
+            k.starts_with("LANG")
+                || k.starts_with("LC_")
+                || k == "TZ"
+                || k == "HOME"
+                || k == "USER"
+                || k == "PATH"
+                || k == "SHELL"
+                || k == "TERM"
+        })
+        .collect();
+
     // Write seed files
     for file in &seed.files {
         let file_path = work_dir.join(&file.path);
@@ -143,7 +202,7 @@ pub fn run_scenario(
         }
 
         // Run setup commands in sandbox to prevent malicious actions
-        let mut cmd = build_sandbox_command(work_dir);
+        let mut cmd = build_sandbox_command(work_dir, &sandbox_tmp);
         cmd.arg(&setup_cmd[0]);
         cmd.args(&setup_cmd[1..]);
         cmd.stdout(Stdio::null());
@@ -207,11 +266,18 @@ pub fn run_scenario(
             setup_results,
             execution_error: None,
             captured_at_ms,
+            fs_diff: None,
+            stdout_metrics: None,
+            stderr_metrics: None,
+            env,
         });
     }
 
+    // Capture filesystem state before running the main command
+    let fs_state_before = capture_fs_state(work_dir);
+
     // Build the main command with full sandbox isolation
-    let mut cmd = build_sandbox_command(work_dir);
+    let mut cmd = build_sandbox_command(work_dir, &sandbox_tmp);
     cmd.arg(binary);
     cmd.args(argv);
     cmd.stdout(Stdio::piped());
@@ -231,14 +297,33 @@ pub fn run_scenario(
                 setup_results: Vec::new(),
                 execution_error: Some(e.to_string()),
                 captured_at_ms,
+                fs_diff: None,
+                stdout_metrics: None,
+                stderr_metrics: None,
+                env,
             });
         }
+    };
+
+    // Capture filesystem state after running the main command
+    let fs_state_after = capture_fs_state(work_dir);
+
+    // Compute filesystem diff
+    let fs_diff = compute_fs_diff(&fs_state_before, &fs_state_after);
+    let fs_diff = if fs_diff.has_changes() {
+        Some(fs_diff)
+    } else {
+        None
     };
 
     // Capture and truncate outputs
     let stdout = truncate_output(&output.stdout);
     let stderr = truncate_output(&output.stderr);
     let exit_code = output.status.code();
+
+    // Compute output metrics
+    let stdout_metrics = Some(compute_output_metrics(&stdout));
+    let stderr_metrics = Some(compute_output_metrics(&stderr));
 
     Ok(Evidence {
         argv: argv.to_vec(),
@@ -250,6 +335,10 @@ pub fn run_scenario(
         setup_results: Vec::new(),
         execution_error: None,
         captured_at_ms,
+        fs_diff,
+        stdout_metrics,
+        stderr_metrics,
+        env,
     })
 }
 
@@ -309,6 +398,107 @@ fn truncate_output(bytes: &[u8]) -> String {
         bytes
     };
     String::from_utf8_lossy(truncated).to_string()
+}
+
+/// Capture filesystem state for a directory.
+///
+/// Returns a map of relative file paths to (size, mtime) tuples.
+/// Ignores hidden files (starting with '.').
+pub fn capture_fs_state(dir: &Path) -> HashMap<PathBuf, (u64, u128)> {
+    let mut state = HashMap::new();
+    if fs::read_dir(dir).is_ok() {
+        capture_fs_state_recursive(dir, dir, &mut state);
+    }
+    state
+}
+
+fn capture_fs_state_recursive(
+    base: &Path,
+    current: &Path,
+    state: &mut HashMap<PathBuf, (u64, u128)>,
+) {
+    let entries = match fs::read_dir(current) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    for entry in entries.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        let file_name = match path.file_name() {
+            Some(name) => name.to_string_lossy(),
+            None => continue,
+        };
+
+        // Skip hidden files
+        if file_name.starts_with('.') {
+            continue;
+        }
+
+        if path.is_dir() {
+            capture_fs_state_recursive(base, &path, state);
+        } else if let Ok(metadata) = path.metadata() {
+            let relative = path.strip_prefix(base).unwrap_or(&path).to_path_buf();
+            let size = metadata.len();
+            let mtime = metadata
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            state.insert(relative, (size, mtime));
+        }
+    }
+}
+
+/// Compute filesystem diff between before and after states.
+pub fn compute_fs_diff(
+    before: &HashMap<PathBuf, (u64, u128)>,
+    after: &HashMap<PathBuf, (u64, u128)>,
+) -> FsDiff {
+    let mut created = Vec::new();
+    let mut modified = Vec::new();
+    let mut deleted = Vec::new();
+
+    // Find created and modified files
+    for (path, (size_after, mtime_after)) in after {
+        match before.get(path) {
+            None => {
+                created.push(path.to_string_lossy().to_string());
+            }
+            Some((size_before, mtime_before)) => {
+                if size_after != size_before || mtime_after != mtime_before {
+                    modified.push(path.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+
+    // Find deleted files
+    for path in before.keys() {
+        if !after.contains_key(path) {
+            deleted.push(path.to_string_lossy().to_string());
+        }
+    }
+
+    // Sort for deterministic output
+    created.sort();
+    modified.sort();
+    deleted.sort();
+
+    FsDiff {
+        created,
+        modified,
+        deleted,
+    }
+}
+
+/// Compute output metrics for a string.
+pub fn compute_output_metrics(output: &str) -> OutputMetrics {
+    OutputMetrics {
+        line_count: output.lines().count(),
+        byte_count: output.len(),
+        is_empty: output.is_empty(),
+    }
 }
 
 /// Write evidence to a file in the pack.
@@ -393,8 +583,8 @@ pub fn compute_outcome(option_evidence: &Evidence, control_evidence: &Evidence) 
     let exit_differs = option_evidence.exit_code != control_evidence.exit_code;
 
     // Reject stderr-only diffs when both runs failed (likely just error message variations)
-    let both_failed = option_evidence.exit_code.unwrap_or(0) != 0
-        && control_evidence.exit_code.unwrap_or(0) != 0;
+    let both_failed =
+        option_evidence.exit_code.unwrap_or(0) != 0 && control_evidence.exit_code.unwrap_or(0) != 0;
     let stderr_only_diff = stderr_differs && !stdout_differs && !exit_differs;
 
     if (stdout_differs || stderr_differs || exit_differs) && !(stderr_only_diff && both_failed) {
@@ -405,6 +595,24 @@ pub fn compute_outcome(option_evidence: &Evidence, control_evidence: &Evidence) 
             _ => DiffKind::Multiple,
         };
         return Outcome::Verified { diff_kind };
+    }
+
+    // Check for filesystem side effects when outputs are equal
+    let fs_diff_differs = match (&option_evidence.fs_diff, &control_evidence.fs_diff) {
+        (Some(opt), Some(ctrl)) => {
+            opt.created != ctrl.created
+                || opt.modified != ctrl.modified
+                || opt.deleted != ctrl.deleted
+        }
+        (Some(opt), None) => opt.has_changes(),
+        (None, Some(ctrl)) => ctrl.has_changes(),
+        (None, None) => false,
+    };
+
+    if fs_diff_differs {
+        return Outcome::Verified {
+            diff_kind: DiffKind::SideEffect,
+        };
     }
 
     // No difference from control - check if both crashed the same way
@@ -513,6 +721,14 @@ mod tests {
             setup_results: Vec::new(),
             execution_error: None,
             captured_at_ms: 12345,
+            fs_diff: None,
+            stdout_metrics: Some(OutputMetrics {
+                line_count: 1,
+                byte_count: 6,
+                is_empty: false,
+            }),
+            stderr_metrics: None,
+            env: HashMap::new(),
         };
 
         write_evidence(temp_pack.path(), "evidence/test.json", &evidence).unwrap();
@@ -563,6 +779,10 @@ mod tests {
             setup_results: Vec::new(),
             execution_error: None,
             captured_at_ms: 0,
+            fs_diff: None,
+            stdout_metrics: None,
+            stderr_metrics: None,
+            env: HashMap::new(),
         };
 
         let option = Evidence {
@@ -575,6 +795,10 @@ mod tests {
             setup_results: Vec::new(),
             execution_error: None,
             captured_at_ms: 0,
+            fs_diff: None,
+            stdout_metrics: None,
+            stderr_metrics: None,
+            env: HashMap::new(),
         };
 
         let outcome = compute_outcome(&option, &control);
@@ -593,6 +817,10 @@ mod tests {
             setup_results: Vec::new(),
             execution_error: None,
             captured_at_ms: 0,
+            fs_diff: None,
+            stdout_metrics: None,
+            stderr_metrics: None,
+            env: HashMap::new(),
         };
 
         let option = Evidence {
@@ -605,6 +833,10 @@ mod tests {
             setup_results: Vec::new(),
             execution_error: None,
             captured_at_ms: 0,
+            fs_diff: None,
+            stdout_metrics: None,
+            stderr_metrics: None,
+            env: HashMap::new(),
         };
 
         let outcome = compute_outcome(&option, &control);
@@ -613,6 +845,131 @@ mod tests {
                 assert!(matches!(diff_kind, DiffKind::Stdout));
             }
             _ => panic!("Expected Verified with Stdout diff"),
+        }
+    }
+
+    #[test]
+    fn test_fs_diff_has_changes() {
+        let empty = FsDiff::default();
+        assert!(!empty.has_changes());
+
+        let created = FsDiff {
+            created: vec!["file.txt".to_string()],
+            modified: vec![],
+            deleted: vec![],
+        };
+        assert!(created.has_changes());
+
+        let modified = FsDiff {
+            created: vec![],
+            modified: vec!["file.txt".to_string()],
+            deleted: vec![],
+        };
+        assert!(modified.has_changes());
+
+        let deleted = FsDiff {
+            created: vec![],
+            modified: vec![],
+            deleted: vec!["file.txt".to_string()],
+        };
+        assert!(deleted.has_changes());
+    }
+
+    #[test]
+    fn test_compute_output_metrics() {
+        let empty_metrics = compute_output_metrics("");
+        assert_eq!(empty_metrics.line_count, 0);
+        assert_eq!(empty_metrics.byte_count, 0);
+        assert!(empty_metrics.is_empty);
+
+        let single_line = compute_output_metrics("hello world");
+        assert_eq!(single_line.line_count, 1);
+        assert_eq!(single_line.byte_count, 11);
+        assert!(!single_line.is_empty);
+
+        let multi_line = compute_output_metrics("line1\nline2\nline3");
+        assert_eq!(multi_line.line_count, 3);
+        assert_eq!(multi_line.byte_count, 17);
+        assert!(!multi_line.is_empty);
+    }
+
+    #[test]
+    fn test_capture_fs_state_ignores_hidden_files() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let dir = temp_dir.path();
+
+        // Create visible and hidden files
+        std::fs::write(dir.join("visible.txt"), "content").unwrap();
+        std::fs::write(dir.join(".hidden"), "secret").unwrap();
+
+        let state = capture_fs_state(dir);
+
+        assert!(state.contains_key(&PathBuf::from("visible.txt")));
+        assert!(!state.contains_key(&PathBuf::from(".hidden")));
+    }
+
+    #[test]
+    fn test_compute_fs_diff() {
+        let mut before = HashMap::new();
+        before.insert(PathBuf::from("existing.txt"), (100u64, 1000u128));
+        before.insert(PathBuf::from("to_delete.txt"), (50u64, 500u128));
+
+        let mut after = HashMap::new();
+        after.insert(PathBuf::from("existing.txt"), (100u64, 1000u128)); // unchanged
+        after.insert(PathBuf::from("modified.txt"), (200u64, 2000u128)); // new
+                                                                         // to_delete.txt is gone
+
+        let diff = compute_fs_diff(&before, &after);
+
+        assert_eq!(diff.created, vec!["modified.txt"]);
+        assert!(diff.modified.is_empty());
+        assert_eq!(diff.deleted, vec!["to_delete.txt"]);
+    }
+
+    #[test]
+    fn test_compute_outcome_side_effect() {
+        let control = Evidence {
+            argv: vec!["test".to_string()],
+            seed: Seed::default(),
+            stdout: "output".to_string(),
+            stderr: "".to_string(),
+            exit_code: Some(0),
+            setup_failed: false,
+            setup_results: Vec::new(),
+            execution_error: None,
+            captured_at_ms: 0,
+            fs_diff: None,
+            stdout_metrics: None,
+            stderr_metrics: None,
+            env: HashMap::new(),
+        };
+
+        let option = Evidence {
+            argv: vec!["--opt".to_string(), "test".to_string()],
+            seed: Seed::default(),
+            stdout: "output".to_string(),
+            stderr: "".to_string(),
+            exit_code: Some(0),
+            setup_failed: false,
+            setup_results: Vec::new(),
+            execution_error: None,
+            captured_at_ms: 0,
+            fs_diff: Some(FsDiff {
+                created: vec!["newfile.txt".to_string()],
+                modified: vec![],
+                deleted: vec![],
+            }),
+            stdout_metrics: None,
+            stderr_metrics: None,
+            env: HashMap::new(),
+        };
+
+        let outcome = compute_outcome(&option, &control);
+        match outcome {
+            Outcome::Verified { diff_kind } => {
+                assert!(matches!(diff_kind, DiffKind::SideEffect));
+            }
+            _ => panic!("Expected Verified with SideEffect diff, got {:?}", outcome),
         }
     }
 }

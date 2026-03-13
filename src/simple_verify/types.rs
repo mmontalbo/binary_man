@@ -117,7 +117,20 @@ pub struct Attempt {
     /// Preview of stdout from the control run (for comparison).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control_stdout_preview: Option<String>,
+    /// Filesystem changes from the option run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fs_diff: Option<FsDiff>,
+    /// Output metrics for stdout (line count, byte count).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stdout_metrics: Option<OutputMetrics>,
+    /// Output metrics for stderr (line count, byte count).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stderr_metrics: Option<OutputMetrics>,
 }
+
+/// Filesystem changes detected between before/after command execution.
+/// Re-exported from evidence module for use in Attempt.
+pub use super::evidence::{FsDiff, OutputMetrics};
 
 /// Environment setup before scenario execution.
 ///
@@ -197,6 +210,8 @@ pub enum DiffKind {
     ExitCode,
     /// Multiple aspects differ.
     Multiple,
+    /// Filesystem side effects (files created/modified).
+    SideEffect,
 }
 
 #[cfg(test)]
