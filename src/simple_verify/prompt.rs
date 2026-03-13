@@ -3,7 +3,7 @@
 //! Builds structured prompts that give the LM all the context it needs to
 //! decide on actions. The prompt format is intentionally simple and human-readable.
 
-use super::types::{Outcome, State};
+use super::types::{Attempt, Outcome, State};
 use std::collections::HashMap;
 
 /// A known issue extracted from SetupFailed outcomes.
@@ -194,6 +194,109 @@ fn format_known_issues_section(issues: &[KnownIssue]) -> String {
     section
 }
 
+/// Maximum characters for seed summary in attempt history.
+const SEED_SUMMARY_MAX_LEN: usize = 200;
+
+/// Format attempt history for retry prompts.
+///
+/// Shows the last N attempts as a compact summary to help the LM learn from
+/// what didn't work. Only includes mechanical data (seed, outcome), no semantic
+/// parsing of LM responses.
+pub fn format_attempt_history(attempts: &[Attempt], max: usize) -> String {
+    if attempts.is_empty() {
+        return String::new();
+    }
+
+    let mut history = String::from("Prior attempts:\n");
+
+    // Take the last N attempts
+    let start = attempts.len().saturating_sub(max);
+    for (i, attempt) in attempts.iter().skip(start).enumerate() {
+        let attempt_num = start + i + 1;
+
+        // Format seed summary compactly
+        let seed_summary = format_seed_summary(&attempt.seed);
+
+        // Format outcome compactly
+        let outcome_summary = format_outcome_compact(&attempt.outcome);
+
+        history.push_str(&format!(
+            "- Attempt {}: seed={{{}}}, outcome={}\n",
+            attempt_num, seed_summary, outcome_summary
+        ));
+    }
+
+    history
+}
+
+/// Format seed as a compact summary (file names and setup commands only).
+fn format_seed_summary(seed: &super::types::Seed) -> String {
+    let mut parts = Vec::new();
+
+    // Include file names (not contents)
+    if !seed.files.is_empty() {
+        let file_names: Vec<&str> = seed.files.iter().map(|f| f.path.as_str()).collect();
+        parts.push(format!("files:{:?}", file_names));
+    }
+
+    // Include setup commands
+    if !seed.setup.is_empty() {
+        let setup_cmds: Vec<String> = seed
+            .setup
+            .iter()
+            .map(|cmd| cmd.join(" "))
+            .collect();
+        parts.push(format!("setup:{:?}", setup_cmds));
+    }
+
+    let summary = parts.join(", ");
+
+    // Truncate if too long
+    if summary.len() > SEED_SUMMARY_MAX_LEN {
+        let mut end = SEED_SUMMARY_MAX_LEN;
+        while end > 0 && !summary.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &summary[..end])
+    } else {
+        summary
+    }
+}
+
+/// Format outcome compactly for attempt history.
+fn format_outcome_compact(outcome: &Outcome) -> String {
+    match outcome {
+        Outcome::Verified { diff_kind } => format!("Verified({:?})", diff_kind),
+        Outcome::OutputsEqual => "OutputsEqual".to_string(),
+        Outcome::SetupFailed { hint } => {
+            // Include a truncated hint for context
+            let short_hint = if hint.len() > 50 {
+                let mut end = 50;
+                while end > 0 && !hint.is_char_boundary(end) {
+                    end -= 1;
+                }
+                format!("{}...", &hint[..end])
+            } else {
+                hint.clone()
+            };
+            format!("SetupFailed({})", short_hint)
+        }
+        Outcome::Crashed { hint } => {
+            let short_hint = if hint.len() > 50 {
+                let mut end = 50;
+                while end > 0 && !hint.is_char_boundary(end) {
+                    end -= 1;
+                }
+                format!("{}...", &hint[..end])
+            } else {
+                hint.clone()
+            };
+            format!("Crashed({})", short_hint)
+        }
+        Outcome::ExecutionError { error } => format!("ExecutionError({})", error),
+    }
+}
+
 /// Build the LM prompt for a set of target surfaces.
 pub fn build_prompt(state: &State, target_ids: &[String]) -> String {
     let mut prompt = String::new();
@@ -238,6 +341,9 @@ pub fn build_prompt(state: &State, target_ids: &[String]) -> String {
     for id in target_ids {
         if let Some(entry) = state.entries.iter().find(|e| &e.id == id) {
             prompt.push_str(&format!("### {}\n", entry.id));
+            if entry.retried {
+                prompt.push_str("  **Previously excluded** - try a different/creative approach\n");
+            }
             prompt.push_str(&format!("Description: {}\n", entry.description));
             if let Some(context) = &entry.context {
                 prompt.push_str(&format!("{}\n", context));
@@ -316,6 +422,83 @@ fn format_outcome(outcome: &Outcome) -> String {
         Outcome::Crashed { hint } => format!("Crashed: {}", hint),
         Outcome::ExecutionError { error } => format!("ExecutionError: {}", error),
     }
+}
+
+/// Maximum prior attempts to show in retry prompt history.
+const MAX_PRIOR_ATTEMPTS: usize = 2;
+
+/// Build a retry prompt that includes prior attempt history.
+///
+/// This is used during the retry pass for surfaces that were previously excluded.
+/// Each surface only sees its own attempt history (no cross-surface hints).
+pub fn build_retry_prompt(state: &State, target_ids: &[String], prior_attempts: &std::collections::HashMap<String, Vec<Attempt>>) -> String {
+    let mut prompt = String::new();
+
+    // Header with full base command
+    let base_command = if state.context_argv.is_empty() {
+        state.binary.clone()
+    } else {
+        format!("{} {}", state.binary, state.context_argv.join(" "))
+    };
+    prompt.push_str(&format!("# Behavior Verification (Retry): {}\n\n", base_command));
+
+    // Show base command clearly
+    prompt.push_str(&format!(
+        "**Base command:** `{}` (your args will be appended to this)\n\n",
+        base_command
+    ));
+
+    // Known issues section
+    let known_issues = extract_known_issues(state);
+    prompt.push_str(&format_known_issues_section(&known_issues));
+
+    // Baseline info
+    if let Some(baseline) = &state.baseline {
+        prompt.push_str("## Baseline\n\n");
+        prompt.push_str(&format!(
+            "Full command: `{} {}`\n",
+            state.binary,
+            baseline.argv.join(" ")
+        ));
+        if !baseline.seed.setup.is_empty() {
+            prompt.push_str(&format!("seed.setup: {:?}\n", baseline.seed.setup));
+        }
+        prompt.push('\n');
+    } else {
+        prompt.push_str("## Baseline\n\n");
+        prompt.push_str("No baseline set yet. You must provide a SetBaseline action first.\n\n");
+    }
+
+    // Target surfaces with prior attempt history
+    prompt.push_str("## Surfaces Needing Retry\n\n");
+    prompt.push_str("These surfaces were previously excluded. Try a different/creative approach.\n\n");
+
+    for id in target_ids {
+        if let Some(entry) = state.entries.iter().find(|e| &e.id == id) {
+            prompt.push_str(&format!("### {}\n", entry.id));
+            prompt.push_str(&format!("Description: {}\n", entry.description));
+            if let Some(context) = &entry.context {
+                prompt.push_str(&format!("{}\n", context));
+            }
+            if let Some(hint) = &entry.value_hint {
+                prompt.push_str(&format!("Value hint: {}\n", hint));
+            }
+
+            // Include prior attempt history if available (each surface only sees its own)
+            if let Some(attempts) = prior_attempts.get(id) {
+                if !attempts.is_empty() {
+                    prompt.push_str(&format!("\n{}", format_attempt_history(attempts, MAX_PRIOR_ATTEMPTS)));
+                }
+            }
+
+            prompt.push('\n');
+        }
+    }
+
+    // Instructions
+    prompt.push_str(INSTRUCTIONS);
+
+    prompt
 }
 
 /// Build an incremental prompt for stateful LM plugins.
@@ -514,6 +697,7 @@ mod tests {
                 value_hint: None,
                 status: Status::Pending,
                 attempts: vec![],
+                retried: false,
             }],
             cycle: 0,
         };
@@ -551,6 +735,7 @@ mod tests {
                 value_hint: None,
                 status: Status::Pending,
                 attempts: vec![],
+                retried: false,
             }],
             cycle: 1,
         };
@@ -594,6 +779,7 @@ mod tests {
                     stderr_preview: None,
                     control_stdout_preview: None,
                 }],
+                retried: false,
             }],
             cycle: 2,
         };
@@ -638,6 +824,7 @@ mod tests {
                 value_hint: None,
                 status: Status::Pending,
                 attempts: vec![],
+                retried: false,
             }],
             cycle: 1,
         };
@@ -679,6 +866,7 @@ mod tests {
                     stderr_preview: None,
                     control_stdout_preview: Some("file1.txt\nfile2.txt\n".to_string()),
                 }],
+                retried: false,
             }],
             cycle: 2,
         };
@@ -734,6 +922,7 @@ mod tests {
                         control_stdout_preview: Some("output2".to_string()),
                     },
                 ],
+                retried: false,
             }],
             cycle: 3,
         };
@@ -833,6 +1022,7 @@ stderr: error: pathspec 'main' did not match"#
                         make_setup_failed_attempt(2),
                         make_setup_failed_attempt(3),
                     ],
+                    retried: false,
                 },
                 SurfaceEntry {
                     id: "--opt2".to_string(),
@@ -845,6 +1035,7 @@ stderr: error: pathspec 'main' did not match"#
                         make_setup_failed_attempt(5),
                         make_setup_failed_attempt(6),
                     ],
+                    retried: false,
                 },
             ],
             cycle: 7,
@@ -886,6 +1077,7 @@ stderr: error: already a git repo"#
                     stderr_preview: None,
                     control_stdout_preview: None,
                 }],
+                retried: false,
             }],
             cycle: 2,
         };
@@ -940,6 +1132,7 @@ stderr: pathspec 'main' did not match"#
                     value_hint: None,
                     status: Status::Pending,
                     attempts: vec![make_setup_failed_attempt(1), make_setup_failed_attempt(2)],
+                    retried: false,
                 },
                 SurfaceEntry {
                     id: "--oneline".to_string(),
@@ -948,6 +1141,7 @@ stderr: pathspec 'main' did not match"#
                     value_hint: None,
                     status: Status::Pending,
                     attempts: vec![make_setup_failed_attempt(3), make_setup_failed_attempt(4)],
+                    retried: false,
                 },
             ],
             cycle: 5,
@@ -975,6 +1169,7 @@ stderr: pathspec 'main' did not match"#
                 value_hint: None,
                 status: Status::Pending,
                 attempts: vec![],
+                retried: false,
             }],
             cycle: 1,
         };
@@ -992,5 +1187,228 @@ stderr: pathspec 'main' did not match"#
         let result = super::truncate_error(&long, 60);
         assert!(result.len() <= 63); // 60 chars + "..."
         assert!(result.ends_with("..."));
+    }
+
+    #[test]
+    fn test_build_prompt_with_retried_surface() {
+        let state = State {
+            schema_version: STATE_SCHEMA_VERSION,
+            binary: "ls".to_string(),
+            context_argv: vec![],
+            baseline: Some(BaselineRecord {
+                argv: vec![],
+                seed: Seed::default(),
+                evidence_path: "evidence/baseline.json".to_string(),
+            }),
+            entries: vec![SurfaceEntry {
+                id: "--all".to_string(),
+                description: "Show hidden files".to_string(),
+                context: None,
+                value_hint: None,
+                status: Status::Pending,
+                attempts: vec![],
+                retried: true, // This surface was previously excluded and is being retried
+            }],
+            cycle: 10,
+        };
+
+        let prompt = build_prompt(&state, &["--all".to_string()]);
+
+        // Should show the retry hint
+        assert!(prompt.contains("**Previously excluded**"));
+        assert!(prompt.contains("different/creative approach"));
+    }
+
+    #[test]
+    fn test_format_attempt_history_empty() {
+        let history = super::format_attempt_history(&[], 2);
+        assert!(history.is_empty());
+    }
+
+    #[test]
+    fn test_format_attempt_history_single_attempt() {
+        use crate::simple_verify::types::FileEntry;
+
+        let attempts = vec![Attempt {
+            cycle: 1,
+            args: vec!["--stat".to_string()],
+            full_argv: vec!["diff".to_string(), "--stat".to_string()],
+            seed: Seed {
+                setup: vec![vec!["git".to_string(), "init".to_string()]],
+                files: vec![FileEntry {
+                    path: "test.txt".to_string(),
+                    content: "content".to_string(),
+                }],
+            },
+            evidence_path: "evidence/stat_c1.json".to_string(),
+            outcome: Outcome::OutputsEqual,
+            stdout_preview: None,
+            stderr_preview: None,
+            control_stdout_preview: None,
+        }];
+
+        let history = super::format_attempt_history(&attempts, 2);
+        assert!(history.contains("Prior attempts:"));
+        assert!(history.contains("Attempt 1:"));
+        assert!(history.contains("files:[\"test.txt\"]"));
+        assert!(history.contains("setup:[\"git init\"]"));
+        assert!(history.contains("outcome=OutputsEqual"));
+    }
+
+    #[test]
+    fn test_format_attempt_history_limits_to_max() {
+        let make_attempt = |cycle: u32, outcome: Outcome| Attempt {
+            cycle,
+            args: vec!["--opt".to_string()],
+            full_argv: vec!["--opt".to_string()],
+            seed: Seed::default(),
+            evidence_path: format!("evidence/opt_c{}.json", cycle),
+            outcome,
+            stdout_preview: None,
+            stderr_preview: None,
+            control_stdout_preview: None,
+        };
+
+        let attempts = vec![
+            make_attempt(1, Outcome::OutputsEqual),
+            make_attempt(2, Outcome::SetupFailed { hint: "error 1".to_string() }),
+            make_attempt(3, Outcome::OutputsEqual),
+            make_attempt(4, Outcome::Crashed { hint: "crash".to_string() }),
+        ];
+
+        // With max=2, should only show attempts 3 and 4
+        let history = super::format_attempt_history(&attempts, 2);
+        assert!(!history.contains("Attempt 1:"));
+        assert!(!history.contains("Attempt 2:"));
+        assert!(history.contains("Attempt 3:"));
+        assert!(history.contains("Attempt 4:"));
+        assert!(history.contains("Crashed(crash)"));
+    }
+
+    #[test]
+    fn test_format_seed_summary_truncates() {
+        use crate::simple_verify::types::FileEntry;
+
+        let seed = Seed {
+            setup: vec![
+                vec!["git".to_string(), "init".to_string()],
+                vec!["git".to_string(), "add".to_string(), ".".to_string()],
+                vec!["git".to_string(), "commit".to_string(), "-m".to_string(), "initial".to_string()],
+            ],
+            files: vec![
+                FileEntry { path: "file1.txt".to_string(), content: "a".repeat(100) },
+                FileEntry { path: "file2.txt".to_string(), content: "b".repeat(100) },
+                FileEntry { path: "very_long_file_name_that_takes_up_space.txt".to_string(), content: "c".to_string() },
+            ],
+        };
+
+        let summary = super::format_seed_summary(&seed);
+        // Should be truncated to <= 200 chars + "..."
+        assert!(summary.len() <= 203, "Summary too long: {}", summary.len());
+    }
+
+    #[test]
+    fn test_build_retry_prompt_includes_prior_history() {
+        use std::collections::HashMap;
+
+        let state = State {
+            schema_version: STATE_SCHEMA_VERSION,
+            binary: "ls".to_string(),
+            context_argv: vec![],
+            baseline: Some(BaselineRecord {
+                argv: vec![],
+                seed: Seed::default(),
+                evidence_path: "evidence/baseline.json".to_string(),
+            }),
+            entries: vec![SurfaceEntry {
+                id: "--all".to_string(),
+                description: "Show hidden files".to_string(),
+                context: None,
+                value_hint: None,
+                status: Status::Pending,
+                attempts: vec![], // Cleared for retry
+                retried: true,
+            }],
+            cycle: 10,
+        };
+
+        // Prior attempts from before the retry
+        let mut prior_attempts = HashMap::new();
+        prior_attempts.insert(
+            "--all".to_string(),
+            vec![
+                Attempt {
+                    cycle: 1,
+                    args: vec!["--all".to_string()],
+                    full_argv: vec!["--all".to_string()],
+                    seed: Seed::default(),
+                    evidence_path: "evidence/all_c1.json".to_string(),
+                    outcome: Outcome::OutputsEqual,
+                    stdout_preview: None,
+                    stderr_preview: None,
+                    control_stdout_preview: None,
+                },
+                Attempt {
+                    cycle: 2,
+                    args: vec!["--all".to_string()],
+                    full_argv: vec!["--all".to_string()],
+                    seed: Seed {
+                        setup: vec![vec!["touch".to_string(), ".hidden".to_string()]],
+                        files: vec![],
+                    },
+                    evidence_path: "evidence/all_c2.json".to_string(),
+                    outcome: Outcome::SetupFailed { hint: "touch failed".to_string() },
+                    stdout_preview: None,
+                    stderr_preview: None,
+                    control_stdout_preview: None,
+                },
+            ],
+        );
+
+        let prompt = super::build_retry_prompt(&state, &["--all".to_string()], &prior_attempts);
+
+        // Should contain retry header
+        assert!(prompt.contains("Behavior Verification (Retry)"));
+        assert!(prompt.contains("Surfaces Needing Retry"));
+        // Should contain prior attempt history
+        assert!(prompt.contains("Prior attempts:"));
+        assert!(prompt.contains("Attempt 1:"));
+        assert!(prompt.contains("Attempt 2:"));
+        assert!(prompt.contains("OutputsEqual"));
+        assert!(prompt.contains("SetupFailed"));
+    }
+
+    #[test]
+    fn test_build_retry_prompt_no_history_for_surface_without_attempts() {
+        use std::collections::HashMap;
+
+        let state = State {
+            schema_version: STATE_SCHEMA_VERSION,
+            binary: "ls".to_string(),
+            context_argv: vec![],
+            baseline: Some(BaselineRecord {
+                argv: vec![],
+                seed: Seed::default(),
+                evidence_path: "evidence/baseline.json".to_string(),
+            }),
+            entries: vec![SurfaceEntry {
+                id: "--all".to_string(),
+                description: "Show hidden files".to_string(),
+                context: None,
+                value_hint: None,
+                status: Status::Pending,
+                attempts: vec![],
+                retried: true,
+            }],
+            cycle: 10,
+        };
+
+        // No prior attempts for this surface
+        let prior_attempts: HashMap<String, Vec<Attempt>> = HashMap::new();
+
+        let prompt = super::build_retry_prompt(&state, &["--all".to_string()], &prior_attempts);
+
+        // Should NOT contain prior attempts section
+        assert!(!prompt.contains("Prior attempts:"));
     }
 }
