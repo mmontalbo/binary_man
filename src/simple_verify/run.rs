@@ -6,7 +6,7 @@
 use super::apply::{apply_action, merge_test_result, run_test_scenario};
 use super::bootstrap::bootstrap;
 use super::evidence::{
-    make_output_preview, run_scenario, sanitize_id, write_evidence, OUTPUT_PREVIEW_MAX_LEN,
+    make_output_preview, run_scenario_pair, sanitize_id, write_evidence, OUTPUT_PREVIEW_MAX_LEN,
 };
 use super::lm::{log_prompt, log_response, parse_lm_response, LmAction, LmResponse};
 use super::prompt::{build_incremental_prompt, build_prompt, build_retry_prompt};
@@ -1429,32 +1429,18 @@ fn probe_entries_with_modifiers(state: &mut State, pack_path: &Path, verbose: bo
                 .chain(std::iter::once(surface_id.clone()))
                 .collect();
 
-            // Run control scenario
+            // Run control and variant in the SAME sandbox
             let probe_id = format!(
                 "{}_probe_{}_c{}",
                 sanitize_id(&surface_id),
                 sanitize_id(modifier),
                 state.cycle
             );
-            let control_id = format!("{}_control", probe_id);
 
-            let control_evidence = match run_scenario(
-                pack_path,
-                &control_id,
-                &state.binary,
-                &control_argv,
-                &seed,
-                false,
-            ) {
-                Ok(ev) => ev,
-                Err(_) => continue, // Skip this modifier on error
-            };
-
-            // Run variant scenario
-            let variant_evidence = match run_scenario(
-                pack_path,
+            let (control_evidence, variant_evidence) = match run_scenario_pair(
                 &probe_id,
                 &state.binary,
+                &control_argv,
                 &variant_argv,
                 &seed,
                 false,
@@ -1492,7 +1478,7 @@ fn probe_entries_with_modifiers(state: &mut State, pack_path: &Path, verbose: bo
                 }
 
                 // Write evidence files
-                let control_path = format!("evidence/{}.json", control_id);
+                let control_path = format!("evidence/{}_control.json", probe_id);
                 let variant_path = format!("evidence/{}.json", probe_id);
                 write_evidence(pack_path, &control_path, &control_evidence)?;
                 write_evidence(pack_path, &variant_path, &variant_evidence)?;

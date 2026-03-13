@@ -611,6 +611,384 @@ pub fn run_scenario(
     })
 }
 
+/// A prepared sandbox ready for running multiple commands.
+///
+/// After setup completes, the sandbox can run multiple commands sequentially,
+/// ensuring they share the same filesystem state (including git commit hashes).
+pub struct PreparedSandbox {
+    /// The temporary directory (kept alive for cleanup on drop).
+    _temp_dir: tempfile::TempDir,
+    /// Working directory path inside the sandbox.
+    work_dir: PathBuf,
+    /// Sandbox /tmp directory for observable side effects.
+    sandbox_tmp: PathBuf,
+    /// Results from setup commands (empty if all succeeded).
+    setup_results: Vec<SetupResult>,
+    /// Whether setup failed.
+    setup_failed: bool,
+    /// Error summary if setup failed.
+    setup_error: Option<String>,
+    /// Timestamp when sandbox was created.
+    captured_at_ms: u128,
+    /// Environment variables captured for telemetry.
+    env: HashMap<String, String>,
+    /// The seed used to create this sandbox.
+    seed: Seed,
+}
+
+/// Prepare a sandbox by creating directory, writing files, and running setup.
+///
+/// Returns a prepared sandbox that can be used to run multiple commands.
+/// Setup commands run in a writable sandbox.
+pub fn prepare_sandbox(scenario_id: &str, seed: &Seed) -> Result<PreparedSandbox> {
+    let captured_at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+
+    // Create a temporary working directory
+    let temp_dir = tempfile::Builder::new()
+        .prefix(&format!("sv_{scenario_id}_"))
+        .tempdir()
+        .context("create temp directory for scenario")?;
+
+    let work_dir = temp_dir.path().to_path_buf();
+
+    // Create workspace/tmp directory for observable /tmp inside sandbox
+    let sandbox_tmp = work_dir.join("tmp");
+    fs::create_dir_all(&sandbox_tmp).context("create workspace/tmp directory")?;
+
+    // Write pre-generated fixtures for LM to use
+    write_fixtures(&work_dir)?;
+
+    // Capture environment variables for telemetry
+    let env: HashMap<String, String> = std::env::vars()
+        .filter(|(k, _)| {
+            k.starts_with("LANG")
+                || k.starts_with("LC_")
+                || k == "TZ"
+                || k == "HOME"
+                || k == "USER"
+                || k == "PATH"
+                || k == "SHELL"
+                || k == "TERM"
+        })
+        .collect();
+
+    // Write seed files
+    for file in &seed.files {
+        let file_path = work_dir.join(&file.path);
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("create parent dirs for {}", file.path))?;
+        }
+        fs::write(&file_path, &file.content)
+            .with_context(|| format!("write seed file {}", file.path))?;
+    }
+
+    // Run seed setup commands
+    let mut setup_results = Vec::new();
+    let mut setup_failed = false;
+    let mut setup_error = None;
+
+    for (index, setup_cmd) in seed.setup.iter().enumerate() {
+        if setup_cmd.is_empty() {
+            continue;
+        }
+
+        // Run setup commands in sandbox (writable mode)
+        let mut cmd = build_sandbox_command(&work_dir, &sandbox_tmp);
+        cmd.arg(&setup_cmd[0]);
+        cmd.args(&setup_cmd[1..]);
+        cmd.stdout(Stdio::null());
+        cmd.stderr(Stdio::piped());
+
+        let output = cmd.output();
+
+        match output {
+            Ok(out) => {
+                let exit_code = out.status.code();
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let stderr_truncated = if stderr.len() > 200 {
+                    format!("{}...", &stderr[..200])
+                } else {
+                    stderr.to_string()
+                };
+
+                if !out.status.success() {
+                    setup_results.push(SetupResult {
+                        index,
+                        argv: setup_cmd.clone(),
+                        exit_code,
+                        stderr: stderr_truncated.clone(),
+                    });
+                    setup_error = Some(format!(
+                        "Setup command #{} failed: {:?}\nstderr: {}",
+                        index,
+                        setup_cmd,
+                        stderr_truncated.trim()
+                    ));
+                    setup_failed = true;
+                    break;
+                }
+            }
+            Err(e) => {
+                setup_results.push(SetupResult {
+                    index,
+                    argv: setup_cmd.clone(),
+                    exit_code: None,
+                    stderr: e.to_string(),
+                });
+                setup_error = Some(format!(
+                    "Setup command #{} failed to execute: {:?}\nerror: {}",
+                    index, setup_cmd, e
+                ));
+                setup_failed = true;
+                break;
+            }
+        }
+    }
+
+    Ok(PreparedSandbox {
+        _temp_dir: temp_dir,
+        work_dir,
+        sandbox_tmp,
+        setup_results,
+        setup_failed,
+        setup_error,
+        captured_at_ms,
+        env,
+        seed: seed.clone(),
+    })
+}
+
+/// Build a bwrap command with read-only work directory.
+///
+/// Used after setup to ensure commands don't mutate state between runs.
+fn build_sandbox_command_readonly(work_dir: &Path, sandbox_tmp: &Path) -> Command {
+    let mut cmd = Command::new("bwrap");
+
+    // Core filesystem setup
+    cmd.args(["--ro-bind", "/", "/"]); // Read-only root
+    cmd.args(["--dev", "/dev"]); // Device access
+    cmd.args(["--proc", "/proc"]); // Proc filesystem
+
+    // Bind workspace/tmp to /tmp (still writable for temp files)
+    let sandbox_tmp_str = sandbox_tmp.to_string_lossy();
+    cmd.args(["--bind", &sandbox_tmp_str, "/tmp"]);
+
+    // Make work directory READ-ONLY after setup
+    let work_dir_str = work_dir.to_string_lossy();
+    cmd.args(["--ro-bind", &work_dir_str, &work_dir_str]);
+
+    // Security isolation
+    cmd.arg("--unshare-net");
+    cmd.arg("--die-with-parent");
+    cmd.arg("--new-session");
+
+    // Set working directory
+    cmd.args(["--chdir", &work_dir_str]);
+
+    // Separator before actual command
+    cmd.arg("--");
+
+    cmd
+}
+
+/// Build a read-only bwrap command with PTY support.
+fn build_sandbox_command_readonly_with_pty(
+    work_dir: &Path,
+    sandbox_tmp: &Path,
+    binary: &str,
+    argv: &[String],
+) -> Command {
+    let mut cmd = Command::new("bwrap");
+
+    // Core filesystem setup
+    cmd.args(["--ro-bind", "/", "/"]); // Read-only root
+    cmd.args(["--dev", "/dev"]); // Device access (needed for PTY)
+    cmd.args(["--proc", "/proc"]); // Proc filesystem
+
+    // Bind workspace/tmp to /tmp
+    let sandbox_tmp_str = sandbox_tmp.to_string_lossy();
+    cmd.args(["--bind", &sandbox_tmp_str, "/tmp"]);
+
+    // Make work directory READ-ONLY
+    let work_dir_str = work_dir.to_string_lossy();
+    cmd.args(["--ro-bind", &work_dir_str, &work_dir_str]);
+
+    // Security isolation
+    cmd.arg("--unshare-net");
+    cmd.arg("--die-with-parent");
+    cmd.arg("--new-session");
+
+    // Set working directory
+    cmd.args(["--chdir", &work_dir_str]);
+
+    // Separator before actual command
+    cmd.arg("--");
+
+    // Use script to allocate a PTY
+    cmd.arg("script");
+    cmd.arg("-q");
+
+    // Build the command string for script -c
+    let mut cmd_parts = vec![binary.to_string()];
+    for arg in argv {
+        if arg.contains(' ') || arg.contains('"') || arg.contains('\'') {
+            cmd_parts.push(format!("'{}'", arg.replace('\'', "'\\''")));
+        } else {
+            cmd_parts.push(arg.clone());
+        }
+    }
+    let cmd_str = cmd_parts.join(" ");
+    cmd.args(["-c", &cmd_str]);
+
+    // Output to /dev/null (we capture from stdout)
+    cmd.arg("/dev/null");
+
+    cmd
+}
+
+/// Run a command in a prepared sandbox (read-only mode).
+///
+/// The sandbox work directory is mounted read-only to detect commands
+/// that attempt to mutate state.
+pub fn run_in_sandbox(
+    sandbox: &PreparedSandbox,
+    binary: &str,
+    argv: &[String],
+    with_pty: bool,
+) -> Result<Evidence> {
+    // If setup failed, return failure evidence
+    if sandbox.setup_failed {
+        return Ok(Evidence {
+            argv: argv.to_vec(),
+            seed: sandbox.seed.clone(),
+            stdout: String::new(),
+            stderr: sandbox.setup_error.clone().unwrap_or_default(),
+            exit_code: None,
+            setup_failed: true,
+            setup_results: sandbox.setup_results.clone(),
+            execution_error: None,
+            captured_at_ms: sandbox.captured_at_ms,
+            fs_diff: None,
+            stdout_metrics: None,
+            stderr_metrics: None,
+            env: sandbox.env.clone(),
+            with_pty,
+        });
+    }
+
+    // Capture filesystem state before running (from /tmp only since work_dir is read-only)
+    let fs_state_before = capture_fs_state(&sandbox.sandbox_tmp);
+
+    // Build command with READ-ONLY work directory
+    let mut cmd = if with_pty {
+        build_sandbox_command_readonly_with_pty(
+            &sandbox.work_dir,
+            &sandbox.sandbox_tmp,
+            binary,
+            argv,
+        )
+    } else {
+        let mut c = build_sandbox_command_readonly(&sandbox.work_dir, &sandbox.sandbox_tmp);
+        c.arg(binary);
+        c.args(argv);
+        c
+    };
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    // Disable pagers when using PTY
+    if with_pty {
+        cmd.env("PAGER", "cat");
+        cmd.env("GIT_PAGER", "cat");
+        cmd.env("MANPAGER", "cat");
+        cmd.env("DELTA_PAGER", "cat");
+    }
+
+    // Execute with timeout
+    let output = match execute_with_timeout(&mut cmd, Duration::from_secs(DEFAULT_TIMEOUT_SECS)) {
+        Ok(output) => output,
+        Err(e) => {
+            return Ok(Evidence {
+                argv: argv.to_vec(),
+                seed: sandbox.seed.clone(),
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: None,
+                setup_failed: false,
+                setup_results: Vec::new(),
+                execution_error: Some(e.to_string()),
+                captured_at_ms: sandbox.captured_at_ms,
+                fs_diff: None,
+                stdout_metrics: None,
+                stderr_metrics: None,
+                env: sandbox.env.clone(),
+                with_pty,
+            });
+        }
+    };
+
+    // Capture filesystem state after (from /tmp only)
+    let fs_state_after = capture_fs_state(&sandbox.sandbox_tmp);
+
+    // Compute filesystem diff
+    let fs_diff = compute_fs_diff(&fs_state_before, &fs_state_after);
+    let fs_diff = if fs_diff.has_changes() {
+        Some(fs_diff)
+    } else {
+        None
+    };
+
+    let stdout = truncate_output(&output.stdout);
+    let stderr = truncate_output(&output.stderr);
+    let exit_code = output.status.code();
+
+    let stdout_metrics = Some(compute_output_metrics(&stdout));
+    let stderr_metrics = Some(compute_output_metrics(&stderr));
+
+    Ok(Evidence {
+        argv: argv.to_vec(),
+        seed: sandbox.seed.clone(),
+        stdout,
+        stderr,
+        exit_code,
+        setup_failed: false,
+        setup_results: Vec::new(),
+        execution_error: None,
+        captured_at_ms: sandbox.captured_at_ms,
+        fs_diff,
+        stdout_metrics,
+        stderr_metrics,
+        env: sandbox.env.clone(),
+        with_pty,
+    })
+}
+
+/// Run control and option commands in the same sandbox.
+///
+/// This ensures both commands see identical filesystem state (including
+/// git commit hashes that depend on timestamps), providing meaningful
+/// comparison of option effects.
+pub fn run_scenario_pair(
+    scenario_id: &str,
+    binary: &str,
+    control_argv: &[String],
+    option_argv: &[String],
+    seed: &Seed,
+    with_pty: bool,
+) -> Result<(Evidence, Evidence)> {
+    let sandbox = prepare_sandbox(scenario_id, seed)?;
+
+    // Run both commands in the same sandbox (read-only mode)
+    let control_evidence = run_in_sandbox(&sandbox, binary, control_argv, with_pty)?;
+    let option_evidence = run_in_sandbox(&sandbox, binary, option_argv, with_pty)?;
+
+    Ok((control_evidence, option_evidence))
+}
+
 /// Execute a command with a timeout.
 fn execute_with_timeout(cmd: &mut Command, timeout: Duration) -> Result<std::process::Output> {
     let mut child = cmd.spawn().context("spawn command")?;

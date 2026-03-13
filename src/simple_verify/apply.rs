@@ -4,8 +4,8 @@
 //! computing outcomes by comparing option runs to control runs.
 
 use super::evidence::{
-    compute_outcome, make_output_preview, run_scenario, sanitize_id, write_evidence, FsDiff,
-    OutputMetrics, OUTPUT_PREVIEW_MAX_LEN,
+    compute_outcome, make_output_preview, run_scenario, run_scenario_pair, sanitize_id,
+    write_evidence, FsDiff, OutputMetrics, OUTPUT_PREVIEW_MAX_LEN,
 };
 use super::lm::LmAction;
 use super::types::{Attempt, BaselineRecord, Outcome, Seed, State, Status};
@@ -35,6 +35,10 @@ pub struct TestResult {
 ///
 /// This is the parallelizable part of Test action execution.
 /// Returns a TestResult that can be merged into state later.
+///
+/// IMPORTANT: Control and option commands run in the SAME sandbox to ensure
+/// they see identical filesystem state (including git commit hashes). This
+/// prevents false positives from timestamp-dependent content like git commits.
 #[allow(clippy::too_many_arguments)]
 pub fn run_test_scenario(
     pack_path: &Path,
@@ -48,9 +52,8 @@ pub fn run_test_scenario(
 ) -> Result<TestResult> {
     let scenario_id = format!("{}_c{}", sanitize_id(surface_id), cycle);
 
-    // Control run: context_argv + extra args (excluding the option being tested)
+    // Control argv: context_argv + extra args (excluding the option being tested)
     // This isolates the effect of just the option by keeping everything else constant
-    let control_id = format!("{}_control", scenario_id);
     let surface_with_eq = format!("{}=", surface_id);
     let extra_args: Vec<String> = args
         .iter()
@@ -62,36 +65,41 @@ pub fn run_test_scenario(
         .chain(extra_args.iter())
         .cloned()
         .collect();
-    let control_evidence = run_scenario(
-        pack_path,
-        &control_id,
+
+    // Option argv: context_argv + all args (including the option)
+    let full_argv: Vec<String> = context_argv.iter().chain(args.iter()).cloned().collect();
+
+    // Run both control and option in the SAME sandbox
+    // This ensures they see identical filesystem state (same git commit hashes, etc.)
+    // The sandbox is read-only after setup to catch commands that mutate state
+    let (control_evidence, option_evidence) = run_scenario_pair(
+        &scenario_id,
         binary,
         &control_argv,
+        &full_argv,
         &seed,
         with_pty,
     )?;
-    let control_path = format!("evidence/{}.json", control_id);
-    write_evidence(pack_path, &control_path, &control_evidence)?;
 
-    // Option run: context_argv + all args (including the option)
-    let full_argv: Vec<String> = context_argv.iter().chain(args.iter()).cloned().collect();
-    let evidence = run_scenario(pack_path, &scenario_id, binary, &full_argv, &seed, with_pty)?;
+    // Write evidence files
+    let control_path = format!("evidence/{}_control.json", scenario_id);
+    write_evidence(pack_path, &control_path, &control_evidence)?;
     let evidence_path = format!("evidence/{}.json", scenario_id);
-    write_evidence(pack_path, &evidence_path, &evidence)?;
+    write_evidence(pack_path, &evidence_path, &option_evidence)?;
 
     // Compute outcome by comparing option to control (same seed, different argv)
-    let outcome = compute_outcome(&evidence, &control_evidence);
+    let outcome = compute_outcome(&option_evidence, &control_evidence);
 
     // Capture output previews for debugging
-    let stdout_preview = make_output_preview(&evidence.stdout, OUTPUT_PREVIEW_MAX_LEN);
-    let stderr_preview = make_output_preview(&evidence.stderr, OUTPUT_PREVIEW_MAX_LEN);
+    let stdout_preview = make_output_preview(&option_evidence.stdout, OUTPUT_PREVIEW_MAX_LEN);
+    let stderr_preview = make_output_preview(&option_evidence.stderr, OUTPUT_PREVIEW_MAX_LEN);
     let control_stdout_preview =
         make_output_preview(&control_evidence.stdout, OUTPUT_PREVIEW_MAX_LEN);
 
     // Capture fs_diff and output metrics from evidence
-    let fs_diff = evidence.fs_diff.clone();
-    let stdout_metrics = evidence.stdout_metrics.clone();
-    let stderr_metrics = evidence.stderr_metrics.clone();
+    let fs_diff = option_evidence.fs_diff.clone();
+    let stdout_metrics = option_evidence.stdout_metrics.clone();
+    let stderr_metrics = option_evidence.stderr_metrics.clone();
 
     Ok(TestResult {
         surface_id: surface_id.to_string(),
@@ -175,8 +183,7 @@ pub fn apply_action(state: &mut State, pack_path: &Path, action: LmAction) -> Re
         } => {
             let scenario_id = format!("{}_c{}", sanitize_id(&surface_id), state.cycle);
 
-            // Control run: context_argv + extra args (excluding the option being tested)
-            let control_id = format!("{}_control", scenario_id);
+            // Control argv: context_argv + extra args (excluding the option being tested)
             let surface_with_eq = format!("{}=", surface_id);
             let extra_args: Vec<String> = args
                 .iter()
@@ -189,48 +196,46 @@ pub fn apply_action(state: &mut State, pack_path: &Path, action: LmAction) -> Re
                 .chain(extra_args.iter())
                 .cloned()
                 .collect();
-            let control_evidence = run_scenario(
-                pack_path,
-                &control_id,
-                &state.binary,
-                &control_argv,
-                &seed,
-                false,
-            )?;
-            let control_path = format!("evidence/{}.json", control_id);
-            write_evidence(pack_path, &control_path, &control_evidence)?;
 
-            // Option run: context_argv + all args (including the option)
+            // Option argv: context_argv + all args (including the option)
             let full_argv: Vec<String> = state
                 .context_argv
                 .iter()
                 .chain(args.iter())
                 .cloned()
                 .collect();
-            let evidence = run_scenario(
-                pack_path,
+
+            // Run both control and option in the SAME sandbox
+            let (control_evidence, option_evidence) = run_scenario_pair(
                 &scenario_id,
                 &state.binary,
+                &control_argv,
                 &full_argv,
                 &seed,
-                false,
+                false, // apply_action doesn't support PTY currently
             )?;
+
+            // Write evidence files
+            let control_path = format!("evidence/{}_control.json", scenario_id);
+            write_evidence(pack_path, &control_path, &control_evidence)?;
             let evidence_path = format!("evidence/{}.json", scenario_id);
-            write_evidence(pack_path, &evidence_path, &evidence)?;
+            write_evidence(pack_path, &evidence_path, &option_evidence)?;
 
             // Compute outcome by comparing option to control (same seed, different argv)
-            let outcome = compute_outcome(&evidence, &control_evidence);
+            let outcome = compute_outcome(&option_evidence, &control_evidence);
 
             // Capture output previews for debugging
-            let stdout_preview = make_output_preview(&evidence.stdout, OUTPUT_PREVIEW_MAX_LEN);
-            let stderr_preview = make_output_preview(&evidence.stderr, OUTPUT_PREVIEW_MAX_LEN);
+            let stdout_preview =
+                make_output_preview(&option_evidence.stdout, OUTPUT_PREVIEW_MAX_LEN);
+            let stderr_preview =
+                make_output_preview(&option_evidence.stderr, OUTPUT_PREVIEW_MAX_LEN);
             let control_stdout_preview =
                 make_output_preview(&control_evidence.stdout, OUTPUT_PREVIEW_MAX_LEN);
 
             // Capture fs_diff and output metrics from evidence
-            let fs_diff = evidence.fs_diff.clone();
-            let stdout_metrics = evidence.stdout_metrics.clone();
-            let stderr_metrics = evidence.stderr_metrics.clone();
+            let fs_diff = option_evidence.fs_diff.clone();
+            let stdout_metrics = option_evidence.stdout_metrics.clone();
+            let stderr_metrics = option_evidence.stderr_metrics.clone();
 
             // Update entry
             if let Some(entry) = state.entries.iter_mut().find(|e| e.id == surface_id) {
