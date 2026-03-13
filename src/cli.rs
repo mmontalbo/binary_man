@@ -53,6 +53,12 @@ pub struct RunArgs {
     #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
     pub parallel: bool,
 
+    /// Run commands in a pseudo-terminal (PTY).
+    /// Captures ANSI color codes and terminal-dependent output.
+    /// Useful for verifying color-related options.
+    #[arg(long)]
+    pub with_pty: bool,
+
     /// Command to document: <binary> [entry-point...]
     #[arg(value_name = "COMMAND", required = true, num_args = 1..)]
     pub invocation: Vec<String>,

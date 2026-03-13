@@ -35,6 +35,7 @@ pub struct TestResult {
 ///
 /// This is the parallelizable part of Test action execution.
 /// Returns a TestResult that can be merged into state later.
+#[allow(clippy::too_many_arguments)]
 pub fn run_test_scenario(
     pack_path: &Path,
     binary: &str,
@@ -43,6 +44,7 @@ pub fn run_test_scenario(
     surface_id: &str,
     args: Vec<String>,
     seed: Seed,
+    with_pty: bool,
 ) -> Result<TestResult> {
     let scenario_id = format!("{}_c{}", sanitize_id(surface_id), cycle);
 
@@ -60,13 +62,20 @@ pub fn run_test_scenario(
         .chain(extra_args.iter())
         .cloned()
         .collect();
-    let control_evidence = run_scenario(pack_path, &control_id, binary, &control_argv, &seed)?;
+    let control_evidence = run_scenario(
+        pack_path,
+        &control_id,
+        binary,
+        &control_argv,
+        &seed,
+        with_pty,
+    )?;
     let control_path = format!("evidence/{}.json", control_id);
     write_evidence(pack_path, &control_path, &control_evidence)?;
 
     // Option run: context_argv + all args (including the option)
     let full_argv: Vec<String> = context_argv.iter().chain(args.iter()).cloned().collect();
-    let evidence = run_scenario(pack_path, &scenario_id, binary, &full_argv, &seed)?;
+    let evidence = run_scenario(pack_path, &scenario_id, binary, &full_argv, &seed, with_pty)?;
     let evidence_path = format!("evidence/{}.json", scenario_id);
     write_evidence(pack_path, &evidence_path, &evidence)?;
 
@@ -141,7 +150,14 @@ pub fn apply_action(state: &mut State, pack_path: &Path, action: LmAction) -> Re
                 .cloned()
                 .collect();
 
-            let evidence = run_scenario(pack_path, "baseline", &state.binary, &full_argv, &seed)?;
+            let evidence = run_scenario(
+                pack_path,
+                "baseline",
+                &state.binary,
+                &full_argv,
+                &seed,
+                false,
+            )?;
             let evidence_path = "evidence/baseline.json".to_string();
             write_evidence(pack_path, &evidence_path, &evidence)?;
 
@@ -173,8 +189,14 @@ pub fn apply_action(state: &mut State, pack_path: &Path, action: LmAction) -> Re
                 .chain(extra_args.iter())
                 .cloned()
                 .collect();
-            let control_evidence =
-                run_scenario(pack_path, &control_id, &state.binary, &control_argv, &seed)?;
+            let control_evidence = run_scenario(
+                pack_path,
+                &control_id,
+                &state.binary,
+                &control_argv,
+                &seed,
+                false,
+            )?;
             let control_path = format!("evidence/{}.json", control_id);
             write_evidence(pack_path, &control_path, &control_evidence)?;
 
@@ -185,7 +207,14 @@ pub fn apply_action(state: &mut State, pack_path: &Path, action: LmAction) -> Re
                 .chain(args.iter())
                 .cloned()
                 .collect();
-            let evidence = run_scenario(pack_path, &scenario_id, &state.binary, &full_argv, &seed)?;
+            let evidence = run_scenario(
+                pack_path,
+                &scenario_id,
+                &state.binary,
+                &full_argv,
+                &seed,
+                false,
+            )?;
             let evidence_path = format!("evidence/{}.json", scenario_id);
             write_evidence(pack_path, &evidence_path, &evidence)?;
 
@@ -395,6 +424,7 @@ mod tests {
             stdout_metrics: None,
             stderr_metrics: None,
             env: HashMap::new(),
+            with_pty: false,
         };
 
         // Option evidence with same output
@@ -412,6 +442,7 @@ mod tests {
             stdout_metrics: None,
             stderr_metrics: None,
             env: HashMap::new(),
+            with_pty: false,
         };
 
         let outcome = compute_outcome(&option_evidence, &control_evidence);
@@ -435,6 +466,7 @@ mod tests {
             stdout_metrics: None,
             stderr_metrics: None,
             env: HashMap::new(),
+            with_pty: false,
         };
 
         // Option evidence with different output
@@ -452,6 +484,7 @@ mod tests {
             stdout_metrics: None,
             stderr_metrics: None,
             env: HashMap::new(),
+            with_pty: false,
         };
 
         let outcome = compute_outcome(&option_evidence, &control_evidence);

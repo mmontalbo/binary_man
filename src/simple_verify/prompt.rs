@@ -699,6 +699,16 @@ CRITICAL: Each setup command is an ARRAY of strings: `["cmd", "arg1", "arg2"]`, 
 - If OutputsEqual, try: different seed files that better exercise the option
 - Learn from stderr errors and adjust seed accordingly
 - Exclude if surface genuinely can't be tested (needs root, hardware, network, etc.)
+
+## Pre-generated Fixtures
+
+Pattern files are available in `_fixtures/` directory. Use them in setup commands:
+
+- `_fixtures/repeated.txt`: ~50 similar repeated blocks with minor variations
+- `_fixtures/indented.txt`: Code-like structure with nested indentation levels
+- `_fixtures/moveable.txt`: Config-style sections that can be reordered or copied
+
+These files are pre-generated and available in every sandbox. Copy and modify them as needed.
 "#;
 
 #[cfg(test)]

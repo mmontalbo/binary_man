@@ -23,6 +23,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tempfile = "3.10"
 which = "6.0"
+pty-process = "0.5"
 
 [[bin]]
 name = "bman"

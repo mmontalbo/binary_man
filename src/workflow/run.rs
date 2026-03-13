@@ -62,6 +62,7 @@ pub fn run_run(args: &RunArgs) -> Result<()> {
         args.context_mode,
         args.session_size,
         args.parallel,
+        args.with_pty,
     )?;
 
     // Load final state for output

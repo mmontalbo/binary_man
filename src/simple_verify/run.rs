@@ -115,6 +115,7 @@ pub fn run(
     context_mode: ContextMode,
     session_size: usize,
     parallel_sessions: bool,
+    with_pty: bool,
 ) -> Result<RunResult> {
     // Create pack directory structure
     fs::create_dir_all(pack_path.join("evidence")).context("create evidence directory")?;
@@ -163,6 +164,7 @@ pub fn run(
             lm_config,
             verbose,
             context_mode,
+            with_pty,
         )
     } else {
         run_sequential_sessions(
@@ -173,6 +175,7 @@ pub fn run(
             lm_config,
             verbose,
             context_mode,
+            with_pty,
         )
     };
 
@@ -254,6 +257,7 @@ pub fn run(
                 verbose,
                 context_mode,
                 &prior_attempts,
+                with_pty,
             );
         } else {
             // Sequential: single LM session for all retry surfaces
@@ -270,6 +274,7 @@ pub fn run(
                 verbose,
                 context_mode,
                 &prior_attempts,
+                with_pty,
             );
 
             retry_plugin.shutdown().ok();
@@ -314,6 +319,7 @@ pub fn run(
 }
 
 /// Run sessions sequentially (original behavior).
+#[allow(clippy::too_many_arguments)]
 fn run_sequential_sessions(
     pack_path: &Path,
     state: &mut State,
@@ -322,6 +328,7 @@ fn run_sequential_sessions(
     lm_config: &LmConfig,
     verbose: bool,
     context_mode: ContextMode,
+    with_pty: bool,
 ) -> RunResult {
     let num_sessions = chunks.len();
     let mut result = RunResult::Complete;
@@ -372,6 +379,7 @@ fn run_sequential_sessions(
             max_cycles,
             verbose,
             context_mode,
+            with_pty,
         ) {
             Ok(r) => r,
             Err(e) => {
@@ -393,6 +401,7 @@ fn run_sequential_sessions(
 }
 
 /// Run sessions in parallel using thread::scope.
+#[allow(clippy::too_many_arguments)]
 fn run_parallel_sessions(
     pack_path: &Path,
     state: &mut State,
@@ -401,6 +410,7 @@ fn run_parallel_sessions(
     lm_config: &LmConfig,
     verbose: bool,
     context_mode: ContextMode,
+    with_pty: bool,
 ) -> RunResult {
     let num_sessions = chunks.len();
 
@@ -467,6 +477,7 @@ fn run_parallel_sessions(
                         session_max,
                         verbose,
                         context_mode,
+                        with_pty,
                     );
 
                     plugin.shutdown().ok();
@@ -551,6 +562,7 @@ fn run_parallel_retry_chunks(
     verbose: bool,
     context_mode: ContextMode,
     prior_attempts: &std::collections::HashMap<String, Vec<Attempt>>,
+    with_pty: bool,
 ) {
     let num_chunks = chunks.len();
 
@@ -597,6 +609,7 @@ fn run_parallel_retry_chunks(
                         verbose,
                         context_mode,
                         &chunk_prior,
+                        with_pty,
                     );
 
                     plugin.shutdown().ok();
@@ -679,6 +692,7 @@ fn run_sequential_chunk(
     max_cycles: u32,
     verbose: bool,
     context_mode: ContextMode,
+    with_pty: bool,
 ) -> Result<RunResult> {
     // Track last response for incremental mode
     let mut last_response: Option<LmResponse> = None;
@@ -927,6 +941,7 @@ fn run_sequential_chunk(
                                 &surface_id,
                                 args,
                                 seed,
+                                with_pty,
                             )
                         })
                     })
@@ -1022,6 +1037,7 @@ fn run_retry_chunk(
     verbose: bool,
     context_mode: ContextMode,
     prior_attempts: &std::collections::HashMap<String, Vec<Attempt>>,
+    with_pty: bool,
 ) -> Result<RunResult> {
     // Track last response for incremental mode
     let mut last_response: Option<LmResponse> = None;
@@ -1261,6 +1277,7 @@ fn run_retry_chunk(
                                 &surface_id,
                                 args,
                                 seed,
+                                with_pty,
                             )
                         })
                     })
@@ -1421,18 +1438,30 @@ fn probe_entries_with_modifiers(state: &mut State, pack_path: &Path, verbose: bo
             );
             let control_id = format!("{}_control", probe_id);
 
-            let control_evidence =
-                match run_scenario(pack_path, &control_id, &state.binary, &control_argv, &seed) {
-                    Ok(ev) => ev,
-                    Err(_) => continue, // Skip this modifier on error
-                };
+            let control_evidence = match run_scenario(
+                pack_path,
+                &control_id,
+                &state.binary,
+                &control_argv,
+                &seed,
+                false,
+            ) {
+                Ok(ev) => ev,
+                Err(_) => continue, // Skip this modifier on error
+            };
 
             // Run variant scenario
-            let variant_evidence =
-                match run_scenario(pack_path, &probe_id, &state.binary, &variant_argv, &seed) {
-                    Ok(ev) => ev,
-                    Err(_) => continue, // Skip this modifier on error
-                };
+            let variant_evidence = match run_scenario(
+                pack_path,
+                &probe_id,
+                &state.binary,
+                &variant_argv,
+                &seed,
+                false,
+            ) {
+                Ok(ev) => ev,
+                Err(_) => continue, // Skip this modifier on error
+            };
 
             // Compare outputs
             let stdout_differs = variant_evidence.stdout != control_evidence.stdout;

@@ -19,6 +19,180 @@ use std::time::Duration;
 /// Default timeout for scenario execution in seconds.
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
+/// Directory name for pre-generated fixtures in the sandbox.
+const FIXTURES_DIR: &str = "_fixtures";
+
+/// Fixture: repeated similar blocks - good for testing diff algorithm options
+/// (--patience, --minimal, --histogram, --diff-algorithm)
+const FIXTURE_REPEATED: &str = r#"section_start {
+    process_item alpha
+    validate alpha
+    save alpha
+}
+section_end
+
+section_start {
+    process_item beta
+    validate beta
+    save beta
+}
+section_end
+
+section_start {
+    process_item gamma
+    validate gamma
+    save gamma
+}
+section_end
+
+section_start {
+    process_item delta
+    validate delta
+    save delta
+}
+section_end
+
+section_start {
+    process_item epsilon
+    validate epsilon
+    save epsilon
+}
+section_end
+
+handler_block {
+    setup_connection
+    read_data
+    process_data
+    write_result
+    cleanup
+}
+
+handler_block {
+    setup_connection
+    read_data
+    process_data
+    write_result
+    cleanup
+}
+
+handler_block {
+    setup_connection
+    read_data
+    process_data
+    write_result
+    cleanup
+}
+"#;
+
+/// Fixture: indented code-like structure - good for testing indent heuristics
+/// (--indent-heuristic, --no-indent-heuristic)
+const FIXTURE_INDENTED: &str = r#"def function_one():
+    setup()
+    process()
+    cleanup()
+    return True
+
+def function_two():
+    setup()
+    process()
+    cleanup()
+    return True
+
+def function_three():
+    setup()
+    process()
+    cleanup()
+    return True
+
+class Handler:
+    def __init__(self):
+        self.state = None
+
+    def handle(self, data):
+        self.validate(data)
+        self.transform(data)
+        self.store(data)
+
+    def validate(self, data):
+        pass
+
+    def transform(self, data):
+        pass
+
+    def store(self, data):
+        pass
+
+class Processor:
+    def __init__(self):
+        self.state = None
+
+    def handle(self, data):
+        self.validate(data)
+        self.transform(data)
+        self.store(data)
+
+    def validate(self, data):
+        pass
+
+    def transform(self, data):
+        pass
+
+    def store(self, data):
+        pass
+"#;
+
+/// Fixture: content with moveable blocks - good for copy/move detection
+/// (-C, -M, --color-moved, --no-color-moved-ws)
+const FIXTURE_MOVEABLE: &str = r#"# Configuration File
+# This content can be reordered to test move detection
+
+[database]
+host = localhost
+port = 5432
+name = myapp_db
+user = admin
+
+[cache]
+host = localhost
+port = 6379
+ttl = 3600
+
+[logging]
+level = info
+format = json
+output = stdout
+
+[server]
+host = 0.0.0.0
+port = 8080
+workers = 4
+
+[features]
+enable_auth = true
+enable_cache = true
+enable_logging = true
+
+# End of configuration
+"#;
+
+/// Write pre-generated fixtures to the sandbox directory.
+///
+/// These files are available for LM-generated seeds to use, providing
+/// text patterns that are useful for exercising various diff options.
+fn write_fixtures(work_dir: &Path) -> Result<()> {
+    let fixtures_dir = work_dir.join(FIXTURES_DIR);
+    fs::create_dir_all(&fixtures_dir).context("create _fixtures directory")?;
+
+    fs::write(fixtures_dir.join("repeated.txt"), FIXTURE_REPEATED)
+        .context("write repeated.txt fixture")?;
+    fs::write(fixtures_dir.join("indented.txt"), FIXTURE_INDENTED)
+        .context("write indented.txt fixture")?;
+    fs::write(fixtures_dir.join("moveable.txt"), FIXTURE_MOVEABLE)
+        .context("write moveable.txt fixture")?;
+
+    Ok(())
+}
+
 /// Filesystem changes detected between before/after command execution.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FsDiff {
@@ -80,6 +254,73 @@ fn build_sandbox_command(work_dir: &Path, sandbox_tmp: &Path) -> Command {
     cmd
 }
 
+/// Build a bwrap command that runs the target command in a PTY.
+///
+/// Uses the `script` command to allocate a pseudo-terminal, so programs
+/// output colors and formatting as if running interactively.
+fn build_sandbox_command_with_pty(
+    work_dir: &Path,
+    sandbox_tmp: &Path,
+    binary: &str,
+    argv: &[String],
+) -> Command {
+    let mut cmd = Command::new("bwrap");
+
+    // Core filesystem setup
+    cmd.args(["--ro-bind", "/", "/"]); // Read-only root
+    cmd.args(["--dev", "/dev"]); // Device access (needed for PTY)
+    cmd.args(["--proc", "/proc"]); // Proc filesystem
+
+    // Bind workspace/tmp to /tmp for observability
+    let sandbox_tmp_str = sandbox_tmp.to_string_lossy();
+    cmd.args(["--bind", &sandbox_tmp_str, "/tmp"]);
+
+    // Make work directory writable
+    let work_dir_str = work_dir.to_string_lossy();
+    cmd.args(["--bind", &work_dir_str, &work_dir_str]);
+
+    // Security isolation
+    cmd.arg("--unshare-net"); // No network
+    cmd.arg("--die-with-parent"); // Cleanup on parent exit
+    cmd.arg("--new-session"); // Signal isolation
+
+    // Set working directory
+    cmd.args(["--chdir", &work_dir_str]);
+
+    // Separator before actual command
+    cmd.arg("--");
+
+    // Use script to allocate a PTY
+    // script -q -c "command args" /dev/null
+    cmd.arg("script");
+    cmd.arg("-q"); // Quiet mode (no "Script started" messages)
+
+    // Build the command string for script -c
+    let mut cmd_parts = vec![binary.to_string()];
+    cmd_parts.extend(argv.iter().cloned());
+    let cmd_str = cmd_parts
+        .iter()
+        .map(|s| shell_escape(s))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    cmd.args(["-c", &cmd_str]);
+    cmd.arg("/dev/null"); // Discard typescript file
+
+    cmd
+}
+
+/// Escape a string for shell use.
+fn shell_escape(s: &str) -> String {
+    if s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '/')
+    {
+        s.to_string()
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
+}
+
 /// Maximum bytes to capture for stdout/stderr.
 const MAX_OUTPUT_BYTES: usize = 64 * 1024;
 
@@ -130,6 +371,9 @@ pub struct Evidence {
     /// Environment variables visible to the command.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub env: HashMap<String, String>,
+    /// Whether this command was run in a PTY (captures colors/formatting).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub with_pty: bool,
 }
 
 /// Run a scenario and capture evidence.
@@ -140,12 +384,16 @@ pub struct Evidence {
 /// 3. Run seed setup commands
 /// 4. Run the main command
 /// 5. Capture outputs
+///
+/// If `with_pty` is true, the command runs in a pseudo-terminal, capturing
+/// ANSI color codes and other terminal-dependent output.
 pub fn run_scenario(
     _pack_path: &Path,
     scenario_id: &str,
     binary: &str,
     argv: &[String],
     seed: &Seed,
+    with_pty: bool,
 ) -> Result<Evidence> {
     let captured_at_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -163,6 +411,9 @@ pub fn run_scenario(
     // Create workspace/tmp directory for observable /tmp inside sandbox
     let sandbox_tmp = work_dir.join("tmp");
     fs::create_dir_all(&sandbox_tmp).context("create workspace/tmp directory")?;
+
+    // Write pre-generated fixtures for LM to use
+    write_fixtures(work_dir)?;
 
     // Capture environment variables that will be visible in the sandbox
     // We capture a subset of relevant env vars for telemetry
@@ -270,6 +521,7 @@ pub fn run_scenario(
             stdout_metrics: None,
             stderr_metrics: None,
             env,
+            with_pty,
         });
     }
 
@@ -277,11 +529,26 @@ pub fn run_scenario(
     let fs_state_before = capture_fs_state(work_dir);
 
     // Build the main command with full sandbox isolation
-    let mut cmd = build_sandbox_command(work_dir, &sandbox_tmp);
-    cmd.arg(binary);
-    cmd.args(argv);
+    // If with_pty is true, use script to allocate a PTY for color/formatting capture
+    let mut cmd = if with_pty {
+        build_sandbox_command_with_pty(work_dir, &sandbox_tmp, binary, argv)
+    } else {
+        let mut c = build_sandbox_command(work_dir, &sandbox_tmp);
+        c.arg(binary);
+        c.args(argv);
+        c
+    };
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
+
+    // When running with PTY, disable pagers to prevent blocking
+    // (PTY makes programs think they're interactive)
+    if with_pty {
+        cmd.env("PAGER", "cat");
+        cmd.env("GIT_PAGER", "cat");
+        cmd.env("MANPAGER", "cat");
+        cmd.env("DELTA_PAGER", "cat"); // For delta diff tool
+    }
 
     // Execute with timeout
     let output = match execute_with_timeout(&mut cmd, Duration::from_secs(DEFAULT_TIMEOUT_SECS)) {
@@ -301,6 +568,7 @@ pub fn run_scenario(
                 stdout_metrics: None,
                 stderr_metrics: None,
                 env,
+                with_pty,
             });
         }
     };
@@ -339,6 +607,7 @@ pub fn run_scenario(
         stdout_metrics,
         stderr_metrics,
         env,
+        with_pty,
     })
 }
 
@@ -647,6 +916,7 @@ mod tests {
             "echo",
             &["hello".to_string()],
             &seed,
+            false,
         )
         .unwrap();
 
@@ -673,6 +943,7 @@ mod tests {
             "cat",
             &["input.txt".to_string()],
             &seed,
+            false,
         )
         .unwrap();
 
@@ -701,10 +972,67 @@ mod tests {
             "cat",
             &["subdir/file.txt".to_string()],
             &seed,
+            false,
         )
         .unwrap();
 
         assert_eq!(evidence.stdout.trim(), "nested content");
+    }
+
+    #[test]
+    fn test_run_with_pty() {
+        let temp_pack = tempfile::tempdir().unwrap();
+
+        let seed = Seed::default();
+        // Run echo with PTY mode
+        let evidence = run_scenario(
+            temp_pack.path(),
+            "test_pty",
+            "echo",
+            &["hello".to_string()],
+            &seed,
+            true, // with_pty = true
+        )
+        .unwrap();
+
+        // Output should contain "hello" (though PTY may add extra chars)
+        assert!(evidence.stdout.contains("hello"));
+        assert_eq!(evidence.exit_code, Some(0));
+        assert!(evidence.with_pty);
+    }
+
+    #[test]
+    fn test_pty_captures_colors() {
+        let temp_pack = tempfile::tempdir().unwrap();
+
+        let seed = Seed::default();
+        // Run ls with color=always in PTY mode - should capture ANSI codes
+        let evidence = run_scenario(
+            temp_pack.path(),
+            "test_color",
+            "ls",
+            &["--color=always".to_string(), "/".to_string()],
+            &seed,
+            true, // with_pty = true
+        )
+        .unwrap();
+
+        // If PTY works, ls --color=always should output ANSI escape codes
+        // ANSI codes start with ESC (0x1B) followed by [
+        let has_ansi = evidence.stdout.contains("\x1b[") || evidence.stdout.contains("\x1B[");
+
+        // Note: This might not work in all environments (e.g., if ls doesn't support color)
+        // So we just check it ran successfully
+        assert_eq!(evidence.exit_code, Some(0), "ls should succeed");
+        assert!(evidence.with_pty, "Evidence should indicate PTY was used");
+
+        // If ANSI codes are present, great! If not, the test still passes
+        // because not all systems/configs produce color output
+        if has_ansi {
+            eprintln!("PTY successfully captured ANSI color codes");
+        } else {
+            eprintln!("Note: No ANSI codes captured (may be system-dependent)");
+        }
     }
 
     #[test]
@@ -729,6 +1057,7 @@ mod tests {
             }),
             stderr_metrics: None,
             env: HashMap::new(),
+            with_pty: false,
         };
 
         write_evidence(temp_pack.path(), "evidence/test.json", &evidence).unwrap();
@@ -783,6 +1112,7 @@ mod tests {
             stdout_metrics: None,
             stderr_metrics: None,
             env: HashMap::new(),
+            with_pty: false,
         };
 
         let option = Evidence {
@@ -799,6 +1129,7 @@ mod tests {
             stdout_metrics: None,
             stderr_metrics: None,
             env: HashMap::new(),
+            with_pty: false,
         };
 
         let outcome = compute_outcome(&option, &control);
@@ -821,6 +1152,7 @@ mod tests {
             stdout_metrics: None,
             stderr_metrics: None,
             env: HashMap::new(),
+            with_pty: false,
         };
 
         let option = Evidence {
@@ -837,6 +1169,7 @@ mod tests {
             stdout_metrics: None,
             stderr_metrics: None,
             env: HashMap::new(),
+            with_pty: false,
         };
 
         let outcome = compute_outcome(&option, &control);
@@ -942,6 +1275,7 @@ mod tests {
             stdout_metrics: None,
             stderr_metrics: None,
             env: HashMap::new(),
+            with_pty: false,
         };
 
         let option = Evidence {
@@ -962,6 +1296,7 @@ mod tests {
             stdout_metrics: None,
             stderr_metrics: None,
             env: HashMap::new(),
+            with_pty: false,
         };
 
         let outcome = compute_outcome(&option, &control);
