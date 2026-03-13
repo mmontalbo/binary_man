@@ -17,7 +17,7 @@ pub struct RunArgs {
     pub doc_pack: Option<std::path::PathBuf>,
 
     /// Maximum verification cycles before stopping (0 = unlimited)
-    #[arg(long, default_value = "15")]
+    #[arg(long, default_value = "80")]
     pub max_cycles: usize,
 
     /// Show detailed progress during verification
@@ -41,6 +41,17 @@ pub struct RunArgs {
     /// incremental: Send only changes since last cycle (efficient for stateful plugins).
     #[arg(long, default_value = "auto")]
     pub context_mode: ContextMode,
+
+    /// Maximum surfaces per LM session before starting fresh.
+    /// Prevents context bloat for large surface counts.
+    /// 0 = unlimited.
+    #[arg(long, default_value = "20")]
+    pub session_size: usize,
+
+    /// Run sessions in parallel (default). Use --no-parallel to disable.
+    /// Each session gets its own LM instance.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub parallel: bool,
 
     /// Command to document: <binary> [entry-point...]
     #[arg(value_name = "COMMAND", required = true, num_args = 1..)]

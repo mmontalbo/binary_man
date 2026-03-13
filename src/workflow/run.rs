@@ -43,6 +43,12 @@ pub fn run_run(args: &RunArgs) -> Result<()> {
         eprintln!("LM: {:?}", lm_config);
         eprintln!("Context mode: {:?}", args.context_mode);
         eprintln!("Max cycles: {}", args.max_cycles);
+        if args.session_size > 0 {
+            eprintln!("Session size: {}", args.session_size);
+            if args.parallel {
+                eprintln!("Parallel sessions: enabled");
+            }
+        }
     }
 
     // Run the simplified verification loop
@@ -54,6 +60,8 @@ pub fn run_run(args: &RunArgs) -> Result<()> {
         &lm_config,
         args.verbose,
         args.context_mode,
+        args.session_size,
+        args.parallel,
     )?;
 
     // Load final state for output
