@@ -392,7 +392,12 @@ pub fn compute_outcome(option_evidence: &Evidence, control_evidence: &Evidence) 
     let stderr_differs = option_evidence.stderr != control_evidence.stderr;
     let exit_differs = option_evidence.exit_code != control_evidence.exit_code;
 
-    if stdout_differs || stderr_differs || exit_differs {
+    // Reject stderr-only diffs when both runs failed (likely just error message variations)
+    let both_failed = option_evidence.exit_code.unwrap_or(0) != 0
+        && control_evidence.exit_code.unwrap_or(0) != 0;
+    let stderr_only_diff = stderr_differs && !stdout_differs && !exit_differs;
+
+    if (stdout_differs || stderr_differs || exit_differs) && !(stderr_only_diff && both_failed) {
         let diff_kind = match (stdout_differs, stderr_differs, exit_differs) {
             (true, false, false) => DiffKind::Stdout,
             (false, true, false) => DiffKind::Stderr,

@@ -43,14 +43,24 @@ pub fn run_test_scenario(
 ) -> Result<TestResult> {
     let scenario_id = format!("{}_c{}", sanitize_id(surface_id), cycle);
 
-    // Control run: just context_argv (no extra args)
+    // Control run: context_argv + extra args (excluding the option being tested)
+    // This isolates the effect of just the option by keeping everything else constant
     let control_id = format!("{}_control", scenario_id);
-    let control_argv: Vec<String> = context_argv.to_vec();
+    let extra_args: Vec<String> = args
+        .iter()
+        .filter(|a| *a != surface_id)
+        .cloned()
+        .collect();
+    let control_argv: Vec<String> = context_argv
+        .iter()
+        .chain(extra_args.iter())
+        .cloned()
+        .collect();
     let control_evidence = run_scenario(pack_path, &control_id, binary, &control_argv, &seed)?;
     let control_path = format!("evidence/{}.json", control_id);
     write_evidence(pack_path, &control_path, &control_evidence)?;
 
-    // Option run: context_argv + args
+    // Option run: context_argv + all args (including the option)
     let full_argv: Vec<String> = context_argv.iter().chain(args.iter()).cloned().collect();
     let evidence = run_scenario(pack_path, &scenario_id, binary, &full_argv, &seed)?;
     let evidence_path = format!("evidence/{}.json", scenario_id);
@@ -134,15 +144,25 @@ pub fn apply_action(state: &mut State, pack_path: &Path, action: LmAction) -> Re
         } => {
             let scenario_id = format!("{}_c{}", sanitize_id(&surface_id), state.cycle);
 
-            // Control run: just context_argv (no extra args)
+            // Control run: context_argv + extra args (excluding the option being tested)
             let control_id = format!("{}_control", scenario_id);
-            let control_argv = state.context_argv.clone();
+            let extra_args: Vec<String> = args
+                .iter()
+                .filter(|a| *a != &surface_id)
+                .cloned()
+                .collect();
+            let control_argv: Vec<String> = state
+                .context_argv
+                .iter()
+                .chain(extra_args.iter())
+                .cloned()
+                .collect();
             let control_evidence =
                 run_scenario(pack_path, &control_id, &state.binary, &control_argv, &seed)?;
             let control_path = format!("evidence/{}.json", control_id);
             write_evidence(pack_path, &control_path, &control_evidence)?;
 
-            // Option run: context_argv + args
+            // Option run: context_argv + all args (including the option)
             let full_argv: Vec<String> = state
                 .context_argv
                 .iter()
@@ -252,6 +272,7 @@ mod tests {
                 value_hint: None,
                 status: Status::Pending,
                 attempts: vec![],
+                retried: false,
             }],
             cycle: 1,
         };
@@ -308,6 +329,7 @@ mod tests {
                 value_hint: None,
                 status: Status::Pending,
                 attempts: vec![],
+                retried: false,
             }],
             cycle: 1,
         };
@@ -424,6 +446,7 @@ mod tests {
                 value_hint: None,
                 status: Status::Pending,
                 attempts: vec![],
+                retried: false,
             }],
             cycle: 1,
         };

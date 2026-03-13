@@ -39,6 +39,7 @@ pub fn bootstrap(binary: &str, context_argv: &[String]) -> Result<State> {
             value_hint: s.value_hint,
             status: Status::Pending,
             attempts: vec![],
+            retried: false,
         })
         .collect();
 

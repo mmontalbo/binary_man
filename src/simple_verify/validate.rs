@@ -83,6 +83,7 @@ mod tests {
                     value_hint: None,
                     status: Status::Pending,
                     attempts: vec![],
+                    retried: false,
                 },
                 SurfaceEntry {
                     id: "--quiet".to_string(),
@@ -91,6 +92,7 @@ mod tests {
                     value_hint: None,
                     status: Status::Verified,
                     attempts: vec![],
+                    retried: false,
                 },
             ],
             cycle: 0,

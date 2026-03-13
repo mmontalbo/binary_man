@@ -88,6 +88,9 @@ pub struct SurfaceEntry {
     pub status: Status,
     /// History of verification attempts.
     pub attempts: Vec<Attempt>,
+    /// Whether this surface has been retried after exclusion.
+    #[serde(default)]
+    pub retried: bool,
 }
 
 /// A single verification attempt for a surface.
@@ -218,6 +221,7 @@ mod tests {
                 value_hint: None,
                 status: Status::Pending,
                 attempts: vec![],
+                retried: false,
             }],
             cycle: 0,
         };
