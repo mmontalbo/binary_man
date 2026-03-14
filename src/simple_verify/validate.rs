@@ -42,24 +42,6 @@ pub fn validate_action(action: &LmAction, state: &State) -> Result<(), String> {
                 return Err(format!("Empty args for surface {}", surface_id));
             }
         }
-        LmAction::Exclude { surface_id, reason } => {
-            // Surface must exist
-            if !state.entries.iter().any(|e| &e.id == surface_id) {
-                return Err(format!("Unknown surface: {}", surface_id));
-            }
-            // Surface must be pending
-            if let Some(entry) = state.entries.iter().find(|e| &e.id == surface_id) {
-                if !matches!(entry.status, Status::Pending) {
-                    return Err(format!(
-                        "Surface {} is not pending (status: {:?})",
-                        surface_id, entry.status
-                    ));
-                }
-            }
-            if reason.is_empty() {
-                return Err(format!("Empty exclusion reason for {}", surface_id));
-            }
-        }
     }
     Ok(())
 }
@@ -186,28 +168,6 @@ mod tests {
         let result = validate_action(&action, &state);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Empty args"));
-    }
-
-    #[test]
-    fn test_validate_exclude_ok() {
-        let state = test_state();
-        let action = LmAction::Exclude {
-            surface_id: "--verbose".to_string(),
-            reason: "Requires special hardware".to_string(),
-        };
-        assert!(validate_action(&action, &state).is_ok());
-    }
-
-    #[test]
-    fn test_validate_exclude_empty_reason() {
-        let state = test_state();
-        let action = LmAction::Exclude {
-            surface_id: "--verbose".to_string(),
-            reason: "".to_string(),
-        };
-        let result = validate_action(&action, &state);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Empty exclusion reason"));
     }
 
     #[test]

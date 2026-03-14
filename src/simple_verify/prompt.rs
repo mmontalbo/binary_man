@@ -290,6 +290,18 @@ fn format_outcome_compact(outcome: &Outcome) -> String {
             format!("Crashed({})", short_hint)
         }
         Outcome::ExecutionError { error } => format!("ExecutionError({})", error),
+        Outcome::OptionError { hint } => {
+            let short_hint = if hint.len() > 50 {
+                let mut end = 50;
+                while end > 0 && !hint.is_char_boundary(end) {
+                    end -= 1;
+                }
+                format!("{}...", &hint[..end])
+            } else {
+                hint.clone()
+            };
+            format!("OptionError({})", short_hint)
+        }
     }
 }
 
@@ -434,6 +446,7 @@ fn format_outcome(outcome: &Outcome) -> String {
         Outcome::SetupFailed { hint } => format!("SetupFailed: {}", hint),
         Outcome::Crashed { hint } => format!("Crashed: {}", hint),
         Outcome::ExecutionError { error } => format!("ExecutionError: {}", error),
+        Outcome::OptionError { hint } => format!("OptionError: {}", hint),
     }
 }
 
@@ -584,9 +597,6 @@ pub fn build_incremental_prompt(
                         }
                     }
                 }
-                super::lm::LmAction::Exclude { surface_id, .. } => {
-                    prompt.push_str(&format!("- Exclude {}: ✓ Marked excluded\n", surface_id));
-                }
             }
         }
         prompt.push('\n');
@@ -658,10 +668,6 @@ For each surface, provide ONE action:
    - args: Arguments to append to base command (include the option being tested)
    - seed: Setup commands (copy baseline's seed if same setup works)
 
-3. **Exclude**: Give up on a surface
-   - surface_id: Which surface
-   - reason: Why it can't be verified
-
 ## Execution Model
 
 Each test runs TWO scenarios with the SAME seed:
@@ -682,8 +688,7 @@ Respond with JSON:
 {
   "actions": [
     { "kind": "SetBaseline", "args": [], "seed": { "setup": [["touch", "file.txt"]], "files": [] } },
-    { "kind": "Test", "surface_id": "--example", "args": ["--example"], "seed": { "setup": [["touch", "file.txt"]], "files": [] } },
-    { "kind": "Exclude", "surface_id": "--other", "reason": "requires root" }
+    { "kind": "Test", "surface_id": "--example", "args": ["--example"], "seed": { "setup": [["touch", "file.txt"]], "files": [] } }
   ]
 }
 ```
@@ -698,7 +703,6 @@ CRITICAL: Each setup command is an ARRAY of strings: `["cmd", "arg1", "arg2"]`, 
   - For `--color`: seed must include content that triggers colorization
 - If OutputsEqual, try: different seed files that better exercise the option
 - Learn from stderr errors and adjust seed accordingly
-- Exclude if surface genuinely can't be tested (needs root, hardware, network, etc.)
 
 ## Pre-generated Fixtures
 
@@ -707,6 +711,8 @@ Pattern files are available in `_fixtures/` directory. Use them in setup command
 - `_fixtures/repeated.txt`: ~50 similar repeated blocks with minor variations
 - `_fixtures/indented.txt`: Code-like structure with nested indentation levels
 - `_fixtures/moveable.txt`: Config-style sections that can be reordered or copied
+- `_fixtures/large.txt`: ~10KB file for testing size-related options (--kibibytes, --human-readable, --si, --block-size)
+- `_fixtures/empty.txt`: Empty file for edge cases
 
 These files are pre-generated and available in every sandbox. Copy and modify them as needed.
 "#;

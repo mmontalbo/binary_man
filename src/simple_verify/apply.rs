@@ -259,12 +259,6 @@ pub fn apply_action(state: &mut State, pack_path: &Path, action: LmAction) -> Re
                 }
             }
         }
-
-        LmAction::Exclude { surface_id, reason } => {
-            if let Some(entry) = state.entries.iter_mut().find(|e| e.id == surface_id) {
-                entry.status = Status::Excluded { reason };
-            }
-        }
     }
     Ok(())
 }
@@ -370,46 +364,6 @@ mod tests {
             other => panic!("Expected Verified, got {:?}", other),
         }
         assert!(matches!(entry.status, Status::Verified));
-    }
-
-    #[test]
-    fn test_apply_exclude() {
-        let temp_pack = tempfile::tempdir().unwrap();
-
-        let mut state = State {
-            schema_version: STATE_SCHEMA_VERSION,
-            binary: "test".to_string(),
-            context_argv: vec![],
-            baseline: None,
-            entries: vec![SurfaceEntry {
-                id: "--special".to_string(),
-                description: "Special option".to_string(),
-                context: None,
-                value_hint: None,
-                status: Status::Pending,
-                attempts: vec![],
-                retried: false,
-            }],
-            cycle: 1,
-        };
-
-        apply_action(
-            &mut state,
-            temp_pack.path(),
-            LmAction::Exclude {
-                surface_id: "--special".to_string(),
-                reason: "Requires root".to_string(),
-            },
-        )
-        .unwrap();
-
-        let entry = state.entries.iter().find(|e| e.id == "--special").unwrap();
-        match &entry.status {
-            Status::Excluded { reason } => {
-                assert_eq!(reason, "Requires root");
-            }
-            _ => panic!("Expected Excluded status"),
-        }
     }
 
     #[test]

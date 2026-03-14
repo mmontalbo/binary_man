@@ -175,6 +175,17 @@ enable_logging = true
 # End of configuration
 "#;
 
+/// Generate a large file content (~10KB) for testing size-related options
+/// (--kibibytes, --human-readable, --si, --block-size)
+fn generate_large_fixture() -> String {
+    let line = "This is line number XXXX of the large test file for size demonstrations.\n";
+    let mut content = String::with_capacity(11000);
+    for i in 1..=150 {
+        content.push_str(&line.replace("XXXX", &format!("{:04}", i)));
+    }
+    content
+}
+
 /// Write pre-generated fixtures to the sandbox directory.
 ///
 /// These files are available for LM-generated seeds to use, providing
@@ -189,6 +200,13 @@ fn write_fixtures(work_dir: &Path) -> Result<()> {
         .context("write indented.txt fixture")?;
     fs::write(fixtures_dir.join("moveable.txt"), FIXTURE_MOVEABLE)
         .context("write moveable.txt fixture")?;
+
+    // Large file (~10KB) for size-related options
+    fs::write(fixtures_dir.join("large.txt"), generate_large_fixture())
+        .context("write large.txt fixture")?;
+
+    // Empty file for edge cases
+    fs::write(fixtures_dir.join("empty.txt"), "").context("write empty.txt fixture")?;
 
     Ok(())
 }
@@ -1219,6 +1237,25 @@ pub fn compute_outcome(option_evidence: &Evidence, control_evidence: &Evidence) 
     if option_evidence.setup_failed {
         return Outcome::SetupFailed {
             hint: truncate_str(&option_evidence.stderr, 200),
+        };
+    }
+
+    // Detect invalid test scenarios where option causes an error but control succeeds.
+    // These are false positives - the difference is due to an error, not the option's behavior.
+    let control_succeeded = control_evidence.exit_code.unwrap_or(0) == 0;
+    let option_exit = option_evidence.exit_code.unwrap_or(0);
+    let option_stderr_lower = option_evidence.stderr.to_lowercase();
+    let has_error_stderr =
+        option_stderr_lower.contains("error:") || option_stderr_lower.contains("fatal:");
+
+    // Signal exits (>= 128) or error messages when control succeeded indicate bad test scenario
+    if control_succeeded && (option_exit >= 128 || (option_exit != 0 && has_error_stderr)) {
+        return Outcome::OptionError {
+            hint: format!(
+                "exit={}, stderr: {}",
+                option_exit,
+                truncate_str(&option_evidence.stderr, 150)
+            ),
         };
     }
 

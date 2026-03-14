@@ -52,13 +52,6 @@ pub enum LmAction {
         /// Seed setup for this test.
         seed: Seed,
     },
-    /// Exclude a surface from verification.
-    Exclude {
-        /// Which surface to exclude.
-        surface_id: String,
-        /// Why it can't be verified.
-        reason: String,
-    },
 }
 
 /// Parse the LM response text into an LmResponse.
@@ -259,10 +252,9 @@ fn fix_json_errors(json: &str) -> String {
 
 /// Convert a JSON object to an LmAction.
 ///
-/// Recognizes three object types by their key:
+/// Recognizes two object types by their key:
 /// - `{"baseline": true, ...}` -> SetBaseline
 /// - `{"test": "surface_id", ...}` -> Test
-/// - `{"exclude": "surface_id", ...}` -> Exclude
 fn parse_action_object(obj: &Value) -> Result<Option<LmAction>> {
     // Helper to get value case-insensitively
     fn get_key<'a>(obj: &'a Value, keys: &[&str]) -> Option<&'a Value> {
@@ -289,18 +281,6 @@ fn parse_action_object(obj: &Value) -> Result<Option<LmAction>> {
             surface_id: surface.to_string(),
             args,
             seed,
-        }));
-    }
-
-    // Check for exclude action (exclude/Exclude)
-    if let Some(surface) = get_key(obj, &["exclude", "Exclude"]).and_then(|v| v.as_str()) {
-        let reason = get_key(obj, &["reason", "Reason"])
-            .and_then(|v| v.as_str())
-            .unwrap_or("No reason provided")
-            .to_string();
-        return Ok(Some(LmAction::Exclude {
-            surface_id: surface.to_string(),
-            reason,
         }));
     }
 
@@ -477,7 +457,6 @@ fn fix_common_typos(json: &str) -> String {
         .replace("\"SetBase\"", "\"SetBaseline\"")
         .replace("\"set_baseline\"", "\"SetBaseline\"")
         .replace("\"test\"", "\"Test\"")
-        .replace("\"exclude\"", "\"Exclude\"")
 }
 
 /// Truncate a string safely without splitting UTF-8 characters.
@@ -569,33 +548,18 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_simplified_exclude() {
-        let text = r#"{"exclude": "--gpg-sign", "reason": "requires GPG key"}"#;
-        let response = parse_lm_response(text).unwrap();
-        assert_eq!(response.actions.len(), 1);
-
-        match &response.actions[0] {
-            LmAction::Exclude { surface_id, reason } => {
-                assert_eq!(surface_id, "--gpg-sign");
-                assert_eq!(reason, "requires GPG key");
-            }
-            _ => panic!("Expected Exclude"),
-        }
-    }
-
-    #[test]
     fn test_parse_simplified_multiple_objects() {
         let text = r#"
 {"baseline": true, "setup": "touch file.txt"}
 {"test": "--all", "args": "--all", "setup": "touch .hidden"}
-{"exclude": "--context", "reason": "requires SELinux"}
+{"test": "--verbose", "args": "--verbose", "setup": "touch test.txt"}
 "#;
         let response = parse_lm_response(text).unwrap();
         assert_eq!(response.actions.len(), 3);
 
         assert!(matches!(&response.actions[0], LmAction::SetBaseline { .. }));
         assert!(matches!(&response.actions[1], LmAction::Test { .. }));
-        assert!(matches!(&response.actions[2], LmAction::Exclude { .. }));
+        assert!(matches!(&response.actions[2], LmAction::Test { .. }));
     }
 
     #[test]
@@ -750,30 +714,6 @@ That should work!
                 assert_eq!(args, &["--stat"]);
             }
             _ => panic!("Expected Test"),
-        }
-    }
-
-    #[test]
-    fn test_parse_legacy_exclude_action() {
-        let json = r#"{
-            "actions": [
-                {
-                    "kind": "Exclude",
-                    "surface_id": "--gpg-sign",
-                    "reason": "Requires GPG key setup"
-                }
-            ]
-        }"#;
-
-        let response = parse_lm_response(json).unwrap();
-        assert_eq!(response.actions.len(), 1);
-
-        match &response.actions[0] {
-            LmAction::Exclude { surface_id, reason } => {
-                assert_eq!(surface_id, "--gpg-sign");
-                assert!(reason.contains("GPG"));
-            }
-            _ => panic!("Expected Exclude"),
         }
     }
 

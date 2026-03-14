@@ -197,6 +197,12 @@ pub enum Outcome {
         /// Error description.
         error: String,
     },
+    /// Option caused an error while control succeeded.
+    /// This indicates the test scenario was invalid, not a successful verification.
+    OptionError {
+        /// Diagnostic hint including exit code and stderr.
+        hint: String,
+    },
 }
 
 /// Which aspect of output differed from baseline.
