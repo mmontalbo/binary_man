@@ -175,6 +175,156 @@ enable_logging = true
 # End of configuration
 "#;
 
+/// Fixture: whitespace variations - good for testing whitespace ignore options
+/// (--ignore-all-space, --ignore-space-change, --ignore-space-at-eol)
+const FIXTURE_WHITESPACE: &str = "line with trailing spaces   \n\
+line\twith\ttabs\n\
+    four space indent\n\
+\tsingle tab indent\n\
+  \t  mixed spaces and tab  \n\
+normal line no trailing\n\
+  leading spaces only\n\
+\t\tdouble tab indent\n";
+
+/// Fixture: CRLF line endings - good for testing CR handling
+/// (--ignore-cr-at-eol)
+const FIXTURE_CRLF: &str = "line one with crlf\r\n\
+line two with crlf\r\n\
+line three with crlf\r\n\
+line four with crlf\r\n";
+
+/// Fixture: C functions - good for testing function context
+/// (--function-context, -W)
+const FIXTURE_FUNCTIONS_C: &str = r#"#include <stdio.h>
+
+int add(int a, int b) {
+    int result;
+    result = a + b;
+    return result;
+}
+
+int multiply(int a, int b) {
+    int result;
+    result = a * b;
+    return result;
+}
+
+int subtract(int a, int b) {
+    int result;
+    result = a - b;
+    return result;
+}
+
+int divide(int a, int b) {
+    if (b == 0) {
+        return -1;
+    }
+    return a / b;
+}
+
+int main() {
+    int x = add(5, 3);
+    int y = multiply(4, 2);
+    printf("Results: %d, %d\n", x, y);
+    return 0;
+}
+"#;
+
+/// Fixture: prose text - good for testing word-level diffs
+/// (--word-diff, --word-diff-regex, --color-words)
+const FIXTURE_PROSE: &str = r#"The quick brown fox jumps over the lazy dog.
+This sentence contains multiple words that can be individually modified.
+Word-level diffs highlight exactly which words changed between versions.
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.
+
+The rain in Spain stays mainly in the plain.
+How much wood would a woodchuck chuck if a woodchuck could chuck wood.
+Peter Piper picked a peck of pickled peppers.
+"#;
+
+/// Fixture: binary-like content - good for testing binary handling
+/// (--binary, --text, -a, --numstat with binary)
+const FIXTURE_BINARY: &[u8] = &[
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
+    0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, // IHDR chunk start
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x10, // 16x16 dimensions
+    0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x91, 0x68, // bit depth, color type
+    0x36, 0x00, 0x00, 0x00, 0x01, 0x73, 0x52, 0x47, // sRGB chunk
+    0x42, 0x00, 0xAE, 0xCE, 0x1C, 0xE9, 0x00, 0x00, // more PNG data
+    0x00, 0x04, 0x67, 0x41, 0x4D, 0x41, 0x00, 0x00, // gAMA chunk
+    0xB1, 0x8F, 0x0B, 0xFC, 0x61, 0x05, 0x00, 0x00, // gamma value
+];
+
+/// Fixture: unicode content - good for testing encoding options
+/// (--encoding, multibyte handling)
+const FIXTURE_UNICODE: &str = r#"English: Hello, World!
+Chinese: 你好世界
+Japanese: こんにちは世界
+Korean: 안녕하세요 세계
+Russian: Привет мир
+Arabic: مرحبا بالعالم
+Greek: Γειά σου Κόσμε
+Hebrew: שלום עולם
+Emoji: 🚀 🌍 🎉 ✨ 💻
+Math: ∑∏∫∂√∞≠≈
+Symbols: © ® ™ € £ ¥ ¢
+"#;
+
+/// Fixture: similar content A - paired with similar_b for algorithm comparison
+/// (--histogram, --patience, --minimal, --diff-algorithm)
+const FIXTURE_SIMILAR_A: &str = r#"function setup() {
+    initialize();
+    configure();
+}
+
+function processA() {
+    validate();
+    transform();
+    save();
+}
+
+function processB() {
+    validate();
+    transform();
+    save();
+}
+
+function cleanup() {
+    finalize();
+    close();
+}
+"#;
+
+/// Fixture: similar content B - paired with similar_a for algorithm comparison
+/// (--histogram, --patience, --minimal, --diff-algorithm)
+const FIXTURE_SIMILAR_B: &str = r#"function setup() {
+    initialize();
+    configure();
+    prepare();
+}
+
+function processA() {
+    check();
+    validate();
+    transform();
+    save();
+}
+
+function processC() {
+    validate();
+    convert();
+    save();
+}
+
+function cleanup() {
+    finalize();
+    close();
+}
+"#;
+
 /// Generate a large file content (~10KB) for testing size-related options
 /// (--kibibytes, --human-readable, --si, --block-size)
 fn generate_large_fixture() -> String {
@@ -200,6 +350,34 @@ fn write_fixtures(work_dir: &Path) -> Result<()> {
         .context("write indented.txt fixture")?;
     fs::write(fixtures_dir.join("moveable.txt"), FIXTURE_MOVEABLE)
         .context("write moveable.txt fixture")?;
+
+    // Whitespace variations for ignore-space options
+    fs::write(fixtures_dir.join("whitespace.txt"), FIXTURE_WHITESPACE)
+        .context("write whitespace.txt fixture")?;
+
+    // CRLF line endings for CR handling
+    fs::write(fixtures_dir.join("crlf.txt"), FIXTURE_CRLF).context("write crlf.txt fixture")?;
+
+    // C functions for --function-context
+    fs::write(fixtures_dir.join("functions.c"), FIXTURE_FUNCTIONS_C)
+        .context("write functions.c fixture")?;
+
+    // Prose text for word-level diffs
+    fs::write(fixtures_dir.join("prose.txt"), FIXTURE_PROSE).context("write prose.txt fixture")?;
+
+    // Binary content for binary diff handling
+    fs::write(fixtures_dir.join("binary.bin"), FIXTURE_BINARY)
+        .context("write binary.bin fixture")?;
+
+    // Unicode content for encoding tests
+    fs::write(fixtures_dir.join("unicode.txt"), FIXTURE_UNICODE)
+        .context("write unicode.txt fixture")?;
+
+    // Similar files for algorithm comparison
+    fs::write(fixtures_dir.join("similar_a.txt"), FIXTURE_SIMILAR_A)
+        .context("write similar_a.txt fixture")?;
+    fs::write(fixtures_dir.join("similar_b.txt"), FIXTURE_SIMILAR_B)
+        .context("write similar_b.txt fixture")?;
 
     // Large file (~10KB) for size-related options
     fs::write(fixtures_dir.join("large.txt"), generate_large_fixture())

@@ -708,13 +708,20 @@ CRITICAL: Each setup command is an ARRAY of strings: `["cmd", "arg1", "arg2"]`, 
 
 Pattern files are available in `_fixtures/` directory. Use them in setup commands:
 
-- `_fixtures/repeated.txt`: ~50 similar repeated blocks with minor variations
-- `_fixtures/indented.txt`: Code-like structure with nested indentation levels
-- `_fixtures/moveable.txt`: Config-style sections that can be reordered or copied
-- `_fixtures/large.txt`: ~10KB file for testing size-related options (--kibibytes, --human-readable, --si, --block-size)
-- `_fixtures/empty.txt`: Empty file for edge cases
+- `_fixtures/repeated.txt`: ~50 similar repeated blocks with minor variations. Useful when testing diff algorithm behavior, pattern matching, or how tools handle repetitive content.
+- `_fixtures/indented.txt`: code-like structure with nested indentation levels. Useful when testing indent-aware processing, code formatting, or hierarchical structure handling.
+- `_fixtures/moveable.txt`: config-style sections that can be reordered or copied. Useful when testing move detection, copy detection, or content reordering scenarios.
+- `_fixtures/whitespace.txt`: lines with trailing spaces, tabs, mixed indentation. Useful when testing whitespace normalization, space-vs-tab handling, or trailing whitespace detection.
+- `_fixtures/crlf.txt`: Windows-style CRLF line endings. Useful when testing line ending conversion, cross-platform compatibility, or CR/LF handling.
+- `_fixtures/functions.c`: C source with multiple function definitions. Useful when testing function-aware context, code block detection, or language-aware processing.
+- `_fixtures/prose.txt`: natural language paragraphs. Useful when testing word-level processing, semantic diffing, or text reflow handling.
+- `_fixtures/binary.bin`: non-text binary content. Useful when testing binary vs text detection, encoding handling, or non-printable character scenarios.
+- `_fixtures/unicode.txt`: multi-language UTF-8 text with emoji and symbols. Useful when testing encoding support, multibyte character handling, or internationalization.
+- `_fixtures/similar_a.txt` + `_fixtures/similar_b.txt`: near-identical code with subtle differences. Useful when testing diff algorithms, similarity detection, or minimal change scenarios.
+- `_fixtures/large.txt`: ~10KB file with numbered lines. Useful when testing size thresholds, pagination, or performance with larger content.
+- `_fixtures/empty.txt`: empty file. Useful when testing edge cases, empty input handling, or boundary conditions.
 
-These files are pre-generated and available in every sandbox. Copy and modify them as needed.
+Copy and modify these as needed.
 "#;
 
 #[cfg(test)]
