@@ -3,7 +3,7 @@
 //! Builds structured prompts that give the LM all the context it needs to
 //! decide on actions. The prompt format is intentionally simple and human-readable.
 
-use super::types::{Attempt, Outcome, State};
+use super::types::{Attempt, Outcome, State, SurfaceCategory};
 use std::collections::HashMap;
 
 /// A known issue extracted from SetupFailed outcomes.
@@ -360,6 +360,36 @@ pub fn build_prompt(state: &State, target_ids: &[String]) -> String {
                 prompt.push_str(&format!("Value hint: {}\n", hint));
             }
 
+            // Show critique feedback if a prior verification was rejected
+            if let Some(feedback) = &entry.critique_feedback {
+                prompt.push_str(&format!(
+                    "\n**CRITIQUE FEEDBACK**: A previous verification was rejected: {}\n\
+                     Adjust your seed/approach to directly exercise this option's documented behavior.\n",
+                    feedback
+                ));
+            }
+
+            // Suggest similar verified seeds from the seed bank
+            let similar_seeds: Vec<_> = state
+                .seed_bank
+                .iter()
+                .filter(|s| s.is_similar_to(&entry.id))
+                .collect();
+            if !similar_seeds.is_empty() {
+                prompt.push_str("\n**Suggested seeds** (from similar verified surfaces):\n");
+                for seed in similar_seeds.iter().take(2) {
+                    prompt.push_str(&format!("  From `{}`:\n", seed.surface_id));
+                    if !seed.seed.setup.is_empty() {
+                        prompt.push_str(&format!("    setup: {:?}\n", seed.seed.setup));
+                    }
+                    if !seed.seed.files.is_empty() {
+                        let file_names: Vec<&str> =
+                            seed.seed.files.iter().map(|f| f.path.as_str()).collect();
+                        prompt.push_str(&format!("    files: {:?}\n", file_names));
+                    }
+                }
+            }
+
             // Show all attempts with detailed output information
             if !entry.attempts.is_empty() {
                 prompt.push_str(&format!(
@@ -529,6 +559,33 @@ pub fn build_retry_prompt(
                 }
             }
 
+            // Include seed suggestions from similar verified surfaces
+            let similar_seeds: Vec<_> = state
+                .seed_bank
+                .iter()
+                .filter(|s| s.is_similar_to(id))
+                .take(2)
+                .collect();
+            if !similar_seeds.is_empty() {
+                prompt.push_str("\n**Suggested seeds** (from similar verified surfaces):\n");
+                for seed in similar_seeds {
+                    prompt.push_str(&format!("  From `{}`:\n", seed.surface_id));
+                    if !seed.seed.setup.is_empty() {
+                        prompt.push_str(&format!("    setup: {:?}\n", seed.seed.setup));
+                    }
+                    if !seed.seed.files.is_empty() {
+                        prompt.push_str(&format!(
+                            "    files: {:?}\n",
+                            seed.seed
+                                .files
+                                .iter()
+                                .map(|f| &f.path)
+                                .collect::<Vec<_>>()
+                        ));
+                    }
+                }
+            }
+
             prompt.push('\n');
         }
     }
@@ -574,13 +631,42 @@ pub fn build_incremental_prompt(
                                 prompt.push_str(&format!("- Test {}: ✓ Verified\n", surface_id));
                             }
                             super::types::Status::Pending => {
-                                // Get the last attempt outcome
                                 if let Some(attempt) = entry.attempts.last() {
                                     prompt.push_str(&format!(
                                         "- Test {}: {:?} - try different approach\n",
                                         surface_id,
                                         format_outcome(&attempt.outcome)
                                     ));
+                                    // Include evidence on OutputsEqual so the LM can diagnose WHY
+                                    if matches!(attempt.outcome, Outcome::OutputsEqual) {
+                                        if let Some(control) = &attempt.control_stdout_preview {
+                                            prompt.push_str(&format!(
+                                                "    control_stdout: {:?}\n",
+                                                control
+                                            ));
+                                        }
+                                        if let Some(stdout) = &attempt.stdout_preview {
+                                            prompt.push_str(&format!(
+                                                "    option_stdout: {:?}\n",
+                                                stdout
+                                            ));
+                                        }
+                                        if let Some(metrics) = &attempt.stdout_metrics {
+                                            prompt.push_str(&format!(
+                                                "    (identical: {} lines, {} bytes)\n",
+                                                metrics.line_count, metrics.byte_count
+                                            ));
+                                        }
+                                    }
+                                    // Include stderr for OptionError
+                                    if matches!(attempt.outcome, Outcome::OptionError { .. }) {
+                                        if let Some(stderr) = &attempt.stderr_preview {
+                                            prompt.push_str(&format!(
+                                                "    stderr: {:?}\n",
+                                                stderr
+                                            ));
+                                        }
+                                    }
                                 } else {
                                     prompt.push_str(&format!(
                                         "- Test {}: Still pending\n",
@@ -624,11 +710,40 @@ pub fn build_incremental_prompt(
         verified, excluded, pending
     ));
 
-    // Surfaces needing work (brief version)
+    // Surfaces needing work (brief version with category hints)
     prompt.push_str("## Next Surfaces to Work On\n\n");
     for id in target_ids {
         if let Some(entry) = state.entries.iter().find(|e| &e.id == id) {
             prompt.push_str(&format!("- **{}**: {}\n", entry.id, entry.description));
+
+            // Category-specific hints to guide the LM
+            match &entry.category {
+                SurfaceCategory::Modifier { base } => {
+                    prompt.push_str(&format!(
+                        "  **Modifier of `{}`** — include `{}` in extra_args so the base effect is active.\n",
+                        base, base
+                    ));
+                }
+                SurfaceCategory::TtyDependent => {
+                    prompt.push_str(
+                        "  **TTY-dependent** — color/highlight output may not differ in piped mode.\n",
+                    );
+                }
+                SurfaceCategory::MetaEffect => {
+                    prompt.push_str(
+                        "  **Meta effect** — may affect exit code or stderr rather than stdout. Use appropriate prediction.\n",
+                    );
+                }
+                _ => {}
+            }
+
+            if let Some(feedback) = &entry.critique_feedback {
+                prompt.push_str(&format!(
+                    "  **CRITIQUE**: {}\n",
+                    feedback
+                ));
+            }
+
             if !entry.attempts.is_empty() {
                 let last = entry.attempts.last().unwrap();
                 prompt.push_str(&format!(
@@ -645,8 +760,10 @@ pub fn build_incremental_prompt(
     prompt.push_str(
         r#"Provide your next actions as JSON:
 ```json
-{"actions": [{"kind": "Test", "surface_id": "...", "args": [...], "seed": {...}}, ...]}
+{"actions": [{"kind": "Test", "surface_id": "...", "seed": {...}}, ...]}
 ```
+
+Note: surface_id is automatically included in the command. Only use "extra_args" if you need additional arguments.
 
 Remember: Output must DIFFER from control run to verify. Try different seeds if OutputsEqual.
 "#,
@@ -655,24 +772,56 @@ Remember: Output must DIFFER from control run to verify. Try different seeds if 
     prompt
 }
 
-const INSTRUCTIONS: &str = r#"## Instructions
+const INSTRUCTIONS: &str = r#"IMPORTANT: Your entire response must be a single JSON object. No prose, no explanations, no markdown outside the JSON. Begin your response with `{` and end with `}`.
+
+## Instructions
 
 For each surface, provide ONE action:
 
 1. **SetBaseline** (required first, once only): Define the baseline scenario
-   - args: Arguments to append to base command (usually empty [])
    - seed: Setup commands and files needed
 
 2. **Test**: Test a surface
-   - surface_id: Which surface to test
-   - args: Arguments to append to base command (include the option being tested)
+   - surface_id: Which surface to test (automatically included in command)
+   - extra_args: Additional arguments if needed (optional, usually omit)
    - seed: Setup commands (copy baseline's seed if same setup works)
+   - prediction: (RECOMMENDED) What you expect to happen
+
+Note: The surface option is automatically added to the command. Use "extra_args" for values or additional arguments:
+- Simple option: `{"surface_id": "--stat", "seed": {...}}`
+- Option with value: `{"surface_id": "-U", "extra_args": ["10"], "seed": {...}}` → runs with `-U 10`
+- Option with string value: `{"surface_id": "-S", "extra_args": ["pattern"], "seed": {...}}` → runs with `-S pattern`
+
+IMPORTANT: Do NOT combine the surface and value (e.g., `-U10` is WRONG). Always use the exact surface_id from the list and pass values via extra_args.
+
+## Predictions
+
+Include a prediction to specify what output difference you expect. This enables mechanical verification:
+
+- **StdoutEmpty**: Output will be empty/suppressed (for --no-*, --quiet, --silent options)
+- **StdoutContains**: Output will contain specific text (use {"StdoutContains": "text"})
+- **StdoutDifferent**: Output format/content will change (generic difference)
+- **StderrDifferent**: Stderr will differ (for options that change warning/error output)
+- **ExitCodeDifferent**: Exit code will differ (for options that affect success/failure)
+
+Example with prediction:
+```json
+{
+  "kind": "Test",
+  "surface_id": "--no-patch",
+  "seed": {"setup": [["git", "init"]], "files": []},
+  "prediction": {"diff_type": "StdoutEmpty", "reason": "suppresses diff output"}
+}
+```
+
+If prediction matches actual outcome -> auto-verified (no critique needed).
+If prediction fails but outputs differed -> needs review.
 
 ## Execution Model
 
 Each test runs TWO scenarios with the SAME seed:
 1. Control run: base command (no extra args)
-2. Option run: base command + your args
+2. Option run: base command + surface_id + extra_args
 
 The option is **verified if outputs DIFFER**.
 
@@ -687,13 +836,15 @@ Respond with JSON:
 ```json
 {
   "actions": [
-    { "kind": "SetBaseline", "args": [], "seed": { "setup": [["touch", "file.txt"]], "files": [] } },
-    { "kind": "Test", "surface_id": "--example", "args": ["--example"], "seed": { "setup": [["touch", "file.txt"]], "files": [] } }
+    { "kind": "SetBaseline", "seed": { "setup": [["touch", "file.txt"]], "files": [] } },
+    { "kind": "Test", "surface_id": "--example", "seed": { "setup": [["touch", "file.txt"]], "files": [] }, "prediction": {"diff_type": "StdoutDifferent", "reason": "changes output format"} }
   ]
 }
 ```
 
 CRITICAL: Each setup command is an ARRAY of strings: `["cmd", "arg1", "arg2"]`, NOT a single string.
+
+IMPORTANT: Only use surface_id values from the "Surfaces Needing Work" section above. Do NOT invent or guess option names - only test surfaces explicitly listed in this prompt.
 
 ## Key Principles
 
@@ -703,6 +854,7 @@ CRITICAL: Each setup command is an ARRAY of strings: `["cmd", "arg1", "arg2"]`, 
   - For `--color`: seed must include content that triggers colorization
 - If OutputsEqual, try: different seed files that better exercise the option
 - Learn from stderr errors and adjust seed accordingly
+- Include predictions for suppression options (--no-*, --quiet) to avoid false demotions
 
 ## Pre-generated Fixtures
 
@@ -745,9 +897,13 @@ mod tests {
                 value_hint: None,
                 status: Status::Pending,
                 attempts: vec![],
+                category: SurfaceCategory::General,
                 retried: false,
+                critique_feedback: None,
             }],
             cycle: 0,
+            seed_bank: vec![],
+            help_preamble: String::new(),
         };
 
         let prompt = build_prompt(&state, &["--stat".to_string()]);
@@ -783,9 +939,13 @@ mod tests {
                 value_hint: None,
                 status: Status::Pending,
                 attempts: vec![],
+                category: SurfaceCategory::General,
                 retried: false,
+                critique_feedback: None,
             }],
             cycle: 1,
+            seed_bank: vec![],
+            help_preamble: String::new(),
         };
 
         let prompt = build_prompt(&state, &["--stat".to_string()]);
@@ -829,10 +989,15 @@ mod tests {
                     fs_diff: None,
                     stdout_metrics: None,
                     stderr_metrics: None,
+                    prediction_matched: None,
                 }],
+                category: SurfaceCategory::General,
                 retried: false,
+                critique_feedback: None,
             }],
             cycle: 2,
+            seed_bank: vec![],
+            help_preamble: String::new(),
         };
 
         let prompt = build_prompt(&state, &["--verbose".to_string()]);
@@ -875,9 +1040,13 @@ mod tests {
                 value_hint: None,
                 status: Status::Pending,
                 attempts: vec![],
+                category: SurfaceCategory::General,
                 retried: false,
+                critique_feedback: None,
             }],
             cycle: 1,
+            seed_bank: vec![],
+            help_preamble: String::new(),
         };
 
         let prompt = build_prompt(&state, &["--dereference".to_string()]);
@@ -919,10 +1088,15 @@ mod tests {
                     fs_diff: None,
                     stdout_metrics: None,
                     stderr_metrics: None,
+                    prediction_matched: None,
                 }],
+                category: SurfaceCategory::General,
                 retried: false,
+                critique_feedback: None,
             }],
             cycle: 2,
+            seed_bank: vec![],
+            help_preamble: String::new(),
         };
 
         let prompt = build_prompt(&state, &["--all".to_string()]);
@@ -966,6 +1140,7 @@ mod tests {
                         fs_diff: None,
                         stdout_metrics: None,
                         stderr_metrics: None,
+                        prediction_matched: None,
                     },
                     Attempt {
                         cycle: 2,
@@ -980,11 +1155,16 @@ mod tests {
                         fs_diff: None,
                         stdout_metrics: None,
                         stderr_metrics: None,
+                        prediction_matched: None,
                     },
                 ],
+                category: SurfaceCategory::General,
                 retried: false,
+                critique_feedback: None,
             }],
             cycle: 3,
+            seed_bank: vec![],
+            help_preamble: String::new(),
         };
 
         let prompt = build_prompt(&state, &["--opt".to_string()]);
@@ -1066,6 +1246,7 @@ stderr: error: pathspec 'main' did not match"#
             fs_diff: None,
             stdout_metrics: None,
             stderr_metrics: None,
+            prediction_matched: None,
         };
 
         let state = State {
@@ -1085,7 +1266,9 @@ stderr: error: pathspec 'main' did not match"#
                         make_setup_failed_attempt(2),
                         make_setup_failed_attempt(3),
                     ],
+                category: SurfaceCategory::General,
                     retried: false,
+                    critique_feedback: None,
                 },
                 SurfaceEntry {
                     id: "--opt2".to_string(),
@@ -1098,10 +1281,14 @@ stderr: error: pathspec 'main' did not match"#
                         make_setup_failed_attempt(5),
                         make_setup_failed_attempt(6),
                     ],
+                category: SurfaceCategory::General,
                     retried: false,
+                    critique_feedback: None,
                 },
             ],
             cycle: 7,
+            seed_bank: vec![],
+            help_preamble: String::new(),
         };
 
         let issues = super::extract_known_issues(&state);
@@ -1142,10 +1329,15 @@ stderr: error: already a git repo"#
                     fs_diff: None,
                     stdout_metrics: None,
                     stderr_metrics: None,
+                    prediction_matched: None,
                 }],
+                category: SurfaceCategory::General,
                 retried: false,
+                critique_feedback: None,
             }],
             cycle: 2,
+            seed_bank: vec![],
+            help_preamble: String::new(),
         };
 
         let issues = super::extract_known_issues(&state);
@@ -1161,6 +1353,8 @@ stderr: error: already a git repo"#
             baseline: None,
             entries: vec![],
             cycle: 0,
+            seed_bank: vec![],
+            help_preamble: String::new(),
         };
 
         let issues = super::extract_known_issues(&state);
@@ -1186,6 +1380,7 @@ stderr: pathspec 'main' did not match"#
             fs_diff: None,
             stdout_metrics: None,
             stderr_metrics: None,
+            prediction_matched: None,
         };
 
         let state = State {
@@ -1201,7 +1396,9 @@ stderr: pathspec 'main' did not match"#
                     value_hint: None,
                     status: Status::Pending,
                     attempts: vec![make_setup_failed_attempt(1), make_setup_failed_attempt(2)],
+                category: SurfaceCategory::General,
                     retried: false,
+                    critique_feedback: None,
                 },
                 SurfaceEntry {
                     id: "--oneline".to_string(),
@@ -1210,10 +1407,14 @@ stderr: pathspec 'main' did not match"#
                     value_hint: None,
                     status: Status::Pending,
                     attempts: vec![make_setup_failed_attempt(3), make_setup_failed_attempt(4)],
+                category: SurfaceCategory::General,
                     retried: false,
+                    critique_feedback: None,
                 },
             ],
             cycle: 5,
+            seed_bank: vec![],
+            help_preamble: String::new(),
         };
 
         let prompt = build_prompt(&state, &["--stat".to_string()]);
@@ -1238,9 +1439,13 @@ stderr: pathspec 'main' did not match"#
                 value_hint: None,
                 status: Status::Pending,
                 attempts: vec![],
+                category: SurfaceCategory::General,
                 retried: false,
+                critique_feedback: None,
             }],
             cycle: 1,
+            seed_bank: vec![],
+            help_preamble: String::new(),
         };
 
         let prompt = build_prompt(&state, &["--all".to_string()]);
@@ -1276,9 +1481,13 @@ stderr: pathspec 'main' did not match"#
                 value_hint: None,
                 status: Status::Pending,
                 attempts: vec![],
+                category: SurfaceCategory::General,
                 retried: true, // This surface was previously excluded and is being retried
+                critique_feedback: None,
             }],
             cycle: 10,
+            seed_bank: vec![],
+            help_preamble: String::new(),
         };
 
         let prompt = build_prompt(&state, &["--all".to_string()]);
@@ -1317,6 +1526,7 @@ stderr: pathspec 'main' did not match"#
             fs_diff: None,
             stdout_metrics: None,
             stderr_metrics: None,
+            prediction_matched: None,
         }];
 
         let history = super::format_attempt_history(&attempts, 2);
@@ -1342,6 +1552,7 @@ stderr: pathspec 'main' did not match"#
             fs_diff: None,
             stdout_metrics: None,
             stderr_metrics: None,
+            prediction_matched: None,
         };
 
         let attempts = vec![
@@ -1424,11 +1635,15 @@ stderr: pathspec 'main' did not match"#
                 description: "Show hidden files".to_string(),
                 context: None,
                 value_hint: None,
+                category: SurfaceCategory::General,
                 status: Status::Pending,
                 attempts: vec![], // Cleared for retry
                 retried: true,
+                critique_feedback: None,
             }],
             cycle: 10,
+            seed_bank: vec![],
+            help_preamble: String::new(),
         };
 
         // Prior attempts from before the retry
@@ -1449,6 +1664,7 @@ stderr: pathspec 'main' did not match"#
                     fs_diff: None,
                     stdout_metrics: None,
                     stderr_metrics: None,
+                    prediction_matched: None,
                 },
                 Attempt {
                     cycle: 2,
@@ -1468,6 +1684,7 @@ stderr: pathspec 'main' did not match"#
                     fs_diff: None,
                     stdout_metrics: None,
                     stderr_metrics: None,
+                    prediction_matched: None,
                 },
             ],
         );
@@ -1503,11 +1720,15 @@ stderr: pathspec 'main' did not match"#
                 description: "Show hidden files".to_string(),
                 context: None,
                 value_hint: None,
+                category: SurfaceCategory::General,
                 status: Status::Pending,
                 attempts: vec![],
                 retried: true,
+                critique_feedback: None,
             }],
             cycle: 10,
+            seed_bank: vec![],
+            help_preamble: String::new(),
         };
 
         // No prior attempts for this surface
