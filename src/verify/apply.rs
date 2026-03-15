@@ -217,8 +217,10 @@ pub(super) fn merge_test_result(state: &mut State, result: TestResult) {
                 .iter()
                 .any(|s| s.surface_id == result.surface_id)
             {
+                let args = entry.attempts.last().map(|a| a.args.clone()).unwrap();
                 state.seed_bank.push(VerifiedSeed {
                     surface_id: result.surface_id.clone(),
+                    args,
                     seed,
                     verified_at: state.cycle,
                     hint: None,

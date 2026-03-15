@@ -12,6 +12,8 @@ const FIXTURES_DIR: &str = "_fixtures";
 
 /// Repeated similar blocks - tests diff algorithm options
 /// (--patience, --minimal, --histogram, --diff-algorithm).
+/// Designed with adversarial interleaving that triggers different hunk
+/// boundaries between Myers (greedy) and patience/histogram algorithms.
 const REPEATED: &str = r#"section_start {
     process_item alpha
     validate alpha
@@ -47,6 +49,35 @@ section_start {
 }
 section_end
 
+section_start {
+    process_item zeta
+    validate zeta
+    save zeta
+}
+section_end
+
+section_start {
+    process_item eta
+    validate eta
+    save eta
+}
+section_end
+
+section_start {
+    process_item theta
+    validate theta
+    save theta
+}
+section_end
+
+handler_block {
+    setup_connection
+    read_data
+    process_data
+    write_result
+    cleanup
+}
+
 handler_block {
     setup_connection
     read_data
@@ -70,6 +101,37 @@ handler_block {
     write_result
     cleanup
 }
+
+handler_block {
+    setup_connection
+    read_data
+    process_data
+    write_result
+    cleanup
+}
+
+# Unique anchors for patience algorithm
+# Patience uses these unique lines to align the diff,
+# producing cleaner hunks than Myers on repeated content.
+=== configuration block A ===
+    key = value_a
+    mode = active
+    retry = 3
+
+=== configuration block B ===
+    key = value_b
+    mode = standby
+    retry = 5
+
+=== configuration block C ===
+    key = value_c
+    mode = active
+    retry = 3
+
+=== configuration block D ===
+    key = value_d
+    mode = standby
+    retry = 5
 "#;
 
 /// Indented code-like structure - tests indent heuristics
@@ -181,37 +243,142 @@ line three with crlf\r\n\
 line four with crlf\r\n";
 
 /// C functions - tests function context (--function-context, -W).
+/// Large enough (8 functions, ~130 lines) that --function-context shows
+/// a visible difference from the default 3-line context.
 const FUNCTIONS_C: &str = r#"#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-int add(int a, int b) {
-    int result;
-    result = a + b;
-    return result;
-}
-
-int multiply(int a, int b) {
-    int result;
-    result = a * b;
-    return result;
-}
-
-int subtract(int a, int b) {
-    int result;
-    result = a - b;
-    return result;
-}
-
-int divide(int a, int b) {
-    if (b == 0) {
+/* Parse a configuration value from a string.
+   Returns the integer value or -1 on error. */
+int parse_config(const char *input) {
+    if (input == NULL) {
         return -1;
     }
-    return a / b;
+    int value = atoi(input);
+    if (value < 0 || value > 1000) {
+        fprintf(stderr, "config value out of range: %d\n", value);
+        return -1;
+    }
+    return value;
 }
 
-int main() {
-    int x = add(5, 3);
-    int y = multiply(4, 2);
-    printf("Results: %d, %d\n", x, y);
+/* Initialize the processing buffer with default values.
+   The buffer must be pre-allocated by the caller. */
+void init_buffer(int *buffer, int size) {
+    for (int i = 0; i < size; i++) {
+        buffer[i] = 0;
+    }
+    buffer[0] = 1;  /* sentinel value */
+}
+
+/* Validate that all buffer entries are within range.
+   Returns 1 if valid, 0 otherwise. */
+int validate_buffer(const int *buffer, int size) {
+    if (buffer == NULL || size <= 0) {
+        return 0;
+    }
+    for (int i = 0; i < size; i++) {
+        if (buffer[i] < -1000 || buffer[i] > 1000) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Transform buffer values using the given multiplier.
+   Applies the transformation in-place. */
+void transform_buffer(int *buffer, int size, int multiplier) {
+    for (int i = 0; i < size; i++) {
+        buffer[i] = buffer[i] * multiplier;
+        if (buffer[i] > 1000) {
+            buffer[i] = 1000;
+        }
+    }
+}
+
+/* Compute a running average over a window of values.
+   Returns the average of the last 'window' entries. */
+double running_average(const int *buffer, int size, int window) {
+    if (size == 0 || window <= 0) {
+        return 0.0;
+    }
+    int start = size - window;
+    if (start < 0) {
+        start = 0;
+    }
+    double sum = 0.0;
+    int count = 0;
+    for (int i = start; i < size; i++) {
+        sum += buffer[i];
+        count++;
+    }
+    return sum / count;
+}
+
+/* Merge two sorted buffers into a destination buffer.
+   Both source buffers must already be sorted. */
+void merge_sorted(const int *a, int a_len,
+                  const int *b, int b_len,
+                  int *dest) {
+    int i = 0, j = 0, k = 0;
+    while (i < a_len && j < b_len) {
+        if (a[i] <= b[j]) {
+            dest[k++] = a[i++];
+        } else {
+            dest[k++] = b[j++];
+        }
+    }
+    while (i < a_len) {
+        dest[k++] = a[i++];
+    }
+    while (j < b_len) {
+        dest[k++] = b[j++];
+    }
+}
+
+/* Format a buffer as a comma-separated string.
+   Caller must free the returned string. */
+char *format_buffer(const int *buffer, int size) {
+    char *result = malloc(size * 12);
+    if (result == NULL) {
+        return NULL;
+    }
+    result[0] = '\0';
+    for (int i = 0; i < size; i++) {
+        char tmp[16];
+        snprintf(tmp, sizeof(tmp), "%s%d", (i > 0 ? ", " : ""), buffer[i]);
+        strcat(result, tmp);
+    }
+    return result;
+}
+
+/* Print a summary report of the buffer contents.
+   Shows min, max, average, and total entries. */
+void print_summary(const int *buffer, int size) {
+    if (size == 0) {
+        printf("Empty buffer\n");
+        return;
+    }
+    int min = buffer[0], max = buffer[0];
+    long total = 0;
+    for (int i = 0; i < size; i++) {
+        if (buffer[i] < min) min = buffer[i];
+        if (buffer[i] > max) max = buffer[i];
+        total += buffer[i];
+    }
+    printf("Summary: %d entries, min=%d, max=%d, avg=%.1f\n",
+           size, min, max, (double)total / size);
+}
+
+int main(int argc, char *argv[]) {
+    int config = parse_config(argc > 1 ? argv[1] : "10");
+    int buffer[100];
+    init_buffer(buffer, config);
+    transform_buffer(buffer, config, 3);
+    if (validate_buffer(buffer, config)) {
+        print_summary(buffer, config);
+    }
     return 0;
 }
 "#;

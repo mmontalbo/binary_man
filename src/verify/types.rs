@@ -269,6 +269,9 @@ pub enum DiffKind {
 pub struct VerifiedSeed {
     /// Surface ID that was verified with this seed.
     pub surface_id: String,
+    /// The args used in the successful test (surface_id + extra_args).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
     /// The seed configuration that worked.
     pub seed: Seed,
     /// Cycle when this was verified.
@@ -415,6 +418,7 @@ mod tests {
     fn test_verified_seed_similarity() {
         let seed = VerifiedSeed {
             surface_id: "--indent-heuristic".to_string(),
+            args: vec!["--indent-heuristic".to_string()],
             seed: Seed::default(),
             verified_at: 1,
             hint: None,
@@ -433,6 +437,7 @@ mod tests {
         // Test the reverse direction (--no-X to --X)
         let no_seed = VerifiedSeed {
             surface_id: "--no-color-moved".to_string(),
+            args: vec![],
             seed: Seed::default(),
             verified_at: 1,
             hint: None,
@@ -442,6 +447,7 @@ mod tests {
         // Common prefix matching
         let color_seed = VerifiedSeed {
             surface_id: "--color-moved".to_string(),
+            args: vec![],
             seed: Seed::default(),
             verified_at: 1,
             hint: None,

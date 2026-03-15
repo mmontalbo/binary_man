@@ -351,6 +351,9 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
                 prompt.push_str("\n**Suggested seeds** (from similar verified surfaces):\n");
                 for seed in similar_seeds.iter().take(2) {
                     prompt.push_str(&format!("  From `{}`:\n", seed.surface_id));
+                    if !seed.args.is_empty() {
+                        prompt.push_str(&format!("    args: {:?}\n", seed.args));
+                    }
                     if !seed.seed.setup.is_empty() {
                         prompt.push_str(&format!("    setup: {:?}\n", seed.seed.setup));
                     }
@@ -542,6 +545,9 @@ pub(super) fn build_retry_prompt(
                 prompt.push_str("\n**Suggested seeds** (from similar verified surfaces):\n");
                 for seed in similar_seeds {
                     prompt.push_str(&format!("  From `{}`:\n", seed.surface_id));
+                    if !seed.args.is_empty() {
+                        prompt.push_str(&format!("    args: {:?}\n", seed.args));
+                    }
                     if !seed.seed.setup.is_empty() {
                         prompt.push_str(&format!("    setup: {:?}\n", seed.seed.setup));
                     }

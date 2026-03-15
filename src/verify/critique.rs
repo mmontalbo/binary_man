@@ -152,6 +152,8 @@ struct EvidenceOutputs {
     option_stderr: String,
     control_exit_code: Option<i64>,
     option_exit_code: Option<i64>,
+    /// Files created/modified/deleted by the option run.
+    option_fs_diff: Option<(Vec<String>, Vec<String>, Vec<String>)>,
 }
 
 /// Build a critique prompt for a batch of verified surfaces.
@@ -210,6 +212,23 @@ fn build_prompt(state: &State, surface_ids: &[String], pack_path: &Path) -> Stri
                     prompt.push_str("\n```\n\n");
                 }
 
+                if let Some((created, modified, deleted)) = &evidence.option_fs_diff {
+                    prompt.push_str("**Filesystem changes** (option run):\n");
+                    for f in created {
+                        prompt.push_str(&format!("  + created: {}\n", f));
+                    }
+                    for f in modified {
+                        prompt.push_str(&format!("  ~ modified: {}\n", f));
+                    }
+                    for f in deleted {
+                        prompt.push_str(&format!("  - deleted: {}\n", f));
+                    }
+                    if evidence.option_stdout.is_empty() {
+                        prompt.push_str("  (Note: stdout is empty — the option may redirect output to a file)\n");
+                    }
+                    prompt.push('\n');
+                }
+
                 prompt.push_str(&format!("**Outcome**: {:?}\n\n", attempt.outcome));
 
                 match attempt.prediction_matched {
@@ -252,6 +271,7 @@ fn read_evidence_outputs(pack_path: &Path, evidence_path: &str) -> EvidenceOutpu
         option_stderr: String::new(),
         control_exit_code: None,
         option_exit_code: None,
+        option_fs_diff: None,
     };
 
     if let Ok(content) = fs::read_to_string(&option_path) {
@@ -267,6 +287,27 @@ fn read_evidence_outputs(pack_path: &Path, evidence_path: &str) -> EvidenceOutpu
                 .unwrap_or("")
                 .to_string();
             result.option_exit_code = json.get("exit_code").and_then(|v| v.as_i64());
+
+            // Read fs_diff if present
+            if let Some(fs_diff) = json.get("fs_diff") {
+                let extract = |key| -> Vec<String> {
+                    fs_diff
+                        .get(key)
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                };
+                let created = extract("created");
+                let modified = extract("modified");
+                let deleted = extract("deleted");
+                if !created.is_empty() || !modified.is_empty() || !deleted.is_empty() {
+                    result.option_fs_diff = Some((created, modified, deleted));
+                }
+            }
         }
     }
 
