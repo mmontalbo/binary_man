@@ -2,7 +2,7 @@
 //!
 //! Provides a trait-based abstraction over different LM backends:
 //! - `ClaudeCodePlugin`: Native Claude CLI integration with persistent process
-//! - `CommandPlugin`: Legacy external command (BMAN_LM_COMMAND compatible)
+//! - `CommandPlugin`: External command (any stdin→stdout LM, or BMAN_LM_COMMAND)
 
 mod claude_code;
 mod command;
@@ -41,13 +41,13 @@ pub trait LmPlugin: Send {
 pub enum LmConfig {
     /// Native Claude Code integration: "claude:haiku", "claude:sonnet"
     Claude { model: String },
-    /// Legacy external command
+    /// External command (any stdin→stdout LM wrapper)
     Command { cmd: String },
 }
 
 /// Parse --lm argument into config.
 ///
-/// Format: "claude:model" for native, or raw command string for legacy.
+/// Format: "claude:model" for native, or command string for external backends.
 ///
 /// # Examples
 /// - `"claude:haiku"` -> `LmConfig::Claude { model: "haiku" }`

@@ -30,7 +30,7 @@ pub struct RunArgs {
 
     /// LM plugin to use for verification.
     /// Native: "claude:haiku", "claude:sonnet" (persistent process, faster).
-    /// Legacy: any command string (or set BMAN_LM_COMMAND env var).
+    /// External: any command string (or set BMAN_LM_COMMAND env var).
     #[arg(long, value_name = "LM", default_value = "claude:haiku")]
     pub lm: String,
 

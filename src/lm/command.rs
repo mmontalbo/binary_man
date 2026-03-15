@@ -1,10 +1,8 @@
-//! Legacy external command plugin - wraps BMAN_LM_COMMAND behavior.
+//! External command plugin.
 //!
-//! Each prompt spawns a fresh process, maintaining backward compatibility
-//! with the original command-based LM invocation approach.
-//!
-//! Note: LM processes are not sandboxed because they need network access
-//! for API calls. Security is enforced at the scenario execution layer.
+//! Wraps any command that reads a prompt from stdin and writes a response
+//! to stdout. Each prompt spawns a fresh process (stateless).
+//! Useful for custom LM backends or BMAN_LM_COMMAND integration.
 
 use super::LmPlugin;
 use anyhow::{anyhow, Context, Result};
@@ -21,10 +19,10 @@ fn set_die_with_parent() {
     }
 }
 
-/// Legacy command plugin.
+/// External command plugin.
 ///
-/// Wraps an external command that reads prompts from stdin and writes
-/// responses to stdout. Each prompt spawns a new process.
+/// Wraps any command that reads prompts from stdin and writes
+/// responses to stdout. Each prompt spawns a fresh process.
 pub struct CommandPlugin {
     cmd: String,
 }
