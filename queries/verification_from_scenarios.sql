@@ -1,7 +1,0 @@
--- Verification Query: Derive per-surface verification status from scenario evidence.
--- See queries/README.md for section documentation and performance notes.
---
--- @include verification_from_scenarios/00_inputs_normalization.sql
--- @include verification_from_scenarios/10_behavior_assertion_eval.sql
--- @include verification_from_scenarios/20_coverage_reasoning.sql
--- @include verification_from_scenarios/30_rollups_output.sql
