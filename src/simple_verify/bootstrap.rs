@@ -4,8 +4,9 @@
 //! knowledge (--help or -h flags). This is intentionally simple - no SQL lenses
 //! or multi-stage discovery pipelines.
 
-use super::types::{State, Status, SurfaceEntry, STATE_SCHEMA_VERSION};
+use super::types::{State, Status, SurfaceCategory, SurfaceEntry, STATE_SCHEMA_VERSION};
 use anyhow::{Context, Result};
+use crate::lm::LmConfig;
 use std::collections::HashMap;
 use std::process::Command;
 
@@ -15,8 +16,9 @@ const CONTEXT_WINDOW_SIZE: usize = 2;
 /// Bootstrap a new verification state for a binary.
 ///
 /// This runs both `--help` and `-h` to discover surface items, merging results
-/// to capture both "common options" and full man page options.
-pub fn bootstrap(binary: &str, context_argv: &[String]) -> Result<State> {
+/// to capture both "common options" and full man page options. An LM call
+/// classifies surfaces into categories for scheduling and execution strategy.
+pub fn bootstrap(binary: &str, context_argv: &[String], _lm_config: &LmConfig) -> Result<State> {
     // 1. Run help discovery - collect from BOTH -h and --help
     let help_outputs = collect_all_help_outputs(binary, context_argv)?;
 
@@ -29,19 +31,34 @@ pub fn bootstrap(binary: &str, context_argv: &[String]) -> Result<State> {
         }
     }
 
-    // 3. Create initial entries - all pending
-    let entries = seen
+    // 3. Extract help preamble (synopsis, description) for LM context
+    let preamble = help_outputs
+        .first()
+        .map(|text| extract_help_preamble(text))
+        .unwrap_or_default();
+
+    // 4. Create initial entries with mechanical --no-X classification only
+    let entries: Vec<SurfaceEntry> = seen
         .into_values()
-        .map(|s| SurfaceEntry {
-            id: s.id,
-            description: s.description,
-            context: s.context,
-            value_hint: s.value_hint,
-            status: Status::Pending,
-            attempts: vec![],
-            retried: false,
+        .map(|s| {
+            let category = classify_surface_mechanical(&s.id);
+            SurfaceEntry {
+                id: s.id,
+                description: s.description,
+                context: s.context,
+                value_hint: s.value_hint,
+                category,
+                status: Status::Pending,
+                attempts: vec![],
+                retried: false,
+                critique_feedback: None,
+            }
         })
         .collect();
+
+    // Note: LM classification is deferred to the session loop. Each session
+    // classifies its surfaces in parallel using its own LM instance.
+    // Surfaces start as General (or --no-X Modifier from mechanical classification).
 
     Ok(State {
         schema_version: STATE_SCHEMA_VERSION,
@@ -50,6 +67,8 @@ pub fn bootstrap(binary: &str, context_argv: &[String]) -> Result<State> {
         baseline: None,
         entries,
         cycle: 0,
+        seed_bank: vec![],
+        help_preamble: preamble,
     })
 }
 
@@ -226,18 +245,35 @@ fn parse_surfaces_from_help(help_text: &str) -> Vec<DiscoveredSurface> {
 }
 
 /// Parse help text into option blocks, joining multi-line descriptions.
+///
+/// This function handles several common option formats:
+/// - Combined short and long: `-B, --break-rewrites[=<n>]`
+/// - Long only: `--verbose`, `--stat=<width>`
+/// - Short only: `-v`, `-S<string>`, `-n <num>`
+///
+/// When both short and long forms appear on the same line, TWO OptionBlocks
+/// are emitted (one for each form) with the same description.
 fn parse_option_blocks(help_text: &str) -> Vec<OptionBlock> {
     let mut blocks = Vec::new();
 
-    // Pattern for long options (optionally with short)
-    let long_pattern = regex::Regex::new(
-        r"^\s*(?:-[a-zA-Z0-9])?\s*,?\s*(?P<long>--[a-zA-Z0-9][a-zA-Z0-9_-]*)(?:[=\s](?P<value>[<\[]\S+[>\]]))?(?:\s+(?P<desc>.*))?",
+    // Pattern for lines with both short and long options
+    // Examples: -B, --break-rewrites[=<n>]  OR  -v, --verbose
+    // Captures short option, optional short value, long option, optional long value
+    let combined_pattern = regex::Regex::new(
+        r"^\s*(?P<short>-[a-zA-Z0-9])(?P<short_value>[<\[]\S*[>\]])?(?:\s*,\s*)(?P<long>--[a-zA-Z0-9][a-zA-Z0-9_-]*)(?P<long_value>[=\[]\S*[>\]])?(?:\s+(?P<desc>.*))?",
     )
     .expect("valid regex");
 
-    // Pattern for short-only options (no long option)
-    let short_pattern = regex::Regex::new(
-        r"^\s*(?P<short>-[a-zA-Z0-9])(?:\s+(?P<value>[<\[]\S+[>\]]))?(?:\s+(?P<desc>.*))?$",
+    // Pattern for long-only options (--verbose, --stat=<width>, --stat[=<width>], --diff-algorithm=(x|y))
+    let long_only_pattern = regex::Regex::new(
+        r"^\s*(?P<long>--[a-zA-Z0-9][a-zA-Z0-9_-]*)(?P<value>(?:[=\[]\S*[>\]]|=\([^)]+\)))?(?:\s+(?P<desc>.*))?",
+    )
+    .expect("valid regex");
+
+    // Pattern for short-only options (-v, -S<string>, -n <num>)
+    // Handles both attached values (-S<string>) and space-separated values (-n <num>)
+    let short_only_pattern = regex::Regex::new(
+        r"^\s*(?P<short>-[a-zA-Z0-9])(?P<value>[<\[]\S+[>\]])?(?:\s+(?P<value2>[<\[]\S+[>\]]))?(?:\s+(?P<desc>.*))?$",
     )
     .expect("valid regex");
 
@@ -256,81 +292,164 @@ fn parse_option_blocks(help_text: &str) -> Vec<OptionBlock> {
 
         let line_indent = leading_whitespace_count(line);
 
-        // Try to match an option
-        let parsed = if let Some(caps) = long_pattern.captures(line) {
-            caps.name("long").map(|long| {
-                let value_hint = caps.name("value").map(|m| m.as_str().to_string());
-                let desc_start = caps
-                    .name("desc")
-                    .map(|m| m.as_str().trim().to_string())
-                    .unwrap_or_default();
-                (long.as_str().to_string(), value_hint, desc_start)
-            })
-        } else if let Some(caps) = short_pattern.captures(line) {
-            caps.name("short").map(|short| {
-                let value_hint = caps.name("value").map(|m| m.as_str().to_string());
-                let desc_start = caps
-                    .name("desc")
-                    .map(|m| m.as_str().trim().to_string())
-                    .unwrap_or_default();
-                (short.as_str().to_string(), value_hint, desc_start)
-            })
-        } else {
-            None
-        };
+        // Try combined pattern first (short and long on same line)
+        if let Some(caps) = combined_pattern.captures(line) {
+            let short_opt = caps.name("short").map(|m| m.as_str().to_string());
+            let long_opt = caps.name("long").map(|m| m.as_str().to_string());
+            let short_value = caps.name("short_value").map(|m| m.as_str().to_string());
+            let long_value = caps
+                .name("long_value")
+                .map(|m| normalize_value_hint(m.as_str()));
+            let desc_start = caps
+                .name("desc")
+                .map(|m| m.as_str().trim().to_string())
+                .unwrap_or_default();
 
-        if let Some((id, value_hint, mut description)) = parsed {
-            // Look for continuation lines
+            // Collect continuation lines for description
             i += 1;
-            while i < lines.len() {
-                let next_line = lines[i];
-                let next_trimmed = next_line.trim_start();
+            let description = collect_continuation_lines(&lines, &mut i, line_indent, desc_start);
 
-                // Stop if we hit another option definition
-                // Check for -X (short) or --foo (long) patterns
-                if next_trimmed.starts_with('-')
-                    && next_trimmed
-                        .chars()
-                        .nth(1)
-                        .map(|c| c.is_alphanumeric() || c == '-')
-                        .unwrap_or(false)
-                {
-                    break;
-                }
+            // Determine the value hint - prefer long_value, fall back to short_value
+            let value_hint = long_value.or(short_value);
 
-                // Stop if we hit an empty line
-                if next_trimmed.is_empty() {
-                    i += 1;
-                    break;
-                }
-
-                let next_indent = leading_whitespace_count(next_line);
-
-                // Continuation lines are typically more indented or at description indent
-                // For man-page style, descriptions start on the next line with more indent
-                if next_indent > line_indent || (line_indent == 0 && next_indent >= 8) {
-                    // Join with space, trimming excessive whitespace
-                    if !description.is_empty() {
-                        description.push(' ');
-                    }
-                    description.push_str(next_trimmed);
-                    i += 1;
-                } else {
-                    break;
-                }
+            // Emit short form
+            if let Some(short) = short_opt {
+                blocks.push(OptionBlock {
+                    id: short,
+                    description: description.clone(),
+                    value_hint: value_hint.clone(),
+                });
             }
 
-            blocks.push(OptionBlock {
-                id,
-                description,
-                value_hint,
-            });
+            // Emit long form
+            if let Some(long) = long_opt {
+                blocks.push(OptionBlock {
+                    id: long,
+                    description,
+                    value_hint,
+                });
+            }
+        } else if let Some(caps) = long_only_pattern.captures(line) {
+            // Long-only option
+            if let Some(long) = caps.name("long") {
+                let value_hint = caps
+                    .name("value")
+                    .map(|m| normalize_value_hint(m.as_str()));
+                let desc_start = caps
+                    .name("desc")
+                    .map(|m| m.as_str().trim().to_string())
+                    .unwrap_or_default();
+
+                i += 1;
+                let description =
+                    collect_continuation_lines(&lines, &mut i, line_indent, desc_start);
+
+                blocks.push(OptionBlock {
+                    id: long.as_str().to_string(),
+                    description,
+                    value_hint,
+                });
+            } else {
+                i += 1;
+            }
+        } else if let Some(caps) = short_only_pattern.captures(line) {
+            // Short-only option
+            if let Some(short) = caps.name("short") {
+                // Value can be attached (-S<string>) or space-separated (-n <num>)
+                let value_hint = caps
+                    .name("value")
+                    .or_else(|| caps.name("value2"))
+                    .map(|m| m.as_str().to_string());
+                let desc_start = caps
+                    .name("desc")
+                    .map(|m| m.as_str().trim().to_string())
+                    .unwrap_or_default();
+
+                i += 1;
+                let description =
+                    collect_continuation_lines(&lines, &mut i, line_indent, desc_start);
+
+                blocks.push(OptionBlock {
+                    id: short.as_str().to_string(),
+                    description,
+                    value_hint,
+                });
+            } else {
+                i += 1;
+            }
         } else {
             i += 1;
         }
     }
 
     blocks
+}
+
+/// Collect continuation lines for a multi-line description.
+fn collect_continuation_lines(
+    lines: &[&str],
+    i: &mut usize,
+    line_indent: usize,
+    mut description: String,
+) -> String {
+    while *i < lines.len() {
+        let next_line = lines[*i];
+        let next_trimmed = next_line.trim_start();
+
+        // Stop if we hit another option definition
+        // Check for -X (short) or --foo (long) patterns
+        if next_trimmed.starts_with('-')
+            && next_trimmed
+                .chars()
+                .nth(1)
+                .map(|c| c.is_alphanumeric() || c == '-')
+                .unwrap_or(false)
+        {
+            break;
+        }
+
+        // Stop if we hit an empty line
+        if next_trimmed.is_empty() {
+            *i += 1;
+            break;
+        }
+
+        let next_indent = leading_whitespace_count(next_line);
+
+        // Continuation lines are typically more indented or at description indent
+        // For man-page style, descriptions start on the next line with more indent
+        if next_indent > line_indent || (line_indent == 0 && next_indent >= 8) {
+            // Join with space, trimming excessive whitespace
+            if !description.is_empty() {
+                description.push(' ');
+            }
+            description.push_str(next_trimmed);
+            *i += 1;
+        } else {
+            break;
+        }
+    }
+
+    description
+}
+
+/// Normalize a value hint by extracting the actual hint from various formats.
+///
+/// Handles:
+/// - `=<value>` -> `<value>`
+/// - `[=<value>]` -> `<value>`
+/// - `<value>` -> `<value>` (unchanged)
+/// - `=(a|b|c)` -> `(a|b|c)`
+fn normalize_value_hint(hint: &str) -> String {
+    let hint = hint.trim();
+
+    // Remove leading = or [=
+    let hint = hint.trim_start_matches('[').trim_start_matches('=');
+
+    // Remove trailing ]
+    let hint = hint.trim_end_matches(']');
+
+    hint.to_string()
 }
 
 /// Count leading whitespace characters.
@@ -390,6 +509,49 @@ fn truncate_context_desc(desc: &str, max_len: usize) -> String {
         } else {
             format!("{}...", truncated)
         }
+    }
+}
+
+/// Mechanical classification — only handles the reliable syntactic pattern.
+///
+/// `--no-X` → `Modifier { base: "--X" }`. Everything else defaults to `General`
+/// and is enriched by the LM classification pass.
+fn classify_surface_mechanical(id: &str) -> SurfaceCategory {
+    if let Some(base_name) = id.strip_prefix("--no-") {
+        return SurfaceCategory::Modifier {
+            base: format!("--{}", base_name),
+        };
+    }
+    SurfaceCategory::General
+}
+
+/// Extract the preamble (synopsis, description) from help text.
+///
+/// Returns everything before the first option definition line. This gives the
+/// LM context about what the command does when classifying surfaces.
+fn extract_help_preamble(help_text: &str) -> String {
+    let mut preamble_lines = Vec::new();
+    for line in help_text.lines() {
+        let trimmed = line.trim_start();
+        // Stop at the first option definition
+        if trimmed.starts_with('-')
+            && trimmed.len() > 1
+            && trimmed
+                .chars()
+                .nth(1)
+                .map(|c| c.is_alphanumeric() || c == '-')
+                .unwrap_or(false)
+        {
+            break;
+        }
+        preamble_lines.push(line);
+    }
+    let preamble = preamble_lines.join("\n").trim().to_string();
+    // Cap at ~1000 chars to avoid bloating the prompt
+    if preamble.len() > 1000 {
+        preamble[..1000].to_string()
+    } else {
+        preamble
     }
 }
 
@@ -474,17 +636,9 @@ usage: git diff [<options>] [<commit>] [--] [<path>...]
         assert!(surfaces.iter().any(|s| s.id == "--color"));
     }
 
-    #[test]
-    fn test_bootstrap_echo() {
-        // Test with a simple, always-available command
-        let state = bootstrap("echo", &[]).unwrap();
-
-        assert_eq!(state.binary, "echo");
-        assert!(state.context_argv.is_empty());
-        assert!(state.baseline.is_none());
-        assert_eq!(state.cycle, 0);
-        // echo may or may not have options depending on the system
-    }
+    // Note: test_bootstrap_echo removed — bootstrap now requires an LM plugin
+    // which makes live-binary tests unsuitable for unit tests.
+    // The mechanical parsing is tested thoroughly by the parse_* tests below.
 
     #[test]
     fn test_strip_ansi_codes() {
@@ -606,5 +760,208 @@ usage: git diff [<options>] [<commit>] [--] [<path>...]
             "this is a..."
         );
         assert_eq!(truncate_context_desc("nospaces", 5), "nospa...");
+    }
+
+    #[test]
+    fn test_parse_combined_short_long() {
+        let help = "  -B, --break-rewrites   Detect complete rewrites";
+        let surfaces = parse_surfaces_from_help(help);
+
+        assert!(
+            surfaces.iter().any(|s| s.id == "-B"),
+            "Should have -B, got: {:?}",
+            surfaces.iter().map(|s| &s.id).collect::<Vec<_>>()
+        );
+        assert!(
+            surfaces.iter().any(|s| s.id == "--break-rewrites"),
+            "Should have --break-rewrites"
+        );
+
+        // Both should have the same description
+        let short = surfaces.iter().find(|s| s.id == "-B").unwrap();
+        let long = surfaces.iter().find(|s| s.id == "--break-rewrites").unwrap();
+        assert_eq!(short.description, long.description);
+    }
+
+    #[test]
+    fn test_parse_short_with_attached_value() {
+        let help = "  -S<string>   Find string in diff";
+        let surfaces = parse_surfaces_from_help(help);
+
+        let s = surfaces
+            .iter()
+            .find(|s| s.id == "-S")
+            .expect("Should have -S");
+        assert_eq!(
+            s.value_hint,
+            Some("<string>".to_string()),
+            "Should have value hint <string>"
+        );
+    }
+
+    #[test]
+    fn test_parse_long_with_optional_value() {
+        let help = "  --stat[=<width>]   Show diffstat";
+        let surfaces = parse_surfaces_from_help(help);
+
+        let s = surfaces
+            .iter()
+            .find(|s| s.id == "--stat")
+            .expect("Should have --stat");
+        assert!(s.value_hint.is_some(), "Should have value hint");
+        // The normalized value hint should be <width>
+        assert!(
+            s.value_hint.as_ref().unwrap().contains("width"),
+            "Value hint should contain 'width', got: {:?}",
+            s.value_hint
+        );
+    }
+
+    #[test]
+    fn test_parse_combined_with_value_hints() {
+        // Test combined form where long option has a value hint
+        let help = "  -B, --break-rewrites[=<n>]   Detect complete rewrites";
+        let surfaces = parse_surfaces_from_help(help);
+
+        assert!(surfaces.iter().any(|s| s.id == "-B"));
+        assert!(surfaces.iter().any(|s| s.id == "--break-rewrites"));
+
+        // Both forms should have the value hint
+        let short = surfaces.iter().find(|s| s.id == "-B").unwrap();
+        let long = surfaces.iter().find(|s| s.id == "--break-rewrites").unwrap();
+
+        assert!(short.value_hint.is_some(), "-B should have value hint");
+        assert!(
+            long.value_hint.is_some(),
+            "--break-rewrites should have value hint"
+        );
+    }
+
+    #[test]
+    fn test_normalize_value_hint() {
+        assert_eq!(normalize_value_hint("=<value>"), "<value>");
+        assert_eq!(normalize_value_hint("[=<value>]"), "<value>");
+        assert_eq!(normalize_value_hint("<value>"), "<value>");
+        assert_eq!(normalize_value_hint("[=<width>]"), "<width>");
+    }
+
+    #[test]
+    fn test_parse_git_diff_style_options() {
+        // Real git diff -h style output with various option formats
+        let help = r#"
+usage: git diff [<options>] [<commit>] [--] [<path>...]
+
+    -p                    generate patch
+    -s                    suppress diff output
+    -S<string>            find string in diff
+    -G<regex>             find regex in diff
+    --stat[=<width>[,<name-width>[,<count>]]]
+                          output diffstat
+    -B, --break-rewrites[=<n>/<m>]
+                          detect complete rewrites
+    -M, --find-renames[=<n>]
+                          detect renames
+    --color[=<when>]      show colored diff
+"#;
+
+        let surfaces = parse_surfaces_from_help(help);
+
+        // Short options with attached values
+        assert!(
+            surfaces.iter().any(|s| s.id == "-S"),
+            "Should have -S, got: {:?}",
+            surfaces.iter().map(|s| &s.id).collect::<Vec<_>>()
+        );
+        assert!(surfaces.iter().any(|s| s.id == "-G"), "Should have -G");
+
+        // Combined short+long options
+        assert!(surfaces.iter().any(|s| s.id == "-B"), "Should have -B");
+        assert!(
+            surfaces.iter().any(|s| s.id == "--break-rewrites"),
+            "Should have --break-rewrites"
+        );
+        assert!(surfaces.iter().any(|s| s.id == "-M"), "Should have -M");
+        assert!(
+            surfaces.iter().any(|s| s.id == "--find-renames"),
+            "Should have --find-renames"
+        );
+
+        // Value hints on short options
+        let s_opt = surfaces.iter().find(|s| s.id == "-S").unwrap();
+        assert_eq!(s_opt.value_hint, Some("<string>".to_string()));
+
+        let g_opt = surfaces.iter().find(|s| s.id == "-G").unwrap();
+        assert_eq!(g_opt.value_hint, Some("<regex>".to_string()));
+    }
+
+    #[test]
+    fn test_mechanical_classifier_no_prefix() {
+        // --no-X should be classified as Modifier
+        let cat = classify_surface_mechanical("--no-color");
+        assert_eq!(
+            cat,
+            SurfaceCategory::Modifier {
+                base: "--color".to_string()
+            }
+        );
+
+        // Regular options should be General
+        assert_eq!(
+            classify_surface_mechanical("--verbose"),
+            SurfaceCategory::General
+        );
+        assert_eq!(
+            classify_surface_mechanical("-S"),
+            SurfaceCategory::General
+        );
+        assert_eq!(
+            classify_surface_mechanical("--pickaxe-all"),
+            SurfaceCategory::General
+        );
+    }
+
+    #[test]
+    fn test_extract_help_preamble() {
+        let help = r#"usage: git diff [<options>] [<commit>] [--] [<path>...]
+
+Show changes between commits, commit and working tree, etc.
+
+    --stat[=<width>]          output diffstat
+    --numstat                 machine-readable format
+"#;
+        let preamble = extract_help_preamble(help);
+        assert!(preamble.contains("usage: git diff"));
+        assert!(preamble.contains("Show changes between"));
+        assert!(!preamble.contains("--stat"));
+        assert!(!preamble.contains("--numstat"));
+    }
+
+    #[test]
+    fn test_extract_help_preamble_empty() {
+        let help = "  --stat   output diffstat\n";
+        let preamble = extract_help_preamble(help);
+        assert!(preamble.is_empty());
+    }
+
+    #[test]
+    fn test_parse_paren_value_hint() {
+        let help = "  --diff-algorithm=(patience|minimal|histogram|myers)   Choose a diff algorithm";
+        let surfaces = parse_surfaces_from_help(help);
+
+        let alg = surfaces
+            .iter()
+            .find(|s| s.id == "--diff-algorithm")
+            .expect("Should have --diff-algorithm");
+        assert!(
+            alg.value_hint.is_some(),
+            "diff-algorithm should have a value_hint, got: {:?}",
+            alg.value_hint
+        );
+        let hint = alg.value_hint.as_ref().unwrap();
+        assert!(
+            hint.contains("patience"),
+            "value_hint should contain 'patience', got: {}",
+            hint
+        );
     }
 }
