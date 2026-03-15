@@ -82,6 +82,8 @@ impl ClaudeCodePlugin {
         use std::os::unix::process::CommandExt;
 
         let mut cmd = Command::new("claude");
+        // Allow spawning claude inside a Claude Code session
+        cmd.env_remove("CLAUDECODE");
         cmd.args([
             "-p",
             "--verbose",
