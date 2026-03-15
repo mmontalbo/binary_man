@@ -424,6 +424,7 @@ mod tests {
             cycle: 1,
             seed_bank: vec![],
             help_preamble: String::new(),
+            examples_section: String::new(),
         };
 
         let action = LmAction::SetBaseline {
@@ -468,6 +469,7 @@ mod tests {
             cycle: 1,
             seed_bank: vec![],
             help_preamble: String::new(),
+            examples_section: String::new(),
         };
 
         // Test -n flag
@@ -627,6 +629,7 @@ mod tests {
             cycle: 1,
             seed_bank: vec![],
             help_preamble: String::new(),
+            examples_section: String::new(),
         };
 
         use crate::verify::types::FileEntry;

@@ -1353,6 +1353,7 @@ mod tests {
             cycle: 5,
             seed_bank: vec![],
             help_preamble: String::new(),
+            examples_section: String::new(),
         };
 
         let summary = get_summary(&state);

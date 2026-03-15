@@ -226,6 +226,10 @@ fn build_characterize_prompt(state: &State, surface_ids: &[String]) -> String {
         prompt.push_str(&format!("## Command Description\n\n{}\n\n", state.help_preamble));
     }
 
+    if !state.examples_section.is_empty() {
+        prompt.push_str(&format!("## Examples from Documentation\n\n{}\n\n", state.examples_section));
+    }
+
     prompt.push_str(
         "For each option below, answer two questions:\n\
          1. **trigger**: What kind of input/scenario would make this option produce \

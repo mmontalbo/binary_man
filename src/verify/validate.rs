@@ -218,6 +218,7 @@ mod tests {
             cycle: 0,
             seed_bank: vec![],
             help_preamble: String::new(),
+            examples_section: String::new(),
         }
     }
 

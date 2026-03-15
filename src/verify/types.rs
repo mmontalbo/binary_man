@@ -69,6 +69,9 @@ pub struct State {
     /// Help text preamble (synopsis, description) for LM context.
     #[serde(default)]
     pub help_preamble: String,
+    /// EXAMPLES section from man page, if available.
+    #[serde(default)]
+    pub examples_section: String,
 }
 
 impl State {
@@ -466,6 +469,7 @@ mod tests {
             cycle: 0,
             seed_bank: vec![],
             help_preamble: String::new(),
+            examples_section: String::new(),
         };
 
         let json = serde_json::to_string_pretty(&state).unwrap();

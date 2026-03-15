@@ -299,6 +299,13 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
     let known_issues = extract_known_issues(state);
     prompt.push_str(&format_known_issues_section(&known_issues));
 
+    // Examples from documentation (man page EXAMPLES section)
+    if !state.examples_section.is_empty() {
+        prompt.push_str("## Examples from Documentation\n\n");
+        prompt.push_str(&state.examples_section);
+        prompt.push_str("\n\n");
+    }
+
     // Baseline info
     if let Some(baseline) = &state.baseline {
         prompt.push_str("## Baseline\n\n");
@@ -1023,6 +1030,7 @@ mod tests {
             cycle: 0,
             seed_bank: vec![],
             help_preamble: String::new(),
+            examples_section: String::new(),
         };
 
         let prompt = build_prompt(&state, &["--stat".to_string()]);
@@ -1067,6 +1075,7 @@ mod tests {
             cycle: 1,
             seed_bank: vec![],
             help_preamble: String::new(),
+            examples_section: String::new(),
         };
 
         let prompt = build_prompt(&state, &["--stat".to_string()]);
@@ -1121,6 +1130,7 @@ mod tests {
             cycle: 2,
             seed_bank: vec![],
             help_preamble: String::new(),
+            examples_section: String::new(),
         };
 
         let prompt = build_prompt(&state, &["--verbose".to_string()]);
@@ -1172,6 +1182,7 @@ mod tests {
             cycle: 1,
             seed_bank: vec![],
             help_preamble: String::new(),
+            examples_section: String::new(),
         };
 
         let prompt = build_prompt(&state, &["--dereference".to_string()]);
@@ -1224,6 +1235,7 @@ mod tests {
             cycle: 2,
             seed_bank: vec![],
             help_preamble: String::new(),
+            examples_section: String::new(),
         };
 
         let prompt = build_prompt(&state, &["--all".to_string()]);
@@ -1294,6 +1306,7 @@ mod tests {
             cycle: 3,
             seed_bank: vec![],
             help_preamble: String::new(),
+            examples_section: String::new(),
         };
 
         let prompt = build_prompt(&state, &["--opt".to_string()]);
@@ -1422,6 +1435,7 @@ stderr: error: pathspec 'main' did not match"#
             cycle: 7,
             seed_bank: vec![],
             help_preamble: String::new(),
+            examples_section: String::new(),
         };
 
         let issues = super::extract_known_issues(&state);
@@ -1473,6 +1487,7 @@ stderr: error: already a git repo"#
             cycle: 2,
             seed_bank: vec![],
             help_preamble: String::new(),
+            examples_section: String::new(),
         };
 
         let issues = super::extract_known_issues(&state);
@@ -1490,6 +1505,7 @@ stderr: error: already a git repo"#
             cycle: 0,
             seed_bank: vec![],
             help_preamble: String::new(),
+            examples_section: String::new(),
         };
 
         let issues = super::extract_known_issues(&state);
@@ -1554,6 +1570,7 @@ stderr: pathspec 'main' did not match"#
             cycle: 5,
             seed_bank: vec![],
             help_preamble: String::new(),
+            examples_section: String::new(),
         };
 
         let prompt = build_prompt(&state, &["--stat".to_string()]);
@@ -1587,6 +1604,7 @@ stderr: pathspec 'main' did not match"#
             cycle: 1,
             seed_bank: vec![],
             help_preamble: String::new(),
+            examples_section: String::new(),
         };
 
         let prompt = build_prompt(&state, &["--all".to_string()]);
@@ -1631,6 +1649,7 @@ stderr: pathspec 'main' did not match"#
             cycle: 10,
             seed_bank: vec![],
             help_preamble: String::new(),
+            examples_section: String::new(),
         };
 
         let prompt = build_prompt(&state, &["--all".to_string()]);
@@ -1789,6 +1808,7 @@ stderr: pathspec 'main' did not match"#
             cycle: 10,
             seed_bank: vec![],
             help_preamble: String::new(),
+            examples_section: String::new(),
         };
 
         // Prior attempts from before the retry
@@ -1876,6 +1896,7 @@ stderr: pathspec 'main' did not match"#
             cycle: 10,
             seed_bank: vec![],
             help_preamble: String::new(),
+            examples_section: String::new(),
         };
 
         // No prior attempts for this surface
@@ -1920,6 +1941,7 @@ stderr: pathspec 'main' did not match"#
             cycle: 1,
             seed_bank: vec![],
             help_preamble: String::new(),
+            examples_section: String::new(),
         };
 
         let prompt = build_prompt(&state, &["--patience".to_string()]);
@@ -1976,6 +1998,7 @@ stderr: pathspec 'main' did not match"#
             cycle: 2,
             seed_bank: vec![],
             help_preamble: String::new(),
+            examples_section: String::new(),
         };
 
         let prompt = build_prompt(&state, &["--patience".to_string()]);

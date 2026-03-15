@@ -36,7 +36,13 @@ pub(super) fn bootstrap(binary: &str, context_argv: &[String]) -> Result<State> 
         .map(|text| extract_help_preamble(text))
         .unwrap_or_default();
 
-    // 4. Create initial entries with mechanical --no-X classification only
+    // 4. Extract EXAMPLES section from man page (if available)
+    let examples = help_outputs
+        .first()
+        .map(|text| extract_examples_section(text))
+        .unwrap_or_default();
+
+    // 5. Create initial entries with mechanical --no-X classification only
     let entries: Vec<SurfaceEntry> = seen
         .into_values()
         .map(|s| {
@@ -70,6 +76,7 @@ pub(super) fn bootstrap(binary: &str, context_argv: &[String]) -> Result<State> 
         cycle: 0,
         seed_bank: vec![],
         help_preamble: preamble,
+        examples_section: examples,
     })
 }
 
@@ -386,7 +393,16 @@ fn parse_option_blocks(help_text: &str) -> Vec<OptionBlock> {
     blocks
 }
 
+/// Maximum description length in characters.
+/// Long enough to capture behavioral detail but not overwhelm the prompt.
+const DESC_MAX_LEN: usize = 600;
+
 /// Collect continuation lines for a multi-line description.
+///
+/// Continues past blank lines as long as the next non-blank line is still at
+/// description indentation (not a new option or section header). This captures
+/// multi-paragraph man page descriptions instead of truncating at the first
+/// blank line.
 fn collect_continuation_lines(
     lines: &[&str],
     i: &mut usize,
@@ -409,10 +425,19 @@ fn collect_continuation_lines(
             break;
         }
 
-        // Stop if we hit an empty line
+        // On blank line: peek ahead to see if description continues
         if next_trimmed.is_empty() {
-            *i += 1;
-            break;
+            if let Some(resume_idx) = peek_past_blank(lines, *i, line_indent) {
+                // Skip blank lines, continue collecting from resume point
+                if !description.is_empty() {
+                    description.push(' ');
+                }
+                *i = resume_idx;
+                continue;
+            } else {
+                *i += 1;
+                break;
+            }
         }
 
         let next_indent = leading_whitespace_count(next_line);
@@ -431,7 +456,59 @@ fn collect_continuation_lines(
         }
     }
 
+    // Cap description length — man page descriptions can be very long
+    if description.len() > DESC_MAX_LEN {
+        if let Some(boundary) = description[..DESC_MAX_LEN].rfind(". ") {
+            description.truncate(boundary + 1);
+        } else {
+            description.truncate(DESC_MAX_LEN);
+        }
+    }
+
     description
+}
+
+/// Peek past blank lines to see if the description continues.
+///
+/// Returns `Some(index)` of the next non-blank continuation line if it's
+/// still at description indent. Returns `None` if the blank line ends the
+/// description (next non-blank is a new option, section header, or at
+/// lower indentation).
+fn peek_past_blank(lines: &[&str], blank_idx: usize, option_indent: usize) -> Option<usize> {
+    let mut j = blank_idx + 1;
+    // Allow up to 1 consecutive blank line
+    while j < lines.len() && lines[j].trim().is_empty() {
+        if j - blank_idx > 1 {
+            // Two+ consecutive blanks = section break
+            return None;
+        }
+        j += 1;
+    }
+    if j >= lines.len() {
+        return None;
+    }
+    let next = lines[j];
+    let next_trimmed = next.trim_start();
+    // Stop if it's an option definition
+    if next_trimmed.starts_with('-')
+        && next_trimmed
+            .chars()
+            .nth(1)
+            .is_some_and(|c| c.is_alphanumeric() || c == '-')
+    {
+        return None;
+    }
+    // Stop if it's a section header (all-caps line or line at base indent)
+    let next_indent = leading_whitespace_count(next);
+    if next_indent <= option_indent && !next_trimmed.is_empty() {
+        return None;
+    }
+    // Continuation: still indented past the option line
+    if next_indent > option_indent || (option_indent == 0 && next_indent >= 8) {
+        Some(j)
+    } else {
+        None
+    }
 }
 
 /// Normalize a value hint by extracting the actual hint from various formats.
@@ -553,6 +630,68 @@ fn extract_help_preamble(help_text: &str) -> String {
         preamble[..1000].to_string()
     } else {
         preamble
+    }
+}
+
+/// Extract the EXAMPLES section from help/man page text.
+///
+/// Looks for a line matching "EXAMPLES" (with optional leading whitespace)
+/// and captures until the next section header (all-caps word at the same or
+/// lower indent level).
+fn extract_examples_section(help_text: &str) -> String {
+    let lines: Vec<&str> = help_text.lines().collect();
+    let mut start = None;
+    let mut header_indent = 0;
+
+    // Find the EXAMPLES header
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed == "EXAMPLES" || trimmed == "EXAMPLES:" {
+            start = Some(i + 1);
+            header_indent = leading_whitespace_count(line);
+            break;
+        }
+    }
+
+    let start = match start {
+        Some(s) => s,
+        None => return String::new(),
+    };
+
+    // Collect until the next section header at the same indent level
+    let mut example_lines = Vec::new();
+    for line in &lines[start..] {
+        let trimmed = line.trim();
+        let indent = leading_whitespace_count(line);
+        // A new section header: all-caps word at header indent level
+        if indent <= header_indent
+            && !trimmed.is_empty()
+            && trimmed
+                .chars()
+                .all(|c| c.is_uppercase() || c.is_whitespace())
+        {
+            break;
+        }
+        example_lines.push(*line);
+    }
+
+    // Trim trailing blank lines
+    while example_lines.last().is_some_and(|l| l.trim().is_empty()) {
+        example_lines.pop();
+    }
+
+    let result = example_lines.join("\n").trim().to_string();
+
+    // Cap length
+    const EXAMPLES_MAX_LEN: usize = 2000;
+    if result.len() > EXAMPLES_MAX_LEN {
+        if let Some(boundary) = result[..EXAMPLES_MAX_LEN].rfind('\n') {
+            result[..boundary].to_string()
+        } else {
+            result[..EXAMPLES_MAX_LEN].to_string()
+        }
+    } else {
+        result
     }
 }
 
