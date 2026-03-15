@@ -261,92 +261,18 @@ pub(super) fn apply_action(state: &mut State, pack_path: &Path, action: LmAction
             seed,
             prediction,
         } => {
-            let scenario_id = format!("{}_c{}", sanitize_id(&surface_id), state.cycle);
-
-            // Construct full args: join value to option when needed
-            let args = join_option_value(&surface_id, extra_args);
-
-            // Control argv: context_argv only (no extra args for control)
-            let control_argv: Vec<String> = state.context_argv.clone();
-
-            // Option argv: context_argv + all args (surface_id + extra_args)
-            let full_argv: Vec<String> = state
-                .context_argv
-                .iter()
-                .chain(args.iter())
-                .cloned()
-                .collect();
-
-            // Run both control and option in the SAME sandbox
-            let (control_evidence, option_evidence) = run_scenario_pair(
-                &scenario_id,
+            let result = run_test_scenario(
+                pack_path,
                 &state.binary,
-                &control_argv,
-                &full_argv,
-                &seed,
-                false, // apply_action doesn't support PTY currently
+                &state.context_argv,
+                state.cycle,
+                &surface_id,
+                extra_args,
+                seed,
+                false,
+                prediction,
             )?;
-
-            // Write evidence files
-            let control_path = format!("evidence/{}_control.json", scenario_id);
-            write_evidence(pack_path, &control_path, &control_evidence)?;
-            let evidence_path = format!("evidence/{}.json", scenario_id);
-            write_evidence(pack_path, &evidence_path, &option_evidence)?;
-
-            // Compute outcome by comparing option to control (same seed, different argv)
-            let outcome = compute_outcome(&option_evidence, &control_evidence);
-
-            // Capture output previews for debugging
-            let stdout_preview =
-                make_output_preview(&option_evidence.stdout, OUTPUT_PREVIEW_MAX_LEN);
-            let stderr_preview =
-                make_output_preview(&option_evidence.stderr, OUTPUT_PREVIEW_MAX_LEN);
-            let control_stdout_preview =
-                make_output_preview(&control_evidence.stdout, OUTPUT_PREVIEW_MAX_LEN);
-
-            // Capture fs_diff and output metrics from evidence
-            let fs_diff = option_evidence.fs_diff.clone();
-            let stdout_metrics = option_evidence.stdout_metrics.clone();
-            let stderr_metrics = option_evidence.stderr_metrics.clone();
-
-            // Verify prediction if provided
-            let prediction_matched = prediction
-                .as_ref()
-                .map(|p| verify_prediction(p, &option_evidence, &control_evidence));
-
-            // Update entry
-            if let Some(entry) = state.entries.iter_mut().find(|e| e.id == surface_id) {
-                entry.attempts.push(Attempt {
-                    cycle: state.cycle,
-                    args,
-                    full_argv,
-                    seed,
-                    evidence_path,
-                    outcome: outcome.clone(),
-                    stdout_preview,
-                    stderr_preview,
-                    control_stdout_preview,
-                    fs_diff,
-                    stdout_metrics,
-                    stderr_metrics,
-                    prediction_matched,
-                });
-
-                if matches!(outcome, Outcome::Verified { .. }) {
-                    entry.status = Status::Verified;
-
-                    // Add to seed bank if not already present
-                    let seed = entry.attempts.last().map(|a| a.seed.clone()).unwrap();
-                    if !state.seed_bank.iter().any(|s| s.surface_id == surface_id) {
-                        state.seed_bank.push(VerifiedSeed {
-                            surface_id: surface_id.clone(),
-                            seed,
-                            verified_at: state.cycle,
-                            hint: None,
-                        });
-                    }
-                }
-            }
+            merge_test_result(state, result);
         }
     }
     Ok(())

@@ -90,20 +90,16 @@ pub(super) fn validate_action(action: &LmAction, state: &State) -> Result<(), St
             }
         }
         LmAction::Test { surface_id, .. } => {
-            // Surface must exist
-            if !state.entries.iter().any(|e| &e.id == surface_id) {
-                return Err(format!("Unknown surface: {}", surface_id));
-            }
-            // Surface must be pending
-            if let Some(entry) = state.entries.iter().find(|e| &e.id == surface_id) {
-                if !matches!(entry.status, Status::Pending) {
+            match state.entries.iter().find(|e| &e.id == surface_id) {
+                None => return Err(format!("Unknown surface: {}", surface_id)),
+                Some(entry) if !matches!(entry.status, Status::Pending) => {
                     return Err(format!(
                         "Surface {} is not pending (status: {:?})",
                         surface_id, entry.status
                     ));
                 }
+                _ => {}
             }
-            // extra_args can be empty - surface_id is auto-included
         }
     }
     Ok(())

@@ -119,7 +119,7 @@ pub fn run(
         if verbose {
             eprintln!("Bootstrapping new state for {}", binary);
         }
-        let state = bootstrap(binary, context_argv, lm_config)?;
+        let state = bootstrap(binary, context_argv)?;
         if verbose {
             eprintln!("Discovered {} surfaces", state.entries.len());
         }
@@ -466,7 +466,6 @@ fn run_parallel_sessions(
                             verbose,
                             context_mode,
                             with_pty,
-                            false,
                             None,
                             &mut last_response,
                         )
@@ -682,7 +681,6 @@ fn execute_cycle(
     verbose: bool,
     context_mode: ContextMode,
     with_pty: bool,
-    _is_retry: bool,
     prior_attempts: Option<&std::collections::HashMap<String, Vec<Attempt>>>,
     last_response: &mut Option<LmResponse>,
 ) -> Result<()> {
@@ -982,7 +980,6 @@ fn run_chunk(
             verbose,
             context_mode,
             with_pty,
-            is_retry,
             prior_attempts,
             &mut last_response,
         )?;
