@@ -7,13 +7,16 @@ use super::apply::{apply_action, merge_test_result, run_test_scenario};
 use super::bootstrap::bootstrap;
 use super::lm::{log_prompt, log_response, parse_lm_response, LmAction, LmResponse};
 use super::prompt::{build_incremental_prompt, build_prompt, build_retry_prompt};
-use super::types::{Attempt, Outcome, State, Status};
-use super::validate::validate_action;
+use super::types::{Attempt, Outcome, State, Status, SurfaceCategory, VerifiedSeed};
+use super::validate::{normalize_action, validate_action};
 use crate::cli::ContextMode;
 use crate::lm::{create_plugin, LmConfig, LmPlugin};
 use anyhow::{anyhow, Context, Result};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -23,17 +26,8 @@ const MAX_ATTEMPTS: usize = 5;
 /// Maximum surfaces to include in each LM batch.
 const BATCH_SIZE: usize = 5;
 
-/// Cycles per retry pass.
-const RETRY_PASS_CYCLES: u32 = 10;
-
-/// Minimum retry passes before considering stopping.
-const MIN_RETRY_PASSES: u32 = 3;
-
-/// Stop after this many consecutive passes with no progress.
-const MAX_NO_PROGRESS_PASSES: u32 = 3;
-
-/// Maximum total retry passes regardless of progress.
-const MAX_RETRY_PASSES: u32 = 5;
+/// Maximum cycles to spend retrying critique-demoted surfaces.
+const CRITIQUE_RETRY_CYCLES: u32 = 20;
 
 /// Result of a verification run.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,36 +44,41 @@ const LM_TIMEOUT_SECS: u64 = 120;
 /// Maximum retry attempts for LM calls.
 const MAX_LM_RETRIES: usize = 3;
 
-/// Consecutive parse failures before auto-resetting session.
-const PARSE_ERROR_RESET_THRESHOLD: usize = 2;
 
-/// Reset excluded surfaces to Pending for retry with fresh LM session.
-/// Returns the count and a map of surface_id -> prior attempts for history.
-fn retry_excluded_surfaces(
-    state: &mut State,
-    verbose: bool,
-) -> (usize, std::collections::HashMap<String, Vec<Attempt>>) {
-    let mut count = 0;
-    let mut prior_attempts = std::collections::HashMap::new();
-    for entry in &mut state.entries {
-        if let Status::Excluded { reason } = &entry.status {
-            if !entry.retried {
-                if verbose {
-                    eprintln!("  Queueing {} for retry (was: {})", entry.id, reason);
-                }
-                // Store prior attempts before clearing
-                if !entry.attempts.is_empty() {
-                    prior_attempts.insert(entry.id.clone(), entry.attempts.clone());
-                }
-                entry.status = Status::Pending;
-                entry.retried = true;
-                entry.attempts.clear(); // Fresh start - full workflow will run
-                count += 1;
+/// Shared coordination state for work-stealing parallel sessions.
+struct SharedProgress {
+    /// Surfaces resolved (verified or excluded) by any session.
+    resolved: HashSet<String>,
+    /// Surfaces currently being processed by a session.
+    in_progress: HashSet<String>,
+    /// Total attempt count per surface across all sessions.
+    attempt_counts: HashMap<String, usize>,
+}
+
+/// Compute scheduling priority for a surface category.
+///
+/// Lower values = higher priority. Easy/fast categories run first.
+fn category_priority(category: &SurfaceCategory, state: &State) -> usize {
+    match category {
+        SurfaceCategory::FormatChange => 0,
+        SurfaceCategory::General => 1,
+        SurfaceCategory::MetaEffect => 2,
+        SurfaceCategory::ValueRequired => 3,
+        SurfaceCategory::Modifier { base } => {
+            if state
+                .entries
+                .iter()
+                .any(|b| b.id == *base && matches!(b.status, Status::Verified))
+            {
+                4
+            } else {
+                99
             }
         }
+        SurfaceCategory::TtyDependent => 5,
     }
-    (count, prior_attempts)
 }
+
 
 /// Result from a parallel session, containing updates to merge.
 #[derive(Debug)]
@@ -120,7 +119,7 @@ pub fn run(
         if verbose {
             eprintln!("Bootstrapping new state for {}", binary);
         }
-        let state = bootstrap(binary, context_argv)?;
+        let state = bootstrap(binary, context_argv, lm_config)?;
         if verbose {
             eprintln!("Discovered {} surfaces", state.entries.len());
         }
@@ -168,154 +167,73 @@ pub fn run(
         )
     };
 
-    // Critique pass: validate verified surfaces before retry phase
+    // Critique pass: validate verified surfaces, demoting false positives back to Pending.
+    // Demoted surfaces get critique_feedback attached so the LM can adjust.
     critique_verified_surfaces(&mut state, pack_path, lm_config, verbose)?;
 
-    // Progressive retry: keep retrying excluded surfaces while making progress
-    let mut retry_pass = 0u32;
-    let mut passes_without_progress = 0u32;
+    // Retry critique-demoted surfaces with a single focused session.
+    // These surfaces have critique_feedback set, which the prompt will include.
+    let demoted_ids: Vec<String> = state
+        .entries
+        .iter()
+        .filter(|e| matches!(e.status, Status::Pending) && e.critique_feedback.is_some())
+        .map(|e| e.id.clone())
+        .collect();
 
-    loop {
-        // Reset retried flag for surfaces that are still excluded (allow re-retry)
-        for entry in &mut state.entries {
-            if matches!(entry.status, Status::Excluded { .. }) {
-                entry.retried = false;
-            }
-        }
-
-        // Try to reset excluded surfaces for this pass
-        let (retry_count, prior_attempts) = retry_excluded_surfaces(&mut state, verbose);
-        if retry_count == 0 {
-            break; // Nothing left to retry
-        }
-
-        // Check stopping conditions
-        if retry_pass >= MAX_RETRY_PASSES {
-            if verbose {
-                eprintln!("\nStopping retry: reached max {} passes", MAX_RETRY_PASSES);
-            }
-            break;
-        }
-        if retry_pass >= MIN_RETRY_PASSES && passes_without_progress >= MAX_NO_PROGRESS_PASSES {
+    if !demoted_ids.is_empty() {
+        let remaining_cycles = max_cycles.saturating_sub(state.cycle) + CRITIQUE_RETRY_CYCLES;
+        if remaining_cycles > 0 {
             if verbose {
                 eprintln!(
-                    "\nStopping retry: {} passes without progress",
-                    passes_without_progress
+                    "\nRetrying {} critique-demoted surface(s) with feedback...",
+                    demoted_ids.len()
                 );
             }
-            break;
-        }
 
-        retry_pass += 1;
-        let verified_before = state
-            .entries
-            .iter()
-            .filter(|e| matches!(e.status, Status::Verified))
-            .count();
-
-        if verbose {
-            eprintln!(
-                "\nRetry pass {}: {} surface(s) with fresh LM session",
-                retry_pass, retry_count
-            );
-        }
-        state.save(pack_path)?;
-
-        // Collect retried surface IDs
-        let retry_ids: Vec<String> = state
-            .entries
-            .iter()
-            .filter(|e| e.retried && matches!(e.status, Status::Pending))
-            .map(|e| e.id.clone())
-            .collect();
-
-        // Chunk retry surfaces by session size (same as main phase)
-        let chunk_size = if session_size > 0 {
-            session_size
-        } else {
-            retry_ids.len()
-        };
-        let retry_chunks: Vec<Vec<String>> =
-            retry_ids.chunks(chunk_size).map(|c| c.to_vec()).collect();
-        let num_retry_chunks = retry_chunks.len();
-
-        // Run retry chunks in parallel or sequential (same as main phase)
-        if parallel_sessions && num_retry_chunks > 1 {
-            run_parallel_retry_chunks(
-                pack_path,
-                &mut state,
-                retry_chunks,
-                lm_config,
-                verbose,
-                context_mode,
-                &prior_attempts,
-                with_pty,
-            );
-        } else {
-            // Sequential: single LM session for all retry surfaces
-            let retry_max = state.cycle + RETRY_PASS_CYCLES;
+            let retry_max = state.cycle + remaining_cycles;
             let mut retry_plugin = create_plugin(lm_config);
-            retry_plugin.init().context("initialize retry LM plugin")?;
-
-            let _retry_result = run_retry_chunk(
-                pack_path,
-                &mut *retry_plugin,
-                &mut state,
-                &retry_ids,
-                retry_max,
-                verbose,
-                context_mode,
-                &prior_attempts,
-                with_pty,
-            );
-
-            retry_plugin.shutdown().ok();
-        }
-
-        // Check if we made progress
-        let verified_after = state
-            .entries
-            .iter()
-            .filter(|e| matches!(e.status, Status::Verified))
-            .count();
-
-        if verified_after > verified_before {
-            let newly_verified = verified_after - verified_before;
-            if verbose {
-                eprintln!("  Progress: verified {} new surface(s)", newly_verified);
-            }
-            passes_without_progress = 0; // Reset momentum
-        } else {
-            passes_without_progress += 1;
-            if verbose {
-                eprintln!(
-                    "  No progress ({}/{})",
-                    passes_without_progress, MAX_NO_PROGRESS_PASSES
+            if let Ok(()) = retry_plugin.init() {
+                let _ = run_chunk(
+                    pack_path,
+                    &mut *retry_plugin,
+                    &mut state,
+                    &demoted_ids,
+                    retry_max,
+                    verbose,
+                    context_mode,
+                    with_pty,
+                    None,
                 );
+                retry_plugin.shutdown().ok();
             }
         }
     }
 
-    // Mark any remaining Pending surfaces as Excluded (retry exhausted)
+    // Mark remaining Pending surfaces as Excluded
     let mut final_excluded = 0;
     for entry in &mut state.entries {
         if matches!(entry.status, Status::Pending) {
-            entry.status = Status::Excluded {
-                reason: "Exhausted all retry passes".to_string(),
+            let reason = if entry.attempts.is_empty() {
+                "Never attempted".to_string()
+            } else if entry.critique_feedback.is_some() {
+                "Critique-demoted, not re-verified".to_string()
+            } else {
+                format!("Exhausted after {} attempts", entry.attempts.len())
             };
+            entry.status = Status::Excluded { reason };
             final_excluded += 1;
         }
     }
     if final_excluded > 0 && verbose {
         eprintln!(
             "\nMarked {} remaining pending surface(s) as excluded",
-            final_excluded
+            final_excluded,
         );
     }
 
     state.save(pack_path)?;
 
-    // Determine final result - all surfaces should now be resolved
+    // Determine final result
     let all_resolved = state
         .entries
         .iter()
@@ -380,7 +298,7 @@ fn run_sequential_sessions(
         }
 
         // Run verification on this chunk
-        result = match run_sequential_chunk(
+        result = match run_chunk(
             pack_path,
             &mut *plugin,
             state,
@@ -389,6 +307,7 @@ fn run_sequential_sessions(
             verbose,
             context_mode,
             with_pty,
+            None, // No prior attempts for initial run
         ) {
             Ok(r) => r,
             Err(e) => {
@@ -409,7 +328,11 @@ fn run_sequential_sessions(
     result
 }
 
-/// Run sessions in parallel using thread::scope.
+/// Run sessions in parallel with work-stealing.
+///
+/// Instead of giving each session a fixed partition of surfaces, all sessions
+/// pull from a shared work queue. This ensures every surface gets attempted
+/// regardless of how quickly individual sessions burn through their work.
 #[allow(clippy::too_many_arguments)]
 fn run_parallel_sessions(
     pack_path: &Path,
@@ -424,78 +347,186 @@ fn run_parallel_sessions(
     let num_sessions = chunks.len();
 
     if verbose {
-        eprintln!("\nRunning {} sessions in parallel...", num_sessions);
+        eprintln!(
+            "\nRunning {} sessions with work-stealing ({} surfaces, {} max cycles)...",
+            num_sessions,
+            state.entries.len(),
+            max_cycles
+        );
     }
 
-    // Each session gets its own cycle range to avoid conflicts
-    let cycles_per_session = max_cycles / num_sessions as u32;
+    // Shared coordination between sessions
+    let shared = Arc::new(Mutex::new(SharedProgress {
+        resolved: HashSet::new(),
+        in_progress: HashSet::new(),
+        attempt_counts: HashMap::new(),
+    }));
+    let global_cycle = Arc::new(AtomicU32::new(state.cycle));
+    let initial_seed_count = state.seed_bank.len();
 
     // Run all sessions in parallel
-    let session_results: Vec<(Vec<SessionUpdate>, u32)> = thread::scope(|s| {
-        let handles: Vec<_> = chunks
-            .into_iter()
-            .enumerate()
-            .map(|(session_idx, chunk_ids)| {
-                // Clone state for this session
+    let session_results: Vec<(Vec<SessionUpdate>, Vec<VerifiedSeed>)> = thread::scope(|s| {
+        let handles: Vec<_> = (0..num_sessions)
+            .map(|session_idx| {
                 let mut session_state = state.clone();
-                // Each session starts at a different cycle offset
-                let start_cycle = session_idx as u32 * cycles_per_session;
-                session_state.cycle = start_cycle;
-
-                let session_max = start_cycle + cycles_per_session;
+                let shared = Arc::clone(&shared);
+                let global_cycle = Arc::clone(&global_cycle);
 
                 s.spawn(move || {
-                    // Check if any pending in this chunk
-                    let pending_in_chunk = session_state
-                        .entries
-                        .iter()
-                        .filter(|e| {
-                            chunk_ids.contains(&e.id) && matches!(e.status, Status::Pending)
-                        })
-                        .count();
-
-                    if pending_in_chunk == 0 {
-                        return (vec![], start_cycle);
-                    }
-
                     if verbose {
-                        eprintln!(
-                            "  Session {}/{}: {} surfaces ({} pending), cycles {}-{}",
-                            session_idx + 1,
-                            num_sessions,
-                            chunk_ids.len(),
-                            pending_in_chunk,
-                            start_cycle + 1,
-                            session_max
-                        );
+                        eprintln!("  Session {}/{}: started", session_idx + 1, num_sessions);
                     }
 
-                    // Create fresh LM session
                     let mut plugin = create_plugin(lm_config);
                     if let Err(e) = plugin.init() {
-                        eprintln!("  Session {} failed to init LM: {}", session_idx + 1, e);
-                        return (vec![], start_cycle);
+                        eprintln!(
+                            "  Session {} failed to init LM: {}",
+                            session_idx + 1,
+                            e
+                        );
+                        return (vec![], vec![]);
                     }
 
-                    // Run verification
-                    let _result = run_sequential_chunk(
-                        pack_path,
-                        &mut *plugin,
-                        &mut session_state,
-                        &chunk_ids,
-                        session_max,
-                        verbose,
-                        context_mode,
-                        with_pty,
-                    );
+                    let mut last_response: Option<LmResponse> = None;
+
+                    loop {
+                        // Claim next batch from shared queue
+                        let cycle = global_cycle.fetch_add(1, Ordering::SeqCst) + 1;
+                        if cycle > max_cycles {
+                            // Over budget — put it back
+                            global_cycle.fetch_sub(1, Ordering::SeqCst);
+                            if verbose {
+                                eprintln!(
+                                    "  S{}: hit max cycles ({})",
+                                    session_idx + 1,
+                                    max_cycles
+                                );
+                            }
+                            break;
+                        }
+
+                        let pending_ids = {
+                            let mut progress = shared.lock().unwrap();
+
+                            // Find pending surfaces not resolved or in-progress
+                            let mut candidates: Vec<(usize, String)> = session_state
+                                .entries
+                                .iter()
+                                .filter(|e| {
+                                    matches!(e.status, Status::Pending)
+                                        && !progress.resolved.contains(&e.id)
+                                        && !progress.in_progress.contains(&e.id)
+                                })
+                                .map(|e| {
+                                    (
+                                        category_priority(&e.category, &session_state),
+                                        e.id.clone(),
+                                    )
+                                })
+                                .collect();
+                            candidates.sort_by_key(|(p, _)| *p);
+
+                            let batch: Vec<String> = candidates
+                                .into_iter()
+                                .take(BATCH_SIZE)
+                                .map(|(_, id)| id)
+                                .collect();
+
+                            if batch.is_empty() {
+                                // Nothing left — give back the cycle
+                                global_cycle.fetch_sub(1, Ordering::SeqCst);
+                                break;
+                            }
+
+                            // Mark as in-progress
+                            for id in &batch {
+                                progress.in_progress.insert(id.clone());
+                            }
+
+                            batch
+                        };
+
+                        session_state.cycle = cycle;
+
+                        if verbose {
+                            eprintln!(
+                                "  S{} cycle {}: {}",
+                                session_idx + 1,
+                                cycle,
+                                pending_ids.join(", ")
+                            );
+                        }
+
+                        // Execute one cycle
+                        let cycle_ok = execute_cycle(
+                            pack_path,
+                            &mut *plugin,
+                            &mut session_state,
+                            &pending_ids,
+                            verbose,
+                            context_mode,
+                            with_pty,
+                            false,
+                            None,
+                            &mut last_response,
+                        )
+                        .is_ok();
+
+                        // Publish results back to shared progress
+                        {
+                            let mut progress = shared.lock().unwrap();
+                            for id in &pending_ids {
+                                progress.in_progress.remove(id);
+
+                                // Track total attempts across sessions
+                                if let Some(entry) =
+                                    session_state.entries.iter().find(|e| &e.id == id)
+                                {
+                                    let new_attempts = entry.attempts.len();
+                                    let total = progress
+                                        .attempt_counts
+                                        .entry(id.clone())
+                                        .or_insert(0);
+                                    *total = (*total).max(new_attempts);
+
+                                    // Mark resolved if verified, excluded, or exhausted
+                                    if !matches!(entry.status, Status::Pending)
+                                        || *total >= MAX_ATTEMPTS
+                                    {
+                                        progress.resolved.insert(id.clone());
+                                    }
+                                }
+                            }
+                        }
+
+                        if !cycle_ok {
+                            break;
+                        }
+                    }
 
                     plugin.shutdown().ok();
 
-                    // Collect updates for surfaces in this chunk
+                    if verbose {
+                        let verified = session_state
+                            .entries
+                            .iter()
+                            .filter(|e| {
+                                matches!(e.status, Status::Verified) && !e.attempts.is_empty()
+                            })
+                            .count();
+                        eprintln!(
+                            "  Session {}/{}: done ({} verified)",
+                            session_idx + 1,
+                            num_sessions,
+                            verified
+                        );
+                    }
+
+                    // Collect updates only for surfaces this session worked on
                     let updates: Vec<SessionUpdate> = session_state
                         .entries
                         .iter()
-                        .filter(|e| chunk_ids.contains(&e.id))
+                        .filter(|e| !e.attempts.is_empty())
                         .map(|e| SessionUpdate {
                             surface_id: e.id.clone(),
                             status: e.status.clone(),
@@ -504,28 +535,76 @@ fn run_parallel_sessions(
                         })
                         .collect();
 
-                    (updates, session_state.cycle)
+                    let new_seeds: Vec<VerifiedSeed> = session_state
+                        .seed_bank
+                        .into_iter()
+                        .skip(initial_seed_count)
+                        .collect();
+
+                    (updates, new_seeds)
                 })
             })
             .collect();
 
-        // Collect results from all threads
         handles.into_iter().filter_map(|h| h.join().ok()).collect()
     });
 
-    // Merge updates back into main state
-    let mut max_cycle = state.cycle;
-    for (updates, session_cycle) in session_results {
-        max_cycle = max_cycle.max(session_cycle);
+    // Merge updates back into main state.
+    // Prefer updates that resolved the surface over those that didn't.
+    state.cycle = global_cycle.load(Ordering::SeqCst);
+    for (updates, new_seeds) in session_results {
         for update in updates {
             if let Some(entry) = state.entries.iter_mut().find(|e| e.id == update.surface_id) {
-                entry.status = update.status;
-                entry.attempts = update.attempts;
-                entry.retried = update.retried;
+                let update_resolved = !matches!(update.status, Status::Pending);
+                let current_resolved = !matches!(entry.status, Status::Pending);
+
+                if update_resolved && !current_resolved {
+                    // This session resolved it — use its result
+                    entry.status = update.status;
+                    entry.attempts = update.attempts;
+                    entry.retried = update.retried;
+                } else if !current_resolved && !update_resolved {
+                    // Neither resolved — merge attempts (keep the one with more)
+                    if update.attempts.len() > entry.attempts.len() {
+                        entry.attempts = update.attempts;
+                    }
+                }
+                // If current is already resolved, keep it (first resolver wins)
+            }
+        }
+        for seed in new_seeds {
+            if !state
+                .seed_bank
+                .iter()
+                .any(|s| s.surface_id == seed.surface_id)
+            {
+                state.seed_bank.push(seed);
             }
         }
     }
-    state.cycle = max_cycle;
+
+    // Mark exhausted surfaces (tracked by shared progress)
+    {
+        let progress = shared.lock().unwrap();
+        for (surface_id, total_attempts) in &progress.attempt_counts {
+            if *total_attempts >= MAX_ATTEMPTS {
+                if let Some(entry) = state.entries.iter_mut().find(|e| e.id == *surface_id) {
+                    if matches!(entry.status, Status::Pending) {
+                        entry.status = Status::Excluded {
+                            reason: format!("Exhausted after {} attempts", total_attempts),
+                        };
+                        if verbose {
+                            eprintln!(
+                                "Auto-excluded {} (exhausted after {} attempts across sessions)",
+                                surface_id, total_attempts
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let _ = state.save(pack_path);
 
     if verbose {
@@ -545,7 +624,7 @@ fn run_parallel_sessions(
             .filter(|e| matches!(e.status, Status::Pending))
             .count();
         eprintln!(
-            "\nParallel sessions complete: {} verified, {} excluded, {} pending",
+            "\nWork-stealing sessions complete: {} verified, {} excluded, {} pending",
             verified, excluded, pending
         );
     }
@@ -559,105 +638,6 @@ fn run_parallel_sessions(
     } else {
         RunResult::HitMaxCycles
     }
-}
-
-/// Run retry chunks in parallel using thread::scope.
-#[allow(clippy::too_many_arguments)]
-fn run_parallel_retry_chunks(
-    pack_path: &Path,
-    state: &mut State,
-    chunks: Vec<Vec<String>>,
-    lm_config: &LmConfig,
-    verbose: bool,
-    context_mode: ContextMode,
-    prior_attempts: &std::collections::HashMap<String, Vec<Attempt>>,
-    with_pty: bool,
-) {
-    let num_chunks = chunks.len();
-
-    if verbose {
-        eprintln!("  Running {} retry chunks in parallel...", num_chunks);
-    }
-
-    // Each chunk gets its own cycle range
-    let cycles_per_chunk = RETRY_PASS_CYCLES / num_chunks as u32;
-    let base_cycle = state.cycle;
-
-    // Run all chunks in parallel
-    let chunk_results: Vec<(Vec<SessionUpdate>, u32)> = thread::scope(|s| {
-        let handles: Vec<_> = chunks
-            .into_iter()
-            .enumerate()
-            .map(|(chunk_idx, chunk_ids)| {
-                // Clone state for this chunk
-                let mut chunk_state = state.clone();
-                let start_cycle = base_cycle + (chunk_idx as u32 * cycles_per_chunk);
-                chunk_state.cycle = start_cycle;
-                let chunk_max = start_cycle + cycles_per_chunk;
-
-                // Clone prior_attempts for this chunk
-                let chunk_prior: std::collections::HashMap<String, Vec<Attempt>> = prior_attempts
-                    .iter()
-                    .filter(|(k, _)| chunk_ids.contains(k))
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect();
-
-                s.spawn(move || {
-                    let mut plugin = create_plugin(lm_config);
-                    if plugin.init().is_err() {
-                        return (vec![], start_cycle);
-                    }
-
-                    // Run retry chunk
-                    let _ = run_retry_chunk(
-                        pack_path,
-                        &mut *plugin,
-                        &mut chunk_state,
-                        &chunk_ids,
-                        chunk_max,
-                        verbose,
-                        context_mode,
-                        &chunk_prior,
-                        with_pty,
-                    );
-
-                    plugin.shutdown().ok();
-
-                    // Collect updates for surfaces in this chunk
-                    let updates: Vec<SessionUpdate> = chunk_state
-                        .entries
-                        .iter()
-                        .filter(|e| chunk_ids.contains(&e.id))
-                        .map(|e| SessionUpdate {
-                            surface_id: e.id.clone(),
-                            status: e.status.clone(),
-                            attempts: e.attempts.clone(),
-                            retried: e.retried,
-                        })
-                        .collect();
-
-                    (updates, chunk_state.cycle)
-                })
-            })
-            .collect();
-
-        handles.into_iter().map(|h| h.join().unwrap()).collect()
-    });
-
-    // Merge results back into main state
-    let mut max_cycle = state.cycle;
-    for (updates, chunk_cycle) in chunk_results {
-        max_cycle = max_cycle.max(chunk_cycle);
-        for update in updates {
-            if let Some(entry) = state.entries.iter_mut().find(|e| e.id == update.surface_id) {
-                entry.status = update.status;
-                entry.attempts = update.attempts;
-                entry.retried = update.retried;
-            }
-        }
-    }
-    state.cycle = max_cycle;
-    let _ = state.save(pack_path);
 }
 
 /// Invoke LM with retry logic.
@@ -689,338 +669,229 @@ fn invoke_lm_with_retry(plugin: &mut dyn LmPlugin, prompt: &str, verbose: bool) 
     Err(anyhow!("LM invocation failed after retries"))
 }
 
-/// Run the sequential verification loop for a chunk of surfaces.
+/// Execute a single verification cycle for the given pending surfaces.
 ///
-/// Only processes surfaces whose IDs are in `chunk_ids`.
+/// Builds the prompt, invokes the LM, parses the response, and executes
+/// the resulting test actions. Updates `state` in place.
 #[allow(clippy::too_many_arguments)]
-fn run_sequential_chunk(
+fn execute_cycle(
     pack_path: &Path,
     plugin: &mut dyn LmPlugin,
     state: &mut State,
-    chunk_ids: &[String],
-    max_cycles: u32,
+    pending_ids: &[String],
     verbose: bool,
     context_mode: ContextMode,
     with_pty: bool,
-) -> Result<RunResult> {
-    // Track last response for incremental mode
-    let mut last_response: Option<LmResponse> = None;
-    // Track consecutive parse failures for auto-reset
-    let mut consecutive_parse_failures: usize = 0;
-    loop {
-        // Check cycle limit
-        if state.cycle >= max_cycles {
-            if verbose {
-                eprintln!("Hit max cycles limit ({})", max_cycles);
-            }
-            state.save(pack_path)?;
-            return Ok(RunResult::HitMaxCycles);
-        }
+    _is_retry: bool,
+    prior_attempts: Option<&std::collections::HashMap<String, Vec<Attempt>>>,
+    last_response: &mut Option<LmResponse>,
+) -> Result<()> {
+    // Resolve auto mode based on plugin type
+    let effective_mode = match context_mode {
+        ContextMode::Auto if plugin.is_stateful() => ContextMode::Incremental,
+        ContextMode::Auto => ContextMode::Full,
+        other => other,
+    };
 
-        // Auto-exhaust surfaces over attempt limit (only in this chunk)
-        for entry in &mut state.entries {
-            if chunk_ids.contains(&entry.id)
-                && matches!(entry.status, Status::Pending)
-                && entry.attempts.len() >= MAX_ATTEMPTS
-            {
-                entry.status = Status::Excluded {
-                    reason: format!("Exhausted after {} attempts", MAX_ATTEMPTS),
-                };
-                if verbose {
-                    eprintln!("Auto-excluded {} (exhausted attempts)", entry.id);
-                }
-            }
-        }
-
-        // Find pending targets with round-robin selection (only from this chunk)
-        let all_pending: Vec<String> = state
-            .entries
-            .iter()
-            .filter(|e| chunk_ids.contains(&e.id) && matches!(e.status, Status::Pending))
-            .map(|e| e.id.clone())
-            .collect();
-
-        let pending_ids: Vec<String> = if all_pending.is_empty() {
-            vec![]
-        } else {
-            // Round-robin: start at (cycle % pending_count) to ensure fairness
-            let offset = (state.cycle as usize) % all_pending.len();
-            all_pending
-                .iter()
-                .cycle()
-                .skip(offset)
-                .take(BATCH_SIZE.min(all_pending.len()))
-                .cloned()
-                .collect()
-        };
-
-        if pending_ids.is_empty() {
-            if verbose {
-                eprintln!("All surfaces processed - complete!");
-            }
-            state.save(pack_path)?;
-            return Ok(RunResult::Complete);
-        }
-
-        // Increment cycle
-        state.cycle += 1;
-
-        if verbose {
-            eprintln!(
-                "Cycle {}: processing {} surface(s): {}",
-                state.cycle,
-                pending_ids.len(),
-                pending_ids.join(", ")
-            );
-        }
-
-        // Resolve auto mode based on plugin type
-        let effective_mode = match context_mode {
-            ContextMode::Auto if plugin.is_stateful() => ContextMode::Incremental,
-            ContextMode::Auto => ContextMode::Full,
-            other => other,
-        };
-
-        // Build prompt based on effective context mode
-        let prompt = match effective_mode {
-            ContextMode::Full | ContextMode::Reset => {
-                // Full mode: always send complete state
-                // Reset mode: also sends complete state (but resets after)
-                build_prompt(state, &pending_ids)
-            }
-            ContextMode::Incremental if plugin.is_stateful() && last_response.is_some() => {
-                // Incremental mode for stateful plugins: send only delta
-                build_incremental_prompt(state, &pending_ids, last_response.as_ref())
-            }
-            ContextMode::Incremental | ContextMode::Auto => {
-                // First cycle or non-stateful plugin: send full prompt
-                build_prompt(state, &pending_ids)
-            }
-        };
-        log_prompt(pack_path, state.cycle, &prompt)?;
-
-        if verbose {
-            eprintln!("  Invoking LM...");
-        }
-        let response_text = invoke_lm_with_retry(plugin, &prompt, verbose)?;
-
-        // Parse response with graceful degradation
-        let response = match parse_lm_response(&response_text) {
-            Ok(r) => r,
-            Err(_e) => {
-                // LM may produce prose instead of JSON. Try a short follow-up reminder.
-                if verbose {
-                    eprintln!("  Parse error, sending JSON reminder...");
-                }
-                // Short follow-up that doesn't resend the whole prompt
-                let reminder = "Please provide your response as valid JSON only. \
-                    Format: {\"actions\": [...]}. No explanations or prose.";
-                match invoke_lm_with_retry(plugin, reminder, verbose)
-                    .and_then(|text| parse_lm_response(&text))
-                {
-                    Ok(r) => r,
-                    Err(_) => {
-                        if verbose {
-                            eprintln!(
-                                "  LM still not producing JSON, continuing with empty actions"
-                            );
-                        }
-                        LmResponse { actions: vec![] }
-                    }
-                }
-            }
-        };
-        log_response(pack_path, state.cycle, &response)?;
-
-        // Reset mode: reset plugin after each successful call
-        if matches!(effective_mode, ContextMode::Reset) && plugin.is_stateful() {
-            if verbose {
-                eprintln!("  Resetting LM session (context_mode=reset)");
-            }
-            plugin.reset()?;
-        }
-
-        // Handle empty response - continue to next cycle instead of giving up
-        // Empty actions can mean LM parse failed (graceful degradation) or LM
-        // genuinely had nothing to say. Either way, try again next cycle.
-        if response.actions.is_empty() {
-            consecutive_parse_failures += 1;
-            if verbose {
-                eprintln!("  LM returned no actions - continuing to next cycle");
-            }
-
-            // Auto-reset session if we hit too many consecutive parse failures
-            if consecutive_parse_failures >= PARSE_ERROR_RESET_THRESHOLD {
-                if verbose {
-                    eprintln!(
-                        "  Auto-resetting LM session after {} consecutive parse failures",
-                        consecutive_parse_failures
-                    );
-                }
-                plugin.reset().ok();
-                last_response = None; // Clear incremental state
-                consecutive_parse_failures = 0;
+    // Build prompt based on effective context mode
+    let prompt = match effective_mode {
+        ContextMode::Full | ContextMode::Reset => {
+            if let Some(prior) = prior_attempts {
+                build_retry_prompt(state, pending_ids, prior)
             } else {
-                last_response = Some(response);
+                build_prompt(state, pending_ids)
             }
-            state.save(pack_path)?;
+        }
+        ContextMode::Incremental if plugin.is_stateful() && last_response.is_some() => {
+            build_incremental_prompt(state, pending_ids, last_response.as_ref())
+        }
+        ContextMode::Incremental | ContextMode::Auto => {
+            if let Some(prior) = prior_attempts {
+                build_retry_prompt(state, pending_ids, prior)
+            } else {
+                build_prompt(state, pending_ids)
+            }
+        }
+    };
+    log_prompt(pack_path, state.cycle, &prompt)?;
+
+    if verbose {
+        eprintln!("  Invoking LM...");
+    }
+    let response_text = invoke_lm_with_retry(plugin, &prompt, verbose)?;
+
+    // Parse response — on failure, reset session immediately rather than
+    // sending reminders into a poisoned conversation.
+    let response = match parse_lm_response(&response_text) {
+        Ok(r) => r,
+        Err(_e) => {
+            if verbose {
+                eprintln!("  Parse error, resetting LM session");
+            }
+            plugin.reset().ok();
+            *last_response = None;
+            return Ok(());
+        }
+    };
+    log_response(pack_path, state.cycle, &response)?;
+
+    // Reset mode: reset plugin after each successful call
+    if matches!(effective_mode, ContextMode::Reset) && plugin.is_stateful() {
+        if verbose {
+            eprintln!("  Resetting LM session (context_mode=reset)");
+        }
+        plugin.reset()?;
+    }
+
+    // Handle empty response
+    if response.actions.is_empty() {
+        if verbose {
+            eprintln!("  LM returned no actions, resetting session");
+        }
+        plugin.reset().ok();
+        *last_response = None;
+        return Ok(());
+    }
+
+    if verbose {
+        eprintln!("  LM returned {} action(s)", response.actions.len());
+    }
+
+    // Save response for incremental mode before consuming actions
+    let response_for_tracking = response.clone();
+
+    // Partition and validate actions
+    let mut baselines = Vec::new();
+    let mut tests = Vec::new();
+
+    for action in response.actions {
+        // Normalize action to handle --option=value and -Uvalue formats
+        let action = normalize_action(action, state);
+
+        if let Err(e) = validate_action(&action, state) {
+            eprintln!("  Skipping invalid action: {}", e);
             continue;
         }
-
-        // Got valid actions - reset parse failure counter
-        consecutive_parse_failures = 0;
-
-        if verbose {
-            eprintln!("  LM returned {} action(s)", response.actions.len());
-        }
-
-        // Save response for incremental mode before consuming actions
-        let response_for_tracking = response.clone();
-
-        // Partition and validate actions
-        let mut baselines = Vec::new();
-        let mut tests = Vec::new();
-
-        for action in response.actions {
-            if let Err(e) = validate_action(&action, state) {
-                eprintln!("  Skipping invalid action: {}", e);
-                continue;
-            }
-            match &action {
-                LmAction::SetBaseline { .. } => baselines.push(action),
-                LmAction::Test { .. } => tests.push(action),
-            }
-        }
-
-        // 1. Apply baselines first (must complete before tests)
-        for action in baselines {
-            if verbose {
-                eprintln!("  Applying: {}", format_action_desc(&action));
-            }
-            if let Err(e) = apply_action(state, pack_path, action) {
-                eprintln!("  Action failed: {}", e);
-            }
-            state.save(pack_path)?;
-        }
-
-        // 2. Run tests in parallel
-        if !tests.is_empty() {
-            if verbose {
-                eprintln!("  Running {} test(s) in parallel...", tests.len());
-            }
-
-            // Extract test parameters for parallel execution
-            let test_params: Vec<_> = tests
-                .into_iter()
-                .filter_map(|action| {
-                    if let LmAction::Test {
-                        surface_id,
-                        args,
-                        seed,
-                    } = action
-                    {
-                        Some((surface_id, args, seed))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            // Run scenarios in parallel using thread::scope
-            let results: Vec<_> = thread::scope(|s| {
-                let handles: Vec<_> = test_params
-                    .into_iter()
-                    .map(|(surface_id, args, seed)| {
-                        let binary = &state.binary;
-                        let context_argv = &state.context_argv;
-                        let cycle = state.cycle;
-                        s.spawn(move || {
-                            run_test_scenario(
-                                pack_path,
-                                binary,
-                                context_argv,
-                                cycle,
-                                &surface_id,
-                                args,
-                                seed,
-                                with_pty,
-                            )
-                        })
-                    })
-                    .collect();
-
-                handles
-                    .into_iter()
-                    .filter_map(|h| match h.join() {
-                        Ok(Ok(result)) => Some(result),
-                        Ok(Err(e)) => {
-                            eprintln!("  Test scenario failed: {}", e);
-                            None
-                        }
-                        Err(_) => {
-                            eprintln!("  Test thread panicked");
-                            None
-                        }
-                    })
-                    .collect()
-            });
-
-            // Merge results into state (sequential, fast)
-            for result in results {
-                if verbose {
-                    eprintln!(
-                        "  {} → {:?}",
-                        result.surface_id,
-                        match &result.outcome {
-                            Outcome::Verified { diff_kind } =>
-                                format!("Verified ({:?})", diff_kind),
-                            Outcome::OutputsEqual => "OutputsEqual".to_string(),
-                            Outcome::SetupFailed { .. } => "SetupFailed".to_string(),
-                            Outcome::Crashed { .. } => "Crashed".to_string(),
-                            Outcome::ExecutionError { .. } => "ExecutionError".to_string(),
-                            Outcome::OptionError { .. } => "OptionError".to_string(),
-                        }
-                    );
-                }
-                merge_test_result(state, result);
-            }
-            state.save(pack_path)?;
-        }
-
-        // Track response for incremental mode
-        last_response = Some(response_for_tracking);
-
-        // Report progress
-        if verbose {
-            let verified = state
-                .entries
-                .iter()
-                .filter(|e| matches!(e.status, Status::Verified))
-                .count();
-            let excluded = state
-                .entries
-                .iter()
-                .filter(|e| matches!(e.status, Status::Excluded { .. }))
-                .count();
-            let pending = state
-                .entries
-                .iter()
-                .filter(|e| matches!(e.status, Status::Pending))
-                .count();
-            eprintln!(
-                "  Progress: {} verified, {} excluded, {} pending",
-                verified, excluded, pending
-            );
+        match &action {
+            LmAction::SetBaseline { .. } => baselines.push(action),
+            LmAction::Test { .. } => tests.push(action),
         }
     }
+
+    // 1. Apply baselines first (must complete before tests)
+    for action in baselines {
+        if verbose {
+            eprintln!("  Applying: {}", format_action_desc(&action));
+        }
+        if let Err(e) = apply_action(state, pack_path, action) {
+            eprintln!("  Action failed: {}", e);
+        }
+    }
+
+    // 2. Run tests in parallel
+    if !tests.is_empty() {
+        if verbose {
+            eprintln!("  Running {} test(s) in parallel...", tests.len());
+        }
+
+        // Extract test parameters for parallel execution.
+        // Auto-enable PTY for TTY-dependent surfaces.
+        let test_params: Vec<_> = tests
+            .into_iter()
+            .filter_map(|action| {
+                if let LmAction::Test {
+                    surface_id,
+                    extra_args,
+                    seed,
+                    prediction,
+                } = action
+                {
+                    let surface_pty = with_pty
+                        || state.entries.iter().any(|e| {
+                            e.id == surface_id
+                                && matches!(e.category, SurfaceCategory::TtyDependent)
+                        });
+                    Some((surface_id, extra_args, seed, prediction, surface_pty))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Run scenarios in parallel using thread::scope
+        let results: Vec<_> = thread::scope(|s| {
+            let handles: Vec<_> = test_params
+                .into_iter()
+                .map(|(surface_id, extra_args, seed, prediction, surface_pty)| {
+                    let binary = &state.binary;
+                    let context_argv = &state.context_argv;
+                    let cycle = state.cycle;
+                    s.spawn(move || {
+                        run_test_scenario(
+                            pack_path,
+                            binary,
+                            context_argv,
+                            cycle,
+                            &surface_id,
+                            extra_args,
+                            seed,
+                            surface_pty,
+                            prediction,
+                        )
+                    })
+                })
+                .collect();
+
+            handles
+                .into_iter()
+                .filter_map(|h| match h.join() {
+                    Ok(Ok(result)) => Some(result),
+                    Ok(Err(e)) => {
+                        eprintln!("  Test scenario failed: {}", e);
+                        None
+                    }
+                    Err(_) => {
+                        eprintln!("  Test thread panicked");
+                        None
+                    }
+                })
+                .collect()
+        });
+
+        // Merge results into state (sequential, fast)
+        for result in results {
+            if verbose {
+                eprintln!(
+                    "  {} → {:?}",
+                    result.surface_id,
+                    match &result.outcome {
+                        Outcome::Verified { diff_kind } =>
+                            format!("Verified ({:?})", diff_kind),
+                        Outcome::OutputsEqual => "OutputsEqual".to_string(),
+                        Outcome::SetupFailed { .. } => "SetupFailed".to_string(),
+                        Outcome::Crashed { .. } => "Crashed".to_string(),
+                        Outcome::ExecutionError { .. } => "ExecutionError".to_string(),
+                        Outcome::OptionError { .. } => "OptionError".to_string(),
+                    }
+                );
+            }
+            merge_test_result(state, result);
+        }
+    }
+
+    // Track response for incremental mode
+    *last_response = Some(response_for_tracking);
+
+    Ok(())
 }
 
-/// Run the retry verification loop for a chunk of surfaces with prior attempt history.
+/// Run the verification loop for a chunk of surfaces.
 ///
-/// Similar to run_sequential_chunk but uses build_retry_prompt to include
-/// prior attempt history for each surface.
+/// Only processes surfaces whose IDs are in `chunk_ids`.
+/// If `prior_attempts` is Some, uses retry prompts with attempt history.
+/// Otherwise, uses standard prompts.
 #[allow(clippy::too_many_arguments)]
-fn run_retry_chunk(
+fn run_chunk(
     pack_path: &Path,
     plugin: &mut dyn LmPlugin,
     state: &mut State,
@@ -1028,15 +899,13 @@ fn run_retry_chunk(
     max_cycles: u32,
     verbose: bool,
     context_mode: ContextMode,
-    prior_attempts: &std::collections::HashMap<String, Vec<Attempt>>,
     with_pty: bool,
+    prior_attempts: Option<&std::collections::HashMap<String, Vec<Attempt>>>,
 ) -> Result<RunResult> {
-    // Track last response for incremental mode
+    let is_retry = prior_attempts.is_some();
     let mut last_response: Option<LmResponse> = None;
-    // Track consecutive parse failures for auto-reset
-    let mut consecutive_parse_failures: usize = 0;
+
     loop {
-        // Check cycle limit
         if state.cycle >= max_cycles {
             if verbose {
                 eprintln!("Hit max cycles limit ({})", max_cycles);
@@ -1045,7 +914,7 @@ fn run_retry_chunk(
             return Ok(RunResult::HitMaxCycles);
         }
 
-        // Auto-exhaust surfaces over attempt limit (only in this chunk)
+        // Auto-exhaust surfaces over attempt limit
         for entry in &mut state.entries {
             if chunk_ids.contains(&entry.id)
                 && matches!(entry.status, Status::Pending)
@@ -1060,276 +929,91 @@ fn run_retry_chunk(
             }
         }
 
-        // Find pending targets with round-robin selection (only from this chunk)
-        let all_pending: Vec<String> = state
+        // Find pending targets, sorted by category priority
+        let mut all_pending: Vec<(usize, String)> = state
             .entries
             .iter()
             .filter(|e| chunk_ids.contains(&e.id) && matches!(e.status, Status::Pending))
-            .map(|e| e.id.clone())
+            .map(|e| (category_priority(&e.category, state), e.id.clone()))
             .collect();
+        all_pending.sort_by_key(|(p, _)| *p);
 
-        let pending_ids: Vec<String> = if all_pending.is_empty() {
-            vec![]
-        } else {
-            // Round-robin: start at (cycle % pending_count) to ensure fairness
-            let offset = (state.cycle as usize) % all_pending.len();
-            all_pending
-                .iter()
-                .cycle()
-                .skip(offset)
-                .take(BATCH_SIZE.min(all_pending.len()))
-                .cloned()
-                .collect()
-        };
+        // Only reduce batch size during explicit retry passes
+        let batch_size = if is_retry { 2 } else { BATCH_SIZE };
+
+        let pending_ids: Vec<String> = all_pending
+            .into_iter()
+            .take(batch_size)
+            .map(|(_, id)| id)
+            .collect();
 
         if pending_ids.is_empty() {
             if verbose {
-                eprintln!("All retry surfaces processed - complete!");
+                eprintln!(
+                    "{} - complete!",
+                    if is_retry {
+                        "All retry surfaces processed"
+                    } else {
+                        "All surfaces processed"
+                    }
+                );
             }
             state.save(pack_path)?;
             return Ok(RunResult::Complete);
         }
 
-        // Increment cycle
         state.cycle += 1;
 
         if verbose {
             eprintln!(
-                "Retry cycle {}: processing {} surface(s): {}",
+                "{} {}: processing {} surface(s): {}",
+                if is_retry { "Retry cycle" } else { "Cycle" },
                 state.cycle,
                 pending_ids.len(),
                 pending_ids.join(", ")
             );
         }
 
-        // Resolve auto mode based on plugin type
-        let effective_mode = match context_mode {
-            ContextMode::Auto if plugin.is_stateful() => ContextMode::Incremental,
-            ContextMode::Auto => ContextMode::Full,
-            other => other,
-        };
+        execute_cycle(
+            pack_path,
+            plugin,
+            state,
+            &pending_ids,
+            verbose,
+            context_mode,
+            with_pty,
+            is_retry,
+            prior_attempts,
+            &mut last_response,
+        )?;
 
-        // Build prompt - use retry prompt with prior attempt history for first cycle,
-        // then switch to incremental if supported
-        let prompt = match effective_mode {
-            ContextMode::Full | ContextMode::Reset => {
-                // Use retry prompt with prior attempt history
-                build_retry_prompt(state, &pending_ids, prior_attempts)
-            }
-            ContextMode::Incremental if plugin.is_stateful() && last_response.is_some() => {
-                // Incremental mode for stateful plugins: send only delta
-                build_incremental_prompt(state, &pending_ids, last_response.as_ref())
-            }
-            ContextMode::Incremental | ContextMode::Auto => {
-                // First cycle: use retry prompt with history
-                build_retry_prompt(state, &pending_ids, prior_attempts)
-            }
-        };
-        log_prompt(pack_path, state.cycle, &prompt)?;
-
-        if verbose {
-            eprintln!("  Invoking LM...");
-        }
-        let response_text = invoke_lm_with_retry(plugin, &prompt, verbose)?;
-
-        // Parse response with graceful degradation
-        let response = match parse_lm_response(&response_text) {
-            Ok(r) => r,
-            Err(_e) => {
-                if verbose {
-                    eprintln!("  Parse error, sending JSON reminder...");
-                }
-                let reminder = "Please provide your response as valid JSON only. \
-                    Format: {\"actions\": [...]}. No explanations or prose.";
-                match invoke_lm_with_retry(plugin, reminder, verbose)
-                    .and_then(|text| parse_lm_response(&text))
-                {
-                    Ok(r) => r,
-                    Err(_) => {
-                        if verbose {
-                            eprintln!(
-                                "  LM still not producing JSON, continuing with empty actions"
-                            );
-                        }
-                        LmResponse { actions: vec![] }
-                    }
-                }
-            }
-        };
-        log_response(pack_path, state.cycle, &response)?;
-
-        // Reset mode: reset plugin after each successful call
-        if matches!(effective_mode, ContextMode::Reset) && plugin.is_stateful() {
-            if verbose {
-                eprintln!("  Resetting LM session (context_mode=reset)");
-            }
-            plugin.reset()?;
-        }
-
-        // Handle empty response
-        if response.actions.is_empty() {
-            consecutive_parse_failures += 1;
-            if verbose {
-                eprintln!("  LM returned no actions - continuing to next cycle");
-            }
-
-            if consecutive_parse_failures >= PARSE_ERROR_RESET_THRESHOLD {
-                if verbose {
-                    eprintln!(
-                        "  Auto-resetting LM session after {} consecutive parse failures",
-                        consecutive_parse_failures
-                    );
-                }
-                plugin.reset().ok();
-                last_response = None;
-                consecutive_parse_failures = 0;
-            } else {
-                last_response = Some(response);
-            }
-            state.save(pack_path)?;
-            continue;
-        }
-
-        // Got valid actions - reset parse failure counter
-        consecutive_parse_failures = 0;
-
-        if verbose {
-            eprintln!("  LM returned {} action(s)", response.actions.len());
-        }
-
-        // Save response for incremental mode before consuming actions
-        let response_for_tracking = response.clone();
-
-        // Partition and validate actions
-        let mut baselines = Vec::new();
-        let mut tests = Vec::new();
-
-        for action in response.actions {
-            if let Err(e) = validate_action(&action, state) {
-                eprintln!("  Skipping invalid action: {}", e);
-                continue;
-            }
-            match &action {
-                LmAction::SetBaseline { .. } => baselines.push(action),
-                LmAction::Test { .. } => tests.push(action),
-            }
-        }
-
-        // 1. Apply baselines first
-        for action in baselines {
-            if verbose {
-                eprintln!("  Applying: {}", format_action_desc(&action));
-            }
-            if let Err(e) = apply_action(state, pack_path, action) {
-                eprintln!("  Action failed: {}", e);
-            }
-            state.save(pack_path)?;
-        }
-
-        // 2. Run tests in parallel
-        if !tests.is_empty() {
-            if verbose {
-                eprintln!("  Running {} test(s) in parallel...", tests.len());
-            }
-
-            let test_params: Vec<_> = tests
-                .into_iter()
-                .filter_map(|action| {
-                    if let LmAction::Test {
-                        surface_id,
-                        args,
-                        seed,
-                    } = action
-                    {
-                        Some((surface_id, args, seed))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            let results: Vec<_> = thread::scope(|s| {
-                let handles: Vec<_> = test_params
-                    .into_iter()
-                    .map(|(surface_id, args, seed)| {
-                        let binary = &state.binary;
-                        let context_argv = &state.context_argv;
-                        let cycle = state.cycle;
-                        s.spawn(move || {
-                            run_test_scenario(
-                                pack_path,
-                                binary,
-                                context_argv,
-                                cycle,
-                                &surface_id,
-                                args,
-                                seed,
-                                with_pty,
-                            )
-                        })
-                    })
-                    .collect();
-
-                handles
-                    .into_iter()
-                    .filter_map(|h| match h.join() {
-                        Ok(Ok(result)) => Some(result),
-                        Ok(Err(e)) => {
-                            eprintln!("  Test scenario failed: {}", e);
-                            None
-                        }
-                        Err(_) => {
-                            eprintln!("  Test thread panicked");
-                            None
-                        }
-                    })
-                    .collect()
-            });
-
-            for result in results {
-                if verbose {
-                    eprintln!(
-                        "  {} → {:?}",
-                        result.surface_id,
-                        match &result.outcome {
-                            Outcome::Verified { diff_kind } =>
-                                format!("Verified ({:?})", diff_kind),
-                            Outcome::OutputsEqual => "OutputsEqual".to_string(),
-                            Outcome::SetupFailed { .. } => "SetupFailed".to_string(),
-                            Outcome::Crashed { .. } => "Crashed".to_string(),
-                            Outcome::ExecutionError { .. } => "ExecutionError".to_string(),
-                            Outcome::OptionError { .. } => "OptionError".to_string(),
-                        }
-                    );
-                }
-                merge_test_result(state, result);
-            }
-            state.save(pack_path)?;
-        }
-
-        // Track response for incremental mode
-        last_response = Some(response_for_tracking);
+        state.save(pack_path)?;
 
         // Report progress
         if verbose {
             let verified = state
                 .entries
                 .iter()
-                .filter(|e| matches!(e.status, Status::Verified))
+                .filter(|e| chunk_ids.contains(&e.id) && matches!(e.status, Status::Verified))
                 .count();
             let excluded = state
                 .entries
                 .iter()
-                .filter(|e| matches!(e.status, Status::Excluded { .. }))
+                .filter(|e| {
+                    chunk_ids.contains(&e.id) && matches!(e.status, Status::Excluded { .. })
+                })
                 .count();
             let pending = state
                 .entries
                 .iter()
-                .filter(|e| matches!(e.status, Status::Pending))
+                .filter(|e| chunk_ids.contains(&e.id) && matches!(e.status, Status::Pending))
                 .count();
             eprintln!(
-                "  Progress: {} verified, {} excluded, {} pending",
-                verified, excluded, pending
+                "  Progress: {}/{} verified, {} excluded, {} pending",
+                verified,
+                chunk_ids.len(),
+                excluded,
+                pending
             );
         }
     }
@@ -1351,7 +1035,7 @@ fn critique_verified_surfaces(
     lm_config: &LmConfig,
     verbose: bool,
 ) -> Result<()> {
-    // Collect verified surfaces that need critique
+    // Collect ALL verified surfaces for critique - predictions inform but don't bypass
     let verified_ids: Vec<String> = state
         .entries
         .iter()
@@ -1360,6 +1044,10 @@ fn critique_verified_surfaces(
         .collect();
 
     if verified_ids.is_empty() {
+        if verbose {
+            eprintln!("\nNo surfaces need critique");
+        }
+        state.save(pack_path)?;
         return Ok(());
     }
 
@@ -1435,7 +1123,10 @@ fn critique_verified_surfaces(
                         }
                     }
                     CritiqueAction::Demote { reason } => {
+                        // Set back to Pending with critique feedback.
+                        // Keep attempts intact so the LM sees what was tried.
                         entry.status = Status::Pending;
+                        entry.critique_feedback = Some(reason.clone());
                         demoted_count += 1;
                         if verbose {
                             eprintln!("  {} → DEMOTE ({})", surface_id, reason);
@@ -1534,6 +1225,19 @@ fn build_critique_prompt(state: &State, surface_ids: &[String], pack_path: &Path
                 }
 
                 prompt.push_str(&format!("**Outcome**: {:?}\n\n", attempt.outcome));
+
+                // Include prediction info to help inform critique
+                match attempt.prediction_matched {
+                    Some(true) => {
+                        prompt.push_str("**Prediction**: MATCHED ✓ (LM predicted this behavior, recommend ACCEPT)\n\n");
+                    }
+                    Some(false) => {
+                        prompt.push_str("**Prediction**: FAILED ✗ (LM predicted different behavior, recommend DEMOTE)\n\n");
+                    }
+                    None => {
+                        prompt.push_str("**Prediction**: None (no prediction made)\n\n");
+                    }
+                }
             }
         }
     }
@@ -1749,13 +1453,17 @@ fn parse_critique_response(response: &str) -> Vec<(String, CritiqueAction)> {
 /// Format an action for display.
 fn format_action_desc(action: &super::lm::LmAction) -> String {
     match action {
-        super::lm::LmAction::SetBaseline { args, .. } => {
-            format!("SetBaseline args={:?}", args)
-        }
+        super::lm::LmAction::SetBaseline { .. } => "SetBaseline".to_string(),
         super::lm::LmAction::Test {
-            surface_id, args, ..
+            surface_id,
+            extra_args,
+            ..
         } => {
-            format!("Test {} args={:?}", surface_id, args)
+            if extra_args.is_empty() {
+                format!("Test {}", surface_id)
+            } else {
+                format!("Test {} +{:?}", surface_id, extra_args)
+            }
         }
     }
 }
@@ -1851,7 +1559,9 @@ mod tests {
                     value_hint: None,
                     status: Status::Verified,
                     attempts: vec![],
+                category: SurfaceCategory::General,
                     retried: false,
+                    critique_feedback: None,
                 },
                 SurfaceEntry {
                     id: "-b".to_string(),
@@ -1860,7 +1570,9 @@ mod tests {
                     value_hint: None,
                     status: Status::Pending,
                     attempts: vec![],
+                category: SurfaceCategory::General,
                     retried: false,
+                    critique_feedback: None,
                 },
                 SurfaceEntry {
                     id: "-c".to_string(),
@@ -1871,10 +1583,14 @@ mod tests {
                         reason: "test".to_string(),
                     },
                     attempts: vec![],
+                category: SurfaceCategory::General,
                     retried: false,
+                    critique_feedback: None,
                 },
             ],
             cycle: 5,
+            seed_bank: vec![],
+            help_preamble: String::new(),
         };
 
         let summary = get_summary(&state);
@@ -1890,99 +1606,30 @@ mod tests {
     }
 
     #[test]
-    fn test_retry_excluded_surfaces() {
-        let mut state = State {
-            schema_version: STATE_SCHEMA_VERSION,
-            binary: "test".to_string(),
-            context_argv: vec![],
-            baseline: None,
-            entries: vec![
-                // Should be retried
-                SurfaceEntry {
-                    id: "-a".to_string(),
-                    description: "A".to_string(),
-                    context: None,
-                    value_hint: None,
-                    status: Status::Excluded {
-                        reason: "Exhausted after 5 attempts".to_string(),
-                    },
-                    attempts: vec![],
-                    retried: false,
-                },
-                // Should be retried (fresh run might help)
-                SurfaceEntry {
-                    id: "-b".to_string(),
-                    description: "B".to_string(),
-                    context: None,
-                    value_hint: None,
-                    status: Status::Excluded {
-                        reason: "color output cannot be tested".to_string(),
-                    },
-                    attempts: vec![],
-                    retried: false,
-                },
-                // Should NOT be retried - already retried
-                SurfaceEntry {
-                    id: "-c".to_string(),
-                    description: "C".to_string(),
-                    context: None,
-                    value_hint: None,
-                    status: Status::Excluded {
-                        reason: "failed again".to_string(),
-                    },
-                    attempts: vec![],
-                    retried: true,
-                },
-                // Should NOT be retried - not excluded
-                SurfaceEntry {
-                    id: "-d".to_string(),
-                    description: "D".to_string(),
-                    context: None,
-                    value_hint: None,
-                    status: Status::Pending,
-                    attempts: vec![],
-                    retried: false,
-                },
-            ],
-            cycle: 10,
-        };
-
-        let (count, prior_attempts) = retry_excluded_surfaces(&mut state, false);
-
-        assert_eq!(count, 2);
-        // Prior attempts should be empty since we didn't have any attempts
-        assert!(prior_attempts.is_empty());
-        // -a should now be Pending and retried
-        assert!(matches!(state.entries[0].status, Status::Pending));
-        assert!(state.entries[0].retried);
-        // -b should now be Pending and retried (fresh run might help)
-        assert!(matches!(state.entries[1].status, Status::Pending));
-        assert!(state.entries[1].retried);
-        // -c should still be Excluded (already retried)
-        assert!(matches!(state.entries[2].status, Status::Excluded { .. }));
-        assert!(state.entries[2].retried);
-        // -d should still be Pending
-        assert!(matches!(state.entries[3].status, Status::Pending));
-        assert!(!state.entries[3].retried);
-    }
-
-    #[test]
     fn test_format_action_desc() {
         use crate::simple_verify::lm::LmAction;
         use crate::simple_verify::types::Seed;
 
         let action = LmAction::SetBaseline {
-            args: vec![],
             seed: Seed::default(),
         };
-        assert!(format_action_desc(&action).contains("SetBaseline"));
+        assert_eq!(format_action_desc(&action), "SetBaseline");
 
         let action = LmAction::Test {
             surface_id: "--stat".to_string(),
-            args: vec!["--stat".to_string()],
+            extra_args: vec![],
             seed: Seed::default(),
+            prediction: None,
         };
-        assert!(format_action_desc(&action).contains("Test"));
-        assert!(format_action_desc(&action).contains("--stat"));
+        assert_eq!(format_action_desc(&action), "Test --stat");
+
+        let action = LmAction::Test {
+            surface_id: "--stat".to_string(),
+            extra_args: vec!["--numstat".to_string()],
+            seed: Seed::default(),
+            prediction: None,
+        };
+        assert!(format_action_desc(&action).contains("Test --stat"));
+        assert!(format_action_desc(&action).contains("--numstat"));
     }
 }
