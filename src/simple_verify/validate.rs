@@ -9,6 +9,75 @@
 use super::lm::LmAction;
 use super::types::{State, Status};
 
+/// Normalize an action to handle common LM formatting issues.
+///
+/// Handles cases like:
+/// - `--option=value` → surface_id: `--option`, extra_args: [`value`]
+/// - `-Uvalue` → surface_id: `-U`, extra_args: [`value`] (short option with attached value)
+pub fn normalize_action(action: LmAction, state: &State) -> LmAction {
+    match action {
+        LmAction::Test {
+            surface_id,
+            extra_args,
+            seed,
+            prediction,
+        } => {
+            // If surface_id exists as-is, no normalization needed
+            if state.entries.iter().any(|e| e.id == surface_id) {
+                return LmAction::Test {
+                    surface_id,
+                    extra_args,
+                    seed,
+                    prediction,
+                };
+            }
+
+            // Try to normalize --option=value format
+            if let Some((base, value)) = surface_id.split_once('=') {
+                if state.entries.iter().any(|e| e.id == base) {
+                    let mut new_extra_args = vec![value.to_string()];
+                    new_extra_args.extend(extra_args);
+                    return LmAction::Test {
+                        surface_id: base.to_string(),
+                        extra_args: new_extra_args,
+                        seed,
+                        prediction,
+                    };
+                }
+            }
+
+            // Try to normalize short option with attached value: -Uvalue → -U + value
+            // Handles -U10, -Spattern, etc.
+            if surface_id.starts_with('-')
+                && !surface_id.starts_with("--")
+                && surface_id.len() > 2
+            {
+                let base = &surface_id[..2]; // -U, -S, etc.
+                let value = &surface_id[2..]; // 10, pattern, etc.
+                if state.entries.iter().any(|e| e.id == base) {
+                    let mut new_extra_args = vec![value.to_string()];
+                    new_extra_args.extend(extra_args);
+                    return LmAction::Test {
+                        surface_id: base.to_string(),
+                        extra_args: new_extra_args,
+                        seed,
+                        prediction,
+                    };
+                }
+            }
+
+            // No normalization possible, return as-is (will fail validation)
+            LmAction::Test {
+                surface_id,
+                extra_args,
+                seed,
+                prediction,
+            }
+        }
+        other => other,
+    }
+}
+
 /// Validate an action against the current state.
 ///
 /// Returns `Ok(())` if the action is valid, or `Err` with a description
@@ -19,11 +88,8 @@ pub fn validate_action(action: &LmAction, state: &State) -> Result<(), String> {
             if state.baseline.is_some() {
                 return Err("Baseline already exists".to_string());
             }
-            // args can be empty for baseline (just runs context_argv)
         }
-        LmAction::Test {
-            surface_id, args, ..
-        } => {
+        LmAction::Test { surface_id, .. } => {
             // Surface must exist
             if !state.entries.iter().any(|e| &e.id == surface_id) {
                 return Err(format!("Unknown surface: {}", surface_id));
@@ -37,10 +103,7 @@ pub fn validate_action(action: &LmAction, state: &State) -> Result<(), String> {
                     ));
                 }
             }
-            // Test must have args (the option being tested)
-            if args.is_empty() {
-                return Err(format!("Empty args for surface {}", surface_id));
-            }
+            // extra_args can be empty - surface_id is auto-included
         }
     }
     Ok(())
@@ -49,7 +112,9 @@ pub fn validate_action(action: &LmAction, state: &State) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simple_verify::types::{BaselineRecord, Seed, SurfaceEntry, STATE_SCHEMA_VERSION};
+    use crate::simple_verify::types::{
+        BaselineRecord, Seed, SurfaceCategory, SurfaceEntry, STATE_SCHEMA_VERSION,
+    };
 
     fn test_state() -> State {
         State {
@@ -65,7 +130,9 @@ mod tests {
                     value_hint: None,
                     status: Status::Pending,
                     attempts: vec![],
+                category: SurfaceCategory::General,
                     retried: false,
+                    critique_feedback: None,
                 },
                 SurfaceEntry {
                     id: "--quiet".to_string(),
@@ -74,10 +141,14 @@ mod tests {
                     value_hint: None,
                     status: Status::Verified,
                     attempts: vec![],
+                category: SurfaceCategory::General,
                     retried: false,
+                    critique_feedback: None,
                 },
             ],
             cycle: 0,
+            seed_bank: vec![],
+            help_preamble: String::new(),
         }
     }
 
@@ -85,7 +156,6 @@ mod tests {
     fn test_validate_set_baseline_ok() {
         let state = test_state();
         let action = LmAction::SetBaseline {
-            args: vec!["arg".to_string()],
             seed: Seed::default(),
         };
         assert!(validate_action(&action, &state).is_ok());
@@ -101,7 +171,6 @@ mod tests {
         });
 
         let action = LmAction::SetBaseline {
-            args: vec!["arg".to_string()],
             seed: Seed::default(),
         };
         let result = validate_action(&action, &state);
@@ -110,11 +179,10 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_set_baseline_empty_args_ok() {
-        // Empty args is valid - baseline just runs context_argv
+    fn test_validate_set_baseline_empty_seed_ok() {
+        // Empty seed is valid - baseline just runs context_argv
         let state = test_state();
         let action = LmAction::SetBaseline {
-            args: vec![],
             seed: Seed::default(),
         };
         assert!(validate_action(&action, &state).is_ok());
@@ -125,8 +193,9 @@ mod tests {
         let state = test_state();
         let action = LmAction::Test {
             surface_id: "--verbose".to_string(),
-            args: vec!["--verbose".to_string()],
+            extra_args: vec![],
             seed: Seed::default(),
+            prediction: None,
         };
         assert!(validate_action(&action, &state).is_ok());
     }
@@ -136,8 +205,9 @@ mod tests {
         let state = test_state();
         let action = LmAction::Test {
             surface_id: "--unknown".to_string(),
-            args: vec!["--unknown".to_string()],
+            extra_args: vec![],
             seed: Seed::default(),
+            prediction: None,
         };
         let result = validate_action(&action, &state);
         assert!(result.is_err());
@@ -149,8 +219,9 @@ mod tests {
         let state = test_state();
         let action = LmAction::Test {
             surface_id: "--quiet".to_string(), // This one is Verified
-            args: vec!["--quiet".to_string()],
+            extra_args: vec![],
             seed: Seed::default(),
+            prediction: None,
         };
         let result = validate_action(&action, &state);
         assert!(result.is_err());
@@ -158,30 +229,32 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_test_empty_args() {
+    fn test_validate_test_empty_extra_args_ok() {
+        // Empty extra_args is valid - surface_id is auto-included
         let state = test_state();
         let action = LmAction::Test {
             surface_id: "--verbose".to_string(),
-            args: vec![], // Empty args for Test should fail
+            extra_args: vec![],
             seed: Seed::default(),
+            prediction: None,
         };
         let result = validate_action(&action, &state);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Empty args"));
+        assert!(result.is_ok());
     }
 
     #[test]
     fn test_validate_with_context_argv() {
         // With the new interface, context_argv is handled by the system
-        // LM just provides args, which get appended
+        // LM just provides surface_id, system auto-includes it
         let mut state = test_state();
         state.context_argv = vec!["diff".to_string()];
 
-        // LM just provides the option, system prepends context
+        // LM just provides the option, system auto-includes it
         let action = LmAction::Test {
             surface_id: "--verbose".to_string(),
-            args: vec!["--verbose".to_string()],
+            extra_args: vec![],
             seed: Seed::default(),
+            prediction: None,
         };
         assert!(validate_action(&action, &state).is_ok());
     }
@@ -191,9 +264,8 @@ mod tests {
         let mut state = test_state();
         state.context_argv = vec!["diff".to_string()];
 
-        // Baseline with empty args is valid - system uses context_argv
+        // Baseline is valid - system uses context_argv
         let action = LmAction::SetBaseline {
-            args: vec![],
             seed: Seed::default(),
         };
         assert!(validate_action(&action, &state).is_ok());
