@@ -97,10 +97,7 @@ pub fn parse_lm_response(text: &str) -> Result<LmResponse> {
     let fixed_json = fix_json_errors(&fixed_json);
 
     // Try parsing as {"actions": [...]} format (primary path)
-    if let Ok(mut response) = serde_json::from_str::<LmResponse>(&fixed_json) {
-        for action in &mut response.actions {
-            normalize_action(action)?;
-        }
+    if let Ok(response) = serde_json::from_str::<LmResponse>(&fixed_json) {
         return Ok(response);
     }
 
@@ -136,10 +133,7 @@ fn extract_actions_json(text: &str) -> Option<LmResponse> {
             if let Some(json_str) = extract_balanced_json(json_start) {
                 let fixed = fix_common_typos(&json_str);
                 let fixed = fix_json_errors(&fixed);
-                if let Ok(mut response) = serde_json::from_str::<LmResponse>(&fixed) {
-                    for action in &mut response.actions {
-                        let _ = normalize_action(action);
-                    }
+                if let Ok(response) = serde_json::from_str::<LmResponse>(&fixed) {
                     return Some(response);
                 }
             }
@@ -178,14 +172,6 @@ fn extract_balanced_json(text: &str) -> Option<String> {
         }
     }
     None
-}
-
-/// Normalize action fields to handle flexible LM output.
-fn normalize_action(_action: &mut LmAction) -> Result<()> {
-    // The flexible parsing is already handled in parse_setup_commands and parse_shell_args
-    // when parsing from extracted objects. For serde-deserialized actions, the fields
-    // are already in the correct format.
-    Ok(())
 }
 
 /// Parse extracted JSON objects from LM response.

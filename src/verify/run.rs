@@ -1542,7 +1542,7 @@ impl std::fmt::Display for Summary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simple_verify::types::{SurfaceEntry, STATE_SCHEMA_VERSION};
+    use crate::verify::types::{SurfaceEntry, STATE_SCHEMA_VERSION};
 
     #[test]
     fn test_get_summary() {
@@ -1607,8 +1607,8 @@ mod tests {
 
     #[test]
     fn test_format_action_desc() {
-        use crate::simple_verify::lm::LmAction;
-        use crate::simple_verify::types::Seed;
+        use crate::verify::lm::LmAction;
+        use crate::verify::types::Seed;
 
         let action = LmAction::SetBaseline {
             seed: Seed::default(),

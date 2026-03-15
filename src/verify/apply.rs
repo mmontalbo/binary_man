@@ -356,8 +356,8 @@ pub fn apply_action(state: &mut State, pack_path: &Path, action: LmAction) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simple_verify::evidence::Evidence;
-    use crate::simple_verify::types::{
+    use crate::verify::evidence::Evidence;
+    use crate::verify::types::{
         DiffKind, Seed, SurfaceCategory, SurfaceEntry, STATE_SCHEMA_VERSION,
     };
     use std::collections::HashMap;
@@ -584,7 +584,7 @@ mod tests {
             help_preamble: String::new(),
         };
 
-        use crate::simple_verify::types::FileEntry;
+        use crate::verify::types::FileEntry;
 
         // Seed with a multi-line file - -n should number the lines
         let seed = Seed {

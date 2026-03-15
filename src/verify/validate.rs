@@ -112,7 +112,7 @@ pub fn validate_action(action: &LmAction, state: &State) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simple_verify::types::{
+    use crate::verify::types::{
         BaselineRecord, Seed, SurfaceCategory, SurfaceEntry, STATE_SCHEMA_VERSION,
     };
 

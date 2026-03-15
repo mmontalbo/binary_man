@@ -879,7 +879,7 @@ Copy and modify these as needed.
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simple_verify::types::{
+    use crate::verify::types::{
         Attempt, BaselineRecord, DiffKind, Seed, Status, SurfaceEntry, STATE_SCHEMA_VERSION,
     };
 
@@ -1505,7 +1505,7 @@ stderr: pathspec 'main' did not match"#
 
     #[test]
     fn test_format_attempt_history_single_attempt() {
-        use crate::simple_verify::types::FileEntry;
+        use crate::verify::types::FileEntry;
 
         let attempts = vec![Attempt {
             cycle: 1,
@@ -1583,7 +1583,7 @@ stderr: pathspec 'main' did not match"#
 
     #[test]
     fn test_format_seed_summary_truncates() {
-        use crate::simple_verify::types::FileEntry;
+        use crate::verify::types::FileEntry;
 
         let seed = Seed {
             setup: vec![

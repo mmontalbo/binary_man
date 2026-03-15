@@ -4,7 +4,7 @@
 
 mod cli;
 mod lm;
-mod simple_verify;
+mod verify;
 mod workflow;
 
 use anyhow::Result;

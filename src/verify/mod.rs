@@ -20,6 +20,7 @@
 mod apply;
 mod bootstrap;
 mod evidence;
+mod fixtures;
 mod lm;
 mod prompt;
 mod run;

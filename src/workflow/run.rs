@@ -4,7 +4,7 @@
 
 use crate::cli::{OutputFormat, RunArgs};
 use crate::lm;
-use crate::simple_verify;
+use crate::verify;
 use anyhow::{anyhow, Result};
 use std::path::{Path, PathBuf};
 
@@ -52,7 +52,7 @@ pub fn run_run(args: &RunArgs) -> Result<()> {
     }
 
     // Run the simplified verification loop
-    let result = simple_verify::run(
+    let result = verify::run(
         &binary_name,
         &context_argv,
         &pack_path,
@@ -66,13 +66,13 @@ pub fn run_run(args: &RunArgs) -> Result<()> {
     )?;
 
     // Load final state for output
-    let state = simple_verify::State::load(&pack_path)?;
-    let summary = simple_verify::get_summary(&state);
+    let state = verify::State::load(&pack_path)?;
+    let summary = verify::get_summary(&state);
 
     // Output based on format
     match args.output {
         OutputFormat::Man => {
-            // For now, show summary (man page rendering is out of scope for simple_verify)
+            // For now, show summary (man page rendering is out of scope for verify)
             println!("\n{}", summary);
             print_result(&result);
         }
@@ -96,12 +96,12 @@ pub fn run_run(args: &RunArgs) -> Result<()> {
     Ok(())
 }
 
-fn print_result(result: &simple_verify::RunResult) {
+fn print_result(result: &verify::RunResult) {
     match result {
-        simple_verify::RunResult::Complete => {
+        verify::RunResult::Complete => {
             println!("\nResult: Complete");
         }
-        simple_verify::RunResult::HitMaxCycles => {
+        verify::RunResult::HitMaxCycles => {
             println!("\nResult: Hit max cycles limit");
         }
     }
