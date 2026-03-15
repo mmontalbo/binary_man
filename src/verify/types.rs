@@ -17,7 +17,16 @@ use std::path::Path;
 /// - v2: Added context to SurfaceEntry, output previews to Attempt
 /// - v3: Added seed_bank for reusing successful seeds
 /// - v4: Added surface category for classification-driven scheduling
-pub const STATE_SCHEMA_VERSION: u32 = 4;
+/// - v5: Added probe results for evidence gathering before test commitment
+/// - v6: Added characterization for reasoning-first seed generation
+pub const STATE_SCHEMA_VERSION: u32 = 6;
+
+/// Maximum probe runs per surface.
+///
+/// Probes are now bilateral (run both control and option) and auto-promote
+/// on success, so they're the primary exploration mechanism. Budget is
+/// generous since probes don't burn test attempts.
+pub const MAX_PROBES_PER_SURFACE: usize = 8;
 
 /// Classification of a surface for scheduling and execution strategy.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -114,6 +123,9 @@ pub struct SurfaceEntry {
     pub category: SurfaceCategory,
     /// Current verification status.
     pub status: Status,
+    /// Probe results from evidence-gathering runs (no outcome computed).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub probes: Vec<ProbeResult>,
     /// History of verification attempts.
     pub attempts: Vec<Attempt>,
     /// Whether this surface has been retried after exclusion.
@@ -123,6 +135,61 @@ pub struct SurfaceEntry {
     /// When present, prompts include this so the LM can adjust its approach.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub critique_feedback: Option<String>,
+    /// LM-generated characterization of what input triggers this option's effect.
+    /// Populated once before testing begins; updated on repeated failure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub characterization: Option<Characterization>,
+}
+
+/// LM reasoning about what makes an option produce observable output.
+///
+/// This separates "understanding the option" from "building a seed",
+/// giving the seed-generation step a specification to build against.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Characterization {
+    /// What kind of input/scenario triggers a visible effect.
+    /// e.g., "file with repeated similar lines where hunk boundaries are ambiguous"
+    pub trigger: String,
+    /// What output difference to expect when the trigger is satisfied.
+    /// e.g., "different hunk grouping in diff output"
+    pub expected_diff: String,
+    /// How many times this characterization has been revised (0 = initial).
+    #[serde(default)]
+    pub revision: u32,
+}
+
+/// Result of a probe run — bilateral comparison without commitment.
+///
+/// Probes run BOTH control and option in the same sandbox, returning whether
+/// outputs differ. This lets the LM explore seeds cheaply without burning
+/// test attempts. Probes that show differing outputs can be auto-promoted
+/// to formal Tests.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProbeResult {
+    /// Cycle number when this probe ran.
+    pub cycle: u32,
+    /// Full argv used (context_argv + surface_id + extra_args).
+    pub argv: Vec<String>,
+    /// Seed configuration used.
+    pub seed: Seed,
+    /// Preview of option stdout (first ~200 chars).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stdout_preview: Option<String>,
+    /// Preview of option stderr (first ~200 chars).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stderr_preview: Option<String>,
+    /// Exit code of the option command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<u32>,
+    /// Preview of control stdout (first ~200 chars).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_stdout_preview: Option<String>,
+    /// Whether control and option outputs differ (bilateral comparison).
+    /// When true, this seed is a candidate for auto-promotion to Test.
+    #[serde(default)]
+    pub outputs_differ: bool,
+    /// Whether the seed setup commands failed.
+    pub setup_failed: bool,
 }
 
 /// A single verification attempt for a surface.
@@ -183,8 +250,41 @@ pub struct Seed {
     #[serde(default)]
     pub setup: Vec<Vec<String>>,
     /// Files to create before execution.
-    #[serde(default)]
+    /// Accepts both array format `[{"path": "f", "content": "c"}]`
+    /// and object-map format `{"f": "c"}` (common LM shorthand).
+    #[serde(default, deserialize_with = "deserialize_files")]
     pub files: Vec<FileEntry>,
+}
+
+/// Deserialize files from either array or object-map format.
+fn deserialize_files<'de, D>(deserializer: D) -> Result<Vec<FileEntry>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de;
+    use serde_json::Value;
+
+    let value = Value::deserialize(deserializer)?;
+    match value {
+        Value::Array(arr) => {
+            // Standard format: [{"path": "f", "content": "c"}, ...]
+            arr.into_iter()
+                .map(|v| serde_json::from_value(v).map_err(de::Error::custom))
+                .collect()
+        }
+        Value::Object(map) => {
+            // Object-map shorthand: {"filename": "content", ...}
+            Ok(map
+                .into_iter()
+                .map(|(path, content)| FileEntry {
+                    path,
+                    content: content.as_str().unwrap_or_default().to_string(),
+                })
+                .collect())
+        }
+        Value::Null => Ok(Vec::new()),
+        _ => Err(de::Error::custom("files must be an array or object")),
+    }
 }
 
 /// A file to create as part of seed setup.
@@ -356,10 +456,12 @@ mod tests {
                 context: None,
                 value_hint: None,
                 status: Status::Pending,
+                probes: vec![],
                 attempts: vec![],
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                characterization: None,
             }],
             cycle: 0,
             seed_bank: vec![],

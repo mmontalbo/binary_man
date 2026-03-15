@@ -7,7 +7,7 @@
 //! so we don't need to validate that the LM included the context prefix.
 
 use super::lm::LmAction;
-use super::types::{State, Status};
+use super::types::{State, Status, MAX_PROBES_PER_SURFACE};
 
 /// Normalize an action to handle common LM formatting issues.
 ///
@@ -74,6 +74,55 @@ pub(super) fn normalize_action(action: LmAction, state: &State) -> LmAction {
                 prediction,
             }
         }
+        LmAction::Probe {
+            surface_id,
+            extra_args,
+            seed,
+        } => {
+            // Same normalization as Test
+            if state.entries.iter().any(|e| e.id == surface_id) {
+                return LmAction::Probe {
+                    surface_id,
+                    extra_args,
+                    seed,
+                };
+            }
+
+            if let Some((base, value)) = surface_id.split_once('=') {
+                if state.entries.iter().any(|e| e.id == base) {
+                    let mut new_extra_args = vec![value.to_string()];
+                    new_extra_args.extend(extra_args);
+                    return LmAction::Probe {
+                        surface_id: base.to_string(),
+                        extra_args: new_extra_args,
+                        seed,
+                    };
+                }
+            }
+
+            if surface_id.starts_with('-')
+                && !surface_id.starts_with("--")
+                && surface_id.len() > 2
+            {
+                let base = &surface_id[..2];
+                let value = &surface_id[2..];
+                if state.entries.iter().any(|e| e.id == base) {
+                    let mut new_extra_args = vec![value.to_string()];
+                    new_extra_args.extend(extra_args);
+                    return LmAction::Probe {
+                        surface_id: base.to_string(),
+                        extra_args: new_extra_args,
+                        seed,
+                    };
+                }
+            }
+
+            LmAction::Probe {
+                surface_id,
+                extra_args,
+                seed,
+            }
+        }
         other => other,
     }
 }
@@ -96,6 +145,26 @@ pub(super) fn validate_action(action: &LmAction, state: &State) -> Result<(), St
                     return Err(format!(
                         "Surface {} is not pending (status: {:?})",
                         surface_id, entry.status
+                    ));
+                }
+                _ => {}
+            }
+        }
+        LmAction::Probe { surface_id, .. } => {
+            match state.entries.iter().find(|e| &e.id == surface_id) {
+                None => return Err(format!("Unknown surface: {}", surface_id)),
+                Some(entry) if !matches!(entry.status, Status::Pending) => {
+                    return Err(format!(
+                        "Surface {} is not pending (status: {:?})",
+                        surface_id, entry.status
+                    ));
+                }
+                Some(entry) if entry.probes.len() >= MAX_PROBES_PER_SURFACE => {
+                    return Err(format!(
+                        "Surface {} has exhausted probe budget ({}/{})",
+                        surface_id,
+                        entry.probes.len(),
+                        MAX_PROBES_PER_SURFACE
                     ));
                 }
                 _ => {}
@@ -125,10 +194,12 @@ mod tests {
                     context: None,
                     value_hint: None,
                     status: Status::Pending,
+                    probes: vec![],
                     attempts: vec![],
                 category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
+                    characterization: None,
                 },
                 SurfaceEntry {
                     id: "--quiet".to_string(),
@@ -136,10 +207,12 @@ mod tests {
                     context: None,
                     value_hint: None,
                     status: Status::Verified,
+                    probes: vec![],
                     attempts: vec![],
                 category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
+                    characterization: None,
                 },
             ],
             cycle: 0,
@@ -265,5 +338,74 @@ mod tests {
             seed: Seed::default(),
         };
         assert!(validate_action(&action, &state).is_ok());
+    }
+
+    #[test]
+    fn test_validate_probe_ok() {
+        let state = test_state();
+        let action = LmAction::Probe {
+            surface_id: "--verbose".to_string(),
+            extra_args: vec![],
+            seed: Seed::default(),
+        };
+        assert!(validate_action(&action, &state).is_ok());
+    }
+
+    #[test]
+    fn test_validate_probe_unknown_surface() {
+        let state = test_state();
+        let action = LmAction::Probe {
+            surface_id: "--unknown".to_string(),
+            extra_args: vec![],
+            seed: Seed::default(),
+        };
+        let result = validate_action(&action, &state);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown surface"));
+    }
+
+    #[test]
+    fn test_validate_probe_not_pending() {
+        let state = test_state();
+        let action = LmAction::Probe {
+            surface_id: "--quiet".to_string(), // Verified
+            extra_args: vec![],
+            seed: Seed::default(),
+        };
+        let result = validate_action(&action, &state);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not pending"));
+    }
+
+    #[test]
+    fn test_validate_probe_budget_exhausted() {
+        use super::super::types::ProbeResult;
+
+        let mut state = test_state();
+        // Fill up probe budget
+        if let Some(entry) = state.entries.iter_mut().find(|e| e.id == "--verbose") {
+            for i in 0..MAX_PROBES_PER_SURFACE {
+                entry.probes.push(ProbeResult {
+                    cycle: i as u32,
+                    argv: vec!["--verbose".to_string()],
+                    seed: Seed::default(),
+                    stdout_preview: None,
+                    stderr_preview: None,
+                    exit_code: Some(0),
+                    control_stdout_preview: None,
+                    outputs_differ: false,
+                    setup_failed: false,
+                });
+            }
+        }
+
+        let action = LmAction::Probe {
+            surface_id: "--verbose".to_string(),
+            extra_args: vec![],
+            seed: Seed::default(),
+        };
+        let result = validate_action(&action, &state);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("probe budget"));
     }
 }

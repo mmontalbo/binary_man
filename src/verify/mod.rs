@@ -19,6 +19,7 @@
 
 mod apply;
 mod bootstrap;
+mod characterize;
 mod critique;
 mod evidence;
 mod fixtures;

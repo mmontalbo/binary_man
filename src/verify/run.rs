@@ -3,9 +3,9 @@
 //! This module implements the core verification loop:
 //! bootstrap → [gather pending → lm_call → apply actions → save]* → done
 
-use super::apply::{apply_action, merge_test_result, run_test_scenario};
+use super::apply::{apply_action, merge_probe_result, merge_test_result, run_probe_scenario, run_test_scenario};
 use super::bootstrap::bootstrap;
-use super::lm::{log_prompt, log_response, parse_lm_response, LmAction, LmResponse};
+use super::lm::{log_prompt, log_raw_response, log_response, parse_lm_response, LmAction, LmResponse};
 use super::prompt::{build_incremental_prompt, build_prompt, build_retry_prompt};
 use super::types::{Attempt, Outcome, State, Status, SurfaceCategory, VerifiedSeed};
 use super::validate::{normalize_action, validate_action};
@@ -26,8 +26,6 @@ const MAX_ATTEMPTS: usize = 5;
 /// Maximum surfaces to include in each LM batch.
 const BATCH_SIZE: usize = 5;
 
-/// Maximum cycles to spend retrying critique-demoted surfaces.
-const CRITIQUE_RETRY_CYCLES: u32 = 20;
 
 /// Result of a verification run.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,6 +84,7 @@ struct SessionUpdate {
     surface_id: String,
     status: Status,
     attempts: Vec<Attempt>,
+    probes: Vec<super::types::ProbeResult>,
     retried: bool,
 }
 
@@ -129,6 +128,10 @@ pub fn run(
     // Save initial state
     state.save(pack_path)?;
 
+    // Characterize: reason about what triggers each option before generating seeds.
+    // This is a pure text-reasoning step — no sandbox execution.
+    super::characterize::characterize_surfaces(&mut state, pack_path, lm_config, verbose)?;
+
     // Determine session chunks
     let all_surface_ids: Vec<String> = state.entries.iter().map(|e| e.id.clone()).collect();
     let chunks: Vec<Vec<String>> = if session_size > 0 {
@@ -167,47 +170,9 @@ pub fn run(
         )
     };
 
-    // Critique pass: validate verified surfaces, demoting false positives back to Pending.
-    // Demoted surfaces get critique_feedback attached so the LM can adjust.
-    super::critique::critique_verified_surfaces(&mut state, pack_path, lm_config, verbose)?;
-
-    // Retry critique-demoted surfaces with a single focused session.
-    // These surfaces have critique_feedback set, which the prompt will include.
-    let demoted_ids: Vec<String> = state
-        .entries
-        .iter()
-        .filter(|e| matches!(e.status, Status::Pending) && e.critique_feedback.is_some())
-        .map(|e| e.id.clone())
-        .collect();
-
-    if !demoted_ids.is_empty() {
-        let remaining_cycles = max_cycles.saturating_sub(state.cycle) + CRITIQUE_RETRY_CYCLES;
-        if remaining_cycles > 0 {
-            if verbose {
-                eprintln!(
-                    "\nRetrying {} critique-demoted surface(s) with feedback...",
-                    demoted_ids.len()
-                );
-            }
-
-            let retry_max = state.cycle + remaining_cycles;
-            let mut retry_plugin = create_plugin(lm_config);
-            if let Ok(()) = retry_plugin.init() {
-                let _ = run_chunk(
-                    pack_path,
-                    &mut *retry_plugin,
-                    &mut state,
-                    &demoted_ids,
-                    retry_max,
-                    verbose,
-                    context_mode,
-                    with_pty,
-                    None,
-                );
-                retry_plugin.shutdown().ok();
-            }
-        }
-    }
+    // Critique is now inline — each cycle critiques newly verified surfaces
+    // immediately, demoting false positives back to Pending for retry within
+    // the same session's cycle budget.
 
     // Mark remaining Pending surfaces as Excluded
     let mut final_excluded = 0;
@@ -308,6 +273,7 @@ fn run_sequential_sessions(
             context_mode,
             with_pty,
             None, // No prior attempts for initial run
+            lm_config,
         ) {
             Ok(r) => r,
             Err(e) => {
@@ -468,6 +434,7 @@ fn run_parallel_sessions(
                             with_pty,
                             None,
                             &mut last_response,
+                            lm_config,
                         )
                         .is_ok();
 
@@ -521,15 +488,16 @@ fn run_parallel_sessions(
                         );
                     }
 
-                    // Collect updates only for surfaces this session worked on
+                    // Collect updates for surfaces this session worked on (tested or probed)
                     let updates: Vec<SessionUpdate> = session_state
                         .entries
                         .iter()
-                        .filter(|e| !e.attempts.is_empty())
+                        .filter(|e| !e.attempts.is_empty() || !e.probes.is_empty())
                         .map(|e| SessionUpdate {
                             surface_id: e.id.clone(),
                             status: e.status.clone(),
                             attempts: e.attempts.clone(),
+                            probes: e.probes.clone(),
                             retried: e.retried,
                         })
                         .collect();
@@ -561,14 +529,21 @@ fn run_parallel_sessions(
                     // This session resolved it — use its result
                     entry.status = update.status;
                     entry.attempts = update.attempts;
+                    entry.probes = update.probes;
                     entry.retried = update.retried;
                 } else if !current_resolved && !update_resolved {
-                    // Neither resolved — merge attempts (keep the one with more)
+                    // Neither resolved — merge attempts and probes (keep the one with more)
                     if update.attempts.len() > entry.attempts.len() {
                         entry.attempts = update.attempts;
                     }
+                    if update.probes.len() > entry.probes.len() {
+                        entry.probes = update.probes;
+                    }
+                } else if current_resolved && !update.probes.is_empty() && entry.probes.is_empty() {
+                    // Already resolved but this session has probe data — keep it
+                    entry.probes = update.probes;
                 }
-                // If current is already resolved, keep it (first resolver wins)
+                // If current is already resolved with probes, keep it (first resolver wins)
             }
         }
         for seed in new_seeds {
@@ -683,6 +658,7 @@ fn execute_cycle(
     with_pty: bool,
     prior_attempts: Option<&std::collections::HashMap<String, Vec<Attempt>>>,
     last_response: &mut Option<LmResponse>,
+    lm_config: &LmConfig,
 ) -> Result<()> {
     // Resolve auto mode based on plugin type
     let effective_mode = match context_mode {
@@ -718,14 +694,15 @@ fn execute_cycle(
     }
     let response_text = invoke_lm_with_retry(plugin, &prompt, verbose)?;
 
-    // Parse response — on failure, reset session immediately rather than
-    // sending reminders into a poisoned conversation.
+    // Parse response — on failure, log raw text and reset session immediately
+    // rather than sending reminders into a poisoned conversation.
     let response = match parse_lm_response(&response_text) {
         Ok(r) => r,
-        Err(_e) => {
+        Err(e) => {
             if verbose {
-                eprintln!("  Parse error, resetting LM session");
+                eprintln!("  Parse error: {}", e);
             }
+            log_raw_response(pack_path, state.cycle, &response_text).ok();
             plugin.reset().ok();
             *last_response = None;
             return Ok(());
@@ -760,6 +737,7 @@ fn execute_cycle(
 
     // Partition and validate actions
     let mut baselines = Vec::new();
+    let mut probes = Vec::new();
     let mut tests = Vec::new();
 
     for action in response.actions {
@@ -772,11 +750,12 @@ fn execute_cycle(
         }
         match &action {
             LmAction::SetBaseline { .. } => baselines.push(action),
+            LmAction::Probe { .. } => probes.push(action),
             LmAction::Test { .. } => tests.push(action),
         }
     }
 
-    // 1. Apply baselines first (must complete before tests)
+    // 1. Apply baselines first (must complete before probes/tests)
     for action in baselines {
         if verbose {
             eprintln!("  Applying: {}", format_action_desc(&action));
@@ -786,7 +765,158 @@ fn execute_cycle(
         }
     }
 
-    // 2. Run tests in parallel
+    // Track verified surfaces across both probes (auto-promoted) and tests
+    let mut newly_verified = Vec::new();
+
+    // 2. Run probes in parallel (bilateral comparison)
+    if !probes.is_empty() {
+        if verbose {
+            eprintln!("  Running {} probe(s) in parallel...", probes.len());
+        }
+
+        let probe_params: Vec<_> = probes
+            .into_iter()
+            .filter_map(|action| {
+                if let LmAction::Probe {
+                    surface_id,
+                    extra_args,
+                    seed,
+                } = action
+                {
+                    Some((surface_id, extra_args, seed))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let probe_results: Vec<_> = thread::scope(|s| {
+            let handles: Vec<_> = probe_params
+                .into_iter()
+                .map(|(surface_id, extra_args, seed)| {
+                    let binary = &state.binary;
+                    let context_argv = &state.context_argv;
+                    let cycle = state.cycle;
+                    s.spawn(move || {
+                        run_probe_scenario(
+                            binary,
+                            context_argv,
+                            cycle,
+                            &surface_id,
+                            extra_args,
+                            seed,
+                            with_pty,
+                        )
+                    })
+                })
+                .collect();
+
+            handles
+                .into_iter()
+                .filter_map(|h| match h.join() {
+                    Ok(Ok(result)) => Some(result),
+                    Ok(Err(e)) => {
+                        eprintln!("  Probe scenario failed: {}", e);
+                        None
+                    }
+                    Err(_) => {
+                        eprintln!("  Probe thread panicked");
+                        None
+                    }
+                })
+                .collect()
+        });
+
+        // Collect probes that show differing outputs for auto-promotion
+        let mut auto_promote = Vec::new();
+        for result in probe_results {
+            if verbose {
+                let status = if result.setup_failed {
+                    "SetupFailed".to_string()
+                } else if result.outputs_differ {
+                    "DIFFER (auto-promote)".to_string()
+                } else {
+                    match result.exit_code {
+                        Some(0) => "identical".to_string(),
+                        Some(c) => format!("exit {}", c),
+                        None => "NoExit".to_string(),
+                    }
+                };
+                eprintln!("  Probe {} → {}", result.surface_id, status);
+            }
+            // Auto-promote: probe showed outputs differ → run as formal Test
+            if result.outputs_differ && !result.setup_failed {
+                auto_promote.push((
+                    result.surface_id.clone(),
+                    result.extra_args.clone(),
+                    result.seed.clone(),
+                ));
+            }
+            merge_probe_result(state, result);
+        }
+
+        // Auto-promote differing probes to Tests (no LM round-trip needed)
+        if !auto_promote.is_empty() {
+            if verbose {
+                eprintln!(
+                    "  Auto-promoting {} probe(s) to tests...",
+                    auto_promote.len()
+                );
+            }
+            let promote_results: Vec<_> = thread::scope(|s| {
+                let handles: Vec<_> = auto_promote
+                    .into_iter()
+                    .map(|(surface_id, extra_args, seed)| {
+                        let binary = &state.binary;
+                        let context_argv = &state.context_argv;
+                        let cycle = state.cycle;
+                        s.spawn(move || {
+                            run_test_scenario(
+                                pack_path,
+                                binary,
+                                context_argv,
+                                cycle,
+                                &surface_id,
+                                extra_args,
+                                seed,
+                                with_pty,
+                                None, // No prediction for auto-promoted tests
+                            )
+                        })
+                    })
+                    .collect();
+
+                handles
+                    .into_iter()
+                    .filter_map(|h| match h.join() {
+                        Ok(Ok(result)) => Some(result),
+                        Ok(Err(e)) => {
+                            eprintln!("  Auto-promote test failed: {}", e);
+                            None
+                        }
+                        Err(_) => None,
+                    })
+                    .collect()
+            });
+
+            for result in promote_results {
+                let is_verified = matches!(result.outcome, Outcome::Verified { .. });
+                if verbose {
+                    eprintln!(
+                        "  Auto-promoted {} → {:?}",
+                        result.surface_id,
+                        if is_verified { "Verified" } else { "not verified" }
+                    );
+                }
+                if is_verified {
+                    newly_verified.push(result.surface_id.clone());
+                }
+                merge_test_result(state, result);
+            }
+        }
+    }
+
+    // 3. Run tests in parallel
     if !tests.is_empty() {
         if verbose {
             eprintln!("  Running {} test(s) in parallel...", tests.len());
@@ -856,8 +986,11 @@ fn execute_cycle(
                 .collect()
         });
 
-        // Merge results into state (sequential, fast)
+        // Merge results into state and collect newly verified / failed IDs
+        let mut newly_equal = Vec::new();
         for result in results {
+            let is_verified = matches!(result.outcome, Outcome::Verified { .. });
+            let is_equal = matches!(result.outcome, Outcome::OutputsEqual);
             if verbose {
                 eprintln!(
                     "  {} → {:?}",
@@ -873,7 +1006,51 @@ fn execute_cycle(
                     }
                 );
             }
+            if is_verified {
+                newly_verified.push(result.surface_id.clone());
+            }
+            if is_equal {
+                newly_equal.push(result.surface_id.clone());
+            }
             merge_test_result(state, result);
+        }
+
+        // Inline critique: immediately review newly verified surfaces.
+        // Demoted surfaces go back to Pending and get retried in subsequent cycles.
+        if !newly_verified.is_empty() {
+            super::critique::critique_surfaces(
+                state,
+                pack_path,
+                lm_config,
+                verbose,
+                &newly_verified,
+            )?;
+        }
+
+        // Re-characterize surfaces that keep failing with the current characterization.
+        // Only triggers when a surface has a characterization and 2+ OutputsEqual outcomes.
+        for surface_id in &newly_equal {
+            let needs_rechar = state
+                .entries
+                .iter()
+                .find(|e| e.id == *surface_id)
+                .is_some_and(|e| {
+                    e.characterization.is_some()
+                        && e.attempts
+                            .iter()
+                            .filter(|a| matches!(a.outcome, Outcome::OutputsEqual))
+                            .count()
+                            >= 2
+                });
+            if needs_rechar {
+                super::characterize::recharacterize_surface(
+                    state,
+                    pack_path,
+                    lm_config,
+                    verbose,
+                    surface_id,
+                )?;
+            }
         }
     }
 
@@ -899,6 +1076,7 @@ fn run_chunk(
     context_mode: ContextMode,
     with_pty: bool,
     prior_attempts: Option<&std::collections::HashMap<String, Vec<Attempt>>>,
+    lm_config: &LmConfig,
 ) -> Result<RunResult> {
     let is_retry = prior_attempts.is_some();
     let mut last_response: Option<LmResponse> = None;
@@ -982,6 +1160,7 @@ fn run_chunk(
             with_pty,
             prior_attempts,
             &mut last_response,
+            lm_config,
         )?;
 
         state.save(pack_path)?;
@@ -1029,6 +1208,17 @@ fn format_action_desc(action: &super::lm::LmAction) -> String {
                 format!("Test {}", surface_id)
             } else {
                 format!("Test {} +{:?}", surface_id, extra_args)
+            }
+        }
+        super::lm::LmAction::Probe {
+            surface_id,
+            extra_args,
+            ..
+        } => {
+            if extra_args.is_empty() {
+                format!("Probe {}", surface_id)
+            } else {
+                format!("Probe {} +{:?}", surface_id, extra_args)
             }
         }
     }
@@ -1124,10 +1314,12 @@ mod tests {
                     context: None,
                     value_hint: None,
                     status: Status::Verified,
+                    probes: vec![],
                     attempts: vec![],
                 category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
+                    characterization: None,
                 },
                 SurfaceEntry {
                     id: "-b".to_string(),
@@ -1135,10 +1327,12 @@ mod tests {
                     context: None,
                     value_hint: None,
                     status: Status::Pending,
+                    probes: vec![],
                     attempts: vec![],
                 category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
+                    characterization: None,
                 },
                 SurfaceEntry {
                     id: "-c".to_string(),
@@ -1148,10 +1342,12 @@ mod tests {
                     status: Status::Excluded {
                         reason: "test".to_string(),
                     },
+                    probes: vec![],
                     attempts: vec![],
                 category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
+                    characterization: None,
                 },
             ],
             cycle: 5,

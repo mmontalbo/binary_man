@@ -25,37 +25,36 @@ enum Action {
     Demote { reason: String },
 }
 
-/// Critique verified surfaces to validate they demonstrate documented behavior.
+/// Critique a specific set of verified surfaces.
 ///
-/// Reviews all Verified surfaces and can:
-/// - ACCEPT: Confirm the surface is correctly verified
-/// - DEMOTE: Return surface to Pending for retry
-///
-/// Batches are processed in parallel for faster throughput.
-pub(super) fn critique_verified_surfaces(
+/// Can be called inline after each cycle to critique newly-verified surfaces
+/// immediately, or in batch at the end.
+pub(super) fn critique_surfaces(
     state: &mut State,
     pack_path: &Path,
     lm_config: &LmConfig,
     verbose: bool,
+    surface_ids: &[String],
 ) -> Result<()> {
-    let verified_ids: Vec<String> = state
-        .entries
+    // Only critique surfaces that are actually Verified
+    let verified_ids: Vec<String> = surface_ids
         .iter()
-        .filter(|e| matches!(e.status, Status::Verified))
-        .map(|e| e.id.clone())
+        .filter(|id| {
+            state
+                .entries
+                .iter()
+                .any(|e| &e.id == *id && matches!(e.status, Status::Verified))
+        })
+        .cloned()
         .collect();
 
     if verified_ids.is_empty() {
-        if verbose {
-            eprintln!("\nNo surfaces need critique");
-        }
-        state.save(pack_path)?;
         return Ok(());
     }
 
     if verbose {
         eprintln!(
-            "\nCritique pass: reviewing {} verified surface(s) in parallel...",
+            "  Critiquing {} verified surface(s)...",
             verified_ids.len()
         );
     }

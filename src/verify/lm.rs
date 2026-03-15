@@ -29,12 +29,68 @@ use std::path::Path;
 ///
 /// The LM specifies what it expects to happen when running the test,
 /// allowing mechanical verification instead of subjective critique.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Uses a custom deserializer to handle two LM output formats:
+/// - Nested: `{"diff_type": {"StdoutContains": "@@"}, "reason": "..."}`
+/// - Flat: `{"diff_type": "StdoutContains", "content": "@@", "reason": "..."}`
+#[derive(Debug, Clone, Serialize)]
 pub struct Prediction {
     /// What type of difference is expected.
     pub diff_type: PredictedDiff,
     /// Brief explanation of why this is expected.
     pub reason: String,
+}
+
+impl<'de> serde::Deserialize<'de> for Prediction {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de;
+
+        let obj: serde_json::Value = serde_json::Value::deserialize(deserializer)?;
+        let map = obj.as_object().ok_or_else(|| de::Error::custom("prediction must be object"))?;
+
+        let reason = map
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let diff_type_val = map
+            .get("diff_type")
+            .ok_or_else(|| de::Error::missing_field("diff_type"))?;
+
+        // Try nested format first: {"StdoutContains": "@@"}
+        let diff_type = if let Some(obj) = diff_type_val.as_object() {
+            serde_json::from_value(serde_json::Value::Object(obj.clone()))
+                .map_err(de::Error::custom)?
+        } else if let Some(s) = diff_type_val.as_str() {
+            // Flat format: diff_type is a plain string, value may be in "content" field
+            match s {
+                "StdoutEmpty" => PredictedDiff::StdoutEmpty,
+                "StdoutDifferent" => PredictedDiff::StdoutDifferent,
+                "StderrDifferent" => PredictedDiff::StderrDifferent,
+                "ExitCodeDifferent" => PredictedDiff::ExitCodeDifferent,
+                "StdoutContains" => {
+                    let content = map
+                        .get("content")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    PredictedDiff::StdoutContains(content)
+                }
+                other => return Err(de::Error::unknown_variant(
+                    other,
+                    &["StdoutEmpty", "StdoutContains", "StdoutDifferent", "StderrDifferent", "ExitCodeDifferent"],
+                )),
+            }
+        } else {
+            return Err(de::Error::custom("diff_type must be string or object"));
+        };
+
+        Ok(Prediction { diff_type, reason })
+    }
 }
 
 /// Type of difference expected between control and option runs.
@@ -80,6 +136,19 @@ pub enum LmAction {
         /// Prediction of expected outcome (optional for backward compatibility).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         prediction: Option<Prediction>,
+    },
+    /// Probe a surface to gather evidence before committing to a test.
+    ///
+    /// Runs the command in a sandbox and captures output, but does not
+    /// compute a verification outcome or count against the attempt budget.
+    Probe {
+        /// Which surface this probe is gathering evidence for.
+        surface_id: String,
+        /// Additional arguments beyond surface_id (optional).
+        #[serde(default)]
+        extra_args: Vec<String>,
+        /// Seed setup for this probe.
+        seed: Seed,
     },
 }
 
@@ -242,6 +311,13 @@ fn extract_json_objects(text: &str) -> Vec<String> {
 fn fix_json_errors(json: &str) -> String {
     let mut result = json.to_string();
 
+    // Fix \xNN hex escapes (Python/C style) to \u00NN (valid JSON)
+    // LMs commonly produce these when trying to write binary content
+    let hex_escape_re = regex::Regex::new(r"\\x([0-9a-fA-F]{2})").unwrap();
+    result = hex_escape_re
+        .replace_all(&result, r"\u00$1")
+        .to_string();
+
     // Fix trailing commas: {"a": 1,} -> {"a": 1}
     // Match comma followed by optional whitespace and closing brace/bracket
     let trailing_comma_re = regex::Regex::new(r",(\s*[}\]])").unwrap();
@@ -285,6 +361,17 @@ fn parse_action_object(obj: &Value) -> Result<Option<LmAction>> {
     if get_key(obj, &["baseline", "Baseline"]).is_some() {
         let seed = parse_seed(obj)?;
         return Ok(Some(LmAction::SetBaseline { seed }));
+    }
+
+    // Check for probe action (probe/Probe) — must check before test since both have surface_id
+    if let Some(surface) = get_key(obj, &["probe", "Probe"]).and_then(|v| v.as_str()) {
+        let extra_args = parse_shell_args(get_key(obj, &["extra_args", "Extra_args"]))?;
+        let seed = parse_seed(obj)?;
+        return Ok(Some(LmAction::Probe {
+            surface_id: surface.to_string(),
+            extra_args,
+            seed,
+        }));
     }
 
     // Check for test action (test/Test)
@@ -548,6 +635,15 @@ pub(super) fn log_response(pack_path: &Path, cycle: u32, response: &LmResponse) 
     let path = log_dir.join(format!("c{cycle}_response.json"));
     let content = serde_json::to_string_pretty(response).context("serialize response")?;
     std::fs::write(&path, content).with_context(|| format!("write response to {}", path.display()))
+}
+
+/// Log a raw LM response that failed to parse.
+pub(super) fn log_raw_response(pack_path: &Path, cycle: u32, raw: &str) -> Result<()> {
+    let log_dir = pack_path.join("lm_log");
+    std::fs::create_dir_all(&log_dir).context("create lm_log directory")?;
+
+    let path = log_dir.join(format!("c{cycle}_response_raw.txt"));
+    std::fs::write(&path, raw).with_context(|| format!("write raw response to {}", path.display()))
 }
 
 #[cfg(test)]
@@ -1030,5 +1126,139 @@ Here's my response:
             }
             _ => panic!("Expected Test"),
         }
+    }
+
+    // ==================== Probe Parsing Tests ====================
+
+    #[test]
+    fn test_parse_probe_simplified() {
+        let text = r#"{"probe": "--verbose", "setup": "touch file.txt"}"#;
+        let response = parse_lm_response(text).unwrap();
+        assert_eq!(response.actions.len(), 1);
+
+        match &response.actions[0] {
+            LmAction::Probe {
+                surface_id,
+                extra_args,
+                seed,
+            } => {
+                assert_eq!(surface_id, "--verbose");
+                assert!(extra_args.is_empty());
+                assert_eq!(seed.setup.len(), 1);
+            }
+            _ => panic!("Expected Probe"),
+        }
+    }
+
+    #[test]
+    fn test_parse_probe_with_extra_args() {
+        let text = r#"{"probe": "-N", "extra_args": "10", "setup": "touch file.txt"}"#;
+        let response = parse_lm_response(text).unwrap();
+
+        match &response.actions[0] {
+            LmAction::Probe {
+                surface_id,
+                extra_args,
+                ..
+            } => {
+                assert_eq!(surface_id, "-N");
+                assert_eq!(extra_args, &["10"]);
+            }
+            _ => panic!("Expected Probe"),
+        }
+    }
+
+    #[test]
+    fn test_parse_probe_in_actions_format() {
+        let text = r#"{
+            "actions": [
+                {
+                    "kind": "Probe",
+                    "surface_id": "--verbose",
+                    "seed": {"setup": [["touch", "file.txt"]], "files": []}
+                }
+            ]
+        }"#;
+        let response = parse_lm_response(text).unwrap();
+        assert_eq!(response.actions.len(), 1);
+
+        match &response.actions[0] {
+            LmAction::Probe { surface_id, .. } => {
+                assert_eq!(surface_id, "--verbose");
+            }
+            _ => panic!("Expected Probe"),
+        }
+    }
+
+    #[test]
+    fn test_parse_mixed_probe_and_test() {
+        let text = r#"
+{"probe": "--unknown-opt", "setup": "touch file.txt"}
+{"test": "--verbose", "setup": "touch file.txt"}
+"#;
+        let response = parse_lm_response(text).unwrap();
+        assert_eq!(response.actions.len(), 2);
+        assert!(matches!(&response.actions[0], LmAction::Probe { .. }));
+        assert!(matches!(&response.actions[1], LmAction::Test { .. }));
+    }
+
+    #[test]
+    fn test_parse_hex_escapes_in_file_content() {
+        // LMs produce \xNN hex escapes (Python/C style) which are invalid JSON.
+        // The parser should fix these to \u00NN.
+        let text = r#"{"actions": [{"kind": "Test", "surface_id": "--binary", "seed": {"setup": [], "files": [{"path": "data.bin", "content": "binary\x00content\x01here"}]}}]}"#;
+        let response = parse_lm_response(text).unwrap();
+        assert_eq!(response.actions.len(), 1);
+        assert!(matches!(&response.actions[0], LmAction::Test { .. }));
+    }
+
+    #[test]
+    fn test_parse_files_as_object_map() {
+        // LMs sometimes produce files as {"filename": "content"} instead of
+        // [{"path": "filename", "content": "content"}]
+        let text = r#"{"actions": [{"kind": "Test", "surface_id": "--stat", "seed": {"setup": [["git", "init"]], "files": {"file.txt": "hello\nworld\n"}}}]}"#;
+        let response = parse_lm_response(text).unwrap();
+        assert_eq!(response.actions.len(), 1);
+        if let LmAction::Test { seed, .. } = &response.actions[0] {
+            assert_eq!(seed.files.len(), 1);
+            assert_eq!(seed.files[0].path, "file.txt");
+            assert_eq!(seed.files[0].content, "hello\nworld\n");
+        } else {
+            panic!("Expected Test action");
+        }
+    }
+
+    #[test]
+    fn test_parse_prediction_flat_format() {
+        // LMs produce flat prediction format with separate "content" field
+        // instead of nested {"StdoutContains": "@@"}
+        let text = r#"{"actions": [{"kind": "Test", "surface_id": "-u", "seed": {"setup": [], "files": []}, "prediction": {"diff_type": "StdoutContains", "content": "@@", "reason": "unified diff has @@ markers"}}]}"#;
+        let response = parse_lm_response(text).unwrap();
+        assert_eq!(response.actions.len(), 1);
+        if let LmAction::Test { prediction, .. } = &response.actions[0] {
+            let pred = prediction.as_ref().unwrap();
+            assert_eq!(pred.diff_type, PredictedDiff::StdoutContains("@@".to_string()));
+        } else {
+            panic!("Expected Test action");
+        }
+    }
+
+    #[test]
+    fn test_parse_prediction_nested_format() {
+        // Standard nested format should still work
+        let text = r#"{"actions": [{"kind": "Test", "surface_id": "-u", "seed": {"setup": [], "files": []}, "prediction": {"diff_type": {"StdoutContains": "@@"}, "reason": "has markers"}}]}"#;
+        let response = parse_lm_response(text).unwrap();
+        if let LmAction::Test { prediction, .. } = &response.actions[0] {
+            let pred = prediction.as_ref().unwrap();
+            assert_eq!(pred.diff_type, PredictedDiff::StdoutContains("@@".to_string()));
+        }
+    }
+
+    #[test]
+    fn test_parse_prediction_extra_fields_ignored() {
+        // Extra fields in prediction shouldn't break parsing
+        let text = r#"{"actions": [{"kind": "Test", "surface_id": "--stat", "seed": {"setup": [], "files": []}, "prediction": {"diff_type": "StdoutDifferent", "reason": "stat format", "confidence": 0.9, "notes": "test"}}]}"#;
+        let response = parse_lm_response(text).unwrap();
+        assert_eq!(response.actions.len(), 1);
     }
 }

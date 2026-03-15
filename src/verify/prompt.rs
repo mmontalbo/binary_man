@@ -332,6 +332,21 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
                 prompt.push_str(&format!("Value hint: {}\n", hint));
             }
 
+            // Show characterization — what input triggers this option's effect
+            if let Some(char) = &entry.characterization {
+                prompt.push_str(&format!(
+                    "\n**Trigger**: {}\n**Expected diff**: {}\n",
+                    char.trigger, char.expected_diff
+                ));
+                if char.revision > 0 {
+                    prompt.push_str(&format!(
+                        "(revised {}× — previous characterizations didn't lead to verification)\n",
+                        char.revision
+                    ));
+                }
+                prompt.push_str("→ Build a seed that creates the trigger condition.\n");
+            }
+
             // Show critique feedback if a prior verification was rejected
             if let Some(feedback) = &entry.critique_feedback {
                 prompt.push_str(&format!(
@@ -362,6 +377,50 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
                             seed.seed.files.iter().map(|f| f.path.as_str()).collect();
                         prompt.push_str(&format!("    files: {:?}\n", file_names));
                     }
+                }
+            }
+
+            // Show probe results (bilateral comparison evidence)
+            if !entry.probes.is_empty() {
+                prompt.push_str(&format!(
+                    "\n**Probes:** {} (budget: {}/{})\n\n",
+                    entry.probes.len(),
+                    entry.probes.len(),
+                    super::types::MAX_PROBES_PER_SURFACE
+                ));
+                for (i, probe) in entry.probes.iter().enumerate() {
+                    let diff_status = if probe.setup_failed {
+                        "SetupFailed"
+                    } else if probe.outputs_differ {
+                        "OUTPUTS DIFFER ✓"
+                    } else {
+                        "identical"
+                    };
+                    prompt.push_str(&format!(
+                        "  **Probe {}** (cycle {}) — {}:\n",
+                        i + 1,
+                        probe.cycle,
+                        diff_status
+                    ));
+                    prompt.push_str(&format!("    argv: {:?}\n", probe.argv));
+                    if !probe.seed.setup.is_empty() {
+                        prompt.push_str(&format!("    seed.setup: {:?}\n", probe.seed.setup));
+                    }
+                    if probe.setup_failed {
+                        prompt.push_str("    result: SetupFailed\n");
+                    } else {
+                        prompt.push_str(&format!("    exit_code: {:?}\n", probe.exit_code));
+                        if let Some(stdout) = &probe.stdout_preview {
+                            prompt.push_str(&format!("    option_stdout: {:?}\n", stdout));
+                        }
+                        if let Some(control) = &probe.control_stdout_preview {
+                            prompt.push_str(&format!("    control_stdout: {:?}\n", control));
+                        }
+                        if let Some(stderr) = &probe.stderr_preview {
+                            prompt.push_str(&format!("    stderr: {:?}\n", stderr));
+                        }
+                    }
+                    prompt.push('\n');
                 }
             }
 
@@ -417,9 +476,19 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
                             ));
                         }
 
-                        prompt.push_str(
-                            "    → Outputs matched! Try a different seed that exercises the option's effect.\n",
-                        );
+                        // Diagnosis: compare characterization against reality
+                        if let Some(char) = &entry.characterization {
+                            prompt.push_str(&format!(
+                                "    → DIAGNOSIS: Your trigger was \"{}\", expected \"{}\".\n\
+                                 \x20   The seed didn't satisfy the trigger — outputs were identical.\n\
+                                 \x20   Does the seed actually create the trigger condition?\n",
+                                char.trigger, char.expected_diff
+                            ));
+                        } else {
+                            prompt.push_str(
+                                "    → Outputs matched! Try a different seed that exercises the option's effect.\n",
+                            );
+                        }
                     }
 
                     // Show stderr if present (useful for debugging)
@@ -522,6 +591,15 @@ pub(super) fn build_retry_prompt(
             }
             if let Some(hint) = &entry.value_hint {
                 prompt.push_str(&format!("Value hint: {}\n", hint));
+            }
+
+            // Show characterization
+            if let Some(char) = &entry.characterization {
+                prompt.push_str(&format!(
+                    "\n**Trigger**: {}\n**Expected diff**: {}\n",
+                    char.trigger, char.expected_diff
+                ));
+                prompt.push_str("→ Build a seed that creates the trigger condition.\n");
             }
 
             // Include prior attempt history if available (each surface only sees its own)
@@ -635,6 +713,13 @@ pub(super) fn build_incremental_prompt(
                                                 metrics.line_count, metrics.byte_count
                                             ));
                                         }
+                                        // Diagnosis against characterization
+                                        if let Some(char) = &entry.characterization {
+                                            prompt.push_str(&format!(
+                                                "    → Trigger was \"{}\". Does your seed create that condition?\n",
+                                                char.trigger
+                                            ));
+                                        }
                                     }
                                     // Include stderr for OptionError
                                     if matches!(attempt.outcome, Outcome::OptionError { .. }) {
@@ -657,6 +742,31 @@ pub(super) fn build_incremental_prompt(
                                     "- Test {}: Excluded ({})\n",
                                     surface_id, reason
                                 ));
+                            }
+                        }
+                    }
+                }
+                super::lm::LmAction::Probe { surface_id, .. } => {
+                    if let Some(entry) = state.entries.iter().find(|e| &e.id == surface_id) {
+                        if let Some(probe) = entry.probes.last() {
+                            let status = if probe.setup_failed {
+                                "SetupFailed".to_string()
+                            } else if probe.outputs_differ {
+                                "DIFFER → auto-promoted to Test".to_string()
+                            } else {
+                                format!("identical (exit={})", probe.exit_code.unwrap_or(0))
+                            };
+                            prompt.push_str(&format!(
+                                "- Probe {}: {} (probes left: {})\n",
+                                surface_id,
+                                status,
+                                super::types::MAX_PROBES_PER_SURFACE.saturating_sub(entry.probes.len())
+                            ));
+                            if let Some(stdout) = &probe.stdout_preview {
+                                prompt.push_str(&format!("    stdout: {:?}\n", stdout));
+                            }
+                            if let Some(stderr) = &probe.stderr_preview {
+                                prompt.push_str(&format!("    stderr: {:?}\n", stderr));
                             }
                         }
                     }
@@ -759,18 +869,47 @@ For each surface, provide ONE action:
 1. **SetBaseline** (required first, once only): Define the baseline scenario
    - seed: Setup commands and files needed
 
-2. **Test**: Test a surface
+2. **Probe**: Gather evidence about a surface before committing to a test
+   - surface_id: Which surface to probe
+   - extra_args: Additional arguments if needed (optional)
+   - seed: Setup commands
+   - Runs the command and returns stdout/stderr/exit_code, but does NOT count as a test attempt
+   - Use probes when you're unsure what a surface does or what seed will work
+   - Each surface has a probe budget (3 max) — use them wisely
+
+3. **Test**: Test a surface
    - surface_id: Which surface to test (automatically included in command)
    - extra_args: Additional arguments if needed (optional, usually omit)
    - seed: Setup commands (copy baseline's seed if same setup works)
    - prediction: (RECOMMENDED) What you expect to happen
 
 Note: The surface option is automatically added to the command. Use "extra_args" for values or additional arguments:
-- Simple option: `{"surface_id": "--stat", "seed": {...}}`
-- Option with value: `{"surface_id": "-U", "extra_args": ["10"], "seed": {...}}` → runs with `-U 10`
-- Option with string value: `{"surface_id": "-S", "extra_args": ["pattern"], "seed": {...}}` → runs with `-S pattern`
+- Simple option: `{"surface_id": "--example", "seed": {...}}`
+- Option with value: `{"surface_id": "-N", "extra_args": ["10"], "seed": {...}}` → runs with `-N 10`
+- Option with string value: `{"surface_id": "-P", "extra_args": ["pattern"], "seed": {...}}` → runs with `-P pattern`
 
-IMPORTANT: Do NOT combine the surface and value (e.g., `-U10` is WRONG). Always use the exact surface_id from the list and pass values via extra_args.
+IMPORTANT: Do NOT combine the surface and value (e.g., `-N10` is WRONG). Always use the exact surface_id from the list and pass values via extra_args.
+
+## Probes (Cheap Exploration)
+
+Probes run BOTH control and option commands with your seed and tell you whether outputs differ — without counting against your attempt budget. If a probe shows differing outputs, it is automatically promoted to a formal Test.
+
+**Strategy: Use probes to explore, not tests.** Submit multiple probes with different seeds for hard surfaces. Each probe that shows differing outputs gets auto-promoted — you don't need to submit a separate Test.
+
+When to probe:
+- You're unsure what seed will trigger different output (probe several variants)
+- The characterization suggests a specific trigger — probe to confirm before committing
+- Previous tests returned OutputsEqual — probe with varied seeds to find one that works
+
+You can submit MULTIPLE probes for the same surface in one cycle. They run in parallel.
+
+Example probes (multiple seeds for one surface):
+```json
+{"kind": "Probe", "surface_id": "--example", "seed": {"setup": [["touch", "a.txt"]], "files": []}}
+{"kind": "Probe", "surface_id": "--example", "seed": {"setup": [["touch", "b.txt"]], "files": []}}
+```
+
+Probe results show: option_stdout, control_stdout, and whether they DIFFER or are identical.
 
 ## Predictions
 
@@ -786,9 +925,9 @@ Example with prediction:
 ```json
 {
   "kind": "Test",
-  "surface_id": "--no-patch",
-  "seed": {"setup": [["git", "init"]], "files": []},
-  "prediction": {"diff_type": "StdoutEmpty", "reason": "suppresses diff output"}
+  "surface_id": "--quiet",
+  "seed": {"setup": [["touch", "file.txt"]], "files": []},
+  "prediction": {"diff_type": "StdoutEmpty", "reason": "suppresses output"}
 }
 ```
 
@@ -815,6 +954,7 @@ Respond with JSON:
 {
   "actions": [
     { "kind": "SetBaseline", "seed": { "setup": [["touch", "file.txt"]], "files": [] } },
+    { "kind": "Probe", "surface_id": "--unfamiliar-option", "seed": { "setup": [["touch", "file.txt"]], "files": [] } },
     { "kind": "Test", "surface_id": "--example", "seed": { "setup": [["touch", "file.txt"]], "files": [] }, "prediction": {"diff_type": "StdoutDifferent", "reason": "changes output format"} }
   ]
 }
@@ -827,11 +967,10 @@ IMPORTANT: Only use surface_id values from the "Surfaces Needing Work" section a
 ## Key Principles
 
 - Output must DIFFER from control (same seed, no extra args) to verify a surface
-- Craft seeds that EXERCISE the option's behavior:
-  - For `ls -B` (ignore backups): seed must include backup files like `file.txt~`
-  - For `--color`: seed must include content that triggers colorization
-- If OutputsEqual, try: different seed files that better exercise the option
-- Learn from stderr errors and adjust seed accordingly
+- **PROBE FIRST**: When unsure, submit multiple Probes with different seeds — they're free and auto-promote on success
+- Craft seeds that match the **Trigger** condition described for each surface
+- If OutputsEqual, try STRUCTURALLY different seeds (different file content, different setup), not minor variations
+- Learn from probe results: if control_stdout and option_stdout are identical, the seed doesn't exercise the option
 - Include predictions for suppression options (--no-*, --quiet) to avoid false demotions
 
 ## Pre-generated Fixtures
@@ -874,10 +1013,12 @@ mod tests {
                 context: None,
                 value_hint: None,
                 status: Status::Pending,
+                probes: vec![],
                 attempts: vec![],
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                characterization: None,
             }],
             cycle: 0,
             seed_bank: vec![],
@@ -916,10 +1057,12 @@ mod tests {
                 context: None,
                 value_hint: None,
                 status: Status::Pending,
+                probes: vec![],
                 attempts: vec![],
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                characterization: None,
             }],
             cycle: 1,
             seed_bank: vec![],
@@ -954,6 +1097,7 @@ mod tests {
                 context: None,
                 value_hint: None,
                 status: Status::Pending,
+                probes: vec![],
                 attempts: vec![Attempt {
                     cycle: 1,
                     args: vec!["--verbose".to_string()],
@@ -972,6 +1116,7 @@ mod tests {
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                characterization: None,
             }],
             cycle: 2,
             seed_bank: vec![],
@@ -1017,10 +1162,12 @@ mod tests {
                 context: Some("Related options: -H (follow symlinks on command line); -L (dereference all symlinks)".to_string()),
                 value_hint: None,
                 status: Status::Pending,
+                probes: vec![],
                 attempts: vec![],
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                characterization: None,
             }],
             cycle: 1,
             seed_bank: vec![],
@@ -1053,6 +1200,7 @@ mod tests {
                 context: None,
                 value_hint: None,
                 status: Status::Pending,
+                probes: vec![],
                 attempts: vec![Attempt {
                     cycle: 1,
                     args: vec!["--all".to_string()],
@@ -1071,6 +1219,7 @@ mod tests {
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                characterization: None,
             }],
             cycle: 2,
             seed_bank: vec![],
@@ -1104,6 +1253,7 @@ mod tests {
                 context: None,
                 value_hint: None,
                 status: Status::Pending,
+                probes: vec![],
                 attempts: vec![
                     Attempt {
                         cycle: 1,
@@ -1139,6 +1289,7 @@ mod tests {
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                characterization: None,
             }],
             cycle: 3,
             seed_bank: vec![],
@@ -1239,6 +1390,7 @@ stderr: error: pathspec 'main' did not match"#
                     context: None,
                     value_hint: None,
                     status: Status::Pending,
+                    probes: vec![],
                     attempts: vec![
                         make_setup_failed_attempt(1),
                         make_setup_failed_attempt(2),
@@ -1247,6 +1399,7 @@ stderr: error: pathspec 'main' did not match"#
                 category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
+                characterization: None,
                 },
                 SurfaceEntry {
                     id: "--opt2".to_string(),
@@ -1254,6 +1407,7 @@ stderr: error: pathspec 'main' did not match"#
                     context: None,
                     value_hint: None,
                     status: Status::Pending,
+                    probes: vec![],
                     attempts: vec![
                         make_setup_failed_attempt(4),
                         make_setup_failed_attempt(5),
@@ -1262,6 +1416,7 @@ stderr: error: pathspec 'main' did not match"#
                 category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
+                characterization: None,
                 },
             ],
             cycle: 7,
@@ -1290,6 +1445,7 @@ stderr: error: pathspec 'main' did not match"#
                 context: None,
                 value_hint: None,
                 status: Status::Pending,
+                probes: vec![],
                 attempts: vec![Attempt {
                     cycle: 1,
                     args: vec!["--opt".to_string()],
@@ -1312,6 +1468,7 @@ stderr: error: already a git repo"#
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                characterization: None,
             }],
             cycle: 2,
             seed_bank: vec![],
@@ -1373,10 +1530,12 @@ stderr: pathspec 'main' did not match"#
                     context: None,
                     value_hint: None,
                     status: Status::Pending,
+                    probes: vec![],
                     attempts: vec![make_setup_failed_attempt(1), make_setup_failed_attempt(2)],
                 category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
+                characterization: None,
                 },
                 SurfaceEntry {
                     id: "--oneline".to_string(),
@@ -1384,10 +1543,12 @@ stderr: pathspec 'main' did not match"#
                     context: None,
                     value_hint: None,
                     status: Status::Pending,
+                    probes: vec![],
                     attempts: vec![make_setup_failed_attempt(3), make_setup_failed_attempt(4)],
                 category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
+                characterization: None,
                 },
             ],
             cycle: 5,
@@ -1416,10 +1577,12 @@ stderr: pathspec 'main' did not match"#
                 context: None,
                 value_hint: None,
                 status: Status::Pending,
+                probes: vec![],
                 attempts: vec![],
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                characterization: None,
             }],
             cycle: 1,
             seed_bank: vec![],
@@ -1458,10 +1621,12 @@ stderr: pathspec 'main' did not match"#
                 context: None,
                 value_hint: None,
                 status: Status::Pending,
+                probes: vec![],
                 attempts: vec![],
                 category: SurfaceCategory::General,
                 retried: true, // This surface was previously excluded and is being retried
                 critique_feedback: None,
+                characterization: None,
             }],
             cycle: 10,
             seed_bank: vec![],
@@ -1615,9 +1780,11 @@ stderr: pathspec 'main' did not match"#
                 value_hint: None,
                 category: SurfaceCategory::General,
                 status: Status::Pending,
+                probes: vec![],
                 attempts: vec![], // Cleared for retry
                 retried: true,
                 critique_feedback: None,
+                characterization: None,
             }],
             cycle: 10,
             seed_bank: vec![],
@@ -1700,9 +1867,11 @@ stderr: pathspec 'main' did not match"#
                 value_hint: None,
                 category: SurfaceCategory::General,
                 status: Status::Pending,
+                probes: vec![],
                 attempts: vec![],
                 retried: true,
                 critique_feedback: None,
+                characterization: None,
             }],
             cycle: 10,
             seed_bank: vec![],
@@ -1716,5 +1885,104 @@ stderr: pathspec 'main' did not match"#
 
         // Should NOT contain prior attempts section
         assert!(!prompt.contains("Prior attempts:"));
+    }
+
+    #[test]
+    fn test_build_prompt_includes_characterization() {
+        use crate::verify::types::Characterization;
+
+        let state = State {
+            schema_version: STATE_SCHEMA_VERSION,
+            binary: "git".to_string(),
+            context_argv: vec!["diff".to_string()],
+            baseline: Some(BaselineRecord {
+                argv: vec!["diff".to_string()],
+                seed: Seed::default(),
+                evidence_path: "evidence/baseline.json".to_string(),
+            }),
+            entries: vec![SurfaceEntry {
+                id: "--patience".to_string(),
+                description: "Generate a diff using the patience algorithm".to_string(),
+                context: None,
+                value_hint: None,
+                status: Status::Pending,
+                probes: vec![],
+                attempts: vec![],
+                category: SurfaceCategory::General,
+                retried: false,
+                critique_feedback: None,
+                characterization: Some(Characterization {
+                    trigger: "file with repeated similar lines where hunk boundaries are ambiguous".to_string(),
+                    expected_diff: "different hunk grouping in diff output".to_string(),
+                    revision: 0,
+                }),
+            }],
+            cycle: 1,
+            seed_bank: vec![],
+            help_preamble: String::new(),
+        };
+
+        let prompt = build_prompt(&state, &["--patience".to_string()]);
+
+        assert!(prompt.contains("**Trigger**: file with repeated similar lines"));
+        assert!(prompt.contains("**Expected diff**: different hunk grouping"));
+        assert!(prompt.contains("Build a seed that creates the trigger condition"));
+    }
+
+    #[test]
+    fn test_build_prompt_outputs_equal_diagnosis_with_characterization() {
+        use crate::verify::types::Characterization;
+
+        let state = State {
+            schema_version: STATE_SCHEMA_VERSION,
+            binary: "git".to_string(),
+            context_argv: vec!["diff".to_string()],
+            baseline: Some(BaselineRecord {
+                argv: vec!["diff".to_string()],
+                seed: Seed::default(),
+                evidence_path: "evidence/baseline.json".to_string(),
+            }),
+            entries: vec![SurfaceEntry {
+                id: "--patience".to_string(),
+                description: "Generate a diff using the patience algorithm".to_string(),
+                context: None,
+                value_hint: None,
+                status: Status::Pending,
+                probes: vec![],
+                attempts: vec![Attempt {
+                    cycle: 1,
+                    args: vec!["--patience".to_string()],
+                    full_argv: vec!["git".to_string(), "diff".to_string(), "--patience".to_string()],
+                    seed: Seed::default(),
+                    evidence_path: "evidence/patience_1.json".to_string(),
+                    outcome: Outcome::OutputsEqual,
+                    stdout_preview: Some("hello world".to_string()),
+                    stderr_preview: None,
+                    control_stdout_preview: Some("hello world".to_string()),
+                    fs_diff: None,
+                    stdout_metrics: None,
+                    stderr_metrics: None,
+                    prediction_matched: None,
+                }],
+                category: SurfaceCategory::General,
+                retried: false,
+                critique_feedback: None,
+                characterization: Some(Characterization {
+                    trigger: "file with repeated similar lines".to_string(),
+                    expected_diff: "different hunk boundaries".to_string(),
+                    revision: 0,
+                }),
+            }],
+            cycle: 2,
+            seed_bank: vec![],
+            help_preamble: String::new(),
+        };
+
+        let prompt = build_prompt(&state, &["--patience".to_string()]);
+
+        // Should show diagnosis referencing the characterization
+        assert!(prompt.contains("DIAGNOSIS"));
+        assert!(prompt.contains("file with repeated similar lines"));
+        assert!(prompt.contains("Does the seed actually create the trigger condition"));
     }
 }

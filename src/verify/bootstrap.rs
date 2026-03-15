@@ -48,9 +48,11 @@ pub(super) fn bootstrap(binary: &str, context_argv: &[String]) -> Result<State> 
                 value_hint: s.value_hint,
                 category,
                 status: Status::Pending,
+                probes: vec![],
                 attempts: vec![],
                 retried: false,
                 critique_feedback: None,
+                characterization: None,
             }
         })
         .collect();

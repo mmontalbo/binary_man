@@ -9,7 +9,7 @@ use super::evidence::{
 };
 use super::lm::{LmAction, PredictedDiff, Prediction};
 use super::types::{
-    Attempt, BaselineRecord, Outcome, Seed, State, Status, VerifiedSeed,
+    Attempt, BaselineRecord, Outcome, ProbeResult, Seed, State, Status, VerifiedSeed,
 };
 use anyhow::Result;
 use std::path::Path;
@@ -45,6 +45,25 @@ fn join_option_value(surface_id: &str, extra_args: Vec<String>) -> Vec<String> {
     let mut args = vec![joined];
     args.extend(extra_args.into_iter().skip(1));
     args
+}
+
+/// Result of running a probe scenario (for parallel execution).
+///
+/// Contains bilateral comparison data — both control and option outputs.
+#[derive(Debug)]
+pub struct ProbeRunResult {
+    pub surface_id: String,
+    pub extra_args: Vec<String>,
+    pub argv: Vec<String>,
+    pub seed: Seed,
+    pub stdout_preview: Option<String>,
+    pub stderr_preview: Option<String>,
+    pub exit_code: Option<u32>,
+    pub control_stdout_preview: Option<String>,
+    /// Whether control and option outputs differ.
+    pub outputs_differ: bool,
+    pub setup_failed: bool,
+    pub cycle: u32,
 }
 
 /// Result of running a test scenario (for parallel execution).
@@ -230,6 +249,84 @@ pub(super) fn merge_test_result(state: &mut State, result: TestResult) {
     }
 }
 
+/// Run a probe scenario without mutating state.
+///
+/// Runs BOTH control and option commands in the same sandbox (bilateral
+/// comparison). Returns whether outputs differ so the caller can
+/// auto-promote to a Test without an extra LM round-trip.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn run_probe_scenario(
+    binary: &str,
+    context_argv: &[String],
+    cycle: u32,
+    surface_id: &str,
+    extra_args: Vec<String>,
+    seed: Seed,
+    with_pty: bool,
+) -> Result<ProbeRunResult> {
+    let scenario_id = format!("probe_{}_c{}", sanitize_id(surface_id), cycle);
+
+    // Construct args: join option + value when needed
+    let args = join_option_value(surface_id, extra_args.clone());
+
+    // Control argv: context_argv only
+    let control_argv: Vec<String> = context_argv.to_vec();
+
+    // Full argv: context_argv + all args
+    let full_argv: Vec<String> = context_argv.iter().chain(args.iter()).cloned().collect();
+
+    // Run both control and option in the same sandbox (bilateral)
+    let (control_evidence, option_evidence) = run_scenario_pair(
+        &scenario_id,
+        binary,
+        &control_argv,
+        &full_argv,
+        &seed,
+        with_pty,
+    )?;
+
+    let stdout_preview = make_output_preview(&option_evidence.stdout, OUTPUT_PREVIEW_MAX_LEN);
+    let stderr_preview = make_output_preview(&option_evidence.stderr, OUTPUT_PREVIEW_MAX_LEN);
+    let control_stdout_preview =
+        make_output_preview(&control_evidence.stdout, OUTPUT_PREVIEW_MAX_LEN);
+
+    // Bilateral comparison: do the outputs differ?
+    let outputs_differ = option_evidence.stdout != control_evidence.stdout
+        || option_evidence.stderr != control_evidence.stderr
+        || option_evidence.exit_code != control_evidence.exit_code;
+
+    Ok(ProbeRunResult {
+        surface_id: surface_id.to_string(),
+        extra_args,
+        argv: full_argv,
+        seed,
+        stdout_preview,
+        stderr_preview,
+        exit_code: option_evidence.exit_code.map(|c| c as u32),
+        control_stdout_preview,
+        outputs_differ,
+        setup_failed: option_evidence.setup_failed,
+        cycle,
+    })
+}
+
+/// Merge a probe result into state.
+pub(super) fn merge_probe_result(state: &mut State, result: ProbeRunResult) {
+    if let Some(entry) = state.entries.iter_mut().find(|e| e.id == result.surface_id) {
+        entry.probes.push(ProbeResult {
+            cycle: result.cycle,
+            argv: result.argv,
+            seed: result.seed,
+            stdout_preview: result.stdout_preview,
+            stderr_preview: result.stderr_preview,
+            exit_code: result.exit_code,
+            control_stdout_preview: result.control_stdout_preview,
+            outputs_differ: result.outputs_differ,
+            setup_failed: result.setup_failed,
+        });
+    }
+}
+
 /// Apply an action to the state.
 ///
 /// This runs scenarios as needed and updates the state with results.
@@ -275,6 +372,23 @@ pub(super) fn apply_action(state: &mut State, pack_path: &Path, action: LmAction
                 prediction,
             )?;
             merge_test_result(state, result);
+        }
+
+        LmAction::Probe {
+            surface_id,
+            extra_args,
+            seed,
+        } => {
+            let result = run_probe_scenario(
+                &state.binary,
+                &state.context_argv,
+                state.cycle,
+                &surface_id,
+                extra_args,
+                seed,
+                false,
+            )?;
+            merge_probe_result(state, result);
         }
     }
     Ok(())
@@ -344,10 +458,12 @@ mod tests {
                 context: None,
                 value_hint: None,
                 status: Status::Pending,
+                probes: vec![],
                 attempts: vec![],
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                characterization: None,
             }],
             cycle: 1,
             seed_bank: vec![],
@@ -501,10 +617,12 @@ mod tests {
                 context: None,
                 value_hint: None,
                 status: Status::Pending,
+                probes: vec![],
                 attempts: vec![],
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                characterization: None,
             }],
             cycle: 1,
             seed_bank: vec![],
