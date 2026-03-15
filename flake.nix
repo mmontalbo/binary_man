@@ -18,13 +18,11 @@
           inherit system;
           config = { allowUnfree = true; };
         };
-        claudePkg = if pkgs ? claude-code then pkgs.claude-code else pkgsUnstable.claude-code;
-        codexPkg = if pkgs ? codex then pkgs.codex else pkgsUnstable.codex;
         rustPkgs = pkgsUnstable;
       in
       {
         devShells.default = pkgs.mkShell {
-          packages = [ claudePkg codexPkg ] ++ (with pkgs; [
+          packages = (with pkgs; [
             rustPkgs.rustc
             rustPkgs.cargo
             rustPkgs.rustfmt
