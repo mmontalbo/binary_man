@@ -19,11 +19,12 @@
 
 mod apply;
 mod bootstrap;
+mod critique;
 mod evidence;
 mod fixtures;
 mod lm;
 mod prompt;
-mod run;
+pub(crate) mod run;
 mod types;
 mod validate;
 
