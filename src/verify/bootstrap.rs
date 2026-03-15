@@ -18,7 +18,7 @@ const CONTEXT_WINDOW_SIZE: usize = 2;
 /// This runs both `--help` and `-h` to discover surface items, merging results
 /// to capture both "common options" and full man page options. An LM call
 /// classifies surfaces into categories for scheduling and execution strategy.
-pub fn bootstrap(binary: &str, context_argv: &[String], _lm_config: &LmConfig) -> Result<State> {
+pub(super) fn bootstrap(binary: &str, context_argv: &[String], _lm_config: &LmConfig) -> Result<State> {
     // 1. Run help discovery - collect from BOTH -h and --help
     let help_outputs = collect_all_help_outputs(binary, context_argv)?;
 

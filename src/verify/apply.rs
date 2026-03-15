@@ -71,7 +71,7 @@ pub struct TestResult {
 /// Verify whether a prediction matches the actual outcome.
 ///
 /// Returns true if the predicted diff matches what actually happened.
-pub fn verify_prediction(
+fn verify_prediction(
     prediction: &Prediction,
     option_evidence: &Evidence,
     control_evidence: &Evidence,
@@ -110,7 +110,7 @@ pub fn verify_prediction(
 /// they see identical filesystem state (including git commit hashes). This
 /// prevents false positives from timestamp-dependent content like git commits.
 #[allow(clippy::too_many_arguments)]
-pub fn run_test_scenario(
+pub(super) fn run_test_scenario(
     pack_path: &Path,
     binary: &str,
     context_argv: &[String],
@@ -189,7 +189,7 @@ pub fn run_test_scenario(
 /// Merge a test result into state.
 ///
 /// This is the fast, sequential part after parallel execution.
-pub fn merge_test_result(state: &mut State, result: TestResult) {
+pub(super) fn merge_test_result(state: &mut State, result: TestResult) {
     if let Some(entry) = state.entries.iter_mut().find(|e| e.id == result.surface_id) {
         entry.attempts.push(Attempt {
             cycle: state.cycle,
@@ -232,14 +232,13 @@ pub fn merge_test_result(state: &mut State, result: TestResult) {
 ///
 /// This runs scenarios as needed and updates the state with results.
 /// After applying, the caller should save the state.
-pub fn apply_action(state: &mut State, pack_path: &Path, action: LmAction) -> Result<()> {
+pub(super) fn apply_action(state: &mut State, pack_path: &Path, action: LmAction) -> Result<()> {
     match action {
         LmAction::SetBaseline { seed } => {
             // Full argv = context_argv (no extra args for baseline)
             let full_argv: Vec<String> = state.context_argv.clone();
 
             let evidence = run_scenario(
-                pack_path,
                 "baseline",
                 &state.binary,
                 &full_argv,

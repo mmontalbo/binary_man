@@ -320,7 +320,7 @@ fn generate_large() -> String {
 }
 
 /// Write all pre-generated fixtures to the sandbox work directory.
-pub fn write_fixtures(work_dir: &Path) -> Result<()> {
+pub(super) fn write_fixtures(work_dir: &Path) -> Result<()> {
     let dir = work_dir.join(FIXTURES_DIR);
     fs::create_dir_all(&dir).context("create _fixtures directory")?;
 

@@ -202,7 +202,7 @@ const SEED_SUMMARY_MAX_LEN: usize = 200;
 /// Shows the last N attempts as a compact summary to help the LM learn from
 /// what didn't work. Only includes mechanical data (seed, outcome), no semantic
 /// parsing of LM responses.
-pub fn format_attempt_history(attempts: &[Attempt], max: usize) -> String {
+fn format_attempt_history(attempts: &[Attempt], max: usize) -> String {
     if attempts.is_empty() {
         return String::new();
     }
@@ -265,48 +265,20 @@ fn format_outcome_compact(outcome: &Outcome) -> String {
         Outcome::Verified { diff_kind } => format!("Verified({:?})", diff_kind),
         Outcome::OutputsEqual => "OutputsEqual".to_string(),
         Outcome::SetupFailed { hint } => {
-            // Include a truncated hint for context
-            let short_hint = if hint.len() > 50 {
-                let mut end = 50;
-                while end > 0 && !hint.is_char_boundary(end) {
-                    end -= 1;
-                }
-                format!("{}...", &hint[..end])
-            } else {
-                hint.clone()
-            };
-            format!("SetupFailed({})", short_hint)
+            format!("SetupFailed({})", super::evidence::truncate_str(hint, 50))
         }
         Outcome::Crashed { hint } => {
-            let short_hint = if hint.len() > 50 {
-                let mut end = 50;
-                while end > 0 && !hint.is_char_boundary(end) {
-                    end -= 1;
-                }
-                format!("{}...", &hint[..end])
-            } else {
-                hint.clone()
-            };
-            format!("Crashed({})", short_hint)
+            format!("Crashed({})", super::evidence::truncate_str(hint, 50))
         }
         Outcome::ExecutionError { error } => format!("ExecutionError({})", error),
         Outcome::OptionError { hint } => {
-            let short_hint = if hint.len() > 50 {
-                let mut end = 50;
-                while end > 0 && !hint.is_char_boundary(end) {
-                    end -= 1;
-                }
-                format!("{}...", &hint[..end])
-            } else {
-                hint.clone()
-            };
-            format!("OptionError({})", short_hint)
+            format!("OptionError({})", super::evidence::truncate_str(hint, 50))
         }
     }
 }
 
 /// Build the LM prompt for a set of target surfaces.
-pub fn build_prompt(state: &State, target_ids: &[String]) -> String {
+pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
     let mut prompt = String::new();
 
     // Header with full base command
@@ -487,7 +459,7 @@ const MAX_PRIOR_ATTEMPTS: usize = 2;
 ///
 /// This is used during the retry pass for surfaces that were previously excluded.
 /// Each surface only sees its own attempt history (no cross-surface hints).
-pub fn build_retry_prompt(
+pub(super) fn build_retry_prompt(
     state: &State,
     target_ids: &[String],
     prior_attempts: &std::collections::HashMap<String, Vec<Attempt>>,
@@ -603,7 +575,7 @@ pub fn build_retry_prompt(
 /// - Results from the last cycle
 /// - Remaining pending surfaces (brief list)
 /// - Request for next actions
-pub fn build_incremental_prompt(
+pub(super) fn build_incremental_prompt(
     state: &State,
     target_ids: &[String],
     last_response: Option<&super::lm::LmResponse>,

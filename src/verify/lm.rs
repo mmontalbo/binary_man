@@ -90,7 +90,7 @@ pub enum LmAction {
 /// 1. Extract from markdown code fences
 /// 2. Find `{"actions":` pattern anywhere in text
 /// 3. Extract individual JSON objects from prose
-pub fn parse_lm_response(text: &str) -> Result<LmResponse> {
+pub(super) fn parse_lm_response(text: &str) -> Result<LmResponse> {
     // Strategy 1: Extract JSON from markdown code fences if present
     let json_text = extract_json(text);
     let fixed_json = fix_common_typos(&json_text);
@@ -532,7 +532,7 @@ fn truncate_safe(s: &str, max_bytes: usize) -> &str {
 }
 
 /// Log a prompt to the LM log directory.
-pub fn log_prompt(pack_path: &Path, cycle: u32, prompt: &str) -> Result<()> {
+pub(super) fn log_prompt(pack_path: &Path, cycle: u32, prompt: &str) -> Result<()> {
     let log_dir = pack_path.join("lm_log");
     std::fs::create_dir_all(&log_dir).context("create lm_log directory")?;
 
@@ -541,7 +541,7 @@ pub fn log_prompt(pack_path: &Path, cycle: u32, prompt: &str) -> Result<()> {
 }
 
 /// Log an LM response to the LM log directory.
-pub fn log_response(pack_path: &Path, cycle: u32, response: &LmResponse) -> Result<()> {
+pub(super) fn log_response(pack_path: &Path, cycle: u32, response: &LmResponse) -> Result<()> {
     let log_dir = pack_path.join("lm_log");
     std::fs::create_dir_all(&log_dir).context("create lm_log directory")?;
 

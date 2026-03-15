@@ -14,7 +14,7 @@ use super::types::{State, Status};
 /// Handles cases like:
 /// - `--option=value` → surface_id: `--option`, extra_args: [`value`]
 /// - `-Uvalue` → surface_id: `-U`, extra_args: [`value`] (short option with attached value)
-pub fn normalize_action(action: LmAction, state: &State) -> LmAction {
+pub(super) fn normalize_action(action: LmAction, state: &State) -> LmAction {
     match action {
         LmAction::Test {
             surface_id,
@@ -82,7 +82,7 @@ pub fn normalize_action(action: LmAction, state: &State) -> LmAction {
 ///
 /// Returns `Ok(())` if the action is valid, or `Err` with a description
 /// of what's wrong.
-pub fn validate_action(action: &LmAction, state: &State) -> Result<(), String> {
+pub(super) fn validate_action(action: &LmAction, state: &State) -> Result<(), String> {
     match action {
         LmAction::SetBaseline { .. } => {
             if state.baseline.is_some() {

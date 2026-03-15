@@ -32,7 +32,7 @@ enum Action {
 /// - DEMOTE: Return surface to Pending for retry
 ///
 /// Batches are processed in parallel for faster throughput.
-pub fn critique_verified_surfaces(
+pub(super) fn critique_verified_surfaces(
     state: &mut State,
     pack_path: &Path,
     lm_config: &LmConfig,

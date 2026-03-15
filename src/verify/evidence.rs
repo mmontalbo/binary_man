@@ -165,8 +165,7 @@ pub struct Evidence {
 ///
 /// If `with_pty` is true, the command runs in a pseudo-terminal, capturing
 /// ANSI color codes and other terminal-dependent output.
-pub fn run_scenario(
-    _pack_path: &Path,
+pub(super) fn run_scenario(
     scenario_id: &str,
     binary: &str,
     argv: &[String],
@@ -393,7 +392,7 @@ pub fn run_scenario(
 ///
 /// After setup completes, the sandbox can run multiple commands sequentially,
 /// ensuring they share the same filesystem state (including git commit hashes).
-pub struct PreparedSandbox {
+struct PreparedSandbox {
     /// The temporary directory (kept alive for cleanup on drop).
     _temp_dir: tempfile::TempDir,
     /// Working directory path inside the sandbox.
@@ -658,7 +657,7 @@ fn run_in_sandbox(
 /// This ensures both commands see identical filesystem state (including
 /// git commit hashes that depend on timestamps), providing meaningful
 /// comparison of option effects.
-pub fn run_scenario_pair(
+pub(super) fn run_scenario_pair(
     scenario_id: &str,
     binary: &str,
     control_argv: &[String],
@@ -737,7 +736,7 @@ fn truncate_output(bytes: &[u8]) -> String {
 ///
 /// Returns a map of relative file paths to (size, mtime) tuples.
 /// Ignores hidden files (starting with '.').
-pub fn capture_fs_state(dir: &Path) -> HashMap<PathBuf, (u64, u128)> {
+fn capture_fs_state(dir: &Path) -> HashMap<PathBuf, (u64, u128)> {
     let mut state = HashMap::new();
     if fs::read_dir(dir).is_ok() {
         capture_fs_state_recursive(dir, dir, &mut state);
@@ -835,7 +834,7 @@ fn compute_output_metrics(output: &str) -> OutputMetrics {
 }
 
 /// Write evidence to a file in the pack.
-pub fn write_evidence(pack_path: &Path, relative_path: &str, evidence: &Evidence) -> Result<()> {
+pub(super) fn write_evidence(pack_path: &Path, relative_path: &str, evidence: &Evidence) -> Result<()> {
     let full_path = pack_path.join(relative_path);
     if let Some(parent) = full_path.parent() {
         fs::create_dir_all(parent).context("create evidence directory")?;
@@ -846,7 +845,7 @@ pub fn write_evidence(pack_path: &Path, relative_path: &str, evidence: &Evidence
 }
 
 /// Truncate a string to a maximum number of characters.
-pub fn truncate_str(s: &str, max_chars: usize) -> String {
+pub(super) fn truncate_str(s: &str, max_chars: usize) -> String {
     if s.len() <= max_chars {
         s.to_string()
     } else {
@@ -859,10 +858,10 @@ pub fn truncate_str(s: &str, max_chars: usize) -> String {
 }
 
 /// Maximum length for output previews stored in Attempt records.
-pub const OUTPUT_PREVIEW_MAX_LEN: usize = 200;
+pub(super) const OUTPUT_PREVIEW_MAX_LEN: usize = 200;
 
 /// Create an output preview, returning None if empty.
-pub fn make_output_preview(output: &str, max_len: usize) -> Option<String> {
+pub(super) fn make_output_preview(output: &str, max_len: usize) -> Option<String> {
     if output.is_empty() {
         None
     } else {
@@ -871,7 +870,7 @@ pub fn make_output_preview(output: &str, max_len: usize) -> Option<String> {
 }
 
 /// Sanitize a surface ID for use in filenames.
-pub fn sanitize_id(id: &str) -> String {
+pub(super) fn sanitize_id(id: &str) -> String {
     // Leading dashes are common in option names but problematic in filenames
     let trimmed = id.trim_start_matches('-');
     trimmed
@@ -893,7 +892,7 @@ use super::types::{DiffKind, Outcome};
 /// The control evidence is from running the same seed with just context_argv (no option).
 /// The option evidence is from running with the full argv including the option.
 /// This isolates the effect of the option by keeping everything else constant.
-pub fn compute_outcome(option_evidence: &Evidence, control_evidence: &Evidence) -> Outcome {
+pub(super) fn compute_outcome(option_evidence: &Evidence, control_evidence: &Evidence) -> Outcome {
     // Handle execution errors in the option run
     if let Some(error) = &option_evidence.execution_error {
         return Outcome::ExecutionError {
@@ -990,11 +989,8 @@ mod tests {
 
     #[test]
     fn test_run_simple_scenario() {
-        let temp_pack = tempfile::tempdir().unwrap();
-
         let seed = Seed::default();
         let evidence = run_scenario(
-            temp_pack.path(),
             "test",
             "echo",
             &["hello".to_string()],
@@ -1011,8 +1007,6 @@ mod tests {
 
     #[test]
     fn test_run_with_seed_files() {
-        let temp_pack = tempfile::tempdir().unwrap();
-
         let seed = Seed {
             setup: vec![],
             files: vec![FileEntry {
@@ -1021,7 +1015,6 @@ mod tests {
             }],
         };
         let evidence = run_scenario(
-            temp_pack.path(),
             "test",
             "cat",
             &["input.txt".to_string()],
@@ -1036,8 +1029,6 @@ mod tests {
 
     #[test]
     fn test_run_with_setup_commands() {
-        let temp_pack = tempfile::tempdir().unwrap();
-
         let seed = Seed {
             setup: vec![vec![
                 "mkdir".to_string(),
@@ -1050,7 +1041,6 @@ mod tests {
             }],
         };
         let evidence = run_scenario(
-            temp_pack.path(),
             "test",
             "cat",
             &["subdir/file.txt".to_string()],
@@ -1064,12 +1054,9 @@ mod tests {
 
     #[test]
     fn test_run_with_pty() {
-        let temp_pack = tempfile::tempdir().unwrap();
-
         let seed = Seed::default();
         // Run echo with PTY mode
         let evidence = run_scenario(
-            temp_pack.path(),
             "test_pty",
             "echo",
             &["hello".to_string()],
@@ -1086,12 +1073,9 @@ mod tests {
 
     #[test]
     fn test_pty_captures_colors() {
-        let temp_pack = tempfile::tempdir().unwrap();
-
         let seed = Seed::default();
         // Run ls with color=always in PTY mode - should capture ANSI codes
         let evidence = run_scenario(
-            temp_pack.path(),
             "test_color",
             "ls",
             &["--color=always".to_string(), "/".to_string()],
