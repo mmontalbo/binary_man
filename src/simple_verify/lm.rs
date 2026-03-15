@@ -7,8 +7,8 @@
 //! ```json
 //! {
 //!   "actions": [
-//!     { "kind": "SetBaseline", "args": [], "seed": { "setup": [["git", "init"]], "files": [] } },
-//!     { "kind": "Test", "surface_id": "--stat", "args": ["--stat"], "seed": { ... } }
+//!     { "kind": "SetBaseline", "seed": { "setup": [["git", "init"]], "files": [] } },
+//!     { "kind": "Test", "surface_id": "--stat", "seed": { ... } }
 //!   ]
 //! }
 //! ```
@@ -25,6 +25,33 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::Path;
 
+/// Prediction of expected behavior for a test.
+///
+/// The LM specifies what it expects to happen when running the test,
+/// allowing mechanical verification instead of subjective critique.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Prediction {
+    /// What type of difference is expected.
+    pub diff_type: PredictedDiff,
+    /// Brief explanation of why this is expected.
+    pub reason: String,
+}
+
+/// Type of difference expected between control and option runs.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum PredictedDiff {
+    /// Option output should be empty or much shorter (suppression options like --no-*, --quiet).
+    StdoutEmpty,
+    /// Option output should contain specific text or pattern.
+    StdoutContains(String),
+    /// Stdout format/content differs (generic difference).
+    StdoutDifferent,
+    /// Stderr should contain something different.
+    StderrDifferent,
+    /// Exit code should differ.
+    ExitCodeDifferent,
+}
+
 /// Response from the LM containing actions to execute.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LmResponse {
@@ -38,19 +65,21 @@ pub struct LmResponse {
 pub enum LmAction {
     /// Set the baseline scenario (required first, exactly once).
     SetBaseline {
-        /// Additional arguments appended to base command (usually empty).
-        args: Vec<String>,
         /// Seed setup for the baseline.
         seed: Seed,
     },
     /// Test a specific surface.
     Test {
-        /// Which surface to test.
+        /// Which surface to test (automatically included in command).
         surface_id: String,
-        /// Arguments appended to base command (system prepends context_argv).
-        args: Vec<String>,
+        /// Additional arguments beyond surface_id (optional).
+        #[serde(default)]
+        extra_args: Vec<String>,
         /// Seed setup for this test.
         seed: Seed,
+        /// Prediction of expected outcome (optional for backward compatibility).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prediction: Option<Prediction>,
     },
 }
 
@@ -268,19 +297,20 @@ fn parse_action_object(obj: &Value) -> Result<Option<LmAction>> {
 
     // Check for baseline action (baseline/Baseline)
     if get_key(obj, &["baseline", "Baseline"]).is_some() {
-        let args = parse_shell_args(get_key(obj, &["args", "Args"]))?;
         let seed = parse_seed(obj)?;
-        return Ok(Some(LmAction::SetBaseline { args, seed }));
+        return Ok(Some(LmAction::SetBaseline { seed }));
     }
 
     // Check for test action (test/Test)
     if let Some(surface) = get_key(obj, &["test", "Test"]).and_then(|v| v.as_str()) {
-        let args = parse_shell_args(get_key(obj, &["args", "Args"]))?;
+        let extra_args = parse_shell_args(get_key(obj, &["extra_args", "Extra_args"]))?;
         let seed = parse_seed(obj)?;
+        let prediction = parse_prediction(get_key(obj, &["prediction", "Prediction"]));
         return Ok(Some(LmAction::Test {
             surface_id: surface.to_string(),
-            args,
+            extra_args,
             seed,
+            prediction,
         }));
     }
 
@@ -400,6 +430,50 @@ fn parse_files(value: Option<&Value>) -> Result<Vec<FileEntry>> {
     }
 }
 
+/// Parse prediction from JSON object.
+///
+/// Expected format:
+/// ```json
+/// {
+///   "diff_type": "StdoutEmpty" | "StdoutDifferent" | "StderrDifferent" | "ExitCodeDifferent" | {"StdoutContains": "text"},
+///   "reason": "explanation"
+/// }
+/// ```
+fn parse_prediction(value: Option<&Value>) -> Option<Prediction> {
+    let obj = value?;
+
+    // Get reason (required)
+    let reason = obj
+        .get("reason")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+
+    // Parse diff_type - can be string or object with StdoutContains
+    let diff_type_value = obj.get("diff_type")?;
+
+    let diff_type = match diff_type_value {
+        Value::String(s) => match s.as_str() {
+            "StdoutEmpty" => PredictedDiff::StdoutEmpty,
+            "StdoutDifferent" => PredictedDiff::StdoutDifferent,
+            "StderrDifferent" => PredictedDiff::StderrDifferent,
+            "ExitCodeDifferent" => PredictedDiff::ExitCodeDifferent,
+            _ => return None,
+        },
+        Value::Object(map) => {
+            // Handle {"StdoutContains": "text"} format
+            if let Some(Value::String(text)) = map.get("StdoutContains") {
+                PredictedDiff::StdoutContains(text.clone())
+            } else {
+                return None;
+            }
+        }
+        _ => return None,
+    };
+
+    Some(Prediction { diff_type, reason })
+}
+
 /// Extract JSON from text that might have markdown code fences.
 fn extract_json(text: &str) -> String {
     let text = text.trim();
@@ -503,8 +577,7 @@ mod tests {
         assert_eq!(response.actions.len(), 1);
 
         match &response.actions[0] {
-            LmAction::SetBaseline { args, seed } => {
-                assert!(args.is_empty());
+            LmAction::SetBaseline { seed } => {
                 assert_eq!(seed.setup.len(), 2);
                 assert_eq!(seed.setup[0], vec!["git", "init"]);
                 assert_eq!(seed.setup[1], vec!["touch", "file.txt"]);
@@ -515,33 +588,36 @@ mod tests {
 
     #[test]
     fn test_parse_simplified_test() {
-        let text = r#"{"test": "--stat", "args": "--stat", "setup": "git init"}"#;
+        let text = r#"{"test": "--stat", "setup": "git init"}"#;
         let response = parse_lm_response(text).unwrap();
         assert_eq!(response.actions.len(), 1);
 
         match &response.actions[0] {
             LmAction::Test {
                 surface_id,
-                args,
+                extra_args,
                 seed,
+                prediction,
             } => {
                 assert_eq!(surface_id, "--stat");
-                assert_eq!(args, &["--stat"]);
+                assert!(extra_args.is_empty()); // No extra_args needed
                 assert_eq!(seed.setup.len(), 1);
                 assert_eq!(seed.setup[0], vec!["git", "init"]);
+                assert!(prediction.is_none()); // No prediction in this test case
             }
             _ => panic!("Expected Test"),
         }
     }
 
     #[test]
-    fn test_parse_simplified_test_with_multi_args() {
-        let text = r#"{"test": "--width", "args": "--width 20", "setup": "touch file.txt"}"#;
+    fn test_parse_simplified_test_with_extra_args() {
+        let text = r#"{"test": "--width", "extra_args": "20", "setup": "touch file.txt"}"#;
         let response = parse_lm_response(text).unwrap();
 
         match &response.actions[0] {
-            LmAction::Test { args, .. } => {
-                assert_eq!(args, &["--width", "20"]);
+            LmAction::Test { surface_id, extra_args, .. } => {
+                assert_eq!(surface_id, "--width");
+                assert_eq!(extra_args, &["20"]);
             }
             _ => panic!("Expected Test"),
         }
@@ -551,8 +627,8 @@ mod tests {
     fn test_parse_simplified_multiple_objects() {
         let text = r#"
 {"baseline": true, "setup": "touch file.txt"}
-{"test": "--all", "args": "--all", "setup": "touch .hidden"}
-{"test": "--verbose", "args": "--verbose", "setup": "touch test.txt"}
+{"test": "--all", "setup": "touch .hidden"}
+{"test": "--verbose", "setup": "touch test.txt"}
 "#;
         let response = parse_lm_response(text).unwrap();
         assert_eq!(response.actions.len(), 3);
@@ -570,7 +646,7 @@ First, set up the baseline:
 {"baseline": true, "setup": "touch file.txt"}
 
 Then test the option:
-{"test": "--all", "args": "--all", "setup": "touch .hidden"}
+{"test": "--all", "setup": "touch .hidden"}
 
 That should work!
 "#;
@@ -582,7 +658,7 @@ That should work!
     fn test_parse_simplified_with_code_fence() {
         let text = r#"```json
 {"baseline": true, "setup": "touch file.txt"}
-{"test": "--all", "args": "--all", "setup": "touch .hidden"}
+{"test": "--all", "setup": "touch .hidden"}
 ```"#;
         let response = parse_lm_response(text).unwrap();
         assert_eq!(response.actions.len(), 2);
@@ -590,12 +666,11 @@ That should work!
 
     #[test]
     fn test_parse_simplified_empty_setup() {
-        let text = r#"{"baseline": true, "args": "", "setup": ""}"#;
+        let text = r#"{"baseline": true, "setup": ""}"#;
         let response = parse_lm_response(text).unwrap();
 
         match &response.actions[0] {
-            LmAction::SetBaseline { args, seed } => {
-                assert!(args.is_empty());
+            LmAction::SetBaseline { seed } => {
                 assert!(seed.setup.is_empty());
             }
             _ => panic!("Expected SetBaseline"),
@@ -608,7 +683,7 @@ That should work!
         let response = parse_lm_response(text).unwrap();
 
         match &response.actions[0] {
-            LmAction::SetBaseline { seed, .. } => {
+            LmAction::SetBaseline { seed } => {
                 assert!(seed.setup.is_empty());
             }
             _ => panic!("Expected SetBaseline"),
@@ -684,13 +759,11 @@ That should work!
             "actions": [
                 {
                     "kind": "SetBaseline",
-                    "args": [],
                     "seed": {"setup": [["git", "init"]], "files": []}
                 },
                 {
                     "kind": "Test",
                     "surface_id": "--stat",
-                    "args": ["--stat"],
                     "seed": {"setup": [["git", "init"]], "files": []}
                 }
             ]
@@ -700,18 +773,16 @@ That should work!
         assert_eq!(response.actions.len(), 2);
 
         match &response.actions[0] {
-            LmAction::SetBaseline { args, .. } => {
-                assert!(args.is_empty());
-            }
+            LmAction::SetBaseline { .. } => {}
             _ => panic!("Expected SetBaseline"),
         }
 
         match &response.actions[1] {
             LmAction::Test {
-                surface_id, args, ..
+                surface_id, extra_args, ..
             } => {
                 assert_eq!(surface_id, "--stat");
-                assert_eq!(args, &["--stat"]);
+                assert!(extra_args.is_empty()); // No extra_args in this case
             }
             _ => panic!("Expected Test"),
         }
@@ -844,7 +915,7 @@ That should work!
 Here's my response:
 
 {"baseline": true, "setup": "git init && touch file.txt"}
-{"test": "--stat", "args": "--stat", "setup": "touch test.txt"}
+{"test": "--stat", "setup": "touch test.txt"}
 "#;
 
         let response = parse_lm_response(text).unwrap();
@@ -852,7 +923,7 @@ Here's my response:
 
         // Verify flexible setup parsing worked
         match &response.actions[0] {
-            LmAction::SetBaseline { seed, .. } => {
+            LmAction::SetBaseline { seed } => {
                 assert_eq!(seed.setup.len(), 2);
                 assert_eq!(seed.setup[0], vec!["git", "init"]);
                 assert_eq!(seed.setup[1], vec!["touch", "file.txt"]);
@@ -868,13 +939,11 @@ Here's my response:
             "actions": [
                 {
                     "kind": "SetBaseline",
-                    "args": [],
                     "seed": {"setup": [["git", "init"], ["touch", "file.txt"]], "files": []}
                 },
                 {
                     "kind": "Test",
                     "surface_id": "--stat",
-                    "args": ["--stat"],
                     "seed": {"setup": [["git", "init"]], "files": []}
                 }
             ]
@@ -884,11 +953,96 @@ Here's my response:
         assert_eq!(response.actions.len(), 2);
 
         match &response.actions[0] {
-            LmAction::SetBaseline { seed, .. } => {
+            LmAction::SetBaseline { seed } => {
                 assert_eq!(seed.setup.len(), 2);
                 assert_eq!(seed.setup[0], vec!["git", "init"]);
             }
             _ => panic!("Expected SetBaseline"),
+        }
+    }
+
+    // ==================== Prediction Parsing Tests ====================
+
+    #[test]
+    fn test_parse_prediction_stdout_empty() {
+        let text = r#"{"test": "--no-patch", "prediction": {"diff_type": "StdoutEmpty", "reason": "suppresses diff output"}, "setup": "git init"}"#;
+        let response = parse_lm_response(text).unwrap();
+
+        match &response.actions[0] {
+            LmAction::Test { prediction, .. } => {
+                let pred = prediction.as_ref().expect("Expected prediction");
+                assert_eq!(pred.diff_type, PredictedDiff::StdoutEmpty);
+                assert_eq!(pred.reason, "suppresses diff output");
+            }
+            _ => panic!("Expected Test"),
+        }
+    }
+
+    #[test]
+    fn test_parse_prediction_stdout_contains() {
+        let text = r#"{"test": "--stat", "prediction": {"diff_type": {"StdoutContains": "insertions"}, "reason": "shows statistics"}, "setup": "git init"}"#;
+        let response = parse_lm_response(text).unwrap();
+
+        match &response.actions[0] {
+            LmAction::Test { prediction, .. } => {
+                let pred = prediction.as_ref().expect("Expected prediction");
+                assert_eq!(
+                    pred.diff_type,
+                    PredictedDiff::StdoutContains("insertions".to_string())
+                );
+                assert_eq!(pred.reason, "shows statistics");
+            }
+            _ => panic!("Expected Test"),
+        }
+    }
+
+    #[test]
+    fn test_parse_prediction_stdout_different() {
+        let text = r#"{"test": "--color", "extra_args": ["=always"], "prediction": {"diff_type": "StdoutDifferent", "reason": "adds color codes"}, "setup": "touch file.txt"}"#;
+        let response = parse_lm_response(text).unwrap();
+
+        match &response.actions[0] {
+            LmAction::Test { prediction, .. } => {
+                let pred = prediction.as_ref().expect("Expected prediction");
+                assert_eq!(pred.diff_type, PredictedDiff::StdoutDifferent);
+            }
+            _ => panic!("Expected Test"),
+        }
+    }
+
+    #[test]
+    fn test_parse_prediction_none_when_missing() {
+        let text = r#"{"test": "--verbose", "setup": "touch file.txt"}"#;
+        let response = parse_lm_response(text).unwrap();
+
+        match &response.actions[0] {
+            LmAction::Test { prediction, .. } => {
+                assert!(prediction.is_none());
+            }
+            _ => panic!("Expected Test"),
+        }
+    }
+
+    #[test]
+    fn test_parse_prediction_in_actions_format() {
+        let text = r#"{
+            "actions": [
+                {
+                    "kind": "Test",
+                    "surface_id": "--quiet",
+                    "prediction": {"diff_type": "StdoutEmpty", "reason": "suppresses output"},
+                    "seed": {"setup": [], "files": []}
+                }
+            ]
+        }"#;
+        let response = parse_lm_response(text).unwrap();
+
+        match &response.actions[0] {
+            LmAction::Test { prediction, .. } => {
+                let pred = prediction.as_ref().expect("Expected prediction");
+                assert_eq!(pred.diff_type, PredictedDiff::StdoutEmpty);
+            }
+            _ => panic!("Expected Test"),
         }
     }
 }
