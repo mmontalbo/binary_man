@@ -7,7 +7,7 @@ use super::apply::{apply_action, merge_probe_result, merge_test_result, run_prob
 use super::bootstrap::bootstrap;
 use super::lm::{log_prompt, log_raw_response, log_response, parse_lm_response, LmAction, LmResponse};
 use super::prompt::{build_incremental_prompt, build_prompt, build_retry_prompt};
-use super::types::{Attempt, Outcome, State, Status, SurfaceCategory, VerifiedSeed};
+use super::types::{Attempt, Outcome, State, Status, SurfaceCategory, SurfaceEntry, VerifiedSeed};
 use super::validate::{normalize_action, validate_action};
 use crate::cli::ContextMode;
 use crate::lm::{create_plugin, LmConfig, LmPlugin};
@@ -22,6 +22,9 @@ use std::time::Duration;
 
 /// Maximum verification attempts per surface before auto-exhausting.
 const MAX_ATTEMPTS: usize = 5;
+
+/// Consecutive OutputsEqual outcomes that trigger early stagnation exclusion.
+const STAGNATION_THRESHOLD: usize = 3;
 
 /// Maximum surfaces to include in each LM batch.
 const BATCH_SIZE: usize = 5;
@@ -75,6 +78,19 @@ fn category_priority(category: &SurfaceCategory, state: &State) -> usize {
         }
         SurfaceCategory::TtyDependent => 5,
     }
+}
+
+/// Check if a surface's recent attempts show stagnation (consecutive OutputsEqual).
+fn is_stagnant(entry: &SurfaceEntry) -> bool {
+    if entry.attempts.len() < STAGNATION_THRESHOLD {
+        return false;
+    }
+    entry
+        .attempts
+        .iter()
+        .rev()
+        .take(STAGNATION_THRESHOLD)
+        .all(|a| matches!(a.outcome, Outcome::OutputsEqual))
 }
 
 
@@ -374,8 +390,39 @@ fn run_parallel_sessions(
                         let pending_ids = {
                             let mut progress = shared.lock().unwrap();
 
-                            // Find pending surfaces not resolved or in-progress
-                            let mut candidates: Vec<(usize, String)> = session_state
+                            // Exclude stagnant surfaces early using global attempt counts.
+                            // Session-local state may not reflect all sessions' attempts,
+                            // so we check the shared progress for accurate counts.
+                            for entry in &mut session_state.entries {
+                                let global = *progress
+                                    .attempt_counts
+                                    .get(&entry.id)
+                                    .unwrap_or(&0);
+                                if matches!(entry.status, Status::Pending)
+                                    && !progress.resolved.contains(&entry.id)
+                                    && global >= STAGNATION_THRESHOLD
+                                    && is_stagnant(entry)
+                                {
+                                    entry.status = Status::Excluded {
+                                        reason: format!(
+                                            "Stagnant ({} consecutive OutputsEqual)",
+                                            STAGNATION_THRESHOLD,
+                                        ),
+                                    };
+                                    progress.resolved.insert(entry.id.clone());
+                                    if verbose {
+                                        eprintln!(
+                                            "  Early-excluded {} (stagnant)",
+                                            entry.id
+                                        );
+                                    }
+                                }
+                            }
+
+                            // Find pending surfaces not resolved or in-progress.
+                            // Sort by (category_priority, global_attempt_count) so
+                            // untouched surfaces always go before retries.
+                            let mut candidates: Vec<(usize, usize, String)> = session_state
                                 .entries
                                 .iter()
                                 .filter(|e| {
@@ -384,18 +431,23 @@ fn run_parallel_sessions(
                                         && !progress.in_progress.contains(&e.id)
                                 })
                                 .map(|e| {
+                                    let global_attempts = *progress
+                                        .attempt_counts
+                                        .get(&e.id)
+                                        .unwrap_or(&0);
                                     (
                                         category_priority(&e.category, &session_state),
+                                        global_attempts,
                                         e.id.clone(),
                                     )
                                 })
                                 .collect();
-                            candidates.sort_by_key(|(p, _)| *p);
+                            candidates.sort_by_key(|(p, a, _)| (*p, *a));
 
                             let batch: Vec<String> = candidates
                                 .into_iter()
                                 .take(BATCH_SIZE)
-                                .map(|(_, id)| id)
+                                .map(|(_, _, id)| id)
                                 .collect();
 
                             if batch.is_empty() {
@@ -1090,29 +1142,39 @@ fn run_chunk(
             return Ok(RunResult::HitMaxCycles);
         }
 
-        // Auto-exhaust surfaces over attempt limit
+        // Auto-exhaust surfaces over attempt limit or stagnation
         for entry in &mut state.entries {
-            if chunk_ids.contains(&entry.id)
-                && matches!(entry.status, Status::Pending)
-                && entry.attempts.len() >= MAX_ATTEMPTS
-            {
-                entry.status = Status::Excluded {
-                    reason: format!("Exhausted after {} attempts", MAX_ATTEMPTS),
-                };
-                if verbose {
-                    eprintln!("Auto-excluded {} (exhausted attempts)", entry.id);
+            if chunk_ids.contains(&entry.id) && matches!(entry.status, Status::Pending) {
+                if entry.attempts.len() >= MAX_ATTEMPTS {
+                    entry.status = Status::Excluded {
+                        reason: format!("Exhausted after {} attempts", MAX_ATTEMPTS),
+                    };
+                    if verbose {
+                        eprintln!("Auto-excluded {} (exhausted attempts)", entry.id);
+                    }
+                } else if is_stagnant(entry) {
+                    entry.status = Status::Excluded {
+                        reason: format!(
+                            "Stagnant ({} consecutive OutputsEqual)",
+                            STAGNATION_THRESHOLD,
+                        ),
+                    };
+                    if verbose {
+                        eprintln!("Early-excluded {} (stagnant)", entry.id);
+                    }
                 }
             }
         }
 
-        // Find pending targets, sorted by category priority
-        let mut all_pending: Vec<(usize, String)> = state
+        // Find pending targets, sorted by (category_priority, attempt_count)
+        // so untouched surfaces always go before surfaces with failed attempts.
+        let mut all_pending: Vec<(usize, usize, String)> = state
             .entries
             .iter()
             .filter(|e| chunk_ids.contains(&e.id) && matches!(e.status, Status::Pending))
-            .map(|e| (category_priority(&e.category, state), e.id.clone()))
+            .map(|e| (category_priority(&e.category, state), e.attempts.len(), e.id.clone()))
             .collect();
-        all_pending.sort_by_key(|(p, _)| *p);
+        all_pending.sort_by_key(|(p, a, _)| (*p, *a));
 
         // Only reduce batch size during explicit retry passes
         let batch_size = if is_retry { 2 } else { BATCH_SIZE };
@@ -1120,7 +1182,7 @@ fn run_chunk(
         let pending_ids: Vec<String> = all_pending
             .into_iter()
             .take(batch_size)
-            .map(|(_, id)| id)
+            .map(|(_, _, id)| id)
             .collect();
 
         if pending_ids.is_empty() {
