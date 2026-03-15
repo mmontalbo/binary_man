@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -311,7 +312,50 @@ def analyze(state: dict) -> None:
             print(f"│    ... +{len(e['attempts']) - 2} more")
     print("└──────────────────────────────────────────────────────")
 
-    # ── 7. Diagnosis ────────────────────────────────────────
+    # ── 7. Stability estimate ─────────────────────────────
+    print("\n┌─ STABILITY ESTIMATE ──────────────────────────────────")
+    # Classify each surface into a stability tier
+    stable_verified = []   # attempt-1 success
+    fragile_verified = []  # needed 2+ attempts
+    fragile_excluded = []  # excluded after attempts (might flip)
+    structural_excluded = []  # never attempted or structural barrier
+
+    for e in entries:
+        status = get_status(e)
+        attempts = e.get("attempts", [])
+        if status == "Verified":
+            if len(attempts) <= 1:
+                stable_verified.append(e["id"])
+            else:
+                fragile_verified.append(e["id"])
+        elif status == "Excluded":
+            if not attempts:
+                structural_excluded.append(e["id"])
+            else:
+                fragile_excluded.append(e["id"])
+
+    floor = len(stable_verified)
+    likely = floor + len(fragile_verified)
+    variance_band = len(fragile_verified) + len(fragile_excluded)
+    ceiling = total - len(structural_excluded)
+
+    print(f"│  Stable verified (attempt 1):  {floor:3d}  ({floor * 100 // total}%)")
+    print(f"│  Fragile verified (attempt 2+): {len(fragile_verified):3d}")
+    print(f"│  Fragile excluded (had attempts):{len(fragile_excluded):3d}")
+    print(f"│  Structural excluded (0 attempts):{len(structural_excluded):3d}")
+    print(f"│")
+    print(f"│  Estimated range: {floor}–{ceiling} verified ({floor * 100 // total}%–{ceiling * 100 // total}%)")
+    print(f"│  Variance band:   {variance_band} surfaces ({variance_band * 100 // total}% of total)")
+    if fragile_excluded:
+        print(f"│")
+        print(f"│  Fragile excluded (could flip on re-run):")
+        for sid in sorted(fragile_excluded):
+            e = next(x for x in entries if x["id"] == sid)
+            outcomes = [get_outcome(a) for a in e["attempts"]]
+            print(f"│    {sid}  [{' → '.join(outcomes)}]")
+    print("└──────────────────────────────────────────────────────")
+
+    # ── 8. Diagnosis ────────────────────────────────────────
     print("\n┌─ DIAGNOSIS ──────────────────────────────────────────")
 
     # OutputsEqual dominance
@@ -377,13 +421,122 @@ def analyze(state: dict) -> None:
     print("└──────────────────────────────────────────────────────")
 
 
+def build_snapshot(state: dict) -> dict:
+    """Build a compact run snapshot for history tracking."""
+    entries = state["entries"]
+    verified_ids = sorted(e["id"] for e in entries if get_status(e) == "Verified")
+    excluded_ids = sorted(e["id"] for e in entries if get_status(e) == "Excluded")
+    attempt_1_ids = sorted(
+        e["id"] for e in entries
+        if get_status(e) == "Verified" and len(e.get("attempts", [])) <= 1
+    )
+    total_attempts = sum(len(e.get("attempts", [])) for e in entries)
+    oe_count = sum(
+        1 for e in entries
+        for a in e.get("attempts", [])
+        if get_outcome(a) == "OutputsEqual"
+    )
+    return {
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "surfaces": len(entries),
+        "verified": verified_ids,
+        "excluded": excluded_ids,
+        "attempt_1_verified": attempt_1_ids,
+        "total_attempts": total_attempts,
+        "outputs_equal": oe_count,
+        "cycle": state.get("cycle", 0),
+    }
+
+
+def save_snapshot(pack_path: Path, snapshot: dict) -> None:
+    """Append a snapshot to the run history file."""
+    history_path = pack_path / "run_history.jsonl"
+    with open(history_path, "a") as f:
+        f.write(json.dumps(snapshot, separators=(",", ":")) + "\n")
+
+
+def load_history(pack_path: Path) -> list[dict]:
+    """Load all previous run snapshots."""
+    history_path = pack_path / "run_history.jsonl"
+    if not history_path.exists():
+        return []
+    runs = []
+    for line in history_path.read_text().splitlines():
+        line = line.strip()
+        if line:
+            runs.append(json.loads(line))
+    return runs
+
+
+def show_cross_run_variance(history: list[dict]) -> None:
+    """Show variance analysis across multiple runs."""
+    if len(history) < 2:
+        return
+
+    print(f"\n┌─ CROSS-RUN VARIANCE ({len(history)} runs) ─────────────────────")
+
+    # Verification rates
+    rates = [len(r["verified"]) * 100 // r["surfaces"] for r in history]
+    verified_counts = [len(r["verified"]) for r in history]
+    attempt_1_counts = [len(r["attempt_1_verified"]) for r in history]
+    print(f"│  Verification rate:  min={min(rates)}%  max={max(rates)}%  spread={max(rates) - min(rates)}pp")
+    print(f"│  Verified count:     min={min(verified_counts)}  max={max(verified_counts)}  spread={max(verified_counts) - min(verified_counts)}")
+    print(f"│  Attempt-1 verified: min={min(attempt_1_counts)}  max={max(attempt_1_counts)}  spread={max(attempt_1_counts) - min(attempt_1_counts)}")
+    print(f"│")
+
+    # Per-run summary table
+    print(f"│  Run history:")
+    print(f"│  {'#':>3}  {'Date':10}  {'Rate':>5}  {'Verified':>8}  {'Att-1':>5}  {'OE':>4}  {'Attempts':>8}")
+    for i, r in enumerate(history):
+        rate = len(r["verified"]) * 100 // r["surfaces"]
+        print(
+            f"│  {i + 1:3d}  {r['timestamp'][:10]}  {rate:4d}%  "
+            f"{len(r['verified']):8d}  {len(r['attempt_1_verified']):5d}  "
+            f"{r['outputs_equal']:4d}  {r['total_attempts']:8d}"
+        )
+    print(f"│")
+
+    # Surface stability across runs
+    all_surfaces = set()
+    for r in history:
+        all_surfaces.update(r["verified"])
+        all_surfaces.update(r["excluded"])
+
+    always_verified = set(history[0]["verified"])
+    always_excluded = set(history[0]["excluded"])
+    for r in history[1:]:
+        always_verified &= set(r["verified"])
+        always_excluded &= set(r["excluded"])
+
+    ever_verified = set()
+    ever_excluded = set()
+    for r in history:
+        ever_verified |= set(r["verified"])
+        ever_excluded |= set(r["excluded"])
+
+    flippers = ever_verified & ever_excluded
+
+    print(f"│  Surface stability:")
+    print(f"│    Always verified:    {len(always_verified):3d}  (stable core)")
+    print(f"│    Always excluded:    {len(always_excluded):3d}  (structurally hard)")
+    print(f"│    Flipped across runs:{len(flippers):3d}  (LM-variance dependent)")
+    if flippers:
+        print(f"│")
+        print(f"│  Volatile surfaces (verified in some runs, excluded in others):")
+        for sid in sorted(flippers):
+            v_count = sum(1 for r in history if sid in r["verified"])
+            print(f"│    {sid}  verified {v_count}/{len(history)} runs")
+    print("└──────────────────────────────────────────────────────")
+
+
 def main() -> int:
     if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <pack_path>", file=sys.stderr)
+        print(f"Usage: {sys.argv[0]} <pack_path> [--no-save]", file=sys.stderr)
         print(f"  e.g.: {sys.argv[0]} ~/.local/share/bman/packs/git-diff", file=sys.stderr)
         return 1
 
     pack_path = Path(sys.argv[1])
+    no_save = "--no-save" in sys.argv
     state_path = pack_path / "state.json"
     if not state_path.exists():
         print(f"Error: {state_path} not found", file=sys.stderr)
@@ -393,6 +546,26 @@ def main() -> int:
         state = json.load(f)
 
     analyze(state)
+
+    # Cross-run variance (show before saving so current run isn't double-counted)
+    history = load_history(pack_path)
+    snapshot = build_snapshot(state)
+
+    # Deduplicate: skip save if latest snapshot has identical verified/excluded sets
+    is_dup = False
+    if history:
+        last = history[-1]
+        if (sorted(last["verified"]) == sorted(snapshot["verified"])
+                and sorted(last["excluded"]) == sorted(snapshot["excluded"])):
+            is_dup = True
+
+    if history:
+        combined = history if is_dup else history + [snapshot]
+        show_cross_run_variance(combined)
+
+    if not no_save and not is_dup:
+        save_snapshot(pack_path, snapshot)
+
     return 0
 
 
