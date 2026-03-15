@@ -45,94 +45,45 @@ pub struct OutputMetrics {
 /// Build a bwrap command with full sandbox isolation.
 ///
 /// The sandbox provides:
-/// - Read-only root filesystem
-/// - Writable work directory
-/// - No network access
-/// - Observable /tmp (bound to workspace/tmp)
-/// - Process dies with parent
-fn build_sandbox_command(work_dir: &Path, sandbox_tmp: &Path) -> Command {
-    let mut cmd = Command::new("bwrap");
-
-    // Core filesystem setup
-    cmd.args(["--ro-bind", "/", "/"]); // Read-only root
-    cmd.args(["--dev", "/dev"]); // Device access
-    cmd.args(["--proc", "/proc"]); // Proc filesystem
-
-    // Bind workspace/tmp to /tmp for observability
-    // This allows fs_diff to capture files written to /tmp
-    let sandbox_tmp_str = sandbox_tmp.to_string_lossy();
-    cmd.args(["--bind", &sandbox_tmp_str, "/tmp"]);
-
-    // Make work directory writable
-    let work_dir_str = work_dir.to_string_lossy();
-    cmd.args(["--bind", &work_dir_str, &work_dir_str]);
-
-    // Security isolation
-    cmd.arg("--unshare-net"); // No network
-    cmd.arg("--die-with-parent"); // Cleanup on parent exit
-    cmd.arg("--new-session"); // Signal isolation
-
-    // Set working directory
-    cmd.args(["--chdir", &work_dir_str]);
-
-    // Separator before actual command
-    cmd.arg("--");
-
-    cmd
-}
-
-/// Build a bwrap command that runs the target command in a PTY.
+/// Build a bwrap sandbox command.
 ///
-/// Uses the `script` command to allocate a pseudo-terminal, so programs
-/// output colors and formatting as if running interactively.
-fn build_sandbox_command_with_pty(
+/// `readonly`: mount work_dir read-only (for test runs after setup).
+/// For PTY mode, pass binary/argv to wrap via `script -c`.
+fn build_sandbox_command(
     work_dir: &Path,
     sandbox_tmp: &Path,
-    binary: &str,
-    argv: &[String],
+    readonly: bool,
+    pty: Option<(&str, &[String])>,
 ) -> Command {
     let mut cmd = Command::new("bwrap");
 
-    // Core filesystem setup
-    cmd.args(["--ro-bind", "/", "/"]); // Read-only root
-    cmd.args(["--dev", "/dev"]); // Device access (needed for PTY)
-    cmd.args(["--proc", "/proc"]); // Proc filesystem
+    cmd.args(["--ro-bind", "/", "/"]);
+    cmd.args(["--dev", "/dev"]);
+    cmd.args(["--proc", "/proc"]);
 
-    // Bind workspace/tmp to /tmp for observability
     let sandbox_tmp_str = sandbox_tmp.to_string_lossy();
     cmd.args(["--bind", &sandbox_tmp_str, "/tmp"]);
 
-    // Make work directory writable
     let work_dir_str = work_dir.to_string_lossy();
-    cmd.args(["--bind", &work_dir_str, &work_dir_str]);
+    let bind_flag = if readonly { "--ro-bind" } else { "--bind" };
+    cmd.args([bind_flag, &work_dir_str, &work_dir_str]);
 
-    // Security isolation
-    cmd.arg("--unshare-net"); // No network
-    cmd.arg("--die-with-parent"); // Cleanup on parent exit
-    cmd.arg("--new-session"); // Signal isolation
-
-    // Set working directory
+    cmd.arg("--unshare-net");
+    cmd.arg("--die-with-parent");
+    cmd.arg("--new-session");
     cmd.args(["--chdir", &work_dir_str]);
-
-    // Separator before actual command
     cmd.arg("--");
 
-    // Use script to allocate a PTY
-    // script -q -c "command args" /dev/null
-    cmd.arg("script");
-    cmd.arg("-q"); // Quiet mode (no "Script started" messages)
-
-    // Build the command string for script -c
-    let mut cmd_parts = vec![binary.to_string()];
-    cmd_parts.extend(argv.iter().cloned());
-    let cmd_str = cmd_parts
-        .iter()
-        .map(|s| shell_escape(s))
-        .collect::<Vec<_>>()
-        .join(" ");
-
-    cmd.args(["-c", &cmd_str]);
-    cmd.arg("/dev/null"); // Discard typescript file
+    if let Some((binary, argv)) = pty {
+        cmd.args(["script", "-q"]);
+        let cmd_str: String = std::iter::once(binary.to_string())
+            .chain(argv.iter().cloned())
+            .map(|s| shell_escape(&s))
+            .collect::<Vec<_>>()
+            .join(" ");
+        cmd.args(["-c", &cmd_str]);
+        cmd.arg("/dev/null");
+    }
 
     cmd
 }
@@ -280,7 +231,7 @@ pub fn run_scenario(
         }
 
         // Run setup commands in sandbox to prevent malicious actions
-        let mut cmd = build_sandbox_command(work_dir, &sandbox_tmp);
+        let mut cmd = build_sandbox_command(work_dir, &sandbox_tmp, false, None);
         cmd.arg(&setup_cmd[0]);
         cmd.args(&setup_cmd[1..]);
         cmd.stdout(Stdio::null());
@@ -358,9 +309,9 @@ pub fn run_scenario(
     // Build the main command with full sandbox isolation
     // If with_pty is true, use script to allocate a PTY for color/formatting capture
     let mut cmd = if with_pty {
-        build_sandbox_command_with_pty(work_dir, &sandbox_tmp, binary, argv)
+        build_sandbox_command(work_dir, &sandbox_tmp, false, Some((binary, argv)))
     } else {
-        let mut c = build_sandbox_command(work_dir, &sandbox_tmp);
+        let mut c = build_sandbox_command(work_dir, &sandbox_tmp, false, None);
         c.arg(binary);
         c.args(argv);
         c
@@ -467,7 +418,7 @@ pub struct PreparedSandbox {
 ///
 /// Returns a prepared sandbox that can be used to run multiple commands.
 /// Setup commands run in a writable sandbox.
-pub fn prepare_sandbox(scenario_id: &str, seed: &Seed) -> Result<PreparedSandbox> {
+fn prepare_sandbox(scenario_id: &str, seed: &Seed) -> Result<PreparedSandbox> {
     let captured_at_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
@@ -524,7 +475,7 @@ pub fn prepare_sandbox(scenario_id: &str, seed: &Seed) -> Result<PreparedSandbox
         }
 
         // Run setup commands in sandbox (writable mode)
-        let mut cmd = build_sandbox_command(&work_dir, &sandbox_tmp);
+        let mut cmd = build_sandbox_command(&work_dir, &sandbox_tmp, false, None);
         cmd.arg(&setup_cmd[0]);
         cmd.args(&setup_cmd[1..]);
         cmd.stdout(Stdio::null());
@@ -589,99 +540,12 @@ pub fn prepare_sandbox(scenario_id: &str, seed: &Seed) -> Result<PreparedSandbox
     })
 }
 
-/// Build a bwrap command with read-only work directory.
-///
-/// Used after setup to ensure commands don't mutate state between runs.
-fn build_sandbox_command_readonly(work_dir: &Path, sandbox_tmp: &Path) -> Command {
-    let mut cmd = Command::new("bwrap");
-
-    // Core filesystem setup
-    cmd.args(["--ro-bind", "/", "/"]); // Read-only root
-    cmd.args(["--dev", "/dev"]); // Device access
-    cmd.args(["--proc", "/proc"]); // Proc filesystem
-
-    // Bind workspace/tmp to /tmp (still writable for temp files)
-    let sandbox_tmp_str = sandbox_tmp.to_string_lossy();
-    cmd.args(["--bind", &sandbox_tmp_str, "/tmp"]);
-
-    // Make work directory READ-ONLY after setup
-    let work_dir_str = work_dir.to_string_lossy();
-    cmd.args(["--ro-bind", &work_dir_str, &work_dir_str]);
-
-    // Security isolation
-    cmd.arg("--unshare-net");
-    cmd.arg("--die-with-parent");
-    cmd.arg("--new-session");
-
-    // Set working directory
-    cmd.args(["--chdir", &work_dir_str]);
-
-    // Separator before actual command
-    cmd.arg("--");
-
-    cmd
-}
-
-/// Build a read-only bwrap command with PTY support.
-fn build_sandbox_command_readonly_with_pty(
-    work_dir: &Path,
-    sandbox_tmp: &Path,
-    binary: &str,
-    argv: &[String],
-) -> Command {
-    let mut cmd = Command::new("bwrap");
-
-    // Core filesystem setup
-    cmd.args(["--ro-bind", "/", "/"]); // Read-only root
-    cmd.args(["--dev", "/dev"]); // Device access (needed for PTY)
-    cmd.args(["--proc", "/proc"]); // Proc filesystem
-
-    // Bind workspace/tmp to /tmp
-    let sandbox_tmp_str = sandbox_tmp.to_string_lossy();
-    cmd.args(["--bind", &sandbox_tmp_str, "/tmp"]);
-
-    // Make work directory READ-ONLY
-    let work_dir_str = work_dir.to_string_lossy();
-    cmd.args(["--ro-bind", &work_dir_str, &work_dir_str]);
-
-    // Security isolation
-    cmd.arg("--unshare-net");
-    cmd.arg("--die-with-parent");
-    cmd.arg("--new-session");
-
-    // Set working directory
-    cmd.args(["--chdir", &work_dir_str]);
-
-    // Separator before actual command
-    cmd.arg("--");
-
-    // Use script to allocate a PTY
-    cmd.arg("script");
-    cmd.arg("-q");
-
-    // Build the command string for script -c
-    let mut cmd_parts = vec![binary.to_string()];
-    for arg in argv {
-        if arg.contains(' ') || arg.contains('"') || arg.contains('\'') {
-            cmd_parts.push(format!("'{}'", arg.replace('\'', "'\\''")));
-        } else {
-            cmd_parts.push(arg.clone());
-        }
-    }
-    let cmd_str = cmd_parts.join(" ");
-    cmd.args(["-c", &cmd_str]);
-
-    // Output to /dev/null (we capture from stdout)
-    cmd.arg("/dev/null");
-
-    cmd
-}
 
 /// Run a command in a prepared sandbox (read-only mode).
 ///
 /// The sandbox work directory is mounted read-only to detect commands
 /// that attempt to mutate state.
-pub fn run_in_sandbox(
+fn run_in_sandbox(
     sandbox: &PreparedSandbox,
     binary: &str,
     argv: &[String],
@@ -712,14 +576,9 @@ pub fn run_in_sandbox(
 
     // Build command with READ-ONLY work directory
     let mut cmd = if with_pty {
-        build_sandbox_command_readonly_with_pty(
-            &sandbox.work_dir,
-            &sandbox.sandbox_tmp,
-            binary,
-            argv,
-        )
+        build_sandbox_command(&sandbox.work_dir, &sandbox.sandbox_tmp, true, Some((binary, argv)))
     } else {
-        let mut c = build_sandbox_command_readonly(&sandbox.work_dir, &sandbox.sandbox_tmp);
+        let mut c = build_sandbox_command(&sandbox.work_dir, &sandbox.sandbox_tmp, true, None);
         c.arg(binary);
         c.args(argv);
         c
@@ -925,7 +784,7 @@ fn capture_fs_state_recursive(
 }
 
 /// Compute filesystem diff between before and after states.
-pub fn compute_fs_diff(
+fn compute_fs_diff(
     before: &HashMap<PathBuf, (u64, u128)>,
     after: &HashMap<PathBuf, (u64, u128)>,
 ) -> FsDiff {
@@ -967,7 +826,7 @@ pub fn compute_fs_diff(
 }
 
 /// Compute output metrics for a string.
-pub fn compute_output_metrics(output: &str) -> OutputMetrics {
+fn compute_output_metrics(output: &str) -> OutputMetrics {
     OutputMetrics {
         line_count: output.lines().count(),
         byte_count: output.len(),

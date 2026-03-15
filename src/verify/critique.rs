@@ -189,24 +189,24 @@ fn build_prompt(state: &State, surface_ids: &[String], pack_path: &Path) -> Stri
                         compute_unified_diff(&evidence.control_stdout, &evidence.option_stdout);
                     if !diff.is_empty() {
                         prompt.push_str("**Diff (control vs option)**:\n```diff\n");
-                        prompt.push_str(&truncate_string(&diff, OUTPUT_MAX_LEN));
+                        prompt.push_str(&super::evidence::truncate_str(&diff, OUTPUT_MAX_LEN));
                         prompt.push_str("\n```\n\n");
                     }
                 }
 
                 if !evidence.control_stdout.is_empty() {
                     prompt.push_str("**Control stdout** (truncated):\n```\n");
-                    prompt.push_str(&truncate_string(&evidence.control_stdout, 800));
+                    prompt.push_str(&super::evidence::truncate_str(&evidence.control_stdout, 800));
                     prompt.push_str("\n```\n\n");
                 }
                 if !evidence.option_stdout.is_empty() {
                     prompt.push_str("**Option stdout** (truncated):\n```\n");
-                    prompt.push_str(&truncate_string(&evidence.option_stdout, 800));
+                    prompt.push_str(&super::evidence::truncate_str(&evidence.option_stdout, 800));
                     prompt.push_str("\n```\n\n");
                 }
                 if !evidence.option_stderr.is_empty() {
                     prompt.push_str("**Option stderr**:\n```\n");
-                    prompt.push_str(&truncate_string(&evidence.option_stderr, 400));
+                    prompt.push_str(&super::evidence::truncate_str(&evidence.option_stderr, 400));
                     prompt.push_str("\n```\n\n");
                 }
 
@@ -350,19 +350,6 @@ fn compress_diff_context(diff: &str, context_lines: usize) -> String {
     }
 
     result
-}
-
-/// Truncate string to max length, adding "..." if truncated.
-fn truncate_string(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        let mut end = max_len;
-        while end > 0 && !s.is_char_boundary(end) {
-            end -= 1;
-        }
-        format!("{}...", &s[..end])
-    }
 }
 
 /// Parse critique response from LM.
