@@ -966,13 +966,16 @@ pub(super) fn compute_outcome(option_evidence: &Evidence, control_evidence: &Evi
         };
     }
 
-    // No difference from control - check if both crashed the same way
-    if let Some(exit_code) = option_evidence.exit_code {
-        if exit_code != 0 && option_evidence.stdout.is_empty() {
+    // Check if the option caused a crash that the control didn't.
+    // If both crashed the same way, it's a bad seed, not an option-induced crash.
+    if let (Some(opt_exit), Some(ctrl_exit)) =
+        (option_evidence.exit_code, control_evidence.exit_code)
+    {
+        if opt_exit != 0 && ctrl_exit == 0 && option_evidence.stdout.is_empty() {
             return Outcome::Crashed {
                 hint: format!(
                     "exit={}, stderr: {}",
-                    exit_code,
+                    opt_exit,
                     truncate_str(&option_evidence.stderr, 150)
                 ),
             };
