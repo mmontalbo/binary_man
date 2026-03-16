@@ -106,15 +106,6 @@ fn is_stagnant(entry: &SurfaceEntry) -> bool {
 }
 
 
-fn modifier_base_for(state: &State, surface_id: &str) -> Option<String> {
-    state.entries.iter().find(|e| e.id == surface_id).and_then(|e| {
-        if let SurfaceCategory::Modifier { base } = &e.category {
-            Some(base.clone())
-        } else {
-            None
-        }
-    })
-}
 
 /// Result from a parallel session, containing updates to merge.
 #[derive(Debug)]
@@ -1052,8 +1043,7 @@ fn execute_cycle(
                     seed,
                 } = action
                 {
-                    let mod_base = modifier_base_for(state, &surface_id);
-                    Some((surface_id, extra_args, seed, mod_base))
+                    Some((surface_id, extra_args, seed))
                 } else {
                     None
                 }
@@ -1063,7 +1053,7 @@ fn execute_cycle(
         let probe_results: Vec<_> = thread::scope(|s| {
             let handles: Vec<_> = probe_params
                 .into_iter()
-                .map(|(surface_id, extra_args, seed, mod_base)| {
+                .map(|(surface_id, extra_args, seed)| {
                     let binary = &state.binary;
                     let context_argv = &state.context_argv;
                     let cycle = state.cycle;
@@ -1076,7 +1066,6 @@ fn execute_cycle(
                             extra_args,
                             seed,
                             with_pty,
-                            mod_base.as_deref(),
                         )
                     })
                 })
@@ -1117,12 +1106,10 @@ fn execute_cycle(
             }
             // Auto-promote: probe showed outputs differ → run as formal Test
             if result.outputs_differ && !result.setup_failed {
-                let mod_base = modifier_base_for(state, &result.surface_id);
                 auto_promote.push((
                     result.surface_id.clone(),
                     result.extra_args.clone(),
                     result.seed.clone(),
-                    mod_base,
                 ));
             }
             merge_probe_result(state, result);
@@ -1139,7 +1126,7 @@ fn execute_cycle(
             let promote_results: Vec<_> = thread::scope(|s| {
                 let handles: Vec<_> = auto_promote
                     .into_iter()
-                    .map(|(surface_id, extra_args, seed, mod_base)| {
+                    .map(|(surface_id, extra_args, seed)| {
                         let binary = &state.binary;
                         let context_argv = &state.context_argv;
                         let cycle = state.cycle;
@@ -1154,7 +1141,6 @@ fn execute_cycle(
                                 seed,
                                 with_pty,
                                 None, // No prediction for auto-promoted tests
-                                mod_base.as_deref(),
                             )
                         })
                     })
@@ -1213,8 +1199,7 @@ fn execute_cycle(
                             e.id == surface_id
                                 && matches!(e.category, SurfaceCategory::TtyDependent)
                         });
-                    let mod_base = modifier_base_for(state, &surface_id);
-                    Some((surface_id, extra_args, seed, prediction, surface_pty, mod_base))
+                    Some((surface_id, extra_args, seed, prediction, surface_pty))
                 } else {
                     None
                 }
@@ -1225,7 +1210,7 @@ fn execute_cycle(
         let results: Vec<_> = thread::scope(|s| {
             let handles: Vec<_> = test_params
                 .into_iter()
-                .map(|(surface_id, extra_args, seed, prediction, surface_pty, mod_base)| {
+                .map(|(surface_id, extra_args, seed, prediction, surface_pty)| {
                     let binary = &state.binary;
                     let context_argv = &state.context_argv;
                     let cycle = state.cycle;
@@ -1240,7 +1225,6 @@ fn execute_cycle(
                             seed,
                             surface_pty,
                             prediction,
-                            mod_base.as_deref(),
                         )
                     })
                 })
