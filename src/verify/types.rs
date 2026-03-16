@@ -442,6 +442,154 @@ impl VerifiedSeed {
     }
 }
 
+/// A known issue extracted from SetupFailed outcomes.
+pub(super) struct KnownIssue {
+    /// The command that failed (e.g., "git checkout main").
+    pub command: String,
+    /// The error message (truncated).
+    pub error: String,
+    /// How many times this combination occurred.
+    pub count: usize,
+}
+
+/// Extract aggregated known issues from all SetupFailed outcomes across the state.
+///
+/// Returns issues sorted by count descending, filtered to those with count >= 2.
+pub(super) fn extract_known_issues(state: &State) -> Vec<KnownIssue> {
+    use std::collections::HashMap;
+
+    let mut counts: HashMap<(String, String), usize> = HashMap::new();
+
+    for entry in &state.entries {
+        for attempt in &entry.attempts {
+            if let Outcome::SetupFailed { hint } = &attempt.outcome {
+                if let Some((cmd, err)) = parse_setup_failed_hint(hint) {
+                    *counts.entry((cmd, err)).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+
+    let mut issues: Vec<KnownIssue> = counts
+        .into_iter()
+        .filter(|(_, count)| *count >= 2)
+        .map(|((command, error), count)| KnownIssue {
+            command,
+            error,
+            count,
+        })
+        .collect();
+
+    issues.sort_by(|a, b| {
+        b.count
+            .cmp(&a.count)
+            .then_with(|| a.command.cmp(&b.command))
+    });
+
+    issues.truncate(5);
+    issues
+}
+
+/// Parse a SetupFailed hint to extract the command and error.
+///
+/// The hint format is:
+/// ```text
+/// Setup command #N failed: ["cmd", "arg1", "arg2"]
+/// stderr: error message here
+/// ```
+pub(crate) fn parse_setup_failed_hint(hint: &str) -> Option<(String, String)> {
+    let lines: Vec<&str> = hint.lines().collect();
+    if lines.is_empty() {
+        return None;
+    }
+
+    let first_line = lines[0];
+    let array_start = first_line.find('[')?;
+    let array_end = first_line.rfind(']')?;
+    if array_start >= array_end {
+        return None;
+    }
+
+    let array_str = &first_line[array_start..=array_end];
+    let command = parse_debug_string_array(array_str)?;
+
+    let error = if lines.len() > 1 {
+        let second_line = lines[1];
+        let error_text = second_line
+            .strip_prefix("stderr: ")
+            .or_else(|| second_line.strip_prefix("error: "))
+            .unwrap_or(second_line);
+        truncate_error(error_text, 60)
+    } else {
+        "(no details)".to_string()
+    };
+
+    Some((command, error))
+}
+
+/// Parse a Rust debug format string array like `["git", "checkout", "main"]`.
+pub(crate) fn parse_debug_string_array(s: &str) -> Option<String> {
+    let trimmed = s.trim();
+    if !trimmed.starts_with('[') || !trimmed.ends_with(']') {
+        return None;
+    }
+
+    let inner = &trimmed[1..trimmed.len() - 1];
+    if inner.is_empty() {
+        return Some(String::new());
+    }
+
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut chars = inner.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' if !in_quotes => {
+                in_quotes = true;
+            }
+            '"' if in_quotes => {
+                parts.push(current.clone());
+                current.clear();
+                in_quotes = false;
+            }
+            '\\' if in_quotes => {
+                if let Some(next) = chars.next() {
+                    current.push(next);
+                }
+            }
+            ',' | ' ' if !in_quotes => {}
+            _ if in_quotes => {
+                current.push(ch);
+            }
+            _ => {}
+        }
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" "))
+    }
+}
+
+/// Truncate error message for grouping purposes.
+pub(crate) fn truncate_error(s: &str, max_len: usize) -> String {
+    let first_line = s.lines().next().unwrap_or(s);
+    let trimmed = first_line.trim();
+
+    if trimmed.len() <= max_len {
+        trimmed.to_string()
+    } else {
+        let mut end = max_len;
+        while end > 0 && !trimmed.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &trimmed[..end])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

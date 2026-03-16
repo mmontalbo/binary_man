@@ -341,9 +341,7 @@ fn parse_option_blocks(help_text: &str) -> Vec<OptionBlock> {
         } else if let Some(caps) = long_only_pattern.captures(line) {
             // Long-only option
             if let Some(long) = caps.name("long") {
-                let value_hint = caps
-                    .name("value")
-                    .map(|m| normalize_value_hint(m.as_str()));
+                let value_hint = caps.name("value").map(|m| normalize_value_hint(m.as_str()));
                 let desc_start = caps
                     .name("desc")
                     .map(|m| m.as_str().trim().to_string())
@@ -920,7 +918,10 @@ usage: git diff [<options>] [<commit>] [--] [<path>...]
 
         // Both should have the same description
         let short = surfaces.iter().find(|s| s.id == "-B").unwrap();
-        let long = surfaces.iter().find(|s| s.id == "--break-rewrites").unwrap();
+        let long = surfaces
+            .iter()
+            .find(|s| s.id == "--break-rewrites")
+            .unwrap();
         assert_eq!(short.description, long.description);
     }
 
@@ -969,7 +970,10 @@ usage: git diff [<options>] [<commit>] [--] [<path>...]
 
         // Both forms should have the value hint
         let short = surfaces.iter().find(|s| s.id == "-B").unwrap();
-        let long = surfaces.iter().find(|s| s.id == "--break-rewrites").unwrap();
+        let long = surfaces
+            .iter()
+            .find(|s| s.id == "--break-rewrites")
+            .unwrap();
 
         assert!(short.value_hint.is_some(), "-B should have value hint");
         assert!(
@@ -1051,10 +1055,7 @@ usage: git diff [<options>] [<commit>] [--] [<path>...]
             classify_surface_mechanical("--verbose"),
             SurfaceCategory::General
         );
-        assert_eq!(
-            classify_surface_mechanical("-S"),
-            SurfaceCategory::General
-        );
+        assert_eq!(classify_surface_mechanical("-S"), SurfaceCategory::General);
         assert_eq!(
             classify_surface_mechanical("--pickaxe-all"),
             SurfaceCategory::General
@@ -1086,7 +1087,8 @@ Show changes between commits, commit and working tree, etc.
 
     #[test]
     fn test_parse_paren_value_hint() {
-        let help = "  --diff-algorithm=(patience|minimal|histogram|myers)   Choose a diff algorithm";
+        let help =
+            "  --diff-algorithm=(patience|minimal|histogram|myers)   Choose a diff algorithm";
         let surfaces = parse_surfaces_from_help(help);
 
         let alg = surfaces

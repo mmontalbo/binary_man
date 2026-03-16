@@ -9,11 +9,48 @@
 use super::lm::LmAction;
 use super::types::{State, Status, MAX_PROBES_PER_SURFACE};
 
-/// Normalize an action to handle common LM formatting issues.
+/// Normalize a surface_id that the LM may have formatted incorrectly.
 ///
 /// Handles cases like:
-/// - `--option=value` → surface_id: `--option`, extra_args: [`value`]
-/// - `-Uvalue` → surface_id: `-U`, extra_args: [`value`] (short option with attached value)
+/// - `--option=value` → (`--option`, [`value`, ...extra_args])
+/// - `-Uvalue` → (`-U`, [`value`, ...extra_args])
+///
+/// Returns the (possibly rewritten) surface_id and extra_args.
+fn normalize_surface_id(
+    surface_id: String,
+    extra_args: Vec<String>,
+    state: &State,
+) -> (String, Vec<String>) {
+    // If surface_id exists as-is, no normalization needed
+    if state.entries.iter().any(|e| e.id == surface_id) {
+        return (surface_id, extra_args);
+    }
+
+    // Try to normalize --option=value format
+    if let Some((base, value)) = surface_id.split_once('=') {
+        if state.entries.iter().any(|e| e.id == base) {
+            let mut new_extra_args = vec![value.to_string()];
+            new_extra_args.extend(extra_args);
+            return (base.to_string(), new_extra_args);
+        }
+    }
+
+    // Try to normalize short option with attached value: -Uvalue → -U + value
+    if surface_id.starts_with('-') && !surface_id.starts_with("--") && surface_id.len() > 2 {
+        let base = &surface_id[..2];
+        let value = &surface_id[2..];
+        if state.entries.iter().any(|e| e.id == base) {
+            let mut new_extra_args = vec![value.to_string()];
+            new_extra_args.extend(extra_args);
+            return (base.to_string(), new_extra_args);
+        }
+    }
+
+    // No normalization possible, return as-is (will fail validation)
+    (surface_id, extra_args)
+}
+
+/// Normalize an action to handle common LM formatting issues.
 pub(super) fn normalize_action(action: LmAction, state: &State) -> LmAction {
     match action {
         LmAction::Test {
@@ -22,51 +59,7 @@ pub(super) fn normalize_action(action: LmAction, state: &State) -> LmAction {
             seed,
             prediction,
         } => {
-            // If surface_id exists as-is, no normalization needed
-            if state.entries.iter().any(|e| e.id == surface_id) {
-                return LmAction::Test {
-                    surface_id,
-                    extra_args,
-                    seed,
-                    prediction,
-                };
-            }
-
-            // Try to normalize --option=value format
-            if let Some((base, value)) = surface_id.split_once('=') {
-                if state.entries.iter().any(|e| e.id == base) {
-                    let mut new_extra_args = vec![value.to_string()];
-                    new_extra_args.extend(extra_args);
-                    return LmAction::Test {
-                        surface_id: base.to_string(),
-                        extra_args: new_extra_args,
-                        seed,
-                        prediction,
-                    };
-                }
-            }
-
-            // Try to normalize short option with attached value: -Uvalue → -U + value
-            // Handles -U10, -Spattern, etc.
-            if surface_id.starts_with('-')
-                && !surface_id.starts_with("--")
-                && surface_id.len() > 2
-            {
-                let base = &surface_id[..2]; // -U, -S, etc.
-                let value = &surface_id[2..]; // 10, pattern, etc.
-                if state.entries.iter().any(|e| e.id == base) {
-                    let mut new_extra_args = vec![value.to_string()];
-                    new_extra_args.extend(extra_args);
-                    return LmAction::Test {
-                        surface_id: base.to_string(),
-                        extra_args: new_extra_args,
-                        seed,
-                        prediction,
-                    };
-                }
-            }
-
-            // No normalization possible, return as-is (will fail validation)
+            let (surface_id, extra_args) = normalize_surface_id(surface_id, extra_args, state);
             LmAction::Test {
                 surface_id,
                 extra_args,
@@ -79,44 +72,7 @@ pub(super) fn normalize_action(action: LmAction, state: &State) -> LmAction {
             extra_args,
             seed,
         } => {
-            // Same normalization as Test
-            if state.entries.iter().any(|e| e.id == surface_id) {
-                return LmAction::Probe {
-                    surface_id,
-                    extra_args,
-                    seed,
-                };
-            }
-
-            if let Some((base, value)) = surface_id.split_once('=') {
-                if state.entries.iter().any(|e| e.id == base) {
-                    let mut new_extra_args = vec![value.to_string()];
-                    new_extra_args.extend(extra_args);
-                    return LmAction::Probe {
-                        surface_id: base.to_string(),
-                        extra_args: new_extra_args,
-                        seed,
-                    };
-                }
-            }
-
-            if surface_id.starts_with('-')
-                && !surface_id.starts_with("--")
-                && surface_id.len() > 2
-            {
-                let base = &surface_id[..2];
-                let value = &surface_id[2..];
-                if state.entries.iter().any(|e| e.id == base) {
-                    let mut new_extra_args = vec![value.to_string()];
-                    new_extra_args.extend(extra_args);
-                    return LmAction::Probe {
-                        surface_id: base.to_string(),
-                        extra_args: new_extra_args,
-                        seed,
-                    };
-                }
-            }
-
+            let (surface_id, extra_args) = normalize_surface_id(surface_id, extra_args, state);
             LmAction::Probe {
                 surface_id,
                 extra_args,
@@ -196,7 +152,7 @@ mod tests {
                     status: Status::Pending,
                     probes: vec![],
                     attempts: vec![],
-                category: SurfaceCategory::General,
+                    category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
                     critique_demotions: 0,
@@ -210,7 +166,7 @@ mod tests {
                     status: Status::Verified,
                     probes: vec![],
                     attempts: vec![],
-                category: SurfaceCategory::General,
+                    category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
                     critique_demotions: 0,

@@ -19,7 +19,6 @@ use std::time::Duration;
 /// Default timeout for scenario execution in seconds.
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
-
 /// Filesystem changes detected between before/after command execution.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FsDiff {
@@ -188,9 +187,6 @@ pub(super) fn run_scenario(
     // Create workspace/tmp directory for observable /tmp inside sandbox
     let sandbox_tmp = work_dir.join("tmp");
     fs::create_dir_all(&sandbox_tmp).context("create workspace/tmp directory")?;
-
-    // Write pre-generated fixtures for LM to use
-    super::fixtures::write_fixtures(work_dir)?;
 
     // Capture environment variables that will be visible in the sandbox
     // We capture a subset of relevant env vars for telemetry
@@ -435,9 +431,6 @@ fn prepare_sandbox(scenario_id: &str, seed: &Seed) -> Result<PreparedSandbox> {
     let sandbox_tmp = work_dir.join("tmp");
     fs::create_dir_all(&sandbox_tmp).context("create workspace/tmp directory")?;
 
-    // Write pre-generated fixtures for LM to use
-    super::fixtures::write_fixtures(&work_dir)?;
-
     // Capture environment variables for telemetry
     let env: HashMap<String, String> = std::env::vars()
         .filter(|(k, _)| {
@@ -539,7 +532,6 @@ fn prepare_sandbox(scenario_id: &str, seed: &Seed) -> Result<PreparedSandbox> {
     })
 }
 
-
 /// Run a command in a prepared sandbox (read-only mode).
 ///
 /// The sandbox work directory is mounted read-only to detect commands
@@ -575,7 +567,12 @@ fn run_in_sandbox(
 
     // Build command with READ-ONLY work directory
     let mut cmd = if with_pty {
-        build_sandbox_command(&sandbox.work_dir, &sandbox.sandbox_tmp, true, Some((binary, argv)))
+        build_sandbox_command(
+            &sandbox.work_dir,
+            &sandbox.sandbox_tmp,
+            true,
+            Some((binary, argv)),
+        )
     } else {
         let mut c = build_sandbox_command(&sandbox.work_dir, &sandbox.sandbox_tmp, true, None);
         c.arg(binary);
@@ -834,7 +831,11 @@ fn compute_output_metrics(output: &str) -> OutputMetrics {
 }
 
 /// Write evidence to a file in the pack.
-pub(super) fn write_evidence(pack_path: &Path, relative_path: &str, evidence: &Evidence) -> Result<()> {
+pub(super) fn write_evidence(
+    pack_path: &Path,
+    relative_path: &str,
+    evidence: &Evidence,
+) -> Result<()> {
     let full_path = pack_path.join(relative_path);
     if let Some(parent) = full_path.parent() {
         fs::create_dir_all(parent).context("create evidence directory")?;
@@ -993,14 +994,7 @@ mod tests {
     #[test]
     fn test_run_simple_scenario() {
         let seed = Seed::default();
-        let evidence = run_scenario(
-            "test",
-            "echo",
-            &["hello".to_string()],
-            &seed,
-            false,
-        )
-        .unwrap();
+        let evidence = run_scenario("test", "echo", &["hello".to_string()], &seed, false).unwrap();
 
         assert_eq!(evidence.stdout.trim(), "hello");
         assert_eq!(evidence.exit_code, Some(0));
@@ -1017,14 +1011,8 @@ mod tests {
                 content: "test content".to_string(),
             }],
         };
-        let evidence = run_scenario(
-            "test",
-            "cat",
-            &["input.txt".to_string()],
-            &seed,
-            false,
-        )
-        .unwrap();
+        let evidence =
+            run_scenario("test", "cat", &["input.txt".to_string()], &seed, false).unwrap();
 
         assert_eq!(evidence.stdout.trim(), "test content");
         assert_eq!(evidence.exit_code, Some(0));

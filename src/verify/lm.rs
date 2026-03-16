@@ -49,7 +49,9 @@ impl<'de> serde::Deserialize<'de> for Prediction {
         use serde::de;
 
         let obj: serde_json::Value = serde_json::Value::deserialize(deserializer)?;
-        let map = obj.as_object().ok_or_else(|| de::Error::custom("prediction must be object"))?;
+        let map = obj
+            .as_object()
+            .ok_or_else(|| de::Error::custom("prediction must be object"))?;
 
         let reason = map
             .get("reason")
@@ -80,10 +82,18 @@ impl<'de> serde::Deserialize<'de> for Prediction {
                         .to_string();
                     PredictedDiff::StdoutContains(content)
                 }
-                other => return Err(de::Error::unknown_variant(
-                    other,
-                    &["StdoutEmpty", "StdoutContains", "StdoutDifferent", "StderrDifferent", "ExitCodeDifferent"],
-                )),
+                other => {
+                    return Err(de::Error::unknown_variant(
+                        other,
+                        &[
+                            "StdoutEmpty",
+                            "StdoutContains",
+                            "StdoutDifferent",
+                            "StderrDifferent",
+                            "ExitCodeDifferent",
+                        ],
+                    ))
+                }
             }
         } else {
             return Err(de::Error::custom("diff_type must be string or object"));
@@ -314,9 +324,7 @@ fn fix_json_errors(json: &str) -> String {
     // Fix \xNN hex escapes (Python/C style) to \u00NN (valid JSON)
     // LMs commonly produce these when trying to write binary content
     let hex_escape_re = regex::Regex::new(r"\\x([0-9a-fA-F]{2})").unwrap();
-    result = hex_escape_re
-        .replace_all(&result, r"\u00$1")
-        .to_string();
+    result = hex_escape_re.replace_all(&result, r"\u00$1").to_string();
 
     // Fix trailing commas: {"a": 1,} -> {"a": 1}
     // Match comma followed by optional whitespace and closing brace/bracket
@@ -697,7 +705,11 @@ mod tests {
         let response = parse_lm_response(text).unwrap();
 
         match &response.actions[0] {
-            LmAction::Test { surface_id, extra_args, .. } => {
+            LmAction::Test {
+                surface_id,
+                extra_args,
+                ..
+            } => {
                 assert_eq!(surface_id, "--width");
                 assert_eq!(extra_args, &["20"]);
             }
@@ -861,7 +873,9 @@ That should work!
 
         match &response.actions[1] {
             LmAction::Test {
-                surface_id, extra_args, ..
+                surface_id,
+                extra_args,
+                ..
             } => {
                 assert_eq!(surface_id, "--stat");
                 assert!(extra_args.is_empty()); // No extra_args in this case
@@ -1237,7 +1251,10 @@ Here's my response:
         assert_eq!(response.actions.len(), 1);
         if let LmAction::Test { prediction, .. } = &response.actions[0] {
             let pred = prediction.as_ref().unwrap();
-            assert_eq!(pred.diff_type, PredictedDiff::StdoutContains("@@".to_string()));
+            assert_eq!(
+                pred.diff_type,
+                PredictedDiff::StdoutContains("@@".to_string())
+            );
         } else {
             panic!("Expected Test action");
         }
@@ -1250,7 +1267,10 @@ Here's my response:
         let response = parse_lm_response(text).unwrap();
         if let LmAction::Test { prediction, .. } = &response.actions[0] {
             let pred = prediction.as_ref().unwrap();
-            assert_eq!(pred.diff_type, PredictedDiff::StdoutContains("@@".to_string()));
+            assert_eq!(
+                pred.diff_type,
+                PredictedDiff::StdoutContains("@@".to_string())
+            );
         }
     }
 

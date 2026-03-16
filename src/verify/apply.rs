@@ -331,13 +331,7 @@ pub(super) fn apply_action(state: &mut State, pack_path: &Path, action: LmAction
             // Full argv = context_argv (no extra args for baseline)
             let full_argv: Vec<String> = state.context_argv.clone();
 
-            let evidence = run_scenario(
-                "baseline",
-                &state.binary,
-                &full_argv,
-                &seed,
-                false,
-            )?;
+            let evidence = run_scenario("baseline", &state.binary, &full_argv, &seed, false)?;
             let evidence_path = "evidence/baseline.json".to_string();
             write_evidence(pack_path, &evidence_path, &evidence)?;
 

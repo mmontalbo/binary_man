@@ -3,179 +3,9 @@
 //! Builds structured prompts that give the LM all the context it needs to
 //! decide on actions. The prompt format is intentionally simple and human-readable.
 
-use super::types::{Attempt, Outcome, State, Status, SurfaceCategory};
-use std::collections::HashMap;
-
-/// A known issue extracted from SetupFailed outcomes.
-struct KnownIssue {
-    /// The command that failed (e.g., "git checkout main").
-    command: String,
-    /// The error message (truncated).
-    error: String,
-    /// How many times this combination occurred.
-    count: usize,
-}
-
-/// Extract aggregated known issues from all SetupFailed outcomes across the state.
-///
-/// Returns issues sorted by count descending, filtered to those with count >= 2.
-fn extract_known_issues(state: &State) -> Vec<KnownIssue> {
-    // Map from (command, error_prefix) -> count
-    let mut counts: HashMap<(String, String), usize> = HashMap::new();
-
-    for entry in &state.entries {
-        for attempt in &entry.attempts {
-            if let Outcome::SetupFailed { hint } = &attempt.outcome {
-                if let Some((cmd, err)) = parse_setup_failed_hint(hint) {
-                    *counts.entry((cmd, err)).or_insert(0) += 1;
-                }
-            }
-        }
-    }
-
-    // Convert to Vec and filter to count >= 2
-    let mut issues: Vec<KnownIssue> = counts
-        .into_iter()
-        .filter(|(_, count)| *count >= 2)
-        .map(|((command, error), count)| KnownIssue {
-            command,
-            error,
-            count,
-        })
-        .collect();
-
-    // Sort by count descending, then by command for stability
-    issues.sort_by(|a, b| {
-        b.count
-            .cmp(&a.count)
-            .then_with(|| a.command.cmp(&b.command))
-    });
-
-    // Return top 5
-    issues.truncate(5);
-    issues
-}
-
-/// Parse a SetupFailed hint to extract the command and error.
-///
-/// The hint format is:
-/// ```text
-/// Setup command #N failed: ["cmd", "arg1", "arg2"]
-/// stderr: error message here
-/// ```
-/// or:
-/// ```text
-/// Setup command #N failed to execute: ["cmd", "arg1"]
-/// error: message
-/// ```
-///
-/// Returns (command_string, error_prefix) or None if parsing fails.
-fn parse_setup_failed_hint(hint: &str) -> Option<(String, String)> {
-    let lines: Vec<&str> = hint.lines().collect();
-    if lines.is_empty() {
-        return None;
-    }
-
-    // Parse the first line to extract the command array
-    let first_line = lines[0];
-
-    // Find the array part: [...] at the end of the first line
-    let array_start = first_line.find('[')?;
-    let array_end = first_line.rfind(']')?;
-    if array_start >= array_end {
-        return None;
-    }
-
-    let array_str = &first_line[array_start..=array_end];
-    let command = parse_debug_string_array(array_str)?;
-
-    // Extract error from the second line (if present)
-    let error = if lines.len() > 1 {
-        let second_line = lines[1];
-        // Remove "stderr: " or "error: " prefix
-        let error_text = second_line
-            .strip_prefix("stderr: ")
-            .or_else(|| second_line.strip_prefix("error: "))
-            .unwrap_or(second_line);
-        // Truncate to ~60 chars for grouping
-        truncate_error(error_text, 60)
-    } else {
-        "(no details)".to_string()
-    };
-
-    Some((command, error))
-}
-
-/// Parse a Rust debug format string array like `["git", "checkout", "main"]`.
-fn parse_debug_string_array(s: &str) -> Option<String> {
-    // Simple parser for ["a", "b", "c"] format
-    let trimmed = s.trim();
-    if !trimmed.starts_with('[') || !trimmed.ends_with(']') {
-        return None;
-    }
-
-    let inner = &trimmed[1..trimmed.len() - 1];
-    if inner.is_empty() {
-        return Some(String::new());
-    }
-
-    let mut parts = Vec::new();
-    let mut current = String::new();
-    let mut in_quotes = false;
-    let mut chars = inner.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        match ch {
-            '"' if !in_quotes => {
-                in_quotes = true;
-            }
-            '"' if in_quotes => {
-                parts.push(current.clone());
-                current.clear();
-                in_quotes = false;
-            }
-            '\\' if in_quotes => {
-                // Handle escaped character
-                if let Some(next) = chars.next() {
-                    current.push(next);
-                }
-            }
-            ',' | ' ' if !in_quotes => {
-                // Skip separators outside quotes
-            }
-            _ if in_quotes => {
-                current.push(ch);
-            }
-            _ => {
-                // Skip other chars outside quotes
-            }
-        }
-    }
-
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join(" "))
-    }
-}
-
-/// Truncate error message for grouping purposes.
-fn truncate_error(s: &str, max_len: usize) -> String {
-    // Take first line only
-    let first_line = s.lines().next().unwrap_or(s);
-    let trimmed = first_line.trim();
-
-    if trimmed.len() <= max_len {
-        trimmed.to_string()
-    } else {
-        // Find a safe boundary
-        let mut end = max_len;
-        while end > 0 && !trimmed.is_char_boundary(end) {
-            end -= 1;
-        }
-        format!("{}...", &trimmed[..end])
-    }
-}
+use super::types::{
+    extract_known_issues, Attempt, KnownIssue, Outcome, State, Status, SurfaceCategory,
+};
 
 /// Format the known issues section for the prompt.
 fn format_known_issues_section(issues: &[KnownIssue]) -> String {
@@ -676,11 +506,7 @@ pub(super) fn build_retry_prompt(
                     if !seed.seed.files.is_empty() {
                         prompt.push_str(&format!(
                             "    files: {:?}\n",
-                            seed.seed
-                                .files
-                                .iter()
-                                .map(|f| &f.path)
-                                .collect::<Vec<_>>()
+                            seed.seed.files.iter().map(|f| &f.path).collect::<Vec<_>>()
                         ));
                     }
                 }
@@ -771,10 +597,7 @@ pub(super) fn build_incremental_prompt(
                                     // Include stderr for OptionError
                                     if matches!(attempt.outcome, Outcome::OptionError { .. }) {
                                         if let Some(stderr) = &attempt.stderr_preview {
-                                            prompt.push_str(&format!(
-                                                "    stderr: {:?}\n",
-                                                stderr
-                                            ));
+                                            prompt.push_str(&format!("    stderr: {:?}\n", stderr));
                                         }
                                     }
                                 } else {
@@ -807,7 +630,8 @@ pub(super) fn build_incremental_prompt(
                                 "- Probe {}: {} (probes left: {})\n",
                                 surface_id,
                                 status,
-                                super::types::MAX_PROBES_PER_SURFACE.saturating_sub(entry.probes.len())
+                                super::types::MAX_PROBES_PER_SURFACE
+                                    .saturating_sub(entry.probes.len())
                             ));
                             if let Some(stdout) = &probe.stdout_preview {
                                 prompt.push_str(&format!("    stdout: {:?}\n", stdout));
@@ -873,10 +697,7 @@ pub(super) fn build_incremental_prompt(
             }
 
             if let Some(feedback) = &entry.critique_feedback {
-                prompt.push_str(&format!(
-                    "  **CRITIQUE**: {}\n",
-                    feedback
-                ));
+                prompt.push_str(&format!("  **CRITIQUE**: {}\n", feedback));
             }
 
             if !entry.attempts.is_empty() {
@@ -1023,24 +844,11 @@ IMPORTANT: Only use surface_id values from the "Surfaces Needing Work" section a
 - Learn from probe results: if control_stdout and option_stdout are identical, the seed doesn't exercise the option
 - Include predictions for suppression options (--no-*, --quiet) to avoid false demotions
 
-## Pre-generated Fixtures
+## File Creation
 
-Pattern files are available in `_fixtures/` directory. Use them in setup commands:
-
-- `_fixtures/repeated.txt`: ~50 similar repeated blocks with minor variations. Useful when testing diff algorithm behavior, pattern matching, or how tools handle repetitive content.
-- `_fixtures/indented.txt`: code-like structure with nested indentation levels. Useful when testing indent-aware processing, code formatting, or hierarchical structure handling.
-- `_fixtures/moveable.txt`: config-style sections that can be reordered or copied. Useful when testing move detection, copy detection, or content reordering scenarios.
-- `_fixtures/whitespace.txt`: lines with trailing spaces, tabs, mixed indentation. Useful when testing whitespace normalization, space-vs-tab handling, or trailing whitespace detection.
-- `_fixtures/crlf.txt`: Windows-style CRLF line endings. Useful when testing line ending conversion, cross-platform compatibility, or CR/LF handling.
-- `_fixtures/functions.c`: C source with multiple function definitions. Useful when testing function-aware context, code block detection, or language-aware processing.
-- `_fixtures/prose.txt`: natural language paragraphs. Useful when testing word-level processing, semantic diffing, or text reflow handling.
-- `_fixtures/binary.bin`: non-text binary content. Useful when testing binary vs text detection, encoding handling, or non-printable character scenarios.
-- `_fixtures/unicode.txt`: multi-language UTF-8 text with emoji and symbols. Useful when testing encoding support, multibyte character handling, or internationalization.
-- `_fixtures/similar_a.txt` + `_fixtures/similar_b.txt`: near-identical code with subtle differences. Useful when testing diff algorithms, similarity detection, or minimal change scenarios.
-- `_fixtures/large.txt`: ~10KB file with numbered lines. Useful when testing size thresholds, pagination, or performance with larger content.
-- `_fixtures/empty.txt`: empty file. Useful when testing edge cases, empty input handling, or boundary conditions.
-
-Copy and modify these as needed.
+Create any files you need via `seed.files` or `seed.setup` commands. For example:
+- Use `seed.files` to write file content directly: `{"path": "input.txt", "content": "..."}`
+- Use `seed.setup` commands like `["touch", "file.txt"]` or `["cp", "/etc/hosts", "test.txt"]`
 "#;
 
 #[cfg(test)]
@@ -1374,7 +1182,7 @@ mod tests {
         let hint = r#"Setup command #10 failed: ["git", "checkout", "main"]
 stderr: error: pathspec 'main' did not match any file(s) known to git"#;
 
-        let result = super::parse_setup_failed_hint(hint);
+        let result = crate::verify::types::parse_setup_failed_hint(hint);
         assert!(result.is_some());
         let (cmd, err) = result.unwrap();
         assert_eq!(cmd, "git checkout main");
@@ -1387,7 +1195,7 @@ stderr: error: pathspec 'main' did not match any file(s) known to git"#;
         let hint = r#"Setup command #0 failed to execute: ["nonexistent", "cmd"]
 error: No such file or directory"#;
 
-        let result = super::parse_setup_failed_hint(hint);
+        let result = crate::verify::types::parse_setup_failed_hint(hint);
         assert!(result.is_some());
         let (cmd, err) = result.unwrap();
         assert_eq!(cmd, "nonexistent cmd");
@@ -1397,15 +1205,15 @@ error: No such file or directory"#;
     #[test]
     fn test_parse_debug_string_array() {
         assert_eq!(
-            super::parse_debug_string_array(r#"["git", "checkout", "main"]"#),
+            crate::verify::types::parse_debug_string_array(r#"["git", "checkout", "main"]"#),
             Some("git checkout main".to_string())
         );
         assert_eq!(
-            super::parse_debug_string_array(r#"["ls", "-la"]"#),
+            crate::verify::types::parse_debug_string_array(r#"["ls", "-la"]"#),
             Some("ls -la".to_string())
         );
         assert_eq!(
-            super::parse_debug_string_array(r#"["echo"]"#),
+            crate::verify::types::parse_debug_string_array(r#"["echo"]"#),
             Some("echo".to_string())
         );
     }
@@ -1458,11 +1266,11 @@ stderr: error: pathspec 'main' did not match"#
                         make_setup_failed_attempt(2),
                         make_setup_failed_attempt(3),
                     ],
-                category: SurfaceCategory::General,
+                    category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
                     critique_demotions: 0,
-                characterization: None,
+                    characterization: None,
                 },
                 SurfaceEntry {
                     id: "--opt2".to_string(),
@@ -1476,11 +1284,11 @@ stderr: error: pathspec 'main' did not match"#
                         make_setup_failed_attempt(5),
                         make_setup_failed_attempt(6),
                     ],
-                category: SurfaceCategory::General,
+                    category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
                     critique_demotions: 0,
-                characterization: None,
+                    characterization: None,
                 },
             ],
             cycle: 7,
@@ -1489,7 +1297,7 @@ stderr: error: pathspec 'main' did not match"#
             examples_section: String::new(),
         };
 
-        let issues = super::extract_known_issues(&state);
+        let issues = crate::verify::types::extract_known_issues(&state);
 
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].command, "git checkout main");
@@ -1542,7 +1350,7 @@ stderr: error: already a git repo"#
             examples_section: String::new(),
         };
 
-        let issues = super::extract_known_issues(&state);
+        let issues = crate::verify::types::extract_known_issues(&state);
         assert!(issues.is_empty());
     }
 
@@ -1560,7 +1368,7 @@ stderr: error: already a git repo"#
             examples_section: String::new(),
         };
 
-        let issues = super::extract_known_issues(&state);
+        let issues = crate::verify::types::extract_known_issues(&state);
         assert!(issues.is_empty());
     }
 
@@ -1600,11 +1408,11 @@ stderr: pathspec 'main' did not match"#
                     status: Status::Pending,
                     probes: vec![],
                     attempts: vec![make_setup_failed_attempt(1), make_setup_failed_attempt(2)],
-                category: SurfaceCategory::General,
+                    category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
                     critique_demotions: 0,
-                characterization: None,
+                    characterization: None,
                 },
                 SurfaceEntry {
                     id: "--oneline".to_string(),
@@ -1614,11 +1422,11 @@ stderr: pathspec 'main' did not match"#
                     status: Status::Pending,
                     probes: vec![],
                     attempts: vec![make_setup_failed_attempt(3), make_setup_failed_attempt(4)],
-                category: SurfaceCategory::General,
+                    category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
                     critique_demotions: 0,
-                characterization: None,
+                    characterization: None,
                 },
             ],
             cycle: 5,
@@ -1670,9 +1478,9 @@ stderr: pathspec 'main' did not match"#
 
     #[test]
     fn test_truncate_error() {
-        assert_eq!(super::truncate_error("short", 60), "short");
+        assert_eq!(crate::verify::types::truncate_error("short", 60), "short");
         let long = "a".repeat(100);
-        let result = super::truncate_error(&long, 60);
+        let result = crate::verify::types::truncate_error(&long, 60);
         assert!(result.len() <= 63); // 60 chars + "..."
         assert!(result.ends_with("..."));
     }
@@ -1992,7 +1800,8 @@ stderr: pathspec 'main' did not match"#
                 critique_feedback: None,
                 critique_demotions: 0,
                 characterization: Some(Characterization {
-                    trigger: "file with repeated similar lines where hunk boundaries are ambiguous".to_string(),
+                    trigger: "file with repeated similar lines where hunk boundaries are ambiguous"
+                        .to_string(),
                     expected_diff: "different hunk grouping in diff output".to_string(),
                     revision: 0,
                 }),
@@ -2033,7 +1842,11 @@ stderr: pathspec 'main' did not match"#
                 attempts: vec![Attempt {
                     cycle: 1,
                     args: vec!["--patience".to_string()],
-                    full_argv: vec!["git".to_string(), "diff".to_string(), "--patience".to_string()],
+                    full_argv: vec![
+                        "git".to_string(),
+                        "diff".to_string(),
+                        "--patience".to_string(),
+                    ],
                     seed: Seed::default(),
                     evidence_path: "evidence/patience_1.json".to_string(),
                     outcome: Outcome::OutputsEqual,

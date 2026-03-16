@@ -3,9 +3,13 @@
 //! This module implements the core verification loop:
 //! bootstrap → [gather pending → lm_call → apply actions → save]* → done
 
-use super::apply::{apply_action, merge_probe_result, merge_test_result, run_probe_scenario, run_test_scenario};
+use super::apply::{
+    apply_action, merge_probe_result, merge_test_result, run_probe_scenario, run_test_scenario,
+};
 use super::bootstrap::bootstrap;
-use super::lm::{log_prompt, log_raw_response, log_response, parse_lm_response, LmAction, LmResponse};
+use super::lm::{
+    log_prompt, log_raw_response, log_response, parse_lm_response, LmAction, LmResponse,
+};
 use super::prompt::{build_incremental_prompt, build_prompt, build_retry_prompt};
 use super::types::{Attempt, Outcome, State, Status, SurfaceCategory, SurfaceEntry, VerifiedSeed};
 use super::validate::{normalize_action, validate_action};
@@ -35,7 +39,6 @@ const CHECKPOINT_INTERVAL: u32 = 10;
 /// Total failures across all sessions before a surface is globally excluded.
 const GLOBAL_FAILURE_THRESHOLD: usize = 5;
 
-
 /// Result of a verification run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunResult {
@@ -50,7 +53,6 @@ const LM_TIMEOUT_SECS: u64 = 120;
 
 /// Maximum retry attempts for LM calls.
 const MAX_LM_RETRIES: usize = 3;
-
 
 /// Shared coordination state for work-stealing parallel sessions.
 struct SharedProgress {
@@ -104,8 +106,6 @@ fn is_stagnant(entry: &SurfaceEntry) -> bool {
         .take(STAGNATION_THRESHOLD)
         .all(|a| matches!(a.outcome, Outcome::OutputsEqual))
 }
-
-
 
 /// Result from a parallel session, containing updates to merge.
 #[derive(Debug)]
@@ -370,405 +370,27 @@ fn run_parallel_sessions(
     let session_results: Vec<(Vec<SessionUpdate>, Vec<VerifiedSeed>)> = thread::scope(|s| {
         let handles: Vec<_> = (0..num_sessions)
             .map(|session_idx| {
-                let mut session_state = state.clone();
+                let session_state = state.clone();
                 let shared = Arc::clone(&shared);
                 let global_cycle = Arc::clone(&global_cycle);
                 let checkpoint_state = Arc::clone(&checkpoint_state);
 
                 s.spawn(move || {
-                    if verbose {
-                        eprintln!("  Session {}/{}: started", session_idx + 1, num_sessions);
-                    }
-
-                    let mut plugin = create_plugin(lm_config);
-                    if let Err(e) = plugin.init() {
-                        eprintln!(
-                            "  Session {} failed to init LM: {}",
-                            session_idx + 1,
-                            e
-                        );
-                        return (vec![], vec![]);
-                    }
-
-                    let mut last_response: Option<LmResponse> = None;
-                    let mut last_verify_cycle: u32 = 0;
-                    let mut stall_resets: u32 = 0;
-
-                    loop {
-                        // Claim next batch from shared queue
-                        let cycle = global_cycle.fetch_add(1, Ordering::SeqCst) + 1;
-                        if cycle > max_cycles {
-                            // Over budget — put it back
-                            global_cycle.fetch_sub(1, Ordering::SeqCst);
-                            if verbose {
-                                eprintln!(
-                                    "  S{}: hit max cycles ({})",
-                                    session_idx + 1,
-                                    max_cycles
-                                );
-                            }
-                            break;
-                        }
-
-                        let pending_ids = {
-                            let mut progress = shared.lock().unwrap();
-
-                            // Exclude stagnant surfaces early using global attempt counts.
-                            // Session-local state may not reflect all sessions' attempts,
-                            // so we check the shared progress for accurate counts.
-                            for entry in &mut session_state.entries {
-                                let global = *progress
-                                    .attempt_counts
-                                    .get(&entry.id)
-                                    .unwrap_or(&0);
-                                if matches!(entry.status, Status::Pending)
-                                    && !progress.resolved.contains(&entry.id)
-                                    && global >= STAGNATION_THRESHOLD
-                                    && is_stagnant(entry)
-                                {
-                                    entry.status = Status::Excluded {
-                                        reason: format!(
-                                            "Stagnant ({} consecutive OutputsEqual)",
-                                            STAGNATION_THRESHOLD,
-                                        ),
-                                    };
-                                    progress.resolved.insert(entry.id.clone());
-                                    if verbose {
-                                        eprintln!(
-                                            "  Early-excluded {} (stagnant)",
-                                            entry.id
-                                        );
-                                    }
-                                }
-                            }
-
-                            // Find pending surfaces not resolved or in-progress.
-                            // Sort by (category_priority, global_attempt_count) so
-                            // untouched surfaces always go before retries.
-                            let mut candidates: Vec<(usize, usize, String)> = session_state
-                                .entries
-                                .iter()
-                                .filter(|e| {
-                                    matches!(e.status, Status::Pending)
-                                        && !progress.resolved.contains(&e.id)
-                                        && !progress.in_progress.contains(&e.id)
-                                })
-                                .map(|e| {
-                                    let global_attempts = *progress
-                                        .attempt_counts
-                                        .get(&e.id)
-                                        .unwrap_or(&0);
-                                    (
-                                        category_priority(&e.category, &session_state),
-                                        global_attempts,
-                                        e.id.clone(),
-                                    )
-                                })
-                                .collect();
-                            candidates.sort_by_key(|(p, a, _)| (*p, *a));
-
-                            let batch: Vec<String> = candidates
-                                .into_iter()
-                                .take(BATCH_SIZE)
-                                .map(|(_, _, id)| id)
-                                .collect();
-
-                            if batch.is_empty() {
-                                // Nothing left — give back the cycle
-                                global_cycle.fetch_sub(1, Ordering::SeqCst);
-                                break;
-                            }
-
-                            // Mark as in-progress
-                            for id in &batch {
-                                progress.in_progress.insert(id.clone());
-                            }
-
-                            batch
-                        };
-
-                        session_state.cycle = cycle;
-
-                        if verbose {
-                            eprintln!(
-                                "  S{} cycle {}: {}",
-                                session_idx + 1,
-                                cycle,
-                                pending_ids.join(", ")
-                            );
-                        }
-
-                        // Execute one cycle
-                        let cycle_ok = execute_cycle(
-                            pack_path,
-                            &mut *plugin,
-                            &mut session_state,
-                            &pending_ids,
-                            verbose,
-                            context_mode,
-                            with_pty,
-                            None,
-                            &mut last_response,
-                            lm_config,
-                        )
-                        .is_ok();
-
-                        // Publish results back to shared progress
-                        {
-                            let mut to_exclude: Vec<(String, usize)> = Vec::new();
-                            let mut progress = shared.lock().unwrap();
-                            for id in &pending_ids {
-                                progress.in_progress.remove(id);
-
-                                // Track total attempts across sessions
-                                let Some(entry) =
-                                    session_state.entries.iter().find(|e| &e.id == id)
-                                else {
-                                    continue;
-                                };
-
-                                let new_attempts = entry.attempts.len();
-                                let prev_attempts = *progress
-                                    .attempt_counts
-                                    .get(id)
-                                    .unwrap_or(&0);
-                                let is_pending = matches!(entry.status, Status::Pending);
-                                let is_verified = matches!(entry.status, Status::Verified);
-                                if is_verified {
-                                    last_verify_cycle = cycle;
-                                }
-
-                                // Count new failures since last publish
-                                let new_failure_count = entry
-                                    .attempts
-                                    .iter()
-                                    .skip(prev_attempts)
-                                    .filter(|a| !matches!(a.outcome, Outcome::Verified { .. }))
-                                    .count();
-
-                                // Update attempt count
-                                {
-                                    let total = progress
-                                        .attempt_counts
-                                        .entry(id.clone())
-                                        .or_insert(0);
-                                    *total = (*total).max(new_attempts);
-                                }
-
-                                // Update global failure count
-                                if new_failure_count > 0 {
-                                    let f = progress
-                                        .global_failures
-                                        .entry(id.clone())
-                                        .or_insert(0);
-                                    *f += new_failure_count;
-                                }
-
-                                // Check for global exclusion
-                                let failures = *progress
-                                    .global_failures
-                                    .get(id)
-                                    .unwrap_or(&0);
-                                let total = *progress
-                                    .attempt_counts
-                                    .get(id)
-                                    .unwrap_or(&0);
-                                if failures >= GLOBAL_FAILURE_THRESHOLD
-                                    && is_pending
-                                    && !progress.resolved.contains(id)
-                                {
-                                    to_exclude.push((id.clone(), failures));
-                                    progress.resolved.insert(id.clone());
-                                }
-
-                                // Mark resolved if verified, excluded, or exhausted
-                                if !is_pending || total >= MAX_ATTEMPTS {
-                                    progress.resolved.insert(id.clone());
-                                }
-                            }
-
-                            // Apply global exclusions to session state
-                            for (id, failures) in &to_exclude {
-                                if let Some(entry) = session_state
-                                    .entries
-                                    .iter_mut()
-                                    .find(|e| e.id == *id)
-                                {
-                                    entry.status = Status::Excluded {
-                                        reason: format!(
-                                            "Globally hopeless ({} failures across sessions)",
-                                            failures,
-                                        ),
-                                    };
-                                }
-                                if verbose {
-                                    eprintln!(
-                                        "  Global-excluded {} ({} failures across sessions)",
-                                        id, failures,
-                                    );
-                                }
-                            }
-
-                            // Accumulate updates for checkpoint
-                            for id in &pending_ids {
-                                if let Some(entry) =
-                                    session_state.entries.iter().find(|e| &e.id == id)
-                                {
-                                    if !entry.attempts.is_empty() || !entry.probes.is_empty() {
-                                        progress.pending_updates.push(SessionUpdate {
-                                            surface_id: entry.id.clone(),
-                                            status: entry.status.clone(),
-                                            attempts: entry.attempts.clone(),
-                                            probes: entry.probes.clone(),
-                                            retried: entry.retried,
-                                        });
-                                    }
-                                }
-                            }
-
-                            // Periodic checkpoint: merge accumulated updates and save to disk.
-                            // This ensures progress survives if the process is killed.
-                            if cycle - progress.last_checkpoint_cycle >= CHECKPOINT_INTERVAL {
-                                progress.last_checkpoint_cycle = cycle;
-                                let updates = std::mem::take(&mut progress.pending_updates);
-                                // Drop progress lock before taking checkpoint lock
-                                drop(progress);
-
-                                let mut ckpt = checkpoint_state.lock().unwrap();
-                                ckpt.cycle = cycle;
-                                for update in updates {
-                                    if let Some(entry) = ckpt.entries.iter_mut().find(|e| e.id == update.surface_id) {
-                                        let update_resolved = !matches!(update.status, Status::Pending);
-                                        let current_resolved = !matches!(entry.status, Status::Pending);
-                                        if update_resolved && !current_resolved {
-                                            entry.status = update.status;
-                                            entry.attempts = update.attempts;
-                                            entry.probes = update.probes;
-                                            entry.retried = update.retried;
-                                        } else if !current_resolved {
-                                            if update.attempts.len() > entry.attempts.len() {
-                                                entry.attempts = update.attempts;
-                                            }
-                                            if update.probes.len() > entry.probes.len() {
-                                                entry.probes = update.probes;
-                                            }
-                                        }
-                                    }
-                                }
-                                if let Err(e) = ckpt.save(pack_path) {
-                                    if verbose {
-                                        eprintln!("  Checkpoint save failed: {}", e);
-                                    }
-                                } else if verbose {
-                                    let verified = ckpt.entries.iter()
-                                        .filter(|e| matches!(e.status, Status::Verified))
-                                        .count();
-                                    eprintln!("  Checkpoint at cycle {}: {} verified", cycle, verified);
-                                }
-                            }
-                        }
-
-                        if !cycle_ok {
-                            break;
-                        }
-
-                        // Stall detection: if no verifications in the last
-                        // 10 cycles, reset the LM for fresh context. After 2
-                        // resets with no progress, wind down for real.
-                        // Also wind down if all remaining surfaces are globally hopeless.
-                        {
-                            let stalled = last_verify_cycle > 0
-                                && cycle - last_verify_cycle >= 10;
-                            if stalled {
-                                stall_resets += 1;
-                                if stall_resets >= 2 {
-                                    if verbose {
-                                        eprintln!(
-                                            "  S{}: winding down ({} resets with no progress)",
-                                            session_idx + 1, stall_resets,
-                                        );
-                                    }
-                                    break;
-                                }
-                                if verbose {
-                                    eprintln!(
-                                        "  S{}: stalled, resetting LM (reset {}/2)",
-                                        session_idx + 1, stall_resets,
-                                    );
-                                }
-                                plugin.reset().ok();
-                                last_response = None;
-                                last_verify_cycle = cycle;
-                            }
-
-                            let progress = shared.lock().unwrap();
-                            let remaining: Vec<_> = session_state
-                                .entries
-                                .iter()
-                                .filter(|e| {
-                                    matches!(e.status, Status::Pending)
-                                        && !progress.resolved.contains(&e.id)
-                                })
-                                .collect();
-                            let all_hopeless = !remaining.is_empty()
-                                && remaining.iter().all(|e| {
-                                    *progress
-                                        .global_failures
-                                        .get(&e.id)
-                                        .unwrap_or(&0)
-                                        >= GLOBAL_FAILURE_THRESHOLD
-                                });
-                            if all_hopeless {
-                                if verbose {
-                                    eprintln!(
-                                        "  S{}: winding down (all remaining surfaces hopeless)",
-                                        session_idx + 1,
-                                    );
-                                }
-                                break;
-                            }
-                        }
-                    }
-
-                    plugin.shutdown().ok();
-
-                    if verbose {
-                        let verified = session_state
-                            .entries
-                            .iter()
-                            .filter(|e| {
-                                matches!(e.status, Status::Verified) && !e.attempts.is_empty()
-                            })
-                            .count();
-                        eprintln!(
-                            "  Session {}/{}: done ({} verified)",
-                            session_idx + 1,
-                            num_sessions,
-                            verified
-                        );
-                    }
-
-                    // Collect updates for surfaces this session worked on (tested or probed)
-                    let updates: Vec<SessionUpdate> = session_state
-                        .entries
-                        .iter()
-                        .filter(|e| !e.attempts.is_empty() || !e.probes.is_empty())
-                        .map(|e| SessionUpdate {
-                            surface_id: e.id.clone(),
-                            status: e.status.clone(),
-                            attempts: e.attempts.clone(),
-                            probes: e.probes.clone(),
-                            retried: e.retried,
-                        })
-                        .collect();
-
-                    let new_seeds: Vec<VerifiedSeed> = session_state
-                        .seed_bank
-                        .into_iter()
-                        .skip(initial_seed_count)
-                        .collect();
-
-                    (updates, new_seeds)
+                    run_work_stealing_session(
+                        session_idx,
+                        num_sessions,
+                        session_state,
+                        &shared,
+                        &global_cycle,
+                        &checkpoint_state,
+                        pack_path,
+                        lm_config,
+                        max_cycles,
+                        verbose,
+                        context_mode,
+                        with_pty,
+                        initial_seed_count,
+                    )
                 })
             })
             .collect();
@@ -874,10 +496,438 @@ fn run_parallel_sessions(
     }
 }
 
+/// Run a single work-stealing session.
+///
+/// Claims batches from the shared queue, executes cycles, and publishes results.
+/// Returns accumulated updates and new verified seeds.
+#[allow(clippy::too_many_arguments)]
+fn run_work_stealing_session(
+    session_idx: usize,
+    num_sessions: usize,
+    mut session_state: State,
+    shared: &Mutex<SharedProgress>,
+    global_cycle: &AtomicU32,
+    checkpoint_state: &Mutex<State>,
+    pack_path: &Path,
+    lm_config: &LmConfig,
+    max_cycles: u32,
+    verbose: bool,
+    context_mode: ContextMode,
+    with_pty: bool,
+    initial_seed_count: usize,
+) -> (Vec<SessionUpdate>, Vec<VerifiedSeed>) {
+    if verbose {
+        eprintln!("  Session {}/{}: started", session_idx + 1, num_sessions);
+    }
+
+    let mut plugin = create_plugin(lm_config);
+    if let Err(e) = plugin.init() {
+        eprintln!("  Session {} failed to init LM: {}", session_idx + 1, e);
+        return (vec![], vec![]);
+    }
+
+    let mut last_response: Option<LmResponse> = None;
+    let mut last_verify_cycle: u32 = 0;
+    let mut stall_resets: u32 = 0;
+
+    loop {
+        // Claim next batch from shared queue
+        let cycle = global_cycle.fetch_add(1, Ordering::SeqCst) + 1;
+        if cycle > max_cycles {
+            global_cycle.fetch_sub(1, Ordering::SeqCst);
+            if verbose {
+                eprintln!("  S{}: hit max cycles ({})", session_idx + 1, max_cycles);
+            }
+            break;
+        }
+
+        let pending_ids = {
+            let mut progress = shared.lock().unwrap();
+
+            // Exclude stagnant surfaces using global attempt counts.
+            for entry in &mut session_state.entries {
+                let global = *progress.attempt_counts.get(&entry.id).unwrap_or(&0);
+                if matches!(entry.status, Status::Pending)
+                    && !progress.resolved.contains(&entry.id)
+                    && global >= STAGNATION_THRESHOLD
+                    && is_stagnant(entry)
+                {
+                    entry.status = Status::Excluded {
+                        reason: format!(
+                            "Stagnant ({} consecutive OutputsEqual)",
+                            STAGNATION_THRESHOLD,
+                        ),
+                    };
+                    progress.resolved.insert(entry.id.clone());
+                    if verbose {
+                        eprintln!("  Early-excluded {} (stagnant)", entry.id);
+                    }
+                }
+            }
+
+            // Find pending surfaces not resolved or in-progress, sorted by priority.
+            let mut candidates: Vec<(usize, usize, String)> = session_state
+                .entries
+                .iter()
+                .filter(|e| {
+                    matches!(e.status, Status::Pending)
+                        && !progress.resolved.contains(&e.id)
+                        && !progress.in_progress.contains(&e.id)
+                })
+                .map(|e| {
+                    let global_attempts = *progress.attempt_counts.get(&e.id).unwrap_or(&0);
+                    (
+                        category_priority(&e.category, &session_state),
+                        global_attempts,
+                        e.id.clone(),
+                    )
+                })
+                .collect();
+            candidates.sort_by_key(|(p, a, _)| (*p, *a));
+
+            let batch: Vec<String> = candidates
+                .into_iter()
+                .take(BATCH_SIZE)
+                .map(|(_, _, id)| id)
+                .collect();
+
+            if batch.is_empty() {
+                global_cycle.fetch_sub(1, Ordering::SeqCst);
+                break;
+            }
+
+            for id in &batch {
+                progress.in_progress.insert(id.clone());
+            }
+
+            batch
+        };
+
+        session_state.cycle = cycle;
+
+        if verbose {
+            eprintln!(
+                "  S{} cycle {}: {}",
+                session_idx + 1,
+                cycle,
+                pending_ids.join(", ")
+            );
+        }
+
+        let cycle_ok = execute_cycle(
+            pack_path,
+            &mut *plugin,
+            &mut session_state,
+            &pending_ids,
+            verbose,
+            context_mode,
+            with_pty,
+            None,
+            &mut last_response,
+            lm_config,
+        )
+        .is_ok();
+
+        // Publish results back to shared progress
+        publish_session_results(
+            &pending_ids,
+            &mut session_state,
+            shared,
+            checkpoint_state,
+            pack_path,
+            cycle,
+            verbose,
+            &mut last_verify_cycle,
+        );
+
+        if !cycle_ok {
+            break;
+        }
+
+        // Stall detection: reset LM after 10 cycles without progress, wind down after 2 resets.
+        {
+            let stalled = last_verify_cycle > 0 && cycle - last_verify_cycle >= 10;
+            if stalled {
+                stall_resets += 1;
+                if stall_resets >= 2 {
+                    if verbose {
+                        eprintln!(
+                            "  S{}: winding down ({} resets with no progress)",
+                            session_idx + 1,
+                            stall_resets,
+                        );
+                    }
+                    break;
+                }
+                if verbose {
+                    eprintln!(
+                        "  S{}: stalled, resetting LM (reset {}/2)",
+                        session_idx + 1,
+                        stall_resets,
+                    );
+                }
+                plugin.reset().ok();
+                last_response = None;
+                last_verify_cycle = cycle;
+            }
+
+            let progress = shared.lock().unwrap();
+            let all_hopeless =
+                session_state.entries.iter().any(|e| {
+                    matches!(e.status, Status::Pending) && !progress.resolved.contains(&e.id)
+                }) && session_state
+                    .entries
+                    .iter()
+                    .filter(|e| {
+                        matches!(e.status, Status::Pending) && !progress.resolved.contains(&e.id)
+                    })
+                    .all(|e| {
+                        *progress.global_failures.get(&e.id).unwrap_or(&0)
+                            >= GLOBAL_FAILURE_THRESHOLD
+                    });
+            if all_hopeless {
+                if verbose {
+                    eprintln!(
+                        "  S{}: winding down (all remaining surfaces hopeless)",
+                        session_idx + 1,
+                    );
+                }
+                break;
+            }
+        }
+    }
+
+    plugin.shutdown().ok();
+
+    if verbose {
+        let verified = session_state
+            .entries
+            .iter()
+            .filter(|e| matches!(e.status, Status::Verified) && !e.attempts.is_empty())
+            .count();
+        eprintln!(
+            "  Session {}/{}: done ({} verified)",
+            session_idx + 1,
+            num_sessions,
+            verified
+        );
+    }
+
+    let updates: Vec<SessionUpdate> = session_state
+        .entries
+        .iter()
+        .filter(|e| !e.attempts.is_empty() || !e.probes.is_empty())
+        .map(|e| SessionUpdate {
+            surface_id: e.id.clone(),
+            status: e.status.clone(),
+            attempts: e.attempts.clone(),
+            probes: e.probes.clone(),
+            retried: e.retried,
+        })
+        .collect();
+
+    let new_seeds: Vec<VerifiedSeed> = session_state
+        .seed_bank
+        .into_iter()
+        .skip(initial_seed_count)
+        .collect();
+
+    (updates, new_seeds)
+}
+
+/// Publish a session's cycle results to shared progress, handle exclusions and checkpoints.
+#[allow(clippy::too_many_arguments)]
+fn publish_session_results(
+    pending_ids: &[String],
+    session_state: &mut State,
+    shared: &Mutex<SharedProgress>,
+    checkpoint_state: &Mutex<State>,
+    pack_path: &Path,
+    cycle: u32,
+    verbose: bool,
+    last_verify_cycle: &mut u32,
+) {
+    let mut to_exclude: Vec<(String, usize)> = Vec::new();
+    let mut progress = shared.lock().unwrap();
+
+    for id in pending_ids {
+        progress.in_progress.remove(id);
+
+        let Some(entry) = session_state.entries.iter().find(|e| &e.id == id) else {
+            continue;
+        };
+
+        let new_attempts = entry.attempts.len();
+        let prev_attempts = *progress.attempt_counts.get(id).unwrap_or(&0);
+        let is_pending = matches!(entry.status, Status::Pending);
+
+        if matches!(entry.status, Status::Verified) {
+            *last_verify_cycle = cycle;
+        }
+
+        let new_failure_count = entry
+            .attempts
+            .iter()
+            .skip(prev_attempts)
+            .filter(|a| !matches!(a.outcome, Outcome::Verified { .. }))
+            .count();
+
+        *progress.attempt_counts.entry(id.clone()).or_insert(0) = prev_attempts.max(new_attempts);
+
+        if new_failure_count > 0 {
+            *progress.global_failures.entry(id.clone()).or_insert(0) += new_failure_count;
+        }
+
+        let failures = *progress.global_failures.get(id).unwrap_or(&0);
+        let total = *progress.attempt_counts.get(id).unwrap_or(&0);
+
+        if failures >= GLOBAL_FAILURE_THRESHOLD && is_pending && !progress.resolved.contains(id) {
+            to_exclude.push((id.clone(), failures));
+            progress.resolved.insert(id.clone());
+        }
+
+        if !is_pending || total >= MAX_ATTEMPTS {
+            progress.resolved.insert(id.clone());
+        }
+    }
+
+    // Apply global exclusions to session state
+    for (id, failures) in &to_exclude {
+        if let Some(entry) = session_state.entries.iter_mut().find(|e| e.id == *id) {
+            entry.status = Status::Excluded {
+                reason: format!("Globally hopeless ({} failures across sessions)", failures,),
+            };
+        }
+        if verbose {
+            eprintln!(
+                "  Global-excluded {} ({} failures across sessions)",
+                id, failures,
+            );
+        }
+    }
+
+    // Accumulate updates for checkpoint
+    for id in pending_ids {
+        if let Some(entry) = session_state.entries.iter().find(|e| &e.id == id) {
+            if !entry.attempts.is_empty() || !entry.probes.is_empty() {
+                progress.pending_updates.push(SessionUpdate {
+                    surface_id: entry.id.clone(),
+                    status: entry.status.clone(),
+                    attempts: entry.attempts.clone(),
+                    probes: entry.probes.clone(),
+                    retried: entry.retried,
+                });
+            }
+        }
+    }
+
+    // Periodic checkpoint
+    if cycle - progress.last_checkpoint_cycle >= CHECKPOINT_INTERVAL {
+        progress.last_checkpoint_cycle = cycle;
+        let updates = std::mem::take(&mut progress.pending_updates);
+        drop(progress);
+
+        let mut ckpt = checkpoint_state.lock().unwrap();
+        ckpt.cycle = cycle;
+        merge_checkpoint_updates(&mut ckpt, updates);
+        if let Err(e) = ckpt.save(pack_path) {
+            if verbose {
+                eprintln!("  Checkpoint save failed: {}", e);
+            }
+        } else if verbose {
+            let verified = ckpt
+                .entries
+                .iter()
+                .filter(|e| matches!(e.status, Status::Verified))
+                .count();
+            eprintln!("  Checkpoint at cycle {}: {} verified", cycle, verified);
+        }
+    }
+}
+
+/// Merge session updates into a checkpoint state.
+fn merge_checkpoint_updates(state: &mut State, updates: Vec<SessionUpdate>) {
+    for update in updates {
+        if let Some(entry) = state.entries.iter_mut().find(|e| e.id == update.surface_id) {
+            let update_resolved = !matches!(update.status, Status::Pending);
+            let current_resolved = !matches!(entry.status, Status::Pending);
+            if update_resolved && !current_resolved {
+                entry.status = update.status;
+                entry.attempts = update.attempts;
+                entry.probes = update.probes;
+                entry.retried = update.retried;
+            } else if !current_resolved {
+                if update.attempts.len() > entry.attempts.len() {
+                    entry.attempts = update.attempts;
+                }
+                if update.probes.len() > entry.probes.len() {
+                    entry.probes = update.probes;
+                }
+            }
+        }
+    }
+}
+
+/// Run batches of LM prompts in parallel, each with its own plugin instance.
+///
+/// Each batch gets a fresh LM plugin. On success, the response text is passed to
+/// `parse_fn` along with the batch IDs to produce typed results. Failed batches
+/// produce empty results.
+pub(crate) fn run_parallel_lm_batches<T: Send>(
+    batches: Vec<(Vec<String>, String)>,
+    lm_config: &LmConfig,
+    verbose: bool,
+    label: &str,
+    parse_fn: impl Fn(&str, &[String]) -> Vec<T> + Send + Sync,
+) -> Vec<Vec<T>> {
+    thread::scope(|s| {
+        let parse_fn = &parse_fn;
+        let handles: Vec<_> = batches
+            .into_iter()
+            .map(|(batch_ids, prompt)| {
+                s.spawn(move || -> Vec<T> {
+                    let mut plugin = create_plugin(lm_config);
+                    if let Err(e) = plugin.init() {
+                        if verbose {
+                            eprintln!("  {} batch init failed: {}", label, e);
+                        }
+                        return vec![];
+                    }
+
+                    let response_text = match invoke_lm_with_retry(&mut *plugin, &prompt, verbose) {
+                        Ok(text) => text,
+                        Err(e) => {
+                            if verbose {
+                                eprintln!(
+                                    "  {} LM failed for batch {:?}: {}",
+                                    label,
+                                    &batch_ids[..batch_ids.len().min(3)],
+                                    e
+                                );
+                            }
+                            plugin.shutdown().ok();
+                            return vec![];
+                        }
+                    };
+
+                    plugin.shutdown().ok();
+                    parse_fn(&response_text, &batch_ids)
+                })
+            })
+            .collect();
+
+        handles.into_iter().filter_map(|h| h.join().ok()).collect()
+    })
+}
+
 /// Invoke LM with retry logic.
 ///
 /// Retries up to MAX_LM_RETRIES times, resetting the plugin on the second-to-last attempt.
-pub(crate) fn invoke_lm_with_retry(plugin: &mut dyn LmPlugin, prompt: &str, verbose: bool) -> Result<String> {
+pub(crate) fn invoke_lm_with_retry(
+    plugin: &mut dyn LmPlugin,
+    prompt: &str,
+    verbose: bool,
+) -> Result<String> {
     let timeout = Duration::from_secs(LM_TIMEOUT_SECS);
 
     for attempt in 1..=MAX_LM_RETRIES {
@@ -1165,7 +1215,11 @@ fn execute_cycle(
                     eprintln!(
                         "  Auto-promoted {} → {:?}",
                         result.surface_id,
-                        if is_verified { "Verified" } else { "not verified" }
+                        if is_verified {
+                            "Verified"
+                        } else {
+                            "not verified"
+                        }
                     );
                 }
                 if is_verified {
@@ -1256,8 +1310,7 @@ fn execute_cycle(
                     "  {} → {:?}",
                     result.surface_id,
                     match &result.outcome {
-                        Outcome::Verified { diff_kind } =>
-                            format!("Verified ({:?})", diff_kind),
+                        Outcome::Verified { diff_kind } => format!("Verified ({:?})", diff_kind),
                         Outcome::OutputsEqual => "OutputsEqual".to_string(),
                         Outcome::SetupFailed { .. } => "SetupFailed".to_string(),
                         Outcome::Crashed { .. } => "Crashed".to_string(),
@@ -1304,11 +1357,7 @@ fn execute_cycle(
                 });
             if needs_rechar {
                 super::characterize::recharacterize_surface(
-                    state,
-                    pack_path,
-                    lm_config,
-                    verbose,
-                    surface_id,
+                    state, pack_path, lm_config, verbose, surface_id,
                 )?;
             }
         }
@@ -1380,7 +1429,13 @@ fn run_chunk(
             .entries
             .iter()
             .filter(|e| chunk_ids.contains(&e.id) && matches!(e.status, Status::Pending))
-            .map(|e| (category_priority(&e.category, state), e.attempts.len(), e.id.clone()))
+            .map(|e| {
+                (
+                    category_priority(&e.category, state),
+                    e.attempts.len(),
+                    e.id.clone(),
+                )
+            })
             .collect();
         all_pending.sort_by_key(|(p, a, _)| (*p, *a));
 
@@ -1586,7 +1641,7 @@ mod tests {
                     status: Status::Verified,
                     probes: vec![],
                     attempts: vec![],
-                category: SurfaceCategory::General,
+                    category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
                     critique_demotions: 0,
@@ -1600,7 +1655,7 @@ mod tests {
                     status: Status::Pending,
                     probes: vec![],
                     attempts: vec![],
-                category: SurfaceCategory::General,
+                    category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
                     critique_demotions: 0,
@@ -1616,7 +1671,7 @@ mod tests {
                     },
                     probes: vec![],
                     attempts: vec![],
-                category: SurfaceCategory::General,
+                    category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
                     critique_demotions: 0,

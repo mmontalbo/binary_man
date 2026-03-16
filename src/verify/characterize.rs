@@ -12,7 +12,6 @@ use super::types::{Characterization, State, Status};
 use crate::lm::{create_plugin, LmConfig};
 use anyhow::Result;
 use std::path::Path;
-use std::thread;
 
 /// Maximum surfaces per characterization batch.
 const BATCH_SIZE: usize = 20;
@@ -30,10 +29,7 @@ pub(super) fn characterize_surfaces(
     let needs_characterization: Vec<String> = state
         .entries
         .iter()
-        .filter(|e| {
-            matches!(e.status, Status::Pending)
-                && e.characterization.is_none()
-        })
+        .filter(|e| matches!(e.status, Status::Pending) && e.characterization.is_none())
         .map(|e| e.id.clone())
         .collect();
 
@@ -48,7 +44,6 @@ pub(super) fn characterize_surfaces(
         );
     }
 
-    // Prepare batches with prompts
     let batches: Vec<(Vec<String>, String)> = needs_characterization
         .chunks(BATCH_SIZE)
         .map(|batch| {
@@ -58,61 +53,14 @@ pub(super) fn characterize_surfaces(
         })
         .collect();
 
-    // Process batches in parallel
-    let all_results: Vec<Vec<(String, Characterization)>> = thread::scope(|s| {
-        let handles: Vec<_> = batches
-            .into_iter()
-            .map(|(batch_ids, prompt)| {
-                s.spawn(move || -> Vec<(String, Characterization)> {
-                    let mut plugin = create_plugin(lm_config);
-                    if let Err(e) = plugin.init() {
-                        if verbose {
-                            eprintln!("  Characterize batch init failed: {}", e);
-                        }
-                        return vec![];
-                    }
+    let all_results = super::run::run_parallel_lm_batches(
+        batches,
+        lm_config,
+        verbose,
+        "Characterize",
+        parse_characterize_response,
+    );
 
-                    let response_text = match super::run::invoke_lm_with_retry(
-                        &mut *plugin,
-                        &prompt,
-                        verbose,
-                    ) {
-                        Ok(text) => text,
-                        Err(e) => {
-                            if verbose {
-                                eprintln!(
-                                    "  Characterize LM failed for batch {:?}: {}",
-                                    &batch_ids[..batch_ids.len().min(3)],
-                                    e
-                                );
-                            }
-                            plugin.shutdown().ok();
-                            return vec![];
-                        }
-                    };
-
-                    plugin.shutdown().ok();
-
-                    // Log raw response for debugging
-                    if let Some(cycle_label) = batch_ids.first() {
-                        let log_dir = pack_path.join("lm_log");
-                        let _ = std::fs::create_dir_all(&log_dir);
-                        let path = log_dir.join(format!(
-                            "characterize_{}.txt",
-                            cycle_label.trim_start_matches('-')
-                        ));
-                        let _ = std::fs::write(&path, &response_text);
-                    }
-
-                    parse_characterize_response(&response_text, &batch_ids)
-                })
-            })
-            .collect();
-
-        handles.into_iter().filter_map(|h| h.join().ok()).collect()
-    });
-
-    // Apply characterizations to state
     let mut count = 0;
     for results in all_results {
         for (surface_id, characterization) in results {
@@ -126,7 +74,11 @@ pub(super) fn characterize_surfaces(
     }
 
     if verbose {
-        eprintln!("Characterized {}/{} surfaces", count, needs_characterization.len());
+        eprintln!(
+            "Characterized {}/{} surfaces",
+            count,
+            needs_characterization.len()
+        );
     }
 
     state.save(pack_path)?;
@@ -167,7 +119,10 @@ pub(super) fn recharacterize_surface(
     }
 
     if verbose {
-        eprintln!("  Re-characterizing {} (rev {}, {} OutputsEqual)...", surface_id, old_char.revision, oe_count);
+        eprintln!(
+            "  Re-characterizing {} (rev {}, {} OutputsEqual)...",
+            surface_id, old_char.revision, oe_count
+        );
     }
 
     let prompt = build_recharacterize_prompt(state, surface_id, &old_char);
@@ -217,17 +172,20 @@ fn build_characterize_prompt(state: &State, surface_ids: &[String]) -> String {
     };
 
     prompt.push_str("# Characterize Options\n\n");
-    prompt.push_str(&format!(
-        "Command: `{}`\n\n",
-        base_command
-    ));
+    prompt.push_str(&format!("Command: `{}`\n\n", base_command));
 
     if !state.help_preamble.is_empty() {
-        prompt.push_str(&format!("## Command Description\n\n{}\n\n", state.help_preamble));
+        prompt.push_str(&format!(
+            "## Command Description\n\n{}\n\n",
+            state.help_preamble
+        ));
     }
 
     if !state.examples_section.is_empty() {
-        prompt.push_str(&format!("## Examples from Documentation\n\n{}\n\n", state.examples_section));
+        prompt.push_str(&format!(
+            "## Examples from Documentation\n\n{}\n\n",
+            state.examples_section
+        ));
     }
 
     prompt.push_str(

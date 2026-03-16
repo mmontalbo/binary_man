@@ -4,11 +4,10 @@
 //! differed but didn't actually demonstrate the documented behavior.
 
 use super::types::{State, Status};
-use crate::lm::{create_plugin, LmConfig};
+use crate::lm::LmConfig;
 use anyhow::Result;
 use std::fs;
 use std::path::Path;
-use std::thread;
 
 /// Maximum surfaces per critique batch.
 const BATCH_SIZE: usize = 10;
@@ -36,7 +35,6 @@ pub(super) fn critique_surfaces(
     verbose: bool,
     surface_ids: &[String],
 ) -> Result<()> {
-    // Only critique surfaces that are actually Verified
     let verified_ids: Vec<String> = surface_ids
         .iter()
         .filter(|id| {
@@ -53,13 +51,9 @@ pub(super) fn critique_surfaces(
     }
 
     if verbose {
-        eprintln!(
-            "  Critiquing {} verified surface(s)...",
-            verified_ids.len()
-        );
+        eprintln!("  Critiquing {} verified surface(s)...", verified_ids.len());
     }
 
-    // Prepare batches with their prompts (needs state access, so done before parallel section)
     let batches: Vec<(Vec<String>, String)> = verified_ids
         .chunks(BATCH_SIZE)
         .map(|batch| {
@@ -69,44 +63,13 @@ pub(super) fn critique_surfaces(
         })
         .collect();
 
-    // Process batches in parallel
-    let all_judgments: Vec<Vec<(String, Action)>> = thread::scope(|s| {
-        let handles: Vec<_> = batches
-            .into_iter()
-            .map(|(batch_ids, prompt)| {
-                s.spawn(move || -> Vec<(String, Action)> {
-                    let mut plugin = create_plugin(lm_config);
-                    if let Err(e) = plugin.init() {
-                        if verbose {
-                            eprintln!("  Critique batch init failed: {}", e);
-                        }
-                        return vec![];
-                    }
-
-                    let response_text =
-                        match super::run::invoke_lm_with_retry(&mut *plugin, &prompt, verbose) {
-                            Ok(text) => text,
-                            Err(e) => {
-                                if verbose {
-                                    eprintln!(
-                                        "  Critique LM failed for batch {:?}: {}",
-                                        &batch_ids[..batch_ids.len().min(3)],
-                                        e
-                                    );
-                                }
-                                plugin.shutdown().ok();
-                                return vec![];
-                            }
-                        };
-
-                    plugin.shutdown().ok();
-                    parse_response(&response_text)
-                })
-            })
-            .collect();
-
-        handles.into_iter().filter_map(|h| h.join().ok()).collect()
-    });
+    let all_judgments = super::run::run_parallel_lm_batches(
+        batches,
+        lm_config,
+        verbose,
+        "Critique",
+        |response_text, _batch_ids| parse_response(response_text),
+    );
 
     // Apply all judgments sequentially
     let mut demoted_count = 0;
@@ -213,7 +176,10 @@ fn build_prompt(state: &State, surface_ids: &[String], pack_path: &Path) -> Stri
 
                 if !evidence.control_stdout.is_empty() {
                     prompt.push_str("**Control stdout** (truncated):\n```\n");
-                    prompt.push_str(&super::evidence::truncate_str(&evidence.control_stdout, 800));
+                    prompt.push_str(&super::evidence::truncate_str(
+                        &evidence.control_stdout,
+                        800,
+                    ));
                     prompt.push_str("\n```\n\n");
                 }
                 if !evidence.option_stdout.is_empty() {

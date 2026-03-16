@@ -22,7 +22,6 @@ mod bootstrap;
 mod characterize;
 mod critique;
 mod evidence;
-mod fixtures;
 mod lm;
 mod prompt;
 pub(crate) mod run;
