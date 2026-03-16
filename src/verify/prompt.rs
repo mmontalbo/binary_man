@@ -260,20 +260,19 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
 
             // Default-on hint: detect options that are likely enabled by default
             // (positive form of a negation pair) and have stagnated in probes.
-            if let SurfaceCategory::Modifier { base } = &entry.category {
-                let is_default_on = entry.id.starts_with("--no-") || base.starts_with("--no-");
+            if let Some(neg_form) = entry.find_negation_form(&state.entries) {
                 let identical_probes = entry
                     .probes
                     .iter()
                     .filter(|p| !p.outputs_differ && !p.setup_failed)
                     .count();
-                if is_default_on && identical_probes >= 3 {
+                if identical_probes >= 3 {
                     prompt.push_str(&format!(
                         "\n**DEFAULT-ON:** This option appears to be enabled by default ({} probes \
-                         returned identical). To verify it, disable the behavior first via git \
-                         config or by including {} in your seed setup, then test whether this \
-                         option re-enables it.\n",
-                        identical_probes, base
+                         returned identical). To verify it, disable the behavior first (e.g., \
+                         via configuration or by including {} in your seed setup), then test \
+                         whether this option re-enables it.\n",
+                        identical_probes, neg_form
                     ));
                 }
             }

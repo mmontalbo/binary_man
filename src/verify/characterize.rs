@@ -222,17 +222,15 @@ fn build_characterize_prompt(state: &State, surface_ids: &[String]) -> String {
                 prompt.push_str(&format!("{}\n", context));
             }
 
-            // Default-on hint for negation pairs
-            if let super::types::SurfaceCategory::Modifier { base } = &entry.category {
-                let is_negation_pair = surface_id.starts_with("--no-") || base.starts_with("--no-");
-                if is_negation_pair {
-                    prompt.push_str(&format!(
-                        "Note: This option has a negation form ({}). If this option is enabled \
-                         by default, testing requires disabling it first (e.g., via git config in \
-                         seed setup) before verifying that this option re-enables the behavior.\n",
-                        base
-                    ));
-                }
+            // Default-on hint for negation pairs — check both directions
+            if let Some(neg_form) = entry.find_negation_form(&state.entries) {
+                prompt.push_str(&format!(
+                    "Note: This option has a negation form ({}). If this option is enabled \
+                     by default, testing requires disabling it first (e.g., via configuration \
+                     or by including the negation form in seed setup) before verifying that \
+                     this option re-enables the behavior.\n",
+                    neg_form
+                ));
             }
 
             prompt.push('\n');

@@ -148,6 +148,41 @@ pub struct SurfaceEntry {
     pub characterization: Option<Characterization>,
 }
 
+impl SurfaceEntry {
+    /// Check if any attempt outcome is Verified.
+    pub(super) fn has_verified_attempt(&self) -> bool {
+        self.attempts
+            .iter()
+            .any(|a| matches!(a.outcome, Outcome::Verified { .. }))
+    }
+
+    /// Find the negation counterpart for this surface, checking both directions.
+    ///
+    /// Returns `Some(other_side_id)` if a `--no-` pair relationship exists:
+    /// - If this entry is a `Modifier { base }` with `--no-` in either id or base,
+    ///   returns the base.
+    /// - Otherwise, checks if a `--no-{self.id}` entry exists as a `Modifier`
+    ///   pointing back to this surface, and returns that entry's id.
+    pub(super) fn find_negation_form(&self, entries: &[SurfaceEntry]) -> Option<String> {
+        if let SurfaceCategory::Modifier { base } = &self.category {
+            if self.id.starts_with("--no-") || base.starts_with("--no-") {
+                return Some(base.clone());
+            }
+        }
+        let neg_id = format!("--no-{}", self.id.strip_prefix("--").unwrap_or(&self.id));
+        entries
+            .iter()
+            .find(|e| {
+                e.id == neg_id
+                    && matches!(
+                        &e.category,
+                        SurfaceCategory::Modifier { base } if base == &self.id
+                    )
+            })
+            .map(|e| e.id.clone())
+    }
+}
+
 /// LM reasoning about what makes an option produce observable output.
 ///
 /// This separates "understanding the option" from "building a seed",

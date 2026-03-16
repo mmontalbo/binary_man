@@ -203,26 +203,40 @@ pub fn run(
     // immediately, demoting false positives back to Pending for retry within
     // the same session's cycle budget.
 
-    // Mark remaining Pending surfaces as Excluded
+    // Mark remaining Pending surfaces as Excluded (or recover verified ones)
     let mut final_excluded = 0;
+    let mut final_recovered = 0;
     for entry in &mut state.entries {
         if matches!(entry.status, Status::Pending) {
-            let reason = if entry.attempts.is_empty() {
-                "Never attempted".to_string()
-            } else if entry.critique_feedback.is_some() {
-                "Critique-demoted, not re-verified".to_string()
+            if entry.has_verified_attempt() {
+                entry.status = Status::Verified;
+                final_recovered += 1;
             } else {
-                format!("Exhausted after {} attempts", entry.attempts.len())
-            };
-            entry.status = Status::Excluded { reason };
-            final_excluded += 1;
+                let reason = if entry.attempts.is_empty() {
+                    "Never attempted".to_string()
+                } else if entry.critique_feedback.is_some() {
+                    "Critique-demoted, not re-verified".to_string()
+                } else {
+                    format!("Exhausted after {} attempts", entry.attempts.len())
+                };
+                entry.status = Status::Excluded { reason };
+                final_excluded += 1;
+            }
         }
     }
-    if final_excluded > 0 && verbose {
-        eprintln!(
-            "\nMarked {} remaining pending surface(s) as excluded",
-            final_excluded,
-        );
+    if verbose && (final_excluded > 0 || final_recovered > 0) {
+        if final_recovered > 0 {
+            eprintln!(
+                "\nRecovered {} pending surface(s) to Verified (had verified attempt)",
+                final_recovered,
+            );
+        }
+        if final_excluded > 0 {
+            eprintln!(
+                "\nMarked {} remaining pending surface(s) as excluded",
+                final_excluded,
+            );
+        }
     }
 
     state.save(pack_path)?;
@@ -445,7 +459,7 @@ fn run_parallel_sessions(
         for (surface_id, total_attempts) in &progress.attempt_counts {
             if *total_attempts >= MAX_ATTEMPTS {
                 if let Some(entry) = state.entries.iter_mut().find(|e| e.id == *surface_id) {
-                    if matches!(entry.status, Status::Pending) {
+                    if matches!(entry.status, Status::Pending) && !entry.has_verified_attempt() {
                         entry.status = Status::Excluded {
                             reason: format!("Exhausted after {} attempts", total_attempts),
                         };
@@ -582,6 +596,7 @@ fn run_work_stealing_session(
                     && !progress.resolved.contains(&entry.id)
                     && global >= STAGNATION_THRESHOLD
                     && is_stagnant(entry)
+                    && !entry.has_verified_attempt()
                 {
                     entry.status = Status::Excluded {
                         reason: format!(
@@ -825,6 +840,9 @@ fn publish_session_results(
     // Apply global exclusions to session state
     for (id, failures) in &to_exclude {
         if let Some(entry) = session_state.entries.iter_mut().find(|e| e.id == *id) {
+            if entry.has_verified_attempt() {
+                continue;
+            }
             entry.status = Status::Excluded {
                 reason: format!("Globally hopeless ({} failures across sessions)", failures,),
             };
@@ -1468,7 +1486,10 @@ fn run_chunk(
 
         // Auto-exhaust surfaces over attempt limit or stagnation
         for entry in &mut state.entries {
-            if chunk_ids.contains(&entry.id) && matches!(entry.status, Status::Pending) {
+            if chunk_ids.contains(&entry.id)
+                && matches!(entry.status, Status::Pending)
+                && !entry.has_verified_attempt()
+            {
                 if entry.attempts.len() >= MAX_ATTEMPTS {
                     entry.status = Status::Excluded {
                         reason: format!("Exhausted after {} attempts", MAX_ATTEMPTS),
