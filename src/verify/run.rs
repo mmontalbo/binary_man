@@ -550,8 +550,13 @@ fn run_work_stealing_session(
                 .filter(|e| {
                     matches!(e.status, Status::Pending)
                         && e.characterization.as_ref().is_some_and(|c| c.revision < 2)
-                        && e.attempts.len() >= 2
                         && !e.probes.iter().any(|p| p.outputs_differ)
+                        && (e.attempts.len() >= 2
+                            || e.probes
+                                .iter()
+                                .filter(|p| !p.outputs_differ && !p.setup_failed)
+                                .count()
+                                >= 4)
                 })
                 .map(|e| e.id.clone())
                 .collect();
@@ -1379,9 +1384,15 @@ fn execute_cycle(
                 .find(|e| e.id == *surface_id)
                 .is_some_and(|e| {
                     let has_room = e.characterization.as_ref().is_some_and(|c| c.revision < 2);
-                    let enough_attempts = e.attempts.len() >= 2;
                     let no_probe_validated = !e.probes.iter().any(|p| p.outputs_differ);
-                    has_room && enough_attempts && no_probe_validated
+                    let enough_attempts = e.attempts.len() >= 2;
+                    let enough_identical_probes = e
+                        .probes
+                        .iter()
+                        .filter(|p| !p.outputs_differ && !p.setup_failed)
+                        .count()
+                        >= 4;
+                    has_room && no_probe_validated && (enough_attempts || enough_identical_probes)
                 });
             if needs_rechar {
                 super::characterize::recharacterize_surface(
@@ -1438,8 +1449,13 @@ fn run_chunk(
                     chunk_ids.contains(&e.id)
                         && matches!(e.status, Status::Pending)
                         && e.characterization.as_ref().is_some_and(|c| c.revision < 2)
-                        && e.attempts.len() >= 2
                         && !e.probes.iter().any(|p| p.outputs_differ)
+                        && (e.attempts.len() >= 2
+                            || e.probes
+                                .iter()
+                                .filter(|p| !p.outputs_differ && !p.setup_failed)
+                                .count()
+                                >= 4)
                 })
                 .map(|e| e.id.clone())
                 .collect();

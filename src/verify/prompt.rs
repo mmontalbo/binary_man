@@ -258,6 +258,26 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
                 );
             }
 
+            // Default-on hint: detect options that are likely enabled by default
+            // (positive form of a negation pair) and have stagnated in probes.
+            if let SurfaceCategory::Modifier { base } = &entry.category {
+                let is_default_on = entry.id.starts_with("--no-") || base.starts_with("--no-");
+                let identical_probes = entry
+                    .probes
+                    .iter()
+                    .filter(|p| !p.outputs_differ && !p.setup_failed)
+                    .count();
+                if is_default_on && identical_probes >= 3 {
+                    prompt.push_str(&format!(
+                        "\n**DEFAULT-ON:** This option appears to be enabled by default ({} probes \
+                         returned identical). To verify it, disable the behavior first via git \
+                         config or by including {} in your seed setup, then test whether this \
+                         option re-enables it.\n",
+                        identical_probes, base
+                    ));
+                }
+            }
+
             // Suggest similar verified seeds from the seed bank
             let similar_seeds: Vec<_> = state
                 .seed_bank
@@ -293,14 +313,45 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
             }
 
             // Show probe results (bilateral comparison evidence)
+            // Always show outputs_differ probes; cap identical/failed to most recent 2.
             if !entry.probes.is_empty() {
+                let differ_probes: Vec<_> = entry
+                    .probes
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| p.outputs_differ)
+                    .collect();
+                let other_probes: Vec<_> = entry
+                    .probes
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| !p.outputs_differ)
+                    .collect();
+                let omitted = other_probes.len().saturating_sub(2);
+                let shown_others: Vec<_> = other_probes
+                    .into_iter()
+                    .rev()
+                    .take(2)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect();
+
                 prompt.push_str(&format!(
                     "\n**Probes:** {} (budget: {}/{})\n\n",
                     entry.probes.len(),
                     entry.probes.len(),
                     super::types::MAX_PROBES_PER_SURFACE
                 ));
-                for (i, probe) in entry.probes.iter().enumerate() {
+
+                if omitted > 0 {
+                    prompt.push_str(&format!(
+                        "({} earlier identical/failed probes omitted)\n",
+                        omitted
+                    ));
+                }
+
+                for (i, probe) in differ_probes.iter().chain(shown_others.iter()) {
                     let diff_status = if probe.setup_failed {
                         "SetupFailed"
                     } else if probe.outputs_differ {

@@ -113,11 +113,18 @@ pub(super) fn recharacterize_surface(
         .filter(|a| matches!(a.outcome, super::types::Outcome::OutputsEqual))
         .count();
 
-    // Only recharacterize when there are enough NEW OutputsEqual outcomes since
-    // the last revision. Requires 2 OE per revision to avoid re-running with no
-    // new evidence.
-    let required_oe = (old_char.revision as usize + 1) * 2;
-    if oe_count < required_oe {
+    let identical_probes = entry
+        .probes
+        .iter()
+        .filter(|p| !p.outputs_differ && !p.setup_failed)
+        .count();
+
+    // Only recharacterize when there's enough evidence the characterization is wrong.
+    // Count both OE test attempts and identical probes as evidence. Requires
+    // 2 evidence per revision to avoid re-running with no new evidence.
+    let evidence_count = oe_count + identical_probes;
+    let required_evidence = (old_char.revision as usize + 1) * 2;
+    if evidence_count < required_evidence {
         return Ok(());
     }
 
@@ -214,6 +221,20 @@ fn build_characterize_prompt(state: &State, surface_ids: &[String]) -> String {
             if let Some(context) = &entry.context {
                 prompt.push_str(&format!("{}\n", context));
             }
+
+            // Default-on hint for negation pairs
+            if let super::types::SurfaceCategory::Modifier { base } = &entry.category {
+                let is_negation_pair = surface_id.starts_with("--no-") || base.starts_with("--no-");
+                if is_negation_pair {
+                    prompt.push_str(&format!(
+                        "Note: This option has a negation form ({}). If this option is enabled \
+                         by default, testing requires disabling it first (e.g., via git config in \
+                         seed setup) before verifying that this option re-enables the behavior.\n",
+                        base
+                    ));
+                }
+            }
+
             prompt.push('\n');
         }
     }
