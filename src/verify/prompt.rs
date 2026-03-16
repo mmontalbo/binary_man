@@ -227,6 +227,37 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
                 ));
             }
 
+            // Prescriptive strategy guidance based on OutputsEqual count.
+            // Escalates the approach as repeated attempts fail, forcing the LM
+            // to change strategy rather than retry the same approach.
+            let oe_count = entry
+                .attempts
+                .iter()
+                .filter(|a| matches!(a.outcome, Outcome::OutputsEqual))
+                .count();
+            if oe_count >= 4 {
+                prompt.push_str(
+                    "\n**STRATEGY (final attempt):** Invert your approach entirely. \
+                     If prior seeds were complex, try the simplest possible seed. \
+                     If they were simple, construct a more elaborate scenario. \
+                     If all used the same file type, try a different one.\n",
+                );
+            } else if oe_count >= 3 {
+                prompt.push_str(&format!(
+                    "\n**STRATEGY (re-evaluate):** Your trigger assumption may be wrong. \
+                     Ignore the characterization and reason directly from the help text: \
+                     what does \"{}\" actually do? What input would make that visible?\n",
+                    entry.description,
+                ));
+            } else if oe_count >= 2 {
+                prompt.push_str(
+                    "\n**STRATEGY (change approach):** Previous seeds produced identical output. \
+                     Your next seed MUST differ structurally from all prior attempts — \
+                     different files, different setup commands, different content strategy. \
+                     Minor variations of the same approach will not work.\n",
+                );
+            }
+
             // Suggest similar verified seeds from the seed bank
             let similar_seeds: Vec<_> = state
                 .seed_bank
@@ -236,7 +267,17 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
             if !similar_seeds.is_empty() {
                 prompt.push_str("\n**Suggested seeds** (from similar verified surfaces):\n");
                 for seed in similar_seeds.iter().take(2) {
-                    prompt.push_str(&format!("  From `{}`:\n", seed.surface_id));
+                    prompt.push_str(&format!("  From `{}`", seed.surface_id));
+                    // Include the source surface's characterization trigger so the LM
+                    // understands *why* this seed worked, not just its structure.
+                    if let Some(source_entry) =
+                        state.entries.iter().find(|e| e.id == seed.surface_id)
+                    {
+                        if let Some(char) = &source_entry.characterization {
+                            prompt.push_str(&format!(" (trigger: \"{}\")", char.trigger));
+                        }
+                    }
+                    prompt.push_str(":\n");
                     if !seed.args.is_empty() {
                         prompt.push_str(&format!("    args: {:?}\n", seed.args));
                     }
@@ -484,6 +525,26 @@ pub(super) fn build_retry_prompt(
                         format_attempt_history(attempts, MAX_PRIOR_ATTEMPTS)
                     ));
                 }
+
+                // Strategy guidance based on OutputsEqual count from prior attempts
+                let oe_count = attempts
+                    .iter()
+                    .filter(|a| matches!(a.outcome, Outcome::OutputsEqual))
+                    .count();
+                if oe_count >= 3 {
+                    prompt.push_str(&format!(
+                        "\n**STRATEGY (re-evaluate):** {} prior attempts produced identical output. \
+                         Your trigger assumption is likely wrong. \
+                         Reason directly from the help text: what does \"{}\" actually do? \
+                         Try a fundamentally different approach.\n",
+                        oe_count, entry.description,
+                    ));
+                } else if oe_count >= 2 {
+                    prompt.push_str(
+                        "\n**STRATEGY (change approach):** Previous seeds produced identical output. \
+                         Your next seed MUST differ structurally from all prior attempts.\n",
+                    );
+                }
             }
 
             // Include seed suggestions from similar verified surfaces
@@ -496,7 +557,15 @@ pub(super) fn build_retry_prompt(
             if !similar_seeds.is_empty() {
                 prompt.push_str("\n**Suggested seeds** (from similar verified surfaces):\n");
                 for seed in similar_seeds {
-                    prompt.push_str(&format!("  From `{}`:\n", seed.surface_id));
+                    prompt.push_str(&format!("  From `{}`", seed.surface_id));
+                    if let Some(source_entry) =
+                        state.entries.iter().find(|e| e.id == seed.surface_id)
+                    {
+                        if let Some(char) = &source_entry.characterization {
+                            prompt.push_str(&format!(" (trigger: \"{}\")", char.trigger));
+                        }
+                    }
+                    prompt.push_str(":\n");
                     if !seed.args.is_empty() {
                         prompt.push_str(&format!("    args: {:?}\n", seed.args));
                     }
@@ -839,6 +908,7 @@ IMPORTANT: Only use surface_id values from the "Surfaces Needing Work" section a
 
 - Output must DIFFER from control (same seed, no extra args) to verify a surface
 - **PROBE FIRST**: When unsure, submit multiple Probes with different seeds — they're free and auto-promote on success
+- **PROVEN SEEDS**: When a probe shows "OUTPUTS DIFFER", your next action for that surface MUST be a Test using that probe's exact seed and args — do not redesign the seed
 - Craft seeds that match the **Trigger** condition described for each surface
 - If OutputsEqual, try STRUCTURALLY different seeds (different file content, different setup), not minor variations
 - Learn from probe results: if control_stdout and option_stdout are identical, the seed doesn't exercise the option

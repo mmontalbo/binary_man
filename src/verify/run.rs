@@ -541,6 +541,32 @@ fn run_work_stealing_session(
             break;
         }
 
+        // Pre-stagnation recharacterization for work-stealing sessions.
+        // Runs before the lock so recharacterized surfaces survive stagnation checks.
+        {
+            let rechar_candidates: Vec<String> = session_state
+                .entries
+                .iter()
+                .filter(|e| {
+                    matches!(e.status, Status::Pending)
+                        && e.characterization.as_ref().is_some_and(|c| c.revision < 2)
+                        && e.attempts.len() >= 2
+                        && !e.probes.iter().any(|p| p.outputs_differ)
+                })
+                .map(|e| e.id.clone())
+                .collect();
+            for id in &rechar_candidates {
+                super::characterize::recharacterize_surface(
+                    &mut session_state,
+                    pack_path,
+                    lm_config,
+                    verbose,
+                    id,
+                )
+                .ok();
+            }
+        }
+
         let pending_ids = {
             let mut progress = shared.lock().unwrap();
 
@@ -1340,20 +1366,22 @@ fn execute_cycle(
             )?;
         }
 
-        // Re-characterize surfaces that keep failing with the current characterization.
-        // Only triggers when a surface has a characterization and 2+ OutputsEqual outcomes.
+        // Evidence-gated recharacterization: only recharacterize when there's
+        // genuine evidence the characterization is wrong, not just on any failure.
+        // Gates (ALL must be true):
+        //   - 3+ total attempts
+        //   - No probe has ever shown outputs_differ (trigger never validated)
+        //   - revision < 2 (hard ceiling to prevent wasted cycles)
         for surface_id in &newly_equal {
             let needs_rechar = state
                 .entries
                 .iter()
                 .find(|e| e.id == *surface_id)
                 .is_some_and(|e| {
-                    e.characterization.as_ref().is_some_and(|c| c.revision < 1)
-                        && e.attempts
-                            .iter()
-                            .filter(|a| matches!(a.outcome, Outcome::OutputsEqual))
-                            .count()
-                            >= 2
+                    let has_room = e.characterization.as_ref().is_some_and(|c| c.revision < 2);
+                    let enough_attempts = e.attempts.len() >= 2;
+                    let no_probe_validated = !e.probes.iter().any(|p| p.outputs_differ);
+                    has_room && enough_attempts && no_probe_validated
                 });
             if needs_rechar {
                 super::characterize::recharacterize_surface(
@@ -1397,6 +1425,29 @@ fn run_chunk(
             }
             state.save(pack_path)?;
             return Ok(RunResult::HitMaxCycles);
+        }
+
+        // Pre-stagnation recharacterization: give surfaces a chance to revise their
+        // characterization before stagnation exclusion kills them. Must run first so
+        // a recharacterized surface gets a fresh attempt with the new understanding.
+        {
+            let rechar_candidates: Vec<String> = state
+                .entries
+                .iter()
+                .filter(|e| {
+                    chunk_ids.contains(&e.id)
+                        && matches!(e.status, Status::Pending)
+                        && e.characterization.as_ref().is_some_and(|c| c.revision < 2)
+                        && e.attempts.len() >= 2
+                        && !e.probes.iter().any(|p| p.outputs_differ)
+                })
+                .map(|e| e.id.clone())
+                .collect();
+            for id in &rechar_candidates {
+                super::characterize::recharacterize_surface(
+                    state, pack_path, lm_config, verbose, id,
+                )?;
+            }
         }
 
         // Auto-exhaust surfaces over attempt limit or stagnation

@@ -113,8 +113,11 @@ pub(super) fn recharacterize_surface(
         .filter(|a| matches!(a.outcome, super::types::Outcome::OutputsEqual))
         .count();
 
-    // Only recharacterize after 2+ OutputsEqual with an existing characterization
-    if oe_count < 2 {
+    // Only recharacterize when there are enough NEW OutputsEqual outcomes since
+    // the last revision. Requires 2 OE per revision to avoid re-running with no
+    // new evidence.
+    let required_oe = (old_char.revision as usize + 1) * 2;
+    if oe_count < required_oe {
         return Ok(());
     }
 
