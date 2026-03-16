@@ -58,6 +58,7 @@ pub(super) fn bootstrap(binary: &str, context_argv: &[String]) -> Result<State> 
                 attempts: vec![],
                 retried: false,
                 critique_feedback: None,
+                critique_demotions: 0,
                 characterization: None,
             }
         })

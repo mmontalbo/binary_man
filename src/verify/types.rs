@@ -138,6 +138,10 @@ pub struct SurfaceEntry {
     /// When present, prompts include this so the LM can adjust its approach.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub critique_feedback: Option<String>,
+    /// Number of times this surface has been demoted by critique.
+    /// After 2 demotions, the surface is excluded as critique-irreconcilable.
+    #[serde(default)]
+    pub critique_demotions: u32,
     /// LM-generated characterization of what input triggers this option's effect.
     /// Populated once before testing begins; updated on repeated failure.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -464,6 +468,7 @@ mod tests {
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                critique_demotions: 0,
                 characterization: None,
             }],
             cycle: 0,

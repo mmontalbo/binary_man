@@ -199,6 +199,7 @@ mod tests {
                 category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
+                    critique_demotions: 0,
                     characterization: None,
                 },
                 SurfaceEntry {
@@ -212,6 +213,7 @@ mod tests {
                 category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
+                    critique_demotions: 0,
                     characterization: None,
                 },
             ],

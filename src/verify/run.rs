@@ -29,6 +29,12 @@ const STAGNATION_THRESHOLD: usize = 3;
 /// Maximum surfaces to include in each LM batch.
 const BATCH_SIZE: usize = 5;
 
+/// How often (in cycles) to checkpoint parallel session progress to disk.
+const CHECKPOINT_INTERVAL: u32 = 10;
+
+/// Total failures across all sessions before a surface is globally excluded.
+const GLOBAL_FAILURE_THRESHOLD: usize = 5;
+
 
 /// Result of a verification run.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +60,12 @@ struct SharedProgress {
     in_progress: HashSet<String>,
     /// Total attempt count per surface across all sessions.
     attempt_counts: HashMap<String, usize>,
+    /// Total non-verified outcomes per surface across all sessions.
+    global_failures: HashMap<String, usize>,
+    /// Accumulated updates since last checkpoint.
+    pending_updates: Vec<SessionUpdate>,
+    /// Cycle number at last checkpoint save.
+    last_checkpoint_cycle: u32,
 }
 
 /// Compute scheduling priority for a surface category.
@@ -93,6 +105,16 @@ fn is_stagnant(entry: &SurfaceEntry) -> bool {
         .all(|a| matches!(a.outcome, Outcome::OutputsEqual))
 }
 
+
+fn modifier_base_for(state: &State, surface_id: &str) -> Option<String> {
+    state.entries.iter().find(|e| e.id == surface_id).and_then(|e| {
+        if let SurfaceCategory::Modifier { base } = &e.category {
+            Some(base.clone())
+        } else {
+            None
+        }
+    })
+}
 
 /// Result from a parallel session, containing updates to merge.
 #[derive(Debug)]
@@ -342,8 +364,15 @@ fn run_parallel_sessions(
         resolved: HashSet::new(),
         in_progress: HashSet::new(),
         attempt_counts: HashMap::new(),
+        global_failures: HashMap::new(),
+        pending_updates: Vec::new(),
+        last_checkpoint_cycle: state.cycle,
     }));
     let global_cycle = Arc::new(AtomicU32::new(state.cycle));
+
+    // Checkpoint state: a shared copy of state that gets periodically saved to disk.
+    let checkpoint_state = Arc::new(Mutex::new(state.clone()));
+
     let initial_seed_count = state.seed_bank.len();
 
     // Run all sessions in parallel
@@ -353,6 +382,7 @@ fn run_parallel_sessions(
                 let mut session_state = state.clone();
                 let shared = Arc::clone(&shared);
                 let global_cycle = Arc::clone(&global_cycle);
+                let checkpoint_state = Arc::clone(&checkpoint_state);
 
                 s.spawn(move || {
                     if verbose {
@@ -370,6 +400,8 @@ fn run_parallel_sessions(
                     }
 
                     let mut last_response: Option<LmResponse> = None;
+                    let mut last_verify_cycle: u32 = 0;
+                    let mut stall_resets: u32 = 0;
 
                     loop {
                         // Claim next batch from shared queue
@@ -492,33 +524,218 @@ fn run_parallel_sessions(
 
                         // Publish results back to shared progress
                         {
+                            let mut to_exclude: Vec<(String, usize)> = Vec::new();
                             let mut progress = shared.lock().unwrap();
                             for id in &pending_ids {
                                 progress.in_progress.remove(id);
 
                                 // Track total attempts across sessions
-                                if let Some(entry) =
+                                let Some(entry) =
                                     session_state.entries.iter().find(|e| &e.id == id)
+                                else {
+                                    continue;
+                                };
+
+                                let new_attempts = entry.attempts.len();
+                                let prev_attempts = *progress
+                                    .attempt_counts
+                                    .get(id)
+                                    .unwrap_or(&0);
+                                let is_pending = matches!(entry.status, Status::Pending);
+                                let is_verified = matches!(entry.status, Status::Verified);
+                                if is_verified {
+                                    last_verify_cycle = cycle;
+                                }
+
+                                // Count new failures since last publish
+                                let new_failure_count = entry
+                                    .attempts
+                                    .iter()
+                                    .skip(prev_attempts)
+                                    .filter(|a| !matches!(a.outcome, Outcome::Verified { .. }))
+                                    .count();
+
+                                // Update attempt count
                                 {
-                                    let new_attempts = entry.attempts.len();
                                     let total = progress
                                         .attempt_counts
                                         .entry(id.clone())
                                         .or_insert(0);
                                     *total = (*total).max(new_attempts);
+                                }
 
-                                    // Mark resolved if verified, excluded, or exhausted
-                                    if !matches!(entry.status, Status::Pending)
-                                        || *total >= MAX_ATTEMPTS
-                                    {
-                                        progress.resolved.insert(id.clone());
+                                // Update global failure count
+                                if new_failure_count > 0 {
+                                    let f = progress
+                                        .global_failures
+                                        .entry(id.clone())
+                                        .or_insert(0);
+                                    *f += new_failure_count;
+                                }
+
+                                // Check for global exclusion
+                                let failures = *progress
+                                    .global_failures
+                                    .get(id)
+                                    .unwrap_or(&0);
+                                let total = *progress
+                                    .attempt_counts
+                                    .get(id)
+                                    .unwrap_or(&0);
+                                if failures >= GLOBAL_FAILURE_THRESHOLD
+                                    && is_pending
+                                    && !progress.resolved.contains(id)
+                                {
+                                    to_exclude.push((id.clone(), failures));
+                                    progress.resolved.insert(id.clone());
+                                }
+
+                                // Mark resolved if verified, excluded, or exhausted
+                                if !is_pending || total >= MAX_ATTEMPTS {
+                                    progress.resolved.insert(id.clone());
+                                }
+                            }
+
+                            // Apply global exclusions to session state
+                            for (id, failures) in &to_exclude {
+                                if let Some(entry) = session_state
+                                    .entries
+                                    .iter_mut()
+                                    .find(|e| e.id == *id)
+                                {
+                                    entry.status = Status::Excluded {
+                                        reason: format!(
+                                            "Globally hopeless ({} failures across sessions)",
+                                            failures,
+                                        ),
+                                    };
+                                }
+                                if verbose {
+                                    eprintln!(
+                                        "  Global-excluded {} ({} failures across sessions)",
+                                        id, failures,
+                                    );
+                                }
+                            }
+
+                            // Accumulate updates for checkpoint
+                            for id in &pending_ids {
+                                if let Some(entry) =
+                                    session_state.entries.iter().find(|e| &e.id == id)
+                                {
+                                    if !entry.attempts.is_empty() || !entry.probes.is_empty() {
+                                        progress.pending_updates.push(SessionUpdate {
+                                            surface_id: entry.id.clone(),
+                                            status: entry.status.clone(),
+                                            attempts: entry.attempts.clone(),
+                                            probes: entry.probes.clone(),
+                                            retried: entry.retried,
+                                        });
                                     }
+                                }
+                            }
+
+                            // Periodic checkpoint: merge accumulated updates and save to disk.
+                            // This ensures progress survives if the process is killed.
+                            if cycle - progress.last_checkpoint_cycle >= CHECKPOINT_INTERVAL {
+                                progress.last_checkpoint_cycle = cycle;
+                                let updates = std::mem::take(&mut progress.pending_updates);
+                                // Drop progress lock before taking checkpoint lock
+                                drop(progress);
+
+                                let mut ckpt = checkpoint_state.lock().unwrap();
+                                ckpt.cycle = cycle;
+                                for update in updates {
+                                    if let Some(entry) = ckpt.entries.iter_mut().find(|e| e.id == update.surface_id) {
+                                        let update_resolved = !matches!(update.status, Status::Pending);
+                                        let current_resolved = !matches!(entry.status, Status::Pending);
+                                        if update_resolved && !current_resolved {
+                                            entry.status = update.status;
+                                            entry.attempts = update.attempts;
+                                            entry.probes = update.probes;
+                                            entry.retried = update.retried;
+                                        } else if !current_resolved {
+                                            if update.attempts.len() > entry.attempts.len() {
+                                                entry.attempts = update.attempts;
+                                            }
+                                            if update.probes.len() > entry.probes.len() {
+                                                entry.probes = update.probes;
+                                            }
+                                        }
+                                    }
+                                }
+                                if let Err(e) = ckpt.save(pack_path) {
+                                    if verbose {
+                                        eprintln!("  Checkpoint save failed: {}", e);
+                                    }
+                                } else if verbose {
+                                    let verified = ckpt.entries.iter()
+                                        .filter(|e| matches!(e.status, Status::Verified))
+                                        .count();
+                                    eprintln!("  Checkpoint at cycle {}: {} verified", cycle, verified);
                                 }
                             }
                         }
 
                         if !cycle_ok {
                             break;
+                        }
+
+                        // Stall detection: if no verifications in the last
+                        // 10 cycles, reset the LM for fresh context. After 2
+                        // resets with no progress, wind down for real.
+                        // Also wind down if all remaining surfaces are globally hopeless.
+                        {
+                            let stalled = last_verify_cycle > 0
+                                && cycle - last_verify_cycle >= 10;
+                            if stalled {
+                                stall_resets += 1;
+                                if stall_resets >= 2 {
+                                    if verbose {
+                                        eprintln!(
+                                            "  S{}: winding down ({} resets with no progress)",
+                                            session_idx + 1, stall_resets,
+                                        );
+                                    }
+                                    break;
+                                }
+                                if verbose {
+                                    eprintln!(
+                                        "  S{}: stalled, resetting LM (reset {}/2)",
+                                        session_idx + 1, stall_resets,
+                                    );
+                                }
+                                plugin.reset().ok();
+                                last_response = None;
+                                last_verify_cycle = cycle;
+                            }
+
+                            let progress = shared.lock().unwrap();
+                            let remaining: Vec<_> = session_state
+                                .entries
+                                .iter()
+                                .filter(|e| {
+                                    matches!(e.status, Status::Pending)
+                                        && !progress.resolved.contains(&e.id)
+                                })
+                                .collect();
+                            let all_hopeless = !remaining.is_empty()
+                                && remaining.iter().all(|e| {
+                                    *progress
+                                        .global_failures
+                                        .get(&e.id)
+                                        .unwrap_or(&0)
+                                        >= GLOBAL_FAILURE_THRESHOLD
+                                });
+                            if all_hopeless {
+                                if verbose {
+                                    eprintln!(
+                                        "  S{}: winding down (all remaining surfaces hopeless)",
+                                        session_idx + 1,
+                                    );
+                                }
+                                break;
+                            }
                         }
                     }
 
@@ -835,7 +1052,8 @@ fn execute_cycle(
                     seed,
                 } = action
                 {
-                    Some((surface_id, extra_args, seed))
+                    let mod_base = modifier_base_for(state, &surface_id);
+                    Some((surface_id, extra_args, seed, mod_base))
                 } else {
                     None
                 }
@@ -845,7 +1063,7 @@ fn execute_cycle(
         let probe_results: Vec<_> = thread::scope(|s| {
             let handles: Vec<_> = probe_params
                 .into_iter()
-                .map(|(surface_id, extra_args, seed)| {
+                .map(|(surface_id, extra_args, seed, mod_base)| {
                     let binary = &state.binary;
                     let context_argv = &state.context_argv;
                     let cycle = state.cycle;
@@ -858,6 +1076,7 @@ fn execute_cycle(
                             extra_args,
                             seed,
                             with_pty,
+                            mod_base.as_deref(),
                         )
                     })
                 })
@@ -898,10 +1117,12 @@ fn execute_cycle(
             }
             // Auto-promote: probe showed outputs differ → run as formal Test
             if result.outputs_differ && !result.setup_failed {
+                let mod_base = modifier_base_for(state, &result.surface_id);
                 auto_promote.push((
                     result.surface_id.clone(),
                     result.extra_args.clone(),
                     result.seed.clone(),
+                    mod_base,
                 ));
             }
             merge_probe_result(state, result);
@@ -918,7 +1139,7 @@ fn execute_cycle(
             let promote_results: Vec<_> = thread::scope(|s| {
                 let handles: Vec<_> = auto_promote
                     .into_iter()
-                    .map(|(surface_id, extra_args, seed)| {
+                    .map(|(surface_id, extra_args, seed, mod_base)| {
                         let binary = &state.binary;
                         let context_argv = &state.context_argv;
                         let cycle = state.cycle;
@@ -933,6 +1154,7 @@ fn execute_cycle(
                                 seed,
                                 with_pty,
                                 None, // No prediction for auto-promoted tests
+                                mod_base.as_deref(),
                             )
                         })
                     })
@@ -991,7 +1213,8 @@ fn execute_cycle(
                             e.id == surface_id
                                 && matches!(e.category, SurfaceCategory::TtyDependent)
                         });
-                    Some((surface_id, extra_args, seed, prediction, surface_pty))
+                    let mod_base = modifier_base_for(state, &surface_id);
+                    Some((surface_id, extra_args, seed, prediction, surface_pty, mod_base))
                 } else {
                     None
                 }
@@ -1002,7 +1225,7 @@ fn execute_cycle(
         let results: Vec<_> = thread::scope(|s| {
             let handles: Vec<_> = test_params
                 .into_iter()
-                .map(|(surface_id, extra_args, seed, prediction, surface_pty)| {
+                .map(|(surface_id, extra_args, seed, prediction, surface_pty, mod_base)| {
                     let binary = &state.binary;
                     let context_argv = &state.context_argv;
                     let cycle = state.cycle;
@@ -1017,6 +1240,7 @@ fn execute_cycle(
                             seed,
                             surface_pty,
                             prediction,
+                            mod_base.as_deref(),
                         )
                     })
                 })
@@ -1087,7 +1311,7 @@ fn execute_cycle(
                 .iter()
                 .find(|e| e.id == *surface_id)
                 .is_some_and(|e| {
-                    e.characterization.is_some()
+                    e.characterization.as_ref().is_some_and(|c| c.revision < 1)
                         && e.attempts
                             .iter()
                             .filter(|a| matches!(a.outcome, Outcome::OutputsEqual))
@@ -1381,6 +1605,7 @@ mod tests {
                 category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
+                    critique_demotions: 0,
                     characterization: None,
                 },
                 SurfaceEntry {
@@ -1394,6 +1619,7 @@ mod tests {
                 category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
+                    critique_demotions: 0,
                     characterization: None,
                 },
                 SurfaceEntry {
@@ -1409,6 +1635,7 @@ mod tests {
                 category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
+                    critique_demotions: 0,
                     characterization: None,
                 },
             ],

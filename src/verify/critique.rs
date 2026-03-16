@@ -120,12 +120,28 @@ pub(super) fn critique_surfaces(
                         }
                     }
                     Action::Demote { reason } => {
-                        entry.status = Status::Pending;
-                        entry.critique_feedback = Some(reason.clone());
-                        demoted_count += 1;
-                        if verbose {
-                            eprintln!("  {} → DEMOTE ({})", surface_id, reason);
+                        entry.critique_demotions += 1;
+                        if entry.critique_demotions >= 2 {
+                            entry.status = Status::Excluded {
+                                reason: format!(
+                                    "Critique-irreconcilable after {} demotions: {}",
+                                    entry.critique_demotions, reason
+                                ),
+                            };
+                            if verbose {
+                                eprintln!(
+                                    "  {} → EXCLUDED (critique-irreconcilable, {} demotions)",
+                                    surface_id, entry.critique_demotions
+                                );
+                            }
+                        } else {
+                            entry.status = Status::Pending;
+                            entry.critique_feedback = Some(reason.clone());
+                            if verbose {
+                                eprintln!("  {} → DEMOTE ({})", surface_id, reason);
+                            }
                         }
+                        demoted_count += 1;
                     }
                 }
             }

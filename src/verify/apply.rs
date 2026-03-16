@@ -9,7 +9,8 @@ use super::evidence::{
 };
 use super::lm::{LmAction, PredictedDiff, Prediction};
 use super::types::{
-    Attempt, BaselineRecord, Outcome, ProbeResult, Seed, State, Status, VerifiedSeed,
+    Attempt, BaselineRecord, Outcome, ProbeResult, Seed, State, Status, SurfaceCategory,
+    VerifiedSeed,
 };
 use anyhow::Result;
 use std::path::Path;
@@ -139,17 +140,20 @@ pub(super) fn run_test_scenario(
     seed: Seed,
     with_pty: bool,
     prediction: Option<Prediction>,
+    modifier_base: Option<&str>,
 ) -> Result<TestResult> {
     let scenario_id = format!("{}_c{}", sanitize_id(surface_id), cycle);
 
     // Construct args: join option + value when needed (e.g. -U1, --unified=1)
     let args = join_option_value(surface_id, extra_args);
 
-    // Control argv: context_argv only (no extra args for control)
-    let control_argv: Vec<String> = context_argv.to_vec();
-
-    // Option argv: context_argv + all args
-    let full_argv: Vec<String> = context_argv.iter().chain(args.iter()).cloned().collect();
+    // Control argv: context_argv, plus the base flag for modifier surfaces
+    let control_argv: Vec<String> = if let Some(base) = modifier_base {
+        context_argv.iter().chain(std::iter::once(&base.to_string())).cloned().collect()
+    } else {
+        context_argv.to_vec()
+    };
+    let full_argv: Vec<String> = control_argv.iter().chain(args.iter()).cloned().collect();
 
     // Run both control and option in the SAME sandbox
     // This ensures they see identical filesystem state (same git commit hashes, etc.)
@@ -263,17 +267,20 @@ pub(super) fn run_probe_scenario(
     extra_args: Vec<String>,
     seed: Seed,
     with_pty: bool,
+    modifier_base: Option<&str>,
 ) -> Result<ProbeRunResult> {
     let scenario_id = format!("probe_{}_c{}", sanitize_id(surface_id), cycle);
 
     // Construct args: join option + value when needed
     let args = join_option_value(surface_id, extra_args.clone());
 
-    // Control argv: context_argv only
-    let control_argv: Vec<String> = context_argv.to_vec();
-
-    // Full argv: context_argv + all args
-    let full_argv: Vec<String> = context_argv.iter().chain(args.iter()).cloned().collect();
+    // Control argv: context_argv, plus the base flag for modifier surfaces
+    let control_argv: Vec<String> = if let Some(base) = modifier_base {
+        context_argv.iter().chain(std::iter::once(&base.to_string())).cloned().collect()
+    } else {
+        context_argv.to_vec()
+    };
+    let full_argv: Vec<String> = control_argv.iter().chain(args.iter()).cloned().collect();
 
     // Run both control and option in the same sandbox (bilateral)
     let (control_evidence, option_evidence) = run_scenario_pair(
@@ -360,6 +367,13 @@ pub(super) fn apply_action(state: &mut State, pack_path: &Path, action: LmAction
             seed,
             prediction,
         } => {
+            let mod_base = state.entries.iter().find(|e| e.id == *surface_id).and_then(|e| {
+                if let SurfaceCategory::Modifier { base } = &e.category {
+                    Some(base.clone())
+                } else {
+                    None
+                }
+            });
             let result = run_test_scenario(
                 pack_path,
                 &state.binary,
@@ -370,6 +384,7 @@ pub(super) fn apply_action(state: &mut State, pack_path: &Path, action: LmAction
                 seed,
                 false,
                 prediction,
+                mod_base.as_deref(),
             )?;
             merge_test_result(state, result);
         }
@@ -379,6 +394,13 @@ pub(super) fn apply_action(state: &mut State, pack_path: &Path, action: LmAction
             extra_args,
             seed,
         } => {
+            let mod_base = state.entries.iter().find(|e| e.id == *surface_id).and_then(|e| {
+                if let SurfaceCategory::Modifier { base } = &e.category {
+                    Some(base.clone())
+                } else {
+                    None
+                }
+            });
             let result = run_probe_scenario(
                 &state.binary,
                 &state.context_argv,
@@ -387,6 +409,7 @@ pub(super) fn apply_action(state: &mut State, pack_path: &Path, action: LmAction
                 extra_args,
                 seed,
                 false,
+                mod_base.as_deref(),
             )?;
             merge_probe_result(state, result);
         }
@@ -464,6 +487,7 @@ mod tests {
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                critique_demotions: 0,
                 characterization: None,
             }],
             cycle: 1,
@@ -624,6 +648,7 @@ mod tests {
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                critique_demotions: 0,
                 characterization: None,
             }],
             cycle: 1,

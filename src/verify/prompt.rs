@@ -3,7 +3,7 @@
 //! Builds structured prompts that give the LM all the context it needs to
 //! decide on actions. The prompt format is intentionally simple and human-readable.
 
-use super::types::{Attempt, Outcome, State, SurfaceCategory};
+use super::types::{Attempt, Outcome, State, Status, SurfaceCategory};
 use std::collections::HashMap;
 
 /// A known issue extracted from SetupFailed outcomes.
@@ -189,6 +189,40 @@ fn format_known_issues_section(issues: &[KnownIssue]) -> String {
             "- `{}` failed {}×: {}\n",
             issue.command, issue.count, issue.error
         ));
+    }
+    section.push('\n');
+    section
+}
+
+/// Build a constraint section listing the valid pending surface IDs.
+///
+/// This prevents the LM from hallucinating surface names or targeting
+/// already-resolved surfaces, which wastes ~47% of actions.
+fn format_valid_surfaces_constraint(state: &State, target_ids: &[String]) -> String {
+    let all_pending: Vec<&str> = state
+        .entries
+        .iter()
+        .filter(|e| matches!(e.status, Status::Pending))
+        .map(|e| e.id.as_str())
+        .collect();
+
+    // Only emit constraint if there are surfaces outside the target set
+    // (otherwise the "Surfaces Needing Work" section is already sufficient)
+    if all_pending.len() <= target_ids.len() {
+        return String::new();
+    }
+
+    let mut section = String::from("## Valid Surface IDs\n\n");
+    section.push_str(
+        "You may ONLY use these surface_id values. Any other surface_id will be rejected:\n",
+    );
+    for id in &all_pending {
+        let marker = if target_ids.iter().any(|t| t == id) {
+            " ← target"
+        } else {
+            ""
+        };
+        section.push_str(&format!("- `{}`{}\n", id, marker));
     }
     section.push('\n');
     section
@@ -511,6 +545,9 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
         }
     }
 
+    // Valid surface constraint — prevents hallucinated surface IDs
+    prompt.push_str(&format_valid_surfaces_constraint(state, target_ids));
+
     // Instructions
     prompt.push_str(INSTRUCTIONS);
 
@@ -652,6 +689,9 @@ pub(super) fn build_retry_prompt(
             prompt.push('\n');
         }
     }
+
+    // Valid surface constraint — prevents hallucinated surface IDs
+    prompt.push_str(&format_valid_surfaces_constraint(state, target_ids));
 
     // Instructions
     prompt.push_str(INSTRUCTIONS);
@@ -851,6 +891,9 @@ pub(super) fn build_incremental_prompt(
     }
     prompt.push('\n');
 
+    // Valid surface constraint — prevents hallucinated surface IDs
+    prompt.push_str(&format_valid_surfaces_constraint(state, target_ids));
+
     // Short instructions reminder
     prompt.push_str(
         r#"Provide your next actions as JSON:
@@ -1025,6 +1068,7 @@ mod tests {
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                critique_demotions: 0,
                 characterization: None,
             }],
             cycle: 0,
@@ -1070,6 +1114,7 @@ mod tests {
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                critique_demotions: 0,
                 characterization: None,
             }],
             cycle: 1,
@@ -1125,6 +1170,7 @@ mod tests {
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                critique_demotions: 0,
                 characterization: None,
             }],
             cycle: 2,
@@ -1177,6 +1223,7 @@ mod tests {
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                critique_demotions: 0,
                 characterization: None,
             }],
             cycle: 1,
@@ -1230,6 +1277,7 @@ mod tests {
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                critique_demotions: 0,
                 characterization: None,
             }],
             cycle: 2,
@@ -1301,6 +1349,7 @@ mod tests {
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                critique_demotions: 0,
                 characterization: None,
             }],
             cycle: 3,
@@ -1412,6 +1461,7 @@ stderr: error: pathspec 'main' did not match"#
                 category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
+                    critique_demotions: 0,
                 characterization: None,
                 },
                 SurfaceEntry {
@@ -1429,6 +1479,7 @@ stderr: error: pathspec 'main' did not match"#
                 category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
+                    critique_demotions: 0,
                 characterization: None,
                 },
             ],
@@ -1482,6 +1533,7 @@ stderr: error: already a git repo"#
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                critique_demotions: 0,
                 characterization: None,
             }],
             cycle: 2,
@@ -1551,6 +1603,7 @@ stderr: pathspec 'main' did not match"#
                 category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
+                    critique_demotions: 0,
                 characterization: None,
                 },
                 SurfaceEntry {
@@ -1564,6 +1617,7 @@ stderr: pathspec 'main' did not match"#
                 category: SurfaceCategory::General,
                     retried: false,
                     critique_feedback: None,
+                    critique_demotions: 0,
                 characterization: None,
                 },
             ],
@@ -1599,6 +1653,7 @@ stderr: pathspec 'main' did not match"#
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                critique_demotions: 0,
                 characterization: None,
             }],
             cycle: 1,
@@ -1644,6 +1699,7 @@ stderr: pathspec 'main' did not match"#
                 category: SurfaceCategory::General,
                 retried: true, // This surface was previously excluded and is being retried
                 critique_feedback: None,
+                critique_demotions: 0,
                 characterization: None,
             }],
             cycle: 10,
@@ -1803,6 +1859,7 @@ stderr: pathspec 'main' did not match"#
                 attempts: vec![], // Cleared for retry
                 retried: true,
                 critique_feedback: None,
+                critique_demotions: 0,
                 characterization: None,
             }],
             cycle: 10,
@@ -1891,6 +1948,7 @@ stderr: pathspec 'main' did not match"#
                 attempts: vec![],
                 retried: true,
                 critique_feedback: None,
+                critique_demotions: 0,
                 characterization: None,
             }],
             cycle: 10,
@@ -1932,6 +1990,7 @@ stderr: pathspec 'main' did not match"#
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                critique_demotions: 0,
                 characterization: Some(Characterization {
                     trigger: "file with repeated similar lines where hunk boundaries are ambiguous".to_string(),
                     expected_diff: "different hunk grouping in diff output".to_string(),
@@ -1989,6 +2048,7 @@ stderr: pathspec 'main' did not match"#
                 category: SurfaceCategory::General,
                 retried: false,
                 critique_feedback: None,
+                critique_demotions: 0,
                 characterization: Some(Characterization {
                     trigger: "file with repeated similar lines".to_string(),
                     expected_diff: "different hunk boundaries".to_string(),
