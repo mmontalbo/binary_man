@@ -853,7 +853,7 @@ fn publish_session_results(
     }
 
     // Periodic checkpoint
-    if cycle - progress.last_checkpoint_cycle >= CHECKPOINT_INTERVAL {
+    if cycle.saturating_sub(progress.last_checkpoint_cycle) >= CHECKPOINT_INTERVAL {
         progress.last_checkpoint_cycle = cycle;
         let updates = std::mem::take(&mut progress.pending_updates);
         drop(progress);
