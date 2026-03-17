@@ -255,12 +255,14 @@ pub struct ProbeResult {
 
 impl ProbeResult {
     /// One-line mechanical diagnosis derived from structured comparison.
+    /// Currently used by tests; will be integrated into prompt rendering.
     ///
     /// Rules applied in priority order (first match wins):
     /// 1. Setup failed → name the broken command
     /// 2. Outputs differ → list which channels
     /// 3. Control and option both empty → seed produced no baseline
     /// 4. All identical → no observable effect
+    #[allow(dead_code)]
     pub(super) fn diagnose(&self) -> String {
         if self.setup_failed {
             return if let Some(detail) = &self.setup_detail {
