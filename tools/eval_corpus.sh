@@ -12,11 +12,18 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+EVAL_BIN="$ROOT_DIR/target/release/bman-eval"
+
+if [[ ! -x "$EVAL_BIN" ]]; then
+    echo "Building bman-eval (cargo build --release -p bman-eval)..."
+    cargo build --release -p bman-eval --manifest-path "$ROOT_DIR/Cargo.toml"
+fi
 
 CORPUS=(
     "ls"
     "git diff"
     "grep"
+    "find"
 )
 
 failed=0
@@ -33,7 +40,7 @@ for entry in "${CORPUS[@]}"; do
     echo "════════════════════════════════════════════════════════════"
     echo ""
 
-    if python3 "$SCRIPT_DIR/eval.py" "$binary" "${entry_point[@]}" "$@"; then
+    if "$EVAL_BIN" "$binary" "${entry_point[@]}" "$@"; then
         echo ""
         echo "  ✓ $entry complete"
     else

@@ -24,6 +24,7 @@ import concurrent.futures
 import json
 import math
 import os
+import signal
 import shutil
 import subprocess
 import sys
@@ -83,6 +84,34 @@ def build_bman() -> str:
     return str(path)
 
 
+# ── Subprocess helpers ────────────────────────────────────────────────
+
+def _run_with_pgid_timeout(cmd: list[str], timeout: int) -> int:
+    """Run a command in its own process group so timeout kills the whole tree.
+
+    subprocess.run(timeout=N) only kills the direct child, leaving grandchildren
+    (e.g., LM plugin processes) alive and holding pipe FDs open. This function
+    puts the child in a new session and kills the entire process group on timeout.
+    """
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # Kill the entire process group
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            proc.kill()
+        proc.wait()
+        raise
+    return proc.returncode
+
+
 # ── Bootstrap ────────────────────────────────────────────────────────
 
 def create_bootstrap_state(
@@ -99,7 +128,7 @@ def create_bootstrap_state(
         cmd.append(binary)
         cmd.extend(entry_point)
         print(f"Bootstrapping: {' '.join(cmd)}", file=sys.stderr)
-        subprocess.run(cmd, timeout=timeout, capture_output=True, text=True)
+        _run_with_pgid_timeout(cmd, timeout)
 
         state_path = Path(tmpdir) / "state.json"
         if not state_path.exists():
@@ -155,10 +184,8 @@ def run_single(
         cmd.extend(entry_point)
 
         try:
-            result = subprocess.run(
-                cmd, timeout=timeout, capture_output=True, text=True,
-            )
-            if result.returncode != 0:
+            rc = _run_with_pgid_timeout(cmd, timeout)
+            if rc != 0:
                 crashed = True
         except subprocess.TimeoutExpired:
             timed_out = True

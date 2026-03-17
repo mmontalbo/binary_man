@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "tools/eval"]
+resolver = "2"
+
 [package]
 name = "binary-man"
 version = "0.1.0"

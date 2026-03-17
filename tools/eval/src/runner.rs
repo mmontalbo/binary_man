@@ -1,0 +1,219 @@
+use anyhow::{Context, Result};
+use std::collections::HashMap;
+use std::os::unix::process::CommandExt;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+use crate::summary::{LmStats, RunOutcome, SurfaceOutcome};
+
+/// Execute one full end-to-end bman run, return outcome.
+pub fn run_single(
+    bman_bin: &str,
+    binary: &str,
+    entry_point: &[String],
+    max_cycles: u32,
+    timeout: u64,
+    run_idx: usize,
+) -> Result<RunOutcome> {
+    let tmpdir =
+        tempfile::tempdir().with_context(|| format!("create tmpdir for run {}", run_idx))?;
+
+    let mut cmd_args = vec![
+        "--doc-pack".to_string(),
+        tmpdir.path().to_string_lossy().to_string(),
+        "--max-cycles".to_string(),
+        max_cycles.to_string(),
+        binary.to_string(),
+    ];
+    cmd_args.extend(entry_point.iter().cloned());
+
+    let start = Instant::now();
+    let result = run_with_timeout(bman_bin, &cmd_args, timeout)?;
+    let elapsed = start.elapsed().as_secs_f64();
+
+    // Read final state (even on crash/timeout for partial results)
+    let state_path = tmpdir.path().join("state.json");
+    let (surfaces, cycles) = if state_path.exists() {
+        let raw = std::fs::read_to_string(&state_path)?;
+        match serde_json::from_str::<serde_json::Value>(&raw) {
+            Ok(state) => (
+                extract_surface_outcomes(&state),
+                state["cycle"].as_u64().unwrap_or(0) as u32,
+            ),
+            Err(_) => (HashMap::new(), 0),
+        }
+    } else {
+        (HashMap::new(), 0)
+    };
+
+    let lm_stats = LmStats::from_stderr(&result.stderr);
+
+    Ok(RunOutcome {
+        run_index: run_idx,
+        elapsed_seconds: (elapsed * 10.0).round() / 10.0,
+        cycles,
+        timed_out: result.timed_out,
+        crashed: result.crashed,
+        surfaces,
+        stderr: result.stderr,
+        lm_stats,
+    })
+}
+
+/// Run multiple trials in parallel using scoped threads.
+pub fn run_parallel(
+    bman_bin: &str,
+    binary: &str,
+    entry_point: &[String],
+    max_cycles: u32,
+    timeout: u64,
+    num_runs: usize,
+) -> Result<Vec<RunOutcome>> {
+    let results: Vec<Result<RunOutcome>> = std::thread::scope(|s| {
+        let handles: Vec<_> = (0..num_runs)
+            .map(|i| {
+                s.spawn(move || {
+                    let r = run_single(
+                        bman_bin,
+                        binary,
+                        entry_point,
+                        max_cycles,
+                        timeout,
+                        i,
+                    )?;
+                    crate::display::print_run_progress(&r, i, num_runs);
+                    Ok(r)
+                })
+            })
+            .collect();
+
+        handles
+            .into_iter()
+            .map(|h| h.join().expect("worker thread panicked"))
+            .collect()
+    });
+
+    let mut outcomes: Vec<RunOutcome> = Vec::with_capacity(num_runs);
+    for r in results {
+        outcomes.push(r?);
+    }
+    outcomes.sort_by_key(|r| r.run_index);
+    Ok(outcomes)
+}
+
+/// Extract per-surface outcomes from a completed run's state JSON.
+fn extract_surface_outcomes(state: &serde_json::Value) -> HashMap<String, SurfaceOutcome> {
+    let mut results = HashMap::new();
+
+    let entries = match state["entries"].as_array() {
+        Some(e) => e,
+        None => return results,
+    };
+
+    for entry in entries {
+        let id = match entry["id"].as_str() {
+            Some(s) if !s.is_empty() => s.to_string(),
+            _ => continue,
+        };
+
+        let status_kind = entry["status"]["kind"]
+            .as_str()
+            .unwrap_or("Pending")
+            .to_string();
+        let verified = status_kind == "Verified";
+
+        let attempts = entry["attempts"].as_array().map_or(0, Vec::len);
+        let probes = entry["probes"].as_array().map_or(0, Vec::len);
+
+        let first_verify_cycle =
+            entry["attempts"]
+                .as_array()
+                .and_then(|attempts| {
+                    attempts.iter().find_map(|a| {
+                        if a["outcome"]["kind"].as_str() == Some("Verified") {
+                            a["cycle"].as_u64().map(|c| c as u32)
+                        } else {
+                            None
+                        }
+                    })
+                });
+
+        results.insert(
+            id,
+            SurfaceOutcome {
+                verified,
+                status: status_kind,
+                attempts,
+                probes,
+                first_verify_cycle,
+            },
+        );
+    }
+
+    results
+}
+
+/// Result of running a command with timeout.
+struct RunResult {
+    timed_out: bool,
+    crashed: bool,
+    stderr: String,
+}
+
+/// Run a command in its own process group with a timeout.
+///
+/// Captures stderr for diagnostics (rate limits, retries, errors).
+/// Uses `setsid` + `killpg` to kill the entire process tree on timeout,
+/// preventing orphaned LM plugin processes.
+fn run_with_timeout(program: &str, args: &[String], timeout: u64) -> Result<RunResult> {
+    let mut cmd = Command::new(program);
+    cmd.args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+
+    // Put child in its own session so we can kill the entire process group.
+    unsafe {
+        cmd.pre_exec(|| {
+            let _ = libc::setsid();
+            Ok(())
+        });
+    }
+
+    let mut child = cmd
+        .spawn()
+        .with_context(|| format!("spawn {}", program))?;
+    let pid = child.id() as libc::pid_t;
+
+    // Read stderr in a background thread so we don't block or deadlock.
+    let stderr_handle = child.stderr.take().expect("stderr was piped");
+    let stderr_thread = std::thread::spawn(move || std::io::read_to_string(stderr_handle));
+
+    let deadline = Instant::now() + Duration::from_secs(timeout);
+
+    let (timed_out, crashed) = loop {
+        match child.try_wait().context("check child status")? {
+            Some(status) => break (false, !status.success()),
+            None => {
+                if Instant::now() >= deadline {
+                    unsafe {
+                        let _ = libc::killpg(pid, libc::SIGKILL);
+                    }
+                    let _ = child.wait();
+                    break (true, false);
+                }
+                std::thread::sleep(Duration::from_millis(250));
+            }
+        }
+    };
+
+    let stderr = stderr_thread
+        .join()
+        .expect("stderr reader thread panicked")
+        .unwrap_or_default();
+
+    Ok(RunResult {
+        timed_out,
+        crashed,
+        stderr,
+    })
+}
