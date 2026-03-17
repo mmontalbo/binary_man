@@ -142,6 +142,9 @@ fn format_outcome_compact(outcome: &Outcome) -> String {
 }
 
 /// Build the LM prompt for a set of target surfaces.
+/// Maximum prior attempts to show in prompt history (both build_prompt and retry).
+const MAX_PRIOR_ATTEMPTS: usize = 2;
+
 pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
     let mut prompt = String::new();
 
@@ -386,14 +389,21 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
                 }
             }
 
-            // Show all attempts with detailed output information
+            // Show recent attempts with detailed output information (capped)
             if !entry.attempts.is_empty() {
                 prompt.push_str(&format!(
                     "\n**Attempts:** {} total\n\n",
                     entry.attempts.len()
                 ));
 
-                for (i, attempt) in entry.attempts.iter().enumerate() {
+                let show_start = entry.attempts.len().saturating_sub(MAX_PRIOR_ATTEMPTS);
+                if show_start > 0 {
+                    prompt.push_str(&format!(
+                        "({} earlier attempt(s) omitted)\n\n",
+                        show_start
+                    ));
+                }
+                for (i, attempt) in entry.attempts.iter().enumerate().skip(show_start) {
                     prompt.push_str(&format!(
                         "  **Attempt {}** (cycle {}):\n",
                         i + 1,
@@ -488,9 +498,6 @@ fn format_outcome(outcome: &Outcome) -> String {
         Outcome::OptionError { hint } => format!("OptionError: {}", hint),
     }
 }
-
-/// Maximum prior attempts to show in retry prompt history.
-const MAX_PRIOR_ATTEMPTS: usize = 2;
 
 /// Build a retry prompt that includes prior attempt history.
 ///
