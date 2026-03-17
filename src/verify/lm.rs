@@ -146,6 +146,12 @@ pub enum LmAction {
         /// Prediction of expected outcome (optional for backward compatibility).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         prediction: Option<Prediction>,
+        /// Inline characterization: what triggers this option's effect.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trigger: Option<String>,
+        /// Inline characterization: what output difference to expect.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expected_diff: Option<String>,
     },
     /// Probe a surface to gather evidence before committing to a test.
     ///
@@ -159,6 +165,12 @@ pub enum LmAction {
         extra_args: Vec<String>,
         /// Seed setup for this probe.
         seed: Seed,
+        /// Inline characterization: what triggers this option's effect.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trigger: Option<String>,
+        /// Inline characterization: what output difference to expect.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expected_diff: Option<String>,
     },
 }
 
@@ -375,10 +387,14 @@ fn parse_action_object(obj: &Value) -> Result<Option<LmAction>> {
     if let Some(surface) = get_key(obj, &["probe", "Probe"]).and_then(|v| v.as_str()) {
         let extra_args = parse_shell_args(get_key(obj, &["extra_args", "Extra_args"]))?;
         let seed = parse_seed(obj)?;
+        let trigger = get_key(obj, &["trigger", "Trigger"]).and_then(|v| v.as_str()).map(String::from);
+        let expected_diff = get_key(obj, &["expected_diff", "Expected_diff"]).and_then(|v| v.as_str()).map(String::from);
         return Ok(Some(LmAction::Probe {
             surface_id: surface.to_string(),
             extra_args,
             seed,
+            trigger,
+            expected_diff,
         }));
     }
 
@@ -387,11 +403,15 @@ fn parse_action_object(obj: &Value) -> Result<Option<LmAction>> {
         let extra_args = parse_shell_args(get_key(obj, &["extra_args", "Extra_args"]))?;
         let seed = parse_seed(obj)?;
         let prediction = parse_prediction(get_key(obj, &["prediction", "Prediction"]));
+        let trigger = get_key(obj, &["trigger", "Trigger"]).and_then(|v| v.as_str()).map(String::from);
+        let expected_diff = get_key(obj, &["expected_diff", "Expected_diff"]).and_then(|v| v.as_str()).map(String::from);
         return Ok(Some(LmAction::Test {
             surface_id: surface.to_string(),
             extra_args,
             seed,
             prediction,
+            trigger,
+            expected_diff,
         }));
     }
 
@@ -688,6 +708,7 @@ mod tests {
                 extra_args,
                 seed,
                 prediction,
+                ..
             } => {
                 assert_eq!(surface_id, "--stat");
                 assert!(extra_args.is_empty()); // No extra_args needed
@@ -1155,6 +1176,7 @@ Here's my response:
                 surface_id,
                 extra_args,
                 seed,
+                ..
             } => {
                 assert_eq!(surface_id, "--verbose");
                 assert!(extra_args.is_empty());

@@ -1,7 +1,7 @@
 //! Unified work-stealing verification pipeline.
 //!
 //! Work items flow through stages in priority order:
-//! Verify > Characterize > ExtractChunk
+//! Verify > ExtractChunk
 //!
 //! Each worker pulls the highest-priority item available, ensuring surfaces
 //! push through to verification ASAP while extraction only happens when
@@ -15,7 +15,6 @@ use super::bootstrap::{
     parse_extraction_response, parse_surfaces_from_help, prepare_extraction,
     probe_validate_surfaces, save_surface_cache, DiscoveredSurface,
 };
-use super::characterize;
 use super::lm::{
     log_prompt, log_raw_response, log_response, parse_lm_response, LmAction, LmResponse,
 };
@@ -75,10 +74,8 @@ struct WorkerTimings {
     state_clone: Duration,
     lock_wait: Duration,
     merge: Duration,
-    characterize: Duration,
     extract: Duration,
     verify_cycles: u32,
-    char_batches: u32,
     extract_chunks: u32,
 }
 
@@ -92,10 +89,8 @@ impl WorkerTimings {
             state_clone: Duration::ZERO,
             lock_wait: Duration::ZERO,
             merge: Duration::ZERO,
-            characterize: Duration::ZERO,
             extract: Duration::ZERO,
             verify_cycles: 0,
-            char_batches: 0,
             extract_chunks: 0,
         }
     }
@@ -108,7 +103,6 @@ impl WorkerTimings {
             + self.state_clone
             + self.lock_wait
             + self.merge
-            + self.characterize
             + self.extract
     }
 }
@@ -121,7 +115,7 @@ const MAX_LM_RETRIES: usize = 3;
 
 /// Work item in the unified pipeline.
 ///
-/// Priority: Verify > Characterize > ExtractChunk.
+/// Priority: Verify > ExtractChunk.
 /// This drains forward — surfaces push through to verification ASAP,
 /// extraction only happens when workers have nothing else to do.
 #[derive(Debug)]
@@ -131,8 +125,6 @@ enum WorkItem {
         chunk_index: usize,
         chunk_text: String,
     },
-    /// Characterize a batch of surfaces (pure LM reasoning, no execution).
-    Characterize { surface_ids: Vec<String> },
     /// Verify a batch of surfaces (execute_cycle).
     Verify { surface_ids: Vec<String> },
 }
@@ -144,7 +136,7 @@ enum WorkItem {
 struct PipelineState {
     /// The canonical verification state (grows incrementally).
     state: State,
-    /// Work queue for extraction items (characterize/verify generated on demand).
+    /// Work queue for extraction items (verify generated on demand).
     work_queue: VecDeque<WorkItem>,
     /// Surfaces currently being worked on by a worker.
     in_progress: HashSet<String>,
@@ -163,19 +155,18 @@ struct PipelineState {
 }
 
 impl PipelineState {
-    /// Claim the next work item with priority: Verify > Characterize > ExtractChunk.
+    /// Claim the next work item with priority: Verify > ExtractChunk.
     ///
-    /// Verify and Characterize items are generated on demand from surface state.
+    /// Verify items are generated on demand from surface state.
     /// Only ExtractChunk items come from the explicit queue.
     fn claim_work(&mut self) -> Option<WorkItem> {
-        // Priority 1: Verify — surfaces that are characterized and ready
+        // Priority 1: Verify — surfaces ready for verification
         let mut verify_candidates: Vec<(usize, usize, String)> = self
             .state
             .entries
             .iter()
             .filter(|e| {
                 matches!(e.status, Status::Pending)
-                    && e.characterization.is_some()
                     && !self.in_progress.contains(&e.id)
                     && !self.resolved.contains(&e.id)
                     && *self.attempt_counts.get(&e.id).unwrap_or(&0) < MAX_ATTEMPTS
@@ -192,44 +183,41 @@ impl PipelineState {
             .collect();
         verify_candidates.sort_by_key(|(p, a, _)| (*p, *a));
 
-        let batch: Vec<String> = verify_candidates
-            .into_iter()
-            .take(BATCH_SIZE)
-            .map(|(_, _, id)| id)
-            .collect();
+        if !verify_candidates.is_empty() {
+            // Solo promotion: surfaces with 3+ attempts get dedicated batches
+            if let Some(pos) = verify_candidates.iter().position(|(_, a, _)| *a >= 3) {
+                let (_, _, solo_id) = verify_candidates.remove(pos);
+                self.in_progress.insert(solo_id.clone());
+                return Some(WorkItem::Verify {
+                    surface_ids: vec![solo_id],
+                });
+            }
 
-        if !batch.is_empty() {
+            // Dynamic batch size: smaller batches when only hard surfaces remain
+            let min_attempts = verify_candidates
+                .iter()
+                .map(|(_, a, _)| *a)
+                .min()
+                .unwrap_or(0);
+            let batch_size = if min_attempts >= 2 {
+                BATCH_SIZE.min(3)
+            } else {
+                BATCH_SIZE
+            };
+
+            let batch: Vec<String> = verify_candidates
+                .into_iter()
+                .take(batch_size)
+                .map(|(_, _, id)| id)
+                .collect();
+
             for id in &batch {
                 self.in_progress.insert(id.clone());
             }
             return Some(WorkItem::Verify { surface_ids: batch });
         }
 
-        // Priority 2: Characterize — surfaces with no characterization yet
-        let needs_char: Vec<String> = self
-            .state
-            .entries
-            .iter()
-            .filter(|e| {
-                matches!(e.status, Status::Pending)
-                    && e.characterization.is_none()
-                    && !self.in_progress.contains(&e.id)
-                    && !self.resolved.contains(&e.id)
-            })
-            .take(20)
-            .map(|e| e.id.clone())
-            .collect();
-
-        if !needs_char.is_empty() {
-            for id in &needs_char {
-                self.in_progress.insert(id.clone());
-            }
-            return Some(WorkItem::Characterize {
-                surface_ids: needs_char,
-            });
-        }
-
-        // Priority 3: ExtractChunk items from queue
+        // Priority 2: ExtractChunk items from queue
         if let Some(idx) = self
             .work_queue
             .iter()
@@ -626,7 +614,6 @@ fn print_timing_summary(worker_timings: &[WorkerTimings], wall: Duration) {
     // Aggregate across workers
     let mut total = WorkerTimings::new();
     let mut total_cycles: u32 = 0;
-    let mut total_chars: u32 = 0;
     let mut total_extracts: u32 = 0;
     for wt in worker_timings {
         total.lm_calls += wt.lm_calls;
@@ -636,10 +623,8 @@ fn print_timing_summary(worker_timings: &[WorkerTimings], wall: Duration) {
         total.state_clone += wt.state_clone;
         total.lock_wait += wt.lock_wait;
         total.merge += wt.merge;
-        total.characterize += wt.characterize;
         total.extract += wt.extract;
         total_cycles += wt.verify_cycles;
-        total_chars += wt.char_batches;
         total_extracts += wt.extract_chunks;
     }
 
@@ -660,11 +645,6 @@ fn print_timing_summary(worker_timings: &[WorkerTimings], wall: Duration) {
         "    Critique:            {:>8}  {}",
         fmt_dur(total.critique),
         pct(total.critique, wall)
-    );
-    eprintln!(
-        "    Characterize (LM):   {:>8}  {}",
-        fmt_dur(total.characterize),
-        pct(total.characterize, wall)
     );
     eprintln!(
         "    Recharacterize (LM): {:>8}  {}",
@@ -702,15 +682,15 @@ fn print_timing_summary(worker_timings: &[WorkerTimings], wall: Duration) {
         pct(unaccounted, wall)
     );
     eprintln!(
-        "    Work items: {} verify, {} characterize, {} extract",
-        total_cycles, total_chars, total_extracts
+        "    Work items: {} verify, {} extract",
+        total_cycles, total_extracts
     );
 }
 
 /// Run a single pipeline worker.
 ///
 /// Each worker has its own LM plugin and processes items in priority order:
-/// Verify > Characterize > ExtractChunk.
+/// Verify > ExtractChunk.
 #[allow(clippy::too_many_arguments)]
 fn run_pipeline_worker(
     worker_idx: usize,
@@ -820,63 +800,6 @@ fn run_pipeline_worker(
                         eprintln!(
                             "  W{}: chunk {} added {} surfaces ({}/{})",
                             w, chunk_index, added, ps.chunks_completed, ps.chunks_total,
-                        );
-                    }
-                    condvar.notify_all();
-                    timings.merge += merge_t0.elapsed();
-                }
-            }
-
-            WorkItem::Characterize { surface_ids } => {
-                if verbose {
-                    eprintln!(
-                        "  W{}: characterizing {} surfaces",
-                        w,
-                        surface_ids.len()
-                    );
-                }
-
-                // Snapshot state for prompt building (under lock, fast clone)
-                let clone_t0 = Instant::now();
-                let state_snapshot = {
-                    let ps = lock.lock().unwrap();
-                    ps.state.clone()
-                };
-                timings.state_clone += clone_t0.elapsed();
-
-                // Call LM (outside lock)
-                let char_t0 = Instant::now();
-                let results = characterize::characterize_batch(
-                    &mut *plugin,
-                    &state_snapshot,
-                    &surface_ids,
-                    verbose,
-                );
-                timings.characterize += char_t0.elapsed();
-                timings.char_batches += 1;
-
-                // Apply characterizations (under lock)
-                {
-                    let merge_t0 = Instant::now();
-                    let mut ps = lock.lock().unwrap();
-                    let mut count = 0;
-                    for (id, char_result) in results {
-                        if let Some(entry) =
-                            ps.state.entries.iter_mut().find(|e| e.id == id)
-                        {
-                            if entry.characterization.is_none() {
-                                entry.characterization = Some(char_result);
-                                count += 1;
-                            }
-                        }
-                    }
-                    for id in &surface_ids {
-                        ps.in_progress.remove(id);
-                    }
-                    if verbose && count > 0 {
-                        eprintln!(
-                            "  W{}: characterized {}/{}",
-                            w, count, surface_ids.len()
                         );
                     }
                     condvar.notify_all();
@@ -1444,8 +1367,22 @@ fn execute_cycle(
                     surface_id,
                     extra_args,
                     seed,
+                    trigger,
+                    expected_diff,
                 } = action
                 {
+                    // Populate inline characterization from LM response (B4)
+                    if let (Some(t), Some(ed)) = (&trigger, &expected_diff) {
+                        if let Some(entry) = state.entries.iter_mut().find(|e| e.id == surface_id) {
+                            if entry.characterization.is_none() {
+                                entry.characterization = Some(super::types::Characterization {
+                                    trigger: t.clone(),
+                                    expected_diff: ed.clone(),
+                                    revision: 0,
+                                });
+                            }
+                        }
+                    }
                     Some((surface_id, extra_args, seed))
                 } else {
                     None
@@ -1599,6 +1536,7 @@ fn execute_cycle(
                     extra_args,
                     seed,
                     prediction,
+                    ..
                 } = action
                 {
                     let surface_pty = with_pty
@@ -1928,6 +1866,8 @@ mod tests {
             extra_args: vec![],
             seed: Seed::default(),
             prediction: None,
+            trigger: None,
+            expected_diff: None,
         };
         assert_eq!(format_action_desc(&action), "Test --stat");
 
@@ -1936,6 +1876,8 @@ mod tests {
             extra_args: vec!["--numstat".to_string()],
             seed: Seed::default(),
             prediction: None,
+            trigger: None,
+            expected_diff: None,
         };
         assert!(format_action_desc(&action).contains("Test --stat"));
         assert!(format_action_desc(&action).contains("--numstat"));

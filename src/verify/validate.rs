@@ -58,6 +58,7 @@ pub(super) fn normalize_action(action: LmAction, state: &State) -> LmAction {
             extra_args,
             seed,
             prediction,
+            ..
         } => {
             let (surface_id, extra_args) = normalize_surface_id(surface_id, extra_args, state);
             LmAction::Test {
@@ -65,18 +66,23 @@ pub(super) fn normalize_action(action: LmAction, state: &State) -> LmAction {
                 extra_args,
                 seed,
                 prediction,
+                trigger: None,
+                expected_diff: None,
             }
         }
         LmAction::Probe {
             surface_id,
             extra_args,
             seed,
+            ..
         } => {
             let (surface_id, extra_args) = normalize_surface_id(surface_id, extra_args, state);
             LmAction::Probe {
                 surface_id,
                 extra_args,
                 seed,
+                trigger: None,
+                expected_diff: None,
             }
         }
         other => other,
@@ -224,6 +230,8 @@ mod tests {
             extra_args: vec![],
             seed: Seed::default(),
             prediction: None,
+            trigger: None,
+            expected_diff: None,
         };
         assert!(validate_action(&action, &state).is_ok());
     }
@@ -236,6 +244,8 @@ mod tests {
             extra_args: vec![],
             seed: Seed::default(),
             prediction: None,
+            trigger: None,
+            expected_diff: None,
         };
         let result = validate_action(&action, &state);
         assert!(result.is_err());
@@ -250,6 +260,8 @@ mod tests {
             extra_args: vec![],
             seed: Seed::default(),
             prediction: None,
+            trigger: None,
+            expected_diff: None,
         };
         let result = validate_action(&action, &state);
         assert!(result.is_err());
@@ -265,6 +277,8 @@ mod tests {
             extra_args: vec![],
             seed: Seed::default(),
             prediction: None,
+            trigger: None,
+            expected_diff: None,
         };
         let result = validate_action(&action, &state);
         assert!(result.is_ok());
@@ -283,6 +297,8 @@ mod tests {
             extra_args: vec![],
             seed: Seed::default(),
             prediction: None,
+            trigger: None,
+            expected_diff: None,
         };
         assert!(validate_action(&action, &state).is_ok());
     }
@@ -306,6 +322,8 @@ mod tests {
             surface_id: "--verbose".to_string(),
             extra_args: vec![],
             seed: Seed::default(),
+            trigger: None,
+            expected_diff: None,
         };
         assert!(validate_action(&action, &state).is_ok());
     }
@@ -317,6 +335,8 @@ mod tests {
             surface_id: "--unknown".to_string(),
             extra_args: vec![],
             seed: Seed::default(),
+            trigger: None,
+            expected_diff: None,
         };
         let result = validate_action(&action, &state);
         assert!(result.is_err());
@@ -330,6 +350,8 @@ mod tests {
             surface_id: "--quiet".to_string(), // Verified
             extra_args: vec![],
             seed: Seed::default(),
+            trigger: None,
+            expected_diff: None,
         };
         let result = validate_action(&action, &state);
         assert!(result.is_err());
@@ -368,6 +390,8 @@ mod tests {
             surface_id: "--verbose".to_string(),
             extra_args: vec![],
             seed: Seed::default(),
+            trigger: None,
+            expected_diff: None,
         };
         let result = validate_action(&action, &state);
         assert!(result.is_err());

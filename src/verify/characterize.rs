@@ -1,89 +1,16 @@
-//! Characterization pass — reasoning about options before testing.
+//! Re-characterization support for options that stagnate during verification.
 //!
-//! Asks the LM a pure reading-comprehension question: "Given this option's
-//! description, what input would trigger a visible output difference?"
+//! When a surface has accumulated enough evidence that its characterization
+//! is wrong (OutputsEqual outcomes + identical probes), this module asks the
+//! LM to revise its trigger/expected_diff understanding.
 //!
-//! This separates understanding from construction. The LM reasons about
-//! activation conditions first, then the seed-generation step builds against
-//! that specification. Works well with weak models because each call is
-//! a narrow, structured task.
+//! Initial characterization is now performed inline during verify cycles
+//! (via trigger/expected_diff fields on LmAction::Test and LmAction::Probe).
 
-use super::types::{Characterization, State, Status};
+use super::types::{Characterization, State};
 use crate::lm::{create_plugin, LmConfig};
 use anyhow::Result;
 use std::path::Path;
-
-/// Maximum surfaces per characterization batch.
-const BATCH_SIZE: usize = 20;
-
-/// Characterize all pending surfaces that lack a characterization.
-///
-/// Runs once before the main verification loop. Each batch is a single
-/// LM call that returns trigger/expected_diff pairs — no sandbox execution.
-pub(super) fn characterize_surfaces(
-    state: &mut State,
-    pack_path: &Path,
-    lm_config: &LmConfig,
-    verbose: bool,
-) -> Result<()> {
-    let needs_characterization: Vec<String> = state
-        .entries
-        .iter()
-        .filter(|e| matches!(e.status, Status::Pending) && e.characterization.is_none())
-        .map(|e| e.id.clone())
-        .collect();
-
-    if needs_characterization.is_empty() {
-        return Ok(());
-    }
-
-    if verbose {
-        eprintln!(
-            "Characterizing {} surface(s)...",
-            needs_characterization.len()
-        );
-    }
-
-    let batches: Vec<(Vec<String>, String)> = needs_characterization
-        .chunks(BATCH_SIZE)
-        .map(|batch| {
-            let batch_ids: Vec<String> = batch.to_vec();
-            let prompt = build_characterize_prompt(state, &batch_ids);
-            (batch_ids, prompt)
-        })
-        .collect();
-
-    let all_results = super::run::run_parallel_lm_batches(
-        batches,
-        lm_config,
-        verbose,
-        "Characterize",
-        parse_characterize_response,
-    );
-
-    let mut count = 0;
-    for results in all_results {
-        for (surface_id, characterization) in results {
-            if let Some(entry) = state.entries.iter_mut().find(|e| e.id == surface_id) {
-                if entry.characterization.is_none() {
-                    entry.characterization = Some(characterization);
-                    count += 1;
-                }
-            }
-        }
-    }
-
-    if verbose {
-        eprintln!(
-            "Characterized {}/{} surfaces",
-            count,
-            needs_characterization.len()
-        );
-    }
-
-    state.save(pack_path)?;
-    Ok(())
-}
 
 /// Re-characterize surfaces that have failed repeatedly.
 ///
@@ -169,85 +96,6 @@ pub(super) fn recharacterize_surface(
 
     state.save(pack_path)?;
     Ok(())
-}
-
-/// Build the characterization prompt for a batch of surfaces.
-fn build_characterize_prompt(state: &State, surface_ids: &[String]) -> String {
-    let mut prompt = String::new();
-
-    let base_command = if state.context_argv.is_empty() {
-        state.binary.clone()
-    } else {
-        format!("{} {}", state.binary, state.context_argv.join(" "))
-    };
-
-    prompt.push_str("# Characterize Options\n\n");
-    prompt.push_str(&format!("Command: `{}`\n\n", base_command));
-
-    if !state.help_preamble.is_empty() {
-        prompt.push_str(&format!(
-            "## Command Description\n\n{}\n\n",
-            state.help_preamble
-        ));
-    }
-
-    if !state.examples_section.is_empty() {
-        prompt.push_str(&format!(
-            "## Examples from Documentation\n\n{}\n\n",
-            state.examples_section
-        ));
-    }
-
-    prompt.push_str(
-        "For each option below, answer two questions:\n\
-         1. **trigger**: What kind of input/scenario would make this option produce \
-            visibly different output compared to running without it? Be specific about \
-            what properties the input needs.\n\
-         2. **expected_diff**: What output difference would you see? \
-            (e.g., \"different format\", \"suppressed output\", \"additional lines\")\n\n\
-         Think about what the option DOES, then reason backwards to what input would \
-         make that effect VISIBLE.\n\n",
-    );
-
-    prompt.push_str("## Options\n\n");
-
-    for surface_id in surface_ids {
-        if let Some(entry) = state.entries.iter().find(|e| e.id == *surface_id) {
-            prompt.push_str(&format!("### {}\n", surface_id));
-            prompt.push_str(&format!("Description: {}\n", entry.description));
-            if let Some(hint) = &entry.value_hint {
-                prompt.push_str(&format!("Value: {}\n", hint));
-            }
-            if let Some(context) = &entry.context {
-                prompt.push_str(&format!("{}\n", context));
-            }
-
-            // Default-on hint for negation pairs — check both directions
-            if let Some(neg_form) = entry.find_negation_form(&state.entries) {
-                prompt.push_str(&format!(
-                    "Note: This option has a negation form ({}). If this option is enabled \
-                     by default, testing requires disabling it first (e.g., via configuration \
-                     or by including the negation form in seed setup) before verifying that \
-                     this option re-enables the behavior.\n",
-                    neg_form
-                ));
-            }
-
-            prompt.push('\n');
-        }
-    }
-
-    prompt.push_str("## Response Format\n\n");
-    prompt.push_str("IMPORTANT: Respond with ONLY a JSON object. No prose.\n\n");
-    prompt.push_str("```json\n");
-    prompt.push_str("{\n");
-    prompt.push_str("  \"characterizations\": [\n");
-    prompt.push_str("    {\"surface_id\": \"--example\", \"trigger\": \"input with X property\", \"expected_diff\": \"output changes in Y way\"}\n");
-    prompt.push_str("  ]\n");
-    prompt.push_str("}\n");
-    prompt.push_str("```\n");
-
-    prompt
 }
 
 /// Build re-characterization prompt with failure evidence.
@@ -336,7 +184,7 @@ fn build_recharacterize_prompt(
 }
 
 /// Parse characterization response from LM.
-fn parse_characterize_response(
+pub(super) fn parse_characterize_response(
     response: &str,
     expected_ids: &[String],
 ) -> Vec<(String, Characterization)> {

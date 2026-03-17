@@ -219,6 +219,11 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
                     ));
                 }
                 prompt.push_str("→ Build a seed that creates the trigger condition.\n");
+            } else if entry.attempts.is_empty() {
+                prompt.push_str(
+                    "\n**First attempt** — reason about what input would make this \
+                     option produce visibly different output, then build a seed for that.\n",
+                );
             }
 
             // Show critique feedback if a prior verification was rejected

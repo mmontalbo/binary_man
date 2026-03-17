@@ -385,6 +385,7 @@ pub(super) fn apply_action(state: &mut State, pack_path: &Path, action: LmAction
             extra_args,
             seed,
             prediction,
+            ..
         } => {
             let result = run_test_scenario(
                 pack_path,
@@ -404,6 +405,7 @@ pub(super) fn apply_action(state: &mut State, pack_path: &Path, action: LmAction
             surface_id,
             extra_args,
             seed,
+            ..
         } => {
             let result = run_probe_scenario(
                 &state.binary,
@@ -511,6 +513,8 @@ mod tests {
                 extra_args: vec![],
                 seed: Seed::default(),
                 prediction: None,
+                trigger: None,
+                expected_diff: None,
             },
         )
         .unwrap();
@@ -684,6 +688,8 @@ mod tests {
                 extra_args: vec![],
                 seed,
                 prediction: None,
+                trigger: None,
+                expected_diff: None,
             },
         )
         .unwrap();
