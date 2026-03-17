@@ -1,0 +1,894 @@
+{
+  "baselines": {
+    "v0": {
+      "name": "v0",
+      "commit": "d945f74",
+      "tagged_at": "2026-03-16T21:36:41",
+      "summary": {
+        "meta": {
+          "binary": "grep",
+          "entry_point": [],
+          "pack_name": "grep",
+          "git": {
+            "commit": "d945f74",
+            "subject": "verify: revert probe diagnosis prompt rendering, keep data capture",
+            "dirty": true
+          },
+          "max_cycles": 80,
+          "timeout": 600,
+          "runs": 3,
+          "note": "v0 baseline",
+          "timestamp": "2026-03-16T21:33:10"
+        },
+        "runs": 3,
+        "total_surfaces": 78,
+        "mean_verified": 64.66666666666667,
+        "mean_excluded": 13.333333333333334,
+        "mean_cycle": 40.666666666666664,
+        "mean_elapsed": 448.43333333333334,
+        "crashed": 0,
+        "timed_out": 0,
+        "per_surface": {
+          "--after-context": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 17.666666666666668,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--basic-regexp": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 2.3333333333333335,
+            "mean_first_verify_cycle": 23.5,
+            "outcomes_by_run": [
+              "Excluded",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--before-context": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 3.3333333333333335,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--binary": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 3.0,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Excluded",
+              "Excluded",
+              "Excluded"
+            ]
+          },
+          "--binary-files": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.3333333333333333,
+            "mean_first_verify_cycle": 15.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--byte-offset": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 1.6666666666666667,
+            "mean_first_verify_cycle": 24.5,
+            "outcomes_by_run": [
+              "Excluded",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--color": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 14.333333333333334,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--colour": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 1.3333333333333333,
+            "mean_first_verify_cycle": 20.666666666666668,
+            "outcomes_by_run": [
+              "Excluded",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--context": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.3333333333333333,
+            "mean_first_verify_cycle": 11.666666666666666,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--count": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 1.6666666666666667,
+            "mean_first_verify_cycle": 20.5,
+            "outcomes_by_run": [
+              "Excluded",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--dereference-recursive": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 2.3333333333333335,
+            "mean_first_verify_cycle": 23.5,
+            "outcomes_by_run": [
+              "Excluded",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--devices": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 12.333333333333334,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--directories": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 11.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--exclude": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 11.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--exclude-dir": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 14.666666666666666,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--exclude-from": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 15.333333333333334,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--extended-regexp": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 2.6666666666666665,
+            "mean_first_verify_cycle": 22.0,
+            "outcomes_by_run": [
+              "Excluded",
+              "Verified",
+              "Excluded"
+            ]
+          },
+          "--file": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 8.333333333333334,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--files-with-matches": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 2.0,
+            "mean_first_verify_cycle": 25.5,
+            "outcomes_by_run": [
+              "Excluded",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--files-without-match": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 1.6666666666666667,
+            "mean_first_verify_cycle": 20.0,
+            "outcomes_by_run": [
+              "Excluded",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--fixed-strings": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 2.6666666666666665,
+            "mean_first_verify_cycle": 18.0,
+            "outcomes_by_run": [
+              "Excluded",
+              "Excluded",
+              "Verified"
+            ]
+          },
+          "--group-separator": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 16.333333333333332,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--ignore-case": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 2.6666666666666665,
+            "mean_first_verify_cycle": 20.0,
+            "outcomes_by_run": [
+              "Excluded",
+              "Excluded",
+              "Verified"
+            ]
+          },
+          "--include": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 2.6666666666666665,
+            "mean_first_verify_cycle": 11.0,
+            "outcomes_by_run": [
+              "Excluded",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--initial-tab": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.3333333333333333,
+            "mean_first_verify_cycle": 10.666666666666666,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--invert-match": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 1.6666666666666667,
+            "mean_first_verify_cycle": 14.0,
+            "outcomes_by_run": [
+              "Excluded",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--label": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 14.666666666666666,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--line-buffered": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 2.3333333333333335,
+            "mean_first_verify_cycle": 18.0,
+            "outcomes_by_run": [
+              "Excluded",
+              "Excluded",
+              "Verified"
+            ]
+          },
+          "--line-number": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 1.6666666666666667,
+            "mean_first_verify_cycle": 14.0,
+            "outcomes_by_run": [
+              "Excluded",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--line-regexp": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 1.6666666666666667,
+            "mean_first_verify_cycle": 18.5,
+            "outcomes_by_run": [
+              "Excluded",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--max-count": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 13.333333333333334,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--no-filename": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 1.6666666666666667,
+            "mean_first_verify_cycle": 33.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Excluded"
+            ]
+          },
+          "--no-group-separator": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.3333333333333333,
+            "mean_first_verify_cycle": 32.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--no-ignore-case": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.6666666666666667,
+            "mean_first_verify_cycle": 33.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--no-messages": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 2.3333333333333335,
+            "mean_first_verify_cycle": 27.0,
+            "outcomes_by_run": [
+              "Excluded",
+              "Verified",
+              "Excluded"
+            ]
+          },
+          "--null": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 1.3333333333333333,
+            "mean_first_verify_cycle": 16.666666666666668,
+            "outcomes_by_run": [
+              "Verified",
+              "Excluded",
+              "Verified"
+            ]
+          },
+          "--null-data": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 2.0,
+            "mean_first_verify_cycle": 19.0,
+            "outcomes_by_run": [
+              "Excluded",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--only-matching": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 2.6666666666666665,
+            "mean_first_verify_cycle": 20.0,
+            "outcomes_by_run": [
+              "Excluded",
+              "Excluded",
+              "Verified"
+            ]
+          },
+          "--perl-regexp": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 1.6666666666666667,
+            "mean_first_verify_cycle": 18.5,
+            "outcomes_by_run": [
+              "Excluded",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--quiet": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 2.3333333333333335,
+            "mean_first_verify_cycle": 24.0,
+            "outcomes_by_run": [
+              "Excluded",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--recursive": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 2.0,
+            "mean_first_verify_cycle": 25.5,
+            "outcomes_by_run": [
+              "Excluded",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--regexp": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 11.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--text": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 1.6666666666666667,
+            "mean_first_verify_cycle": 16.5,
+            "outcomes_by_run": [
+              "Excluded",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--with-filename": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 1.6666666666666667,
+            "mean_first_verify_cycle": 11.5,
+            "outcomes_by_run": [
+              "Excluded",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "--word-regexp": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 2.6666666666666665,
+            "mean_first_verify_cycle": 20.0,
+            "outcomes_by_run": [
+              "Excluded",
+              "Excluded",
+              "Verified"
+            ]
+          },
+          "-A": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 12.333333333333334,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-B": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 20.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-C": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 15.666666666666666,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-D": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 8.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-E": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 1.6666666666666667,
+            "mean_first_verify_cycle": 18.5,
+            "outcomes_by_run": [
+              "Excluded",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-F": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 2.0,
+            "mean_first_verify_cycle": 22.333333333333332,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-G": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 22.666666666666668,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-H": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 7.333333333333333,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-I": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 15.666666666666666,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-L": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 2.0,
+            "mean_first_verify_cycle": 23.0,
+            "outcomes_by_run": [
+              "Excluded",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-P": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 2.0,
+            "mean_first_verify_cycle": 20.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Excluded",
+              "Verified"
+            ]
+          },
+          "-R": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.3333333333333333,
+            "mean_first_verify_cycle": 29.666666666666668,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-T": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 15.666666666666666,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-U": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 10.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-Z": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 3.3333333333333335,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-a": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 1.6666666666666667,
+            "mean_first_verify_cycle": 23.5,
+            "outcomes_by_run": [
+              "Excluded",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-b": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 18.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-c": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 17.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-d": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 20.666666666666668,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-e": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.3333333333333333,
+            "mean_first_verify_cycle": 7.666666666666667,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-f": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 16.333333333333332,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-i": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.3333333333333333,
+            "mean_first_verify_cycle": 19.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-l": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.3333333333333333,
+            "mean_first_verify_cycle": 5.666666666666667,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-m": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 13.333333333333334,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-n": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 17.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-o": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 17.666666666666668,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-q": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 11.333333333333334,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-r": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 12.666666666666666,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-s": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 2.3333333333333335,
+            "mean_first_verify_cycle": 26.666666666666668,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-v": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.3333333333333333,
+            "mean_first_verify_cycle": 22.666666666666668,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-w": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 20.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-x": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.3333333333333333,
+            "mean_first_verify_cycle": 8.666666666666666,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          },
+          "-z": {
+            "verification_rate": 1.0,
+            "verified_count": 3,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 15.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Verified"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

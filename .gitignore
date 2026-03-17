@@ -3,3 +3,5 @@
 /out/*
 !/out/.gitkeep
 .mock_cycle
+tools/eval_data/
+__pycache__/

@@ -1,0 +1,1164 @@
+{
+  "baselines": {
+    "v0": {
+      "name": "v0",
+      "commit": "d945f74",
+      "tagged_at": "2026-03-16T21:55:37",
+      "summary": {
+        "meta": {
+          "binary": "git",
+          "entry_point": [
+            "diff"
+          ],
+          "pack_name": "git-diff",
+          "git": {
+            "commit": "d945f74",
+            "subject": "verify: revert probe diagnosis prompt rendering, keep data capture",
+            "dirty": true
+          },
+          "max_cycles": 80,
+          "timeout": 300,
+          "runs": 3,
+          "note": "v0 baseline (5min cap)",
+          "timestamp": "2026-03-16T21:54:47"
+        },
+        "runs": 3,
+        "total_surfaces": 102,
+        "mean_verified": 28.0,
+        "mean_excluded": 0.0,
+        "mean_cycle": 37.333333333333336,
+        "mean_elapsed": 300.0,
+        "mean_reached": 31.666666666666668,
+        "mean_total_attempts": 32.666666666666664,
+        "mean_attempts_per_cycle": 0.7862055257404094,
+        "mean_hit_rate": 0.8796296296296297,
+        "crashed": 0,
+        "timed_out": 3,
+        "per_surface": {
+          "--abbrev": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 0.6666666666666666,
+            "mean_first_verify_cycle": 19.5,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Verified"
+            ]
+          },
+          "--anchored": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.6666666666666666,
+            "mean_first_verify_cycle": 23.0,
+            "outcomes_by_run": [
+              "Pending",
+              "Verified",
+              "Pending"
+            ]
+          },
+          "--base": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 15.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--binary": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 39.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--break-rewrites": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.0,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--cached": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 32.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--check": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 4.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--color": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 3.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--color-moved": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--color-moved-ws": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.0,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--color-words": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 25.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--compact-summary": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 16.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--cumulative": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 4.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--default-prefix": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 28.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--diff-algorithm": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.0,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--diff-filter": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 17.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--dirstat": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 16.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--dirstat-by-file": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 19.0,
+            "outcomes_by_run": [
+              "Pending",
+              "Verified",
+              "Pending"
+            ]
+          },
+          "--dst-prefix": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 0.6666666666666666,
+            "mean_first_verify_cycle": 6.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Verified"
+            ]
+          },
+          "--exit-code": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 2.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--ext-diff": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 6.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--find-copies": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--find-copies-harder": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 23.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--find-object": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.0,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--find-renames": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.0,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--full-index": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 29.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--function-context": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 1.3333333333333333,
+            "mean_first_verify_cycle": 22.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Pending"
+            ]
+          },
+          "--histogram": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.0,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--ignore-all-space": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 38.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--ignore-blank-lines": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 25.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--ignore-cr-at-eol": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 30.0,
+            "outcomes_by_run": [
+              "Pending",
+              "Verified",
+              "Pending"
+            ]
+          },
+          "--ignore-matching-lines": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 25.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--ignore-space-at-eol": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 13.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--ignore-space-change": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 7.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--ignore-submodules": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 27.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--indent-heuristic": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.0,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--inter-hunk-context": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 15.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--irreversible-delete": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 19.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--ita-invisible-in-index": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.0,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--ita-visible-in-index": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 0.6666666666666666,
+            "mean_first_verify_cycle": 9.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Pending"
+            ]
+          },
+          "--line-prefix": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 30.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--minimal": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.0,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--name-only": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 31.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--name-status": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 10.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--no-color": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.0,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--no-color-moved": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.0,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--no-color-moved-ws": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.0,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--no-ext-diff": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.0,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--no-indent-heuristic": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.0,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--no-patch": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.0,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--no-prefix": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.0,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--no-renames": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.0,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--numstat": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 20.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--output": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.6666666666666666,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--output-indicator-context": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 32.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--output-indicator-new": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 3.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--patch-with-raw": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 1.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--patch-with-stat": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 14.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--patience": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.0,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--pickaxe-all": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--pickaxe-regex": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 0.6666666666666666,
+            "mean_first_verify_cycle": 39.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Verified"
+            ]
+          },
+          "--quiet": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 30.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--raw": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 20.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--refresh": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--relative": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 16.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--shortstat": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 12.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--skip-to": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 0.6666666666666666,
+            "mean_first_verify_cycle": 6.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Verified"
+            ]
+          },
+          "--src-prefix": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 28.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--stat": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 14.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--stat-count": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 13.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--stat-graph-width": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 10.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--stat-width": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 24.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--submodule": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.0,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--summary": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 2.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--text": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 33.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--textconv": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--unified": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 19.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--word-diff": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 32.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--word-diff-regex": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 15.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "--ws-error-highlight": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 1.0,
+            "mean_first_verify_cycle": 23.5,
+            "outcomes_by_run": [
+              "Verified",
+              "Verified",
+              "Pending"
+            ]
+          },
+          "-0": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 33.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "-1": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 43.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "-B": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 24.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "-C": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 38.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "-D": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 31.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "-G": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 17.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "-I": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 30.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "-M": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "-O": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 1.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "-R": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 20.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "-S": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 4.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "-U": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 4.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "-W": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 0.6666666666666666,
+            "mean_first_verify_cycle": 10.5,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Verified"
+            ]
+          },
+          "-X": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 26.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "-a": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 38.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "-b": {
+            "verification_rate": 0.6666666666666666,
+            "verified_count": 2,
+            "mean_attempts": 0.6666666666666666,
+            "mean_first_verify_cycle": 22.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Verified"
+            ]
+          },
+          "-l": {
+            "verification_rate": 0.0,
+            "verified_count": 0,
+            "mean_attempts": 0.0,
+            "mean_first_verify_cycle": null,
+            "outcomes_by_run": [
+              "Pending",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "-p": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 38.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "-s": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 12.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "-u": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 26.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "-w": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 3.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          },
+          "-z": {
+            "verification_rate": 0.3333333333333333,
+            "verified_count": 1,
+            "mean_attempts": 0.3333333333333333,
+            "mean_first_verify_cycle": 25.0,
+            "outcomes_by_run": [
+              "Verified",
+              "Pending",
+              "Pending"
+            ]
+          }
+        }
+      }
+    }
+  }
+}
