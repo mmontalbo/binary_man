@@ -60,10 +60,18 @@ pub struct ProbeRunResult {
     pub stderr_preview: Option<String>,
     pub exit_code: Option<u32>,
     pub control_stdout_preview: Option<String>,
-    /// Whether control and option outputs differ.
+    /// Whether control and option outputs differ (any channel).
     pub outputs_differ: bool,
     pub setup_failed: bool,
     pub cycle: u32,
+    /// Per-channel comparison results.
+    pub stdout_differs: bool,
+    pub stderr_differs: bool,
+    pub exit_code_differs: bool,
+    pub control_stderr_preview: Option<String>,
+    pub control_exit_code: Option<u32>,
+    /// Which setup command failed, if any.
+    pub setup_detail: Option<String>,
 }
 
 /// Result of running a test scenario (for parallel execution).
@@ -283,11 +291,29 @@ pub(super) fn run_probe_scenario(
     let stderr_preview = make_output_preview(&option_evidence.stderr, OUTPUT_PREVIEW_MAX_LEN);
     let control_stdout_preview =
         make_output_preview(&control_evidence.stdout, OUTPUT_PREVIEW_MAX_LEN);
+    let control_stderr_preview =
+        make_output_preview(&control_evidence.stderr, OUTPUT_PREVIEW_MAX_LEN);
 
-    // Bilateral comparison: do the outputs differ?
-    let outputs_differ = option_evidence.stdout != control_evidence.stdout
-        || option_evidence.stderr != control_evidence.stderr
-        || option_evidence.exit_code != control_evidence.exit_code;
+    // Per-channel bilateral comparison
+    let stdout_differs = option_evidence.stdout != control_evidence.stdout;
+    let stderr_differs = option_evidence.stderr != control_evidence.stderr;
+    let exit_code_differs = option_evidence.exit_code != control_evidence.exit_code;
+    let outputs_differ = stdout_differs || stderr_differs || exit_code_differs;
+
+    // Extract setup failure detail: which command failed and its exit code
+    let setup_detail = if option_evidence.setup_failed {
+        option_evidence
+            .setup_results
+            .iter()
+            .find(|sr| sr.exit_code != Some(0))
+            .map(|sr| {
+                let cmd = sr.argv.join(" ");
+                let code = sr.exit_code.map_or("?".to_string(), |c| c.to_string());
+                format!("{} (exit {})", cmd, code)
+            })
+    } else {
+        None
+    };
 
     Ok(ProbeRunResult {
         surface_id: surface_id.to_string(),
@@ -301,6 +327,12 @@ pub(super) fn run_probe_scenario(
         outputs_differ,
         setup_failed: option_evidence.setup_failed,
         cycle,
+        stdout_differs,
+        stderr_differs,
+        exit_code_differs,
+        control_stderr_preview,
+        control_exit_code: control_evidence.exit_code.map(|c| c as u32),
+        setup_detail,
     })
 }
 
@@ -317,6 +349,12 @@ pub(super) fn merge_probe_result(state: &mut State, result: ProbeRunResult) {
             control_stdout_preview: result.control_stdout_preview,
             outputs_differ: result.outputs_differ,
             setup_failed: result.setup_failed,
+            stdout_differs: result.stdout_differs,
+            stderr_differs: result.stderr_differs,
+            exit_code_differs: result.exit_code_differs,
+            control_stderr_preview: result.control_stderr_preview,
+            control_exit_code: result.control_exit_code,
+            setup_detail: result.setup_detail,
         });
     }
 }

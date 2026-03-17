@@ -302,11 +302,12 @@ fn build_recharacterize_prompt(
             prompt.push('\n');
         }
 
-        // Include probe evidence
+        // Include probe evidence as mechanical diagnoses
         if !entry.probes.is_empty() {
             prompt.push_str("Probe results:\n");
-            for (i, probe) in entry.probes.iter().take(2).enumerate() {
-                prompt.push_str(&format!("  {}. argv={:?}", i + 1, probe.argv));
+            for (i, probe) in entry.probes.iter().take(3).enumerate() {
+                let diagnosis = probe.diagnose();
+                prompt.push_str(&format!("  {}. {}", i + 1, diagnosis));
                 if let Some(stdout) = &probe.stdout_preview {
                     prompt.push_str(&format!(", stdout={:?}", stdout));
                 }

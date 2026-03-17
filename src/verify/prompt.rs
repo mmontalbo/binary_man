@@ -311,7 +311,7 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
                 }
             }
 
-            // Show probe results (bilateral comparison evidence)
+            // Show probe results as one-line mechanical diagnoses.
             // Always show outputs_differ probes; cap identical/failed to most recent 2.
             if !entry.probes.is_empty() {
                 let differ_probes: Vec<_> = entry
@@ -337,7 +337,7 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
                     .collect();
 
                 prompt.push_str(&format!(
-                    "\n**Probes:** {} (budget: {}/{})\n\n",
+                    "\n**Probes:** {} (budget: {}/{})\n",
                     entry.probes.len(),
                     entry.probes.len(),
                     super::types::MAX_PROBES_PER_SURFACE
@@ -345,44 +345,21 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
 
                 if omitted > 0 {
                     prompt.push_str(&format!(
-                        "({} earlier identical/failed probes omitted)\n",
+                        "  ({} earlier identical/failed probes omitted)\n",
                         omitted
                     ));
                 }
 
                 for (i, probe) in differ_probes.iter().chain(shown_others.iter()) {
-                    let diff_status = if probe.setup_failed {
-                        "SetupFailed"
-                    } else if probe.outputs_differ {
-                        "OUTPUTS DIFFER ✓"
-                    } else {
-                        "identical"
-                    };
+                    let diagnosis = probe.diagnose();
+                    let seed_summary = format_seed_summary(&probe.seed);
                     prompt.push_str(&format!(
-                        "  **Probe {}** (cycle {}) — {}:\n",
+                        "  Probe {} (cycle {}): {} — {}\n",
                         i + 1,
                         probe.cycle,
-                        diff_status
+                        diagnosis,
+                        seed_summary,
                     ));
-                    prompt.push_str(&format!("    argv: {:?}\n", probe.argv));
-                    if !probe.seed.setup.is_empty() {
-                        prompt.push_str(&format!("    seed.setup: {:?}\n", probe.seed.setup));
-                    }
-                    if probe.setup_failed {
-                        prompt.push_str("    result: SetupFailed\n");
-                    } else {
-                        prompt.push_str(&format!("    exit_code: {:?}\n", probe.exit_code));
-                        if let Some(stdout) = &probe.stdout_preview {
-                            prompt.push_str(&format!("    option_stdout: {:?}\n", stdout));
-                        }
-                        if let Some(control) = &probe.control_stdout_preview {
-                            prompt.push_str(&format!("    control_stdout: {:?}\n", control));
-                        }
-                        if let Some(stderr) = &probe.stderr_preview {
-                            prompt.push_str(&format!("    stderr: {:?}\n", stderr));
-                        }
-                    }
-                    prompt.push('\n');
                 }
             }
 
@@ -738,26 +715,20 @@ pub(super) fn build_incremental_prompt(
                 super::lm::LmAction::Probe { surface_id, .. } => {
                     if let Some(entry) = state.entries.iter().find(|e| &e.id == surface_id) {
                         if let Some(probe) = entry.probes.last() {
-                            let status = if probe.setup_failed {
-                                "SetupFailed".to_string()
-                            } else if probe.outputs_differ {
-                                "DIFFER → auto-promoted to Test".to_string()
+                            let diagnosis = probe.diagnose();
+                            let suffix = if probe.outputs_differ {
+                                " → auto-promoted to Test"
                             } else {
-                                format!("identical (exit={})", probe.exit_code.unwrap_or(0))
+                                ""
                             };
                             prompt.push_str(&format!(
-                                "- Probe {}: {} (probes left: {})\n",
+                                "- Probe {}: {}{} (probes left: {})\n",
                                 surface_id,
-                                status,
+                                diagnosis,
+                                suffix,
                                 super::types::MAX_PROBES_PER_SURFACE
                                     .saturating_sub(entry.probes.len())
                             ));
-                            if let Some(stdout) = &probe.stdout_preview {
-                                prompt.push_str(&format!("    stdout: {:?}\n", stdout));
-                            }
-                            if let Some(stderr) = &probe.stderr_preview {
-                                prompt.push_str(&format!("    stderr: {:?}\n", stderr));
-                            }
                         }
                     }
                 }

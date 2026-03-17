@@ -354,6 +354,12 @@ mod tests {
                     control_stdout_preview: None,
                     outputs_differ: false,
                     setup_failed: false,
+                    stdout_differs: false,
+                    stderr_differs: false,
+                    exit_code_differs: false,
+                    control_stderr_preview: None,
+                    control_exit_code: Some(0),
+                    setup_detail: None,
                 });
             }
         }

@@ -19,7 +19,8 @@ use std::path::Path;
 /// - v4: Added surface category for classification-driven scheduling
 /// - v5: Added probe results for evidence gathering before test commitment
 /// - v6: Added characterization for reasoning-first seed generation
-pub const STATE_SCHEMA_VERSION: u32 = 6;
+/// - v7: Added per-channel probe comparison and setup failure detail
+pub const STATE_SCHEMA_VERSION: u32 = 7;
 
 /// Maximum probe runs per surface.
 ///
@@ -232,6 +233,73 @@ pub struct ProbeResult {
     pub outputs_differ: bool,
     /// Whether the seed setup commands failed.
     pub setup_failed: bool,
+    /// Per-channel comparison: stdout differs between control and option.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stdout_differs: bool,
+    /// Per-channel comparison: stderr differs between control and option.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stderr_differs: bool,
+    /// Per-channel comparison: exit code differs between control and option.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub exit_code_differs: bool,
+    /// Preview of control stderr (first ~200 chars).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_stderr_preview: Option<String>,
+    /// Exit code of the control command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_exit_code: Option<u32>,
+    /// Detail of which setup command failed (e.g., "git init (exit 128)").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup_detail: Option<String>,
+}
+
+impl ProbeResult {
+    /// One-line mechanical diagnosis derived from structured comparison.
+    ///
+    /// Rules applied in priority order (first match wins):
+    /// 1. Setup failed → name the broken command
+    /// 2. Outputs differ → list which channels
+    /// 3. Control and option both empty → seed produced no baseline
+    /// 4. All identical → no observable effect
+    pub(super) fn diagnose(&self) -> String {
+        if self.setup_failed {
+            return if let Some(detail) = &self.setup_detail {
+                format!("Setup broken: {}", detail)
+            } else {
+                "Setup broken".to_string()
+            };
+        }
+
+        if self.outputs_differ {
+            let mut channels = Vec::new();
+            if self.stdout_differs {
+                channels.push("stdout");
+            }
+            if self.stderr_differs {
+                channels.push("stderr");
+            }
+            if self.exit_code_differs {
+                channels.push("exit_code");
+            }
+            // Fallback for probes from schema v6 without per-channel data
+            if channels.is_empty() {
+                channels.push("output");
+            }
+            return format!("Differ: {}", channels.join(", "));
+        }
+
+        let control_empty = self
+            .control_stdout_preview
+            .as_ref()
+            .is_none_or(|s| s.is_empty());
+        let option_empty = self.stdout_preview.as_ref().is_none_or(|s| s.is_empty());
+
+        if control_empty && option_empty {
+            return "Seed produced no baseline output — option has nothing to modify".to_string();
+        }
+
+        "No observable effect".to_string()
+    }
 }
 
 /// A single verification attempt for a surface.
@@ -747,5 +815,88 @@ mod tests {
             hint: None,
         };
         assert!(color_seed.is_similar_to("--color-moved-ws"));
+    }
+
+    /// Helper to build a ProbeResult with defaults for diagnosis tests.
+    fn probe_with(overrides: impl FnOnce(&mut ProbeResult)) -> ProbeResult {
+        let mut p = ProbeResult {
+            cycle: 1,
+            argv: vec!["--test".to_string()],
+            seed: Seed::default(),
+            stdout_preview: None,
+            stderr_preview: None,
+            exit_code: Some(0),
+            control_stdout_preview: None,
+            outputs_differ: false,
+            setup_failed: false,
+            stdout_differs: false,
+            stderr_differs: false,
+            exit_code_differs: false,
+            control_stderr_preview: None,
+            control_exit_code: Some(0),
+            setup_detail: None,
+        };
+        overrides(&mut p);
+        p
+    }
+
+    #[test]
+    fn test_diagnose_setup_broken_with_detail() {
+        let p = probe_with(|p| {
+            p.setup_failed = true;
+            p.setup_detail = Some("git init (exit 128)".to_string());
+        });
+        assert_eq!(p.diagnose(), "Setup broken: git init (exit 128)");
+    }
+
+    #[test]
+    fn test_diagnose_setup_broken_no_detail() {
+        let p = probe_with(|p| {
+            p.setup_failed = true;
+        });
+        assert_eq!(p.diagnose(), "Setup broken");
+    }
+
+    #[test]
+    fn test_diagnose_stdout_differs() {
+        let p = probe_with(|p| {
+            p.outputs_differ = true;
+            p.stdout_differs = true;
+        });
+        assert_eq!(p.diagnose(), "Differ: stdout");
+    }
+
+    #[test]
+    fn test_diagnose_multi_channel() {
+        let p = probe_with(|p| {
+            p.outputs_differ = true;
+            p.stdout_differs = true;
+            p.exit_code_differs = true;
+        });
+        assert_eq!(p.diagnose(), "Differ: stdout, exit_code");
+    }
+
+    #[test]
+    fn test_diagnose_empty_baseline() {
+        let p = probe_with(|_| {});
+        assert!(p.diagnose().contains("no baseline output"));
+    }
+
+    #[test]
+    fn test_diagnose_no_observable_effect() {
+        let p = probe_with(|p| {
+            p.control_stdout_preview = Some("some output".to_string());
+            p.stdout_preview = Some("some output".to_string());
+        });
+        assert_eq!(p.diagnose(), "No observable effect");
+    }
+
+    #[test]
+    fn test_diagnose_v6_compat_fallback() {
+        // Simulate a v6 probe: outputs_differ=true but no per-channel bools
+        let p = probe_with(|p| {
+            p.outputs_differ = true;
+        });
+        assert_eq!(p.diagnose(), "Differ: output");
     }
 }
