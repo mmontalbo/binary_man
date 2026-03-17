@@ -1,50 +1,142 @@
 //! Bootstrap initialization for simplified verification.
 //!
-//! Bootstrapping discovers surface items from help output using only built-in
-//! knowledge (--help or -h flags). This is intentionally simple - no SQL lenses
-//! or multi-stage discovery pipelines.
+//! Bootstrapping discovers surface items from help output. Primary extraction
+//! uses an LM to handle non-standard help formats (e.g., `find`'s predicate
+//! style). Regex parsing is the offline/no-LM fallback. LM-extracted options
+//! are probe-validated by running the binary to reject hallucinations.
+//!
+//! Results are cached keyed on help-text hash so repeat bootstraps work offline.
 
 use super::types::{State, Status, SurfaceCategory, SurfaceEntry, STATE_SCHEMA_VERSION};
+use crate::lm::LmConfig;
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+use std::path::Path;
 use std::process::Command;
+
 
 /// Maximum number of surrounding options to include as context.
 const CONTEXT_WINDOW_SIZE: usize = 2;
 
+/// Target chunk size for parallel LM extraction (chars of help text).
+/// Small texts naturally produce 1 chunk and use the same code path.
+const EXTRACT_CHUNK_TARGET_SIZE: usize = 2000;
+
+/// Maximum concurrent probe validations.
+const MAX_CONCURRENT_PROBES: usize = 16;
+
 /// Bootstrap a new verification state for a binary.
 ///
-/// This runs both `--help` and `-h` to discover surface items, merging results
-/// to capture both "common options" and full man page options. An LM call
-/// classifies surfaces into categories for scheduling and execution strategy.
-pub(super) fn bootstrap(binary: &str, context_argv: &[String]) -> Result<State> {
+/// Uses LM-primary extraction when an LM is available, falling back to regex
+/// parsing for offline/no-LM mode. LM-extracted options are probe-validated
+/// by running the binary to reject hallucinations.
+///
+/// Results are cached keyed on help-text hash so repeat bootstraps are
+/// deterministic and work offline after the first run.
+pub(super) fn bootstrap(
+    binary: &str,
+    context_argv: &[String],
+    lm_config: Option<&LmConfig>,
+    pack_path: Option<&Path>,
+    verbose: bool,
+) -> Result<State> {
     // 1. Run help discovery - collect from BOTH -h and --help
     let help_outputs = collect_all_help_outputs(binary, context_argv)?;
 
-    // 2. Parse and merge surfaces from all outputs
+    // 2. Compute help text hash for cache key
+    let combined_help = help_outputs.join("\n---\n");
+    let help_hash = compute_help_hash(&combined_help);
+
+    // 3. Try cache first
+    if let Some(pp) = pack_path {
+        if let Some(cached) = load_surface_cache(pp, &help_hash) {
+            if verbose {
+                eprintln!(
+                    "Using cached surface extraction ({} surfaces, hash {})",
+                    cached.len(),
+                    &help_hash[..12]
+                );
+            }
+            return build_state_from_surfaces(binary, context_argv, cached, &help_outputs);
+        }
+    }
+
+    // 4. Extract surfaces: LM primary, regex fallback
     let mut seen: HashMap<String, DiscoveredSurface> = HashMap::new();
+
+    let used_lm = if let Some(lm_cfg) = lm_config {
+        match lm_extract_surfaces(lm_cfg, binary, context_argv, &help_outputs, verbose) {
+            Ok(lm_surfaces) => {
+                if verbose {
+                    eprintln!(
+                        "LM extracted {} candidate surface(s), probe-validating...",
+                        lm_surfaces.len()
+                    );
+                }
+                // Probe-validate each LM-extracted option
+                let validated =
+                    probe_validate_surfaces(binary, context_argv, lm_surfaces, verbose);
+                if verbose {
+                    eprintln!("{} surface(s) passed probe validation", validated.len());
+                }
+                for surface in validated {
+                    seen.entry(surface.id.clone()).or_insert(surface);
+                }
+                true
+            }
+            Err(e) => {
+                if verbose {
+                    eprintln!("LM extraction failed ({}), falling back to regex", e);
+                }
+                false
+            }
+        }
+    } else {
+        false
+    };
+
+    // Regex fallback (or merge): always run regex to catch anything LM missed
     for output in &help_outputs {
         for surface in parse_surfaces_from_help(output) {
-            // First discovery wins (usually has better description)
             seen.entry(surface.id.clone()).or_insert(surface);
         }
     }
 
-    // 3. Extract help preamble (synopsis, description) for LM context
+    if verbose && !used_lm {
+        eprintln!("Using regex-only surface extraction");
+    }
+
+    let surfaces: Vec<DiscoveredSurface> = seen.into_values().collect();
+
+    // 5. Cache the extraction results
+    if let Some(pp) = pack_path {
+        save_surface_cache(pp, &help_hash, &surfaces);
+    }
+
+    build_state_from_surfaces(binary, context_argv, surfaces, &help_outputs)
+}
+
+/// Build a State from discovered surfaces and help outputs.
+fn build_state_from_surfaces(
+    binary: &str,
+    context_argv: &[String],
+    surfaces: Vec<DiscoveredSurface>,
+    help_outputs: &[String],
+) -> Result<State> {
     let preamble = help_outputs
         .first()
         .map(|text| extract_help_preamble(text))
         .unwrap_or_default();
 
-    // 4. Extract EXAMPLES section from man page (if available)
     let examples = help_outputs
         .first()
         .map(|text| extract_examples_section(text))
         .unwrap_or_default();
 
-    // 5. Create initial entries with mechanical --no-X classification only
-    let entries: Vec<SurfaceEntry> = seen
-        .into_values()
+    let entries: Vec<SurfaceEntry> = surfaces
+        .into_iter()
         .map(|s| {
             let category = classify_surface_mechanical(&s.id);
             SurfaceEntry {
@@ -63,10 +155,6 @@ pub(super) fn bootstrap(binary: &str, context_argv: &[String]) -> Result<State> 
             }
         })
         .collect();
-
-    // Note: LM classification is deferred to the session loop. Each session
-    // classifies its surfaces in parallel using its own LM instance.
-    // Surfaces start as General (or --no-X Modifier from mechanical classification).
 
     Ok(State {
         schema_version: STATE_SCHEMA_VERSION,
@@ -697,6 +785,519 @@ fn extract_examples_section(help_text: &str) -> String {
 /// Check if an option is a help/version option that shouldn't be verified.
 fn is_help_option(opt: &str) -> bool {
     matches!(opt, "--help" | "-h" | "--version" | "-V" | "--usage" | "-?")
+}
+
+/// Check if an option is a logical combinator that shouldn't be verified.
+fn is_combinator(opt: &str) -> bool {
+    matches!(opt, "-and" | "-or" | "-not" | "-a" | "-o")
+}
+
+// ==================== LM-based surface extraction ====================
+
+
+
+/// Cached surface extraction result.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SurfaceCache {
+    /// Hash of the help text used to produce this cache.
+    help_hash: String,
+    /// Extracted surfaces.
+    surfaces: Vec<CachedSurface>,
+}
+
+/// A cached discovered surface (serializable subset of DiscoveredSurface).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CachedSurface {
+    id: String,
+    description: String,
+    value_hint: Option<String>,
+}
+
+/// Compute a stable hash of help text for cache keying.
+fn compute_help_hash(text: &str) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+/// Load cached surface extraction if the hash matches.
+fn load_surface_cache(pack_path: &Path, help_hash: &str) -> Option<Vec<DiscoveredSurface>> {
+    let cache_path = pack_path.join("surface_cache.json");
+    let content = std::fs::read_to_string(&cache_path).ok()?;
+    let cache: SurfaceCache = serde_json::from_str(&content).ok()?;
+
+    if cache.help_hash != help_hash {
+        return None;
+    }
+
+    Some(
+        cache
+            .surfaces
+            .into_iter()
+            .filter(|s| !is_help_option(&s.id) && !is_combinator(&s.id))
+            .map(|s| DiscoveredSurface {
+                id: s.id,
+                description: s.description,
+                context: None,
+                value_hint: s.value_hint,
+            })
+            .collect(),
+    )
+}
+
+/// Save surface extraction results to cache.
+fn save_surface_cache(pack_path: &Path, help_hash: &str, surfaces: &[DiscoveredSurface]) {
+    let cache = SurfaceCache {
+        help_hash: help_hash.to_string(),
+        surfaces: surfaces
+            .iter()
+            .map(|s| CachedSurface {
+                id: s.id.clone(),
+                description: s.description.clone(),
+                value_hint: s.value_hint.clone(),
+            })
+            .collect(),
+    };
+
+    let cache_path = pack_path.join("surface_cache.json");
+    // Best-effort cache write — failure is not fatal
+    if let Ok(content) = serde_json::to_string_pretty(&cache) {
+        let _ = std::fs::write(&cache_path, content);
+    }
+}
+
+/// Build the extraction prompt for the LM.
+fn build_extraction_prompt(binary: &str, context_argv: &[String], help_text: &str) -> String {
+    let cmd_name = if context_argv.is_empty() {
+        binary.to_string()
+    } else {
+        format!("{} {}", binary, context_argv.join(" "))
+    };
+
+    format!(
+        r#"Extract all command-line options from the following help text for `{cmd}`.
+
+Rules:
+1. The "id" field MUST appear verbatim in the help text (copy it exactly).
+2. Handle ALL format styles:
+   - GNU long: --verbose
+   - GNU short: -v
+   - Combined: -v, --verbose (emit BOTH as separate entries)
+   - Predicate-style: -name PATTERN, -maxdepth LEVELS
+   - Packed multiple per line: extract each one separately
+3. Skip --help, --version, -h, -V, -?, and --usage.
+4. Skip logical operators/combinators: -and, -or, -not, -a, -o.
+5. For value hints, capture the placeholder (e.g., PATTERN, <n>, FILE).
+6. Description should be one concise sentence from the help text.
+
+Respond with ONLY a JSON array, no prose:
+
+```json
+[
+  {{"id": "-name", "value_hint": "PATTERN", "description": "Match files by name pattern"}},
+  {{"id": "--verbose", "value_hint": null, "description": "Enable verbose output"}}
+]
+```
+
+Help text for `{cmd}`:
+
+```
+{help}
+```"#,
+        cmd = cmd_name,
+        help = help_text,
+    )
+}
+
+/// LM-extracted surface entry from JSON response.
+#[derive(Debug, Clone, Deserialize)]
+struct LmExtractedSurface {
+    id: String,
+    #[serde(default)]
+    value_hint: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+/// Extract surfaces using an LM.
+///
+/// Splits help text into chunks and extracts in parallel using multiple LM
+/// instances. Small texts naturally produce 1 chunk — same code path.
+fn lm_extract_surfaces(
+    lm_config: &LmConfig,
+    binary: &str,
+    context_argv: &[String],
+    help_outputs: &[String],
+    verbose: bool,
+) -> Result<Vec<DiscoveredSurface>> {
+    let combined_help = help_outputs.join("\n\n---\n\n");
+    let chunks = split_help_into_chunks(&combined_help, EXTRACT_CHUNK_TARGET_SIZE);
+
+    if verbose {
+        eprintln!(
+            "  Extracting surfaces: {} chars, {} chunk(s)",
+            combined_help.len(),
+            chunks.len()
+        );
+    }
+
+    let batches: Vec<(Vec<String>, String)> = chunks
+        .iter()
+        .enumerate()
+        .map(|(i, chunk)| {
+            let prompt = build_extraction_prompt(binary, context_argv, chunk);
+            (vec![format!("chunk_{}", i)], prompt)
+        })
+        .collect();
+
+    let all_results = super::run::run_parallel_lm_batches(
+        batches,
+        lm_config,
+        verbose,
+        "Extract",
+        |response_text, _batch_ids| {
+            parse_extraction_response(response_text).unwrap_or_default()
+        },
+    );
+
+    // Flatten and deduplicate (prefer longer descriptions on conflict)
+    let mut seen: HashMap<String, DiscoveredSurface> = HashMap::new();
+    for batch in all_results {
+        for surface in batch {
+            seen.entry(surface.id.clone())
+                .and_modify(|existing| {
+                    if surface.description.len() > existing.description.len() {
+                        existing.description = surface.description.clone();
+                    }
+                    if existing.value_hint.is_none() && surface.value_hint.is_some() {
+                        existing.value_hint = surface.value_hint.clone();
+                    }
+                })
+                .or_insert(surface);
+        }
+    }
+
+    let surfaces: Vec<DiscoveredSurface> = seen.into_values().collect();
+    if surfaces.is_empty() {
+        anyhow::bail!("LM extraction produced no surfaces");
+    }
+
+    if verbose {
+        eprintln!("  Extracted {} unique surfaces", surfaces.len());
+    }
+
+    Ok(surfaces)
+}
+
+/// Split help text into chunks at section boundaries.
+///
+/// Sections are delimited by blank lines followed by a line at low indentation
+/// that looks like a header (all-caps, ends with colon, or is a `---` separator).
+/// Chunks are greedily merged until they exceed `target_size`.
+fn split_help_into_chunks(help_text: &str, target_size: usize) -> Vec<String> {
+    let lines: Vec<&str> = help_text.lines().collect();
+    if lines.is_empty() {
+        return vec![help_text.to_string()];
+    }
+
+    // Find section break points (line indices where a new section starts)
+    let mut breaks = vec![0usize];
+    let mut prev_blank = false;
+
+    for (i, line) in lines.iter().enumerate() {
+        if line.trim().is_empty() {
+            prev_blank = true;
+            continue;
+        }
+        if prev_blank && i > 0 && is_section_header(line) {
+            breaks.push(i);
+        }
+        prev_blank = false;
+    }
+
+    // Build sections from break points
+    let mut sections: Vec<String> = Vec::new();
+    for w in breaks.windows(2) {
+        let section: String = lines[w[0]..w[1]].to_vec().join("\n");
+        sections.push(section);
+    }
+    // Last section
+    let last_start = *breaks.last().unwrap();
+    let section: String = lines[last_start..].to_vec().join("\n");
+    sections.push(section);
+
+    // Greedily merge sections into chunks up to target_size
+    let mut chunks: Vec<String> = Vec::new();
+    let mut current_chunk = String::new();
+
+    for section in sections {
+        if !current_chunk.is_empty()
+            && current_chunk.len() + section.len() > target_size
+        {
+            chunks.push(std::mem::take(&mut current_chunk));
+        }
+        if !current_chunk.is_empty() {
+            current_chunk.push('\n');
+        }
+        current_chunk.push_str(&section);
+    }
+    if !current_chunk.is_empty() {
+        chunks.push(current_chunk);
+    }
+
+    // If we ended up with just one chunk, return it as-is
+    if chunks.is_empty() {
+        chunks.push(help_text.to_string());
+    }
+
+    chunks
+}
+
+/// Check if a line looks like a section header.
+fn is_section_header(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    // Leading whitespace check: headers are at low indentation
+    let indent = line.len() - line.trim_start().len();
+    if indent > 4 {
+        return false;
+    }
+
+    // "---" separator
+    if trimmed.starts_with("---") {
+        return true;
+    }
+
+    // Ends with colon (e.g., "Positional options (always true):")
+    if trimmed.ends_with(':') {
+        return true;
+    }
+
+    // All-caps word(s) at start (e.g., "OPTIONS", "DESCRIPTION")
+    let first_word = trimmed.split_whitespace().next().unwrap_or("");
+    if first_word.len() >= 3
+        && first_word.chars().all(|c| c.is_ascii_uppercase() || c == '-')
+    {
+        return true;
+    }
+
+    false
+}
+
+/// Parse the LM extraction response into discovered surfaces.
+fn parse_extraction_response(response: &str) -> Result<Vec<DiscoveredSurface>> {
+    // Extract JSON array from response (may be wrapped in code fences or prose)
+    let json_text = extract_json_array(response)
+        .ok_or_else(|| anyhow::anyhow!("no JSON array found in LM response"))?;
+
+    let extracted: Vec<LmExtractedSurface> = serde_json::from_str(&json_text).with_context(
+        || format!("parse extraction JSON: {}", &json_text[..json_text.len().min(200)]),
+    )?;
+
+    let mut surfaces = Vec::new();
+    for entry in extracted {
+        let id = entry.id.trim().to_string();
+
+        // Skip empty ids, help options, and combinators
+        if id.is_empty() || is_help_option(&id) || is_combinator(&id) {
+            continue;
+        }
+
+        // The id must start with a dash
+        if !id.starts_with('-') {
+            continue;
+        }
+
+        surfaces.push(DiscoveredSurface {
+            id,
+            description: entry.description.unwrap_or_default(),
+            context: None,
+            value_hint: entry.value_hint,
+        });
+    }
+
+    Ok(surfaces)
+}
+
+/// Extract a JSON array from text that may include code fences or prose.
+fn extract_json_array(text: &str) -> Option<String> {
+    let text = text.trim();
+
+    // Try extracting from code fences first
+    let inner = if let Some(fence_start) = text.find("```json") {
+        let content_start = fence_start + 7;
+        let content_start = text[content_start..]
+            .find('\n')
+            .map(|i| content_start + i + 1)
+            .unwrap_or(content_start);
+        if let Some(end) = text[content_start..].find("```") {
+            &text[content_start..content_start + end]
+        } else {
+            &text[content_start..]
+        }
+    } else if let Some(fence_start) = text.find("```") {
+        let after_fence = fence_start + 3;
+        let content_start = text[after_fence..]
+            .find('\n')
+            .map(|i| after_fence + i + 1)
+            .unwrap_or(after_fence);
+        if let Some(end) = text[content_start..].find("```") {
+            &text[content_start..content_start + end]
+        } else {
+            &text[content_start..]
+        }
+    } else {
+        text
+    };
+
+    let inner = inner.trim();
+
+    // Find the opening '[' and its matching ']'
+    let start = inner.find('[')?;
+    let mut depth = 0;
+    let mut in_string = false;
+    let mut escape_next = false;
+
+    for (i, ch) in inner[start..].char_indices() {
+        if escape_next {
+            escape_next = false;
+            continue;
+        }
+        match ch {
+            '\\' if in_string => escape_next = true,
+            '"' => in_string = !in_string,
+            '[' if !in_string => depth += 1,
+            ']' if !in_string => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(inner[start..start + i + 1].to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
+// ==================== Probe validation ====================
+
+/// Rejection patterns in stderr that indicate the binary doesn't recognize an option.
+const REJECTION_PATTERNS: &[&str] = &[
+    "unknown option",
+    "unrecognized option",
+    "invalid option",
+    "not recognized",
+    "unknown predicate",
+    "invalid predicate",
+    "bad option",
+    "illegal option",
+];
+
+/// Probe-validate LM-extracted surfaces by running the binary.
+///
+/// For each extracted option, runs `binary [context_argv...] <option>` in an
+/// empty tmpdir and checks stderr for rejection patterns. Options that the
+/// binary rejects are filtered out as hallucinations.
+fn probe_validate_surfaces(
+    binary: &str,
+    context_argv: &[String],
+    candidates: Vec<DiscoveredSurface>,
+    verbose: bool,
+) -> Vec<DiscoveredSurface> {
+    let mut validated = Vec::new();
+
+    // Process in batches to limit concurrent process spawns
+    for batch in candidates.chunks(MAX_CONCURRENT_PROBES) {
+        let batch_results: Vec<(DiscoveredSurface, ProbeOutcome)> =
+            std::thread::scope(|s| {
+                let handles: Vec<_> = batch
+                    .iter()
+                    .map(|surface| {
+                        let surface = surface.clone();
+                        s.spawn(move || {
+                            let outcome = probe_option(binary, context_argv, &surface.id);
+                            (surface, outcome)
+                        })
+                    })
+                    .collect();
+
+                handles
+                    .into_iter()
+                    .filter_map(|h| h.join().ok())
+                    .collect()
+            });
+
+        for (surface, outcome) in batch_results {
+            match outcome {
+                ProbeOutcome::Accepted | ProbeOutcome::Error => {
+                    validated.push(surface);
+                }
+                ProbeOutcome::Rejected => {
+                    if verbose {
+                        eprintln!(
+                            "  Probe rejected: {} (binary doesn't recognize it)",
+                            surface.id
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    validated
+}
+
+/// Result of probing a single option.
+enum ProbeOutcome {
+    /// Binary recognized the option (no rejection pattern in stderr).
+    Accepted,
+    /// Binary rejected the option (stderr contains rejection pattern).
+    Rejected,
+    /// Probe itself failed (couldn't run binary). Keep the surface.
+    Error,
+}
+
+/// Probe a single option by running it against the binary.
+fn probe_option(binary: &str, context_argv: &[String], option: &str) -> ProbeOutcome {
+    let tmpdir = match tempfile::tempdir() {
+        Ok(d) => d,
+        Err(_) => return ProbeOutcome::Error,
+    };
+
+    let mut cmd = Command::new(binary);
+    cmd.args(context_argv);
+    cmd.arg(option);
+    cmd.current_dir(tmpdir.path());
+    // Prevent interactive behavior
+    cmd.env("GIT_PAGER", "cat");
+    cmd.env("PAGER", "cat");
+    cmd.env("TERM", "dumb");
+    // Capture output
+    cmd.stdout(std::process::Stdio::null());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let output = match cmd.output() {
+        Ok(o) => o,
+        Err(_) => return ProbeOutcome::Error,
+    };
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
+
+    // Check for rejection patterns
+    for pattern in REJECTION_PATTERNS {
+        if stderr.contains(pattern) {
+            return ProbeOutcome::Rejected;
+        }
+    }
+
+    // No rejection found — the binary recognizes this option.
+    // This includes "missing argument" / "requires a value" errors,
+    // which confirm the option is real.
+    ProbeOutcome::Accepted
 }
 
 #[cfg(test)]

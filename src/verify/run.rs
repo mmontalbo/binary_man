@@ -147,7 +147,7 @@ pub fn run(
         if verbose {
             eprintln!("Bootstrapping new state for {}", binary);
         }
-        let state = bootstrap(binary, context_argv)?;
+        let state = bootstrap(binary, context_argv, Some(lm_config), Some(pack_path), verbose)?;
         if verbose {
             eprintln!("Discovered {} surfaces", state.entries.len());
         }
