@@ -919,7 +919,6 @@ Include a prediction to specify what output difference you expect. This enables 
 
 - **StdoutEmpty**: Output will be empty/suppressed (for --no-*, --quiet, --silent options)
 - **StdoutContains**: Output will contain specific text (use {"StdoutContains": "text"})
-- **StdoutDifferent**: Output format/content will change (generic difference)
 - **StderrDifferent**: Stderr will differ (for options that change warning/error output)
 - **ExitCodeDifferent**: Exit code will differ (for options that affect success/failure)
 
@@ -957,7 +956,7 @@ Respond with JSON:
   "actions": [
     { "kind": "SetBaseline", "seed": { "setup": [["touch", "file.txt"]], "files": [] } },
     { "kind": "Probe", "surface_id": "--unfamiliar-option", "seed": { "setup": [["touch", "file.txt"]], "files": [] } },
-    { "kind": "Test", "surface_id": "--example", "seed": { "setup": [["touch", "file.txt"]], "files": [] }, "prediction": {"diff_type": "StdoutDifferent", "reason": "changes output format"} }
+    { "kind": "Test", "surface_id": "--example", "seed": { "setup": [["touch", "file.txt"]], "files": [] }, "prediction": {"diff_type": {"StdoutContains": "expected text"}, "reason": "changes output format"} }
   ]
 }
 ```

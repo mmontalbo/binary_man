@@ -1452,22 +1452,8 @@ fn execute_cycle(
                     surface_id,
                     extra_args,
                     seed,
-                    trigger,
-                    expected_diff,
                 } = action
                 {
-                    // Populate inline characterization from LM response (B4)
-                    if let (Some(t), Some(ed)) = (&trigger, &expected_diff) {
-                        if let Some(entry) = state.entries.iter_mut().find(|e| e.id == surface_id) {
-                            if entry.characterization.is_none() {
-                                entry.characterization = Some(super::types::Characterization {
-                                    trigger: t.clone(),
-                                    expected_diff: ed.clone(),
-                                    revision: 0,
-                                });
-                            }
-                        }
-                    }
                     Some((surface_id, extra_args, seed))
                 } else {
                     None

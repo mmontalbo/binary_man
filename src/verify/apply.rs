@@ -113,10 +113,6 @@ fn verify_prediction(
             // Option output should contain the specified text
             option_evidence.stdout.contains(s)
         }
-        PredictedDiff::StdoutDifferent => {
-            // Stdout should differ between control and option
-            option_evidence.stdout != control_evidence.stdout
-        }
         PredictedDiff::StderrDifferent => {
             // Stderr should differ between control and option
             option_evidence.stderr != control_evidence.stderr

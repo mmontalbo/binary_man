@@ -6,7 +6,7 @@
 #   tools/eval_corpus.sh --runs 5 --compare v0
 #   tools/eval_corpus.sh --tag-baseline v0
 #
-# All flags are forwarded to tools/eval.py for each corpus binary.
+# All flags are forwarded to bman-eval for each corpus binary.
 
 set -euo pipefail
 

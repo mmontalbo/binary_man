@@ -29,78 +29,13 @@ use std::path::Path;
 ///
 /// The LM specifies what it expects to happen when running the test,
 /// allowing mechanical verification instead of subjective critique.
-///
-/// Uses a custom deserializer to handle two LM output formats:
-/// - Nested: `{"diff_type": {"StdoutContains": "@@"}, "reason": "..."}`
-/// - Flat: `{"diff_type": "StdoutContains", "content": "@@", "reason": "..."}`
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Prediction {
     /// What type of difference is expected.
     pub diff_type: PredictedDiff,
     /// Brief explanation of why this is expected.
+    #[serde(default)]
     pub reason: String,
-}
-
-impl<'de> serde::Deserialize<'de> for Prediction {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use serde::de;
-
-        let obj: serde_json::Value = serde_json::Value::deserialize(deserializer)?;
-        let map = obj
-            .as_object()
-            .ok_or_else(|| de::Error::custom("prediction must be object"))?;
-
-        let reason = map
-            .get("reason")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-
-        let diff_type_val = map
-            .get("diff_type")
-            .ok_or_else(|| de::Error::missing_field("diff_type"))?;
-
-        // Try nested format first: {"StdoutContains": "@@"}
-        let diff_type = if let Some(obj) = diff_type_val.as_object() {
-            serde_json::from_value(serde_json::Value::Object(obj.clone()))
-                .map_err(de::Error::custom)?
-        } else if let Some(s) = diff_type_val.as_str() {
-            // Flat format: diff_type is a plain string, value may be in "content" field
-            match s {
-                "StdoutEmpty" => PredictedDiff::StdoutEmpty,
-                "StdoutDifferent" => PredictedDiff::StdoutDifferent,
-                "StderrDifferent" => PredictedDiff::StderrDifferent,
-                "ExitCodeDifferent" => PredictedDiff::ExitCodeDifferent,
-                "StdoutContains" => {
-                    let content = map
-                        .get("content")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    PredictedDiff::StdoutContains(content)
-                }
-                other => {
-                    return Err(de::Error::unknown_variant(
-                        other,
-                        &[
-                            "StdoutEmpty",
-                            "StdoutContains",
-                            "StdoutDifferent",
-                            "StderrDifferent",
-                            "ExitCodeDifferent",
-                        ],
-                    ))
-                }
-            }
-        } else {
-            return Err(de::Error::custom("diff_type must be string or object"));
-        };
-
-        Ok(Prediction { diff_type, reason })
-    }
 }
 
 /// Type of difference expected between control and option runs.
@@ -110,8 +45,6 @@ pub enum PredictedDiff {
     StdoutEmpty,
     /// Option output should contain specific text or pattern.
     StdoutContains(String),
-    /// Stdout format/content differs (generic difference).
-    StdoutDifferent,
     /// Stderr should contain something different.
     StderrDifferent,
     /// Exit code should differ.
@@ -165,12 +98,6 @@ pub enum LmAction {
         extra_args: Vec<String>,
         /// Seed setup for this probe.
         seed: Seed,
-        /// Inline characterization: what triggers this option's effect.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        trigger: Option<String>,
-        /// Inline characterization: what output difference to expect.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        expected_diff: Option<String>,
     },
 }
 
@@ -387,14 +314,10 @@ fn parse_action_object(obj: &Value) -> Result<Option<LmAction>> {
     if let Some(surface) = get_key(obj, &["probe", "Probe"]).and_then(|v| v.as_str()) {
         let extra_args = parse_shell_args(get_key(obj, &["extra_args", "Extra_args"]))?;
         let seed = parse_seed(obj)?;
-        let trigger = get_key(obj, &["trigger", "Trigger"]).and_then(|v| v.as_str()).map(String::from);
-        let expected_diff = get_key(obj, &["expected_diff", "Expected_diff"]).and_then(|v| v.as_str()).map(String::from);
         return Ok(Some(LmAction::Probe {
             surface_id: surface.to_string(),
             extra_args,
             seed,
-            trigger,
-            expected_diff,
         }));
     }
 
@@ -536,7 +459,7 @@ fn parse_files(value: Option<&Value>) -> Result<Vec<FileEntry>> {
 /// Expected format:
 /// ```json
 /// {
-///   "diff_type": "StdoutEmpty" | "StdoutDifferent" | "StderrDifferent" | "ExitCodeDifferent" | {"StdoutContains": "text"},
+///   "diff_type": "StdoutEmpty" | "StderrDifferent" | "ExitCodeDifferent" | {"StdoutContains": "text"},
 ///   "reason": "explanation"
 /// }
 /// ```
@@ -556,7 +479,15 @@ fn parse_prediction(value: Option<&Value>) -> Option<Prediction> {
     let diff_type = match diff_type_value {
         Value::String(s) => match s.as_str() {
             "StdoutEmpty" => PredictedDiff::StdoutEmpty,
-            "StdoutDifferent" => PredictedDiff::StdoutDifferent,
+            "StdoutContains" => {
+                // Flat format: diff_type is "StdoutContains" with separate "content" field
+                let content = obj
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                PredictedDiff::StdoutContains(content)
+            }
             "StderrDifferent" => PredictedDiff::StderrDifferent,
             "ExitCodeDifferent" => PredictedDiff::ExitCodeDifferent,
             _ => return None,
@@ -1114,20 +1045,6 @@ Here's my response:
     }
 
     #[test]
-    fn test_parse_prediction_stdout_different() {
-        let text = r#"{"test": "--color", "extra_args": ["=always"], "prediction": {"diff_type": "StdoutDifferent", "reason": "adds color codes"}, "setup": "touch file.txt"}"#;
-        let response = parse_lm_response(text).unwrap();
-
-        match &response.actions[0] {
-            LmAction::Test { prediction, .. } => {
-                let pred = prediction.as_ref().expect("Expected prediction");
-                assert_eq!(pred.diff_type, PredictedDiff::StdoutDifferent);
-            }
-            _ => panic!("Expected Test"),
-        }
-    }
-
-    #[test]
     fn test_parse_prediction_none_when_missing() {
         let text = r#"{"test": "--verbose", "setup": "touch file.txt"}"#;
         let response = parse_lm_response(text).unwrap();
@@ -1266,9 +1183,9 @@ Here's my response:
 
     #[test]
     fn test_parse_prediction_flat_format() {
-        // LMs produce flat prediction format with separate "content" field
-        // instead of nested {"StdoutContains": "@@"}
-        let text = r#"{"actions": [{"kind": "Test", "surface_id": "-u", "seed": {"setup": [], "files": []}, "prediction": {"diff_type": "StdoutContains", "content": "@@", "reason": "unified diff has @@ markers"}}]}"#;
+        // Flat prediction format with separate "content" field works via
+        // the simplified (non-actions) parsing path
+        let text = r#"{"test": "-u", "setup": "touch file.txt", "prediction": {"diff_type": "StdoutContains", "content": "@@", "reason": "unified diff has @@ markers"}}"#;
         let response = parse_lm_response(text).unwrap();
         assert_eq!(response.actions.len(), 1);
         if let LmAction::Test { prediction, .. } = &response.actions[0] {
@@ -1299,7 +1216,7 @@ Here's my response:
     #[test]
     fn test_parse_prediction_extra_fields_ignored() {
         // Extra fields in prediction shouldn't break parsing
-        let text = r#"{"actions": [{"kind": "Test", "surface_id": "--stat", "seed": {"setup": [], "files": []}, "prediction": {"diff_type": "StdoutDifferent", "reason": "stat format", "confidence": 0.9, "notes": "test"}}]}"#;
+        let text = r#"{"actions": [{"kind": "Test", "surface_id": "--stat", "seed": {"setup": [], "files": []}, "prediction": {"diff_type": "StderrDifferent", "reason": "stat format", "confidence": 0.9, "notes": "test"}}]}"#;
         let response = parse_lm_response(text).unwrap();
         assert_eq!(response.actions.len(), 1);
     }
