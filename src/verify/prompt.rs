@@ -88,6 +88,21 @@ fn format_attempt_history(attempts: &[Attempt], max: usize) -> String {
             "- Attempt {}: seed={{{}}}, outcome={}\n",
             attempt_num, seed_summary, outcome_summary
         ));
+
+        // Show prediction failure feedback so the LM can self-correct
+        if attempt.prediction_matched == Some(false)
+            && matches!(attempt.outcome, Outcome::Verified { .. })
+        {
+            history.push_str(
+                "  ⚠ PREDICTION FAILED: outputs differed but your prediction didn't match. Surface stays Pending.\n",
+            );
+            if let Some(stdout) = &attempt.stdout_preview {
+                history.push_str(&format!("    option_stdout: {:?}\n", stdout));
+            }
+            if let Some(control) = &attempt.control_stdout_preview {
+                history.push_str(&format!("    control_stdout: {:?}\n", control));
+            }
+        }
     }
 
     history
@@ -883,7 +898,7 @@ For each surface, provide ONE action:
    - surface_id: Which surface to test (automatically included in command)
    - extra_args: Additional arguments if needed (optional, usually omit)
    - seed: Setup commands (copy baseline's seed if same setup works)
-   - prediction: (RECOMMENDED) What you expect to happen
+   - prediction: (REQUIRED) What you expect to happen
 
 Note: The surface option is automatically added to the command. Use "extra_args" for values or additional arguments:
 - Simple option: `{"surface_id": "--example", "seed": {...}}`
@@ -915,7 +930,7 @@ Probe results show: option_stdout, control_stdout, and whether they DIFFER or ar
 
 ## Predictions
 
-Include a prediction to specify what output difference you expect. This enables mechanical verification:
+Every Test action MUST include a prediction. Predictions are load-bearing — if your prediction doesn't match the actual outcome, the surface stays Pending even if outputs differed. This forces you to understand what the option does, not just guess at seeds.
 
 - **StdoutEmpty**: Output will be empty/suppressed (for --no-*, --quiet, --silent options)
 - **StdoutContains**: Output will contain specific text (use {"StdoutContains": "text"})
@@ -932,8 +947,8 @@ Example with prediction:
 }
 ```
 
-If prediction matches actual outcome -> auto-verified (no critique needed).
-If prediction fails but outputs differed -> needs review.
+If prediction matches actual outcome -> verified.
+If prediction fails but outputs differed -> surface stays Pending. You'll see what you predicted vs what actually happened, so you can fix either the seed or the prediction.
 
 ## Execution Model
 

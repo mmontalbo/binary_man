@@ -1507,6 +1507,14 @@ pub(super) fn batch_probe_surfaces(state: &State, verbose: bool) -> Vec<BatchPro
             continue;
         }
 
+        // Reject empty-stdout hits: option producing empty output while control
+        // has output is degenerate — it means "matched nothing", not meaningful
+        // behavior verification. These are the most common false positive in
+        // batch probe (58% of find's hits were this pattern).
+        if evidence.stdout.is_empty() && !control_stdout.is_empty() && stdout_differs {
+            continue;
+        }
+
         let diff_kind = match (stdout_differs, stderr_differs, exit_code_differs) {
             (true, false, false) => DiffKind::Stdout,
             (false, true, false) => DiffKind::Stderr,

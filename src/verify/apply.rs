@@ -228,23 +228,31 @@ pub(super) fn merge_test_result(state: &mut State, result: TestResult) {
         });
 
         if matches!(result.outcome, Outcome::Verified { .. }) {
-            entry.status = Status::Verified;
+            // Gate on prediction: if the LM made a prediction and it was wrong,
+            // don't verify — keep Pending so the LM can self-correct.
+            // prediction_matched == None means no prediction was provided (e.g.
+            // auto-promoted probes), which is allowed through.
+            let prediction_blocked = result.prediction_matched == Some(false);
 
-            // Add to seed bank if not already present
-            let seed = entry.attempts.last().map(|a| a.seed.clone()).unwrap();
-            if !state
-                .seed_bank
-                .iter()
-                .any(|s| s.surface_id == result.surface_id)
-            {
-                let args = entry.attempts.last().map(|a| a.args.clone()).unwrap();
-                state.seed_bank.push(VerifiedSeed {
-                    surface_id: result.surface_id.clone(),
-                    args,
-                    seed,
-                    verified_at: state.cycle,
-                    hint: None,
-                });
+            if !prediction_blocked {
+                entry.status = Status::Verified;
+
+                // Add to seed bank if not already present
+                let seed = entry.attempts.last().map(|a| a.seed.clone()).unwrap();
+                if !state
+                    .seed_bank
+                    .iter()
+                    .any(|s| s.surface_id == result.surface_id)
+                {
+                    let args = entry.attempts.last().map(|a| a.args.clone()).unwrap();
+                    state.seed_bank.push(VerifiedSeed {
+                        surface_id: result.surface_id.clone(),
+                        args,
+                        seed,
+                        verified_at: state.cycle,
+                        hint: None,
+                    });
+                }
             }
         }
     }
