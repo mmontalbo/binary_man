@@ -10,6 +10,7 @@
 use super::apply::{
     apply_action, merge_probe_result, merge_test_result, run_probe_scenario, run_test_scenario,
 };
+use super::characterize::characterize_pending_surfaces;
 use super::bootstrap::{
     add_surfaces_to_state, apply_batch_probe_hits, batch_probe_surfaces,
     build_extraction_prompt, build_state_from_surfaces, parse_extraction_response,
@@ -366,6 +367,22 @@ pub fn run(
     if state.seed_bank.is_empty() && state.cycle == 0 {
         let hits = batch_probe_surfaces(&state, verbose);
         apply_batch_probe_hits(&mut state, hits, verbose);
+    }
+
+    // Upfront characterization: analyze pending surfaces before pipeline starts.
+    // Produces trigger + expected_diff for each uncharacterized surface so the
+    // verification LM has a specification to build seeds against.
+    let uncharacterized = state
+        .entries
+        .iter()
+        .filter(|e| {
+            matches!(e.status, Status::Pending)
+                && e.characterization.is_none()
+                && e.attempts.is_empty()
+        })
+        .count();
+    if uncharacterized > 0 {
+        characterize_pending_surfaces(&mut state, pack_path, lm_config, verbose)?;
     }
 
     // Save initial state

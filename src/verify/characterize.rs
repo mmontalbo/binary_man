@@ -1,16 +1,161 @@
-//! Re-characterization support for options that stagnate during verification.
+//! Surface characterization: upfront analysis and post-failure revision.
 //!
-//! When a surface has accumulated enough evidence that its characterization
-//! is wrong (OutputsEqual outcomes + identical probes), this module asks the
-//! LM to revise its trigger/expected_diff understanding.
+//! Upfront characterization (`characterize_pending_surfaces`) runs once after
+//! bootstrap, before the verification pipeline starts. It asks the LM to
+//! analyze each pending surface and produce a trigger condition and expected
+//! observable diff. This frontloads the semantic reasoning that would otherwise
+//! happen ad-hoc during verification cycles.
 //!
-//! Initial characterization is now performed inline during verify cycles
-//! (via trigger/expected_diff fields on LmAction::Test and LmAction::Probe).
+//! Re-characterization (`recharacterize_surface`) revises a characterization
+//! after accumulated evidence shows it was wrong.
 
-use super::types::{Characterization, State};
+use super::types::{Characterization, State, Status};
 use crate::lm::{create_plugin, LmConfig};
 use anyhow::Result;
 use std::path::Path;
+
+/// Maximum surfaces per characterization LM call.
+const CHARACTERIZE_CHUNK_SIZE: usize = 20;
+
+/// Characterize all pending surfaces that lack a characterization.
+///
+/// Runs after bootstrap/batch-probe, before the verification pipeline starts.
+/// Asks the LM to produce trigger + expected_diff for each surface in bulk,
+/// giving the verification phase a specification to build seeds against.
+pub(super) fn characterize_pending_surfaces(
+    state: &mut State,
+    pack_path: &Path,
+    lm_config: &LmConfig,
+    verbose: bool,
+) -> Result<()> {
+    // Collect pending surfaces without characterizations
+    let pending_ids: Vec<String> = state
+        .entries
+        .iter()
+        .filter(|e| {
+            matches!(e.status, Status::Pending)
+                && e.characterization.is_none()
+                && e.attempts.is_empty()
+        })
+        .map(|e| e.id.clone())
+        .collect();
+
+    if pending_ids.is_empty() {
+        return Ok(());
+    }
+
+    if verbose {
+        eprintln!(
+            "Characterizing {} pending surfaces...",
+            pending_ids.len()
+        );
+    }
+
+    let mut plugin = create_plugin(lm_config);
+    plugin.init()?;
+
+    let mut total_characterized = 0;
+
+    for chunk in pending_ids.chunks(CHARACTERIZE_CHUNK_SIZE) {
+        let prompt = build_bulk_characterize_prompt(state, chunk);
+
+        let response_text =
+            match super::run::invoke_lm_with_retry(&mut *plugin, &prompt, verbose) {
+                Ok(text) => text,
+                Err(e) => {
+                    if verbose {
+                        eprintln!("  Characterization chunk failed: {}", e);
+                    }
+                    continue;
+                }
+            };
+
+        let chunk_ids: Vec<String> = chunk.to_vec();
+        let results = parse_characterize_response(&response_text, &chunk_ids);
+
+        for (surface_id, char) in results {
+            if let Some(entry) = state.entries.iter_mut().find(|e| e.id == surface_id) {
+                entry.characterization = Some(char);
+                total_characterized += 1;
+            }
+        }
+    }
+
+    plugin.shutdown().ok();
+
+    if verbose {
+        eprintln!(
+            "Characterized {}/{} surfaces",
+            total_characterized,
+            pending_ids.len()
+        );
+    }
+
+    state.save(pack_path)?;
+    Ok(())
+}
+
+/// Build a bulk characterization prompt for multiple surfaces.
+///
+/// Unlike the re-characterization prompt which includes failure evidence,
+/// this prompt asks for initial analysis based on the help text alone.
+fn build_bulk_characterize_prompt(state: &State, surface_ids: &[String]) -> String {
+    let mut prompt = String::new();
+
+    let base_command = if state.context_argv.is_empty() {
+        state.binary.clone()
+    } else {
+        format!("{} {}", state.binary, state.context_argv.join(" "))
+    };
+
+    prompt.push_str("# Characterize Options\n\n");
+    prompt.push_str(&format!("Command: `{}`\n\n", base_command));
+
+    if !state.help_preamble.is_empty() {
+        prompt.push_str(&format!("Help preamble:\n{}\n\n", state.help_preamble));
+    }
+
+    prompt.push_str(
+        "For each option below, analyze what input scenario would make the option \
+         produce **visibly different output** compared to running the command without it.\n\n\
+         Be specific and concrete:\n\
+         - BAD trigger: \"files exist\" (too vague)\n\
+         - GOOD trigger: \"directory contains both empty and non-empty files\" (testable)\n\
+         - BAD expected_diff: \"output changes\" (says nothing)\n\
+         - GOOD expected_diff: \"stdout lists only empty files instead of all files\" (observable)\n\n",
+    );
+
+    prompt.push_str("## Options\n\n");
+
+    for id in surface_ids {
+        if let Some(entry) = state.entries.iter().find(|e| &e.id == id) {
+            prompt.push_str(&format!("### {}\n", entry.id));
+            prompt.push_str(&format!("Description: {}\n", entry.description));
+            if let Some(hint) = &entry.value_hint {
+                prompt.push_str(&format!("Value hint: {}\n", hint));
+            }
+            if let Some(context) = &entry.context {
+                prompt.push_str(&format!("{}\n", context));
+            }
+            prompt.push('\n');
+        }
+    }
+
+    prompt.push_str(
+        "IMPORTANT: Respond with ONLY a JSON object. No prose, no markdown outside JSON.\n\n",
+    );
+    prompt.push_str("```json\n{\n  \"characterizations\": [\n");
+    for (i, id) in surface_ids.iter().enumerate() {
+        let comma = if i + 1 < surface_ids.len() { "," } else { "" };
+        prompt.push_str(&format!(
+            "    {{\"surface_id\": \"{}\", \"trigger\": \"...\", \"expected_diff\": \"...\"}}{}\n",
+            id, comma
+        ));
+    }
+    prompt.push_str("  ]\n}\n```\n");
+
+    prompt
+}
 
 /// Re-characterize surfaces that have failed repeatedly.
 ///
@@ -301,5 +446,64 @@ mod tests {
         // --stat skipped (missing expected_diff), --name-only included
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].0, "--name-only");
+    }
+
+    #[test]
+    fn test_bulk_characterize_prompt_structure() {
+        use super::super::types::*;
+
+        let state = State {
+            schema_version: STATE_SCHEMA_VERSION,
+            binary: "find".to_string(),
+            context_argv: vec![".".to_string()],
+            baseline: None,
+            entries: vec![
+                SurfaceEntry {
+                    id: "-empty".to_string(),
+                    description: "match empty files and directories".to_string(),
+                    context: None,
+                    value_hint: None,
+                    category: SurfaceCategory::General,
+                    status: Status::Pending,
+                    probes: vec![],
+                    attempts: vec![],
+                    retried: false,
+                    critique_feedback: None,
+                    critique_demotions: 0,
+                    characterization: None,
+                },
+                SurfaceEntry {
+                    id: "-name".to_string(),
+                    description: "match filename pattern".to_string(),
+                    context: None,
+                    value_hint: Some("<pattern>".to_string()),
+                    category: SurfaceCategory::ValueRequired,
+                    status: Status::Pending,
+                    probes: vec![],
+                    attempts: vec![],
+                    retried: false,
+                    critique_feedback: None,
+                    critique_demotions: 0,
+                    characterization: None,
+                },
+            ],
+            cycle: 0,
+            seed_bank: vec![],
+            help_preamble: "find - search for files".to_string(),
+            examples_section: String::new(),
+        };
+
+        let ids = vec!["-empty".to_string(), "-name".to_string()];
+        let prompt = build_bulk_characterize_prompt(&state, &ids);
+
+        assert!(prompt.contains("find ."));
+        assert!(prompt.contains("### -empty"));
+        assert!(prompt.contains("### -name"));
+        assert!(prompt.contains("Value hint: <pattern>"));
+        assert!(prompt.contains("find - search for files"));
+        assert!(prompt.contains("\"characterizations\""));
+        // Template shows both surface IDs
+        assert!(prompt.contains("\"-empty\""));
+        assert!(prompt.contains("\"-name\""));
     }
 }
