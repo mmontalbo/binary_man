@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use std::collections::HashMap;
+use std::io::BufRead;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -28,7 +29,7 @@ pub fn run_single(
     cmd_args.extend(entry_point.iter().cloned());
 
     let start = Instant::now();
-    let result = run_with_timeout(bman_bin, &cmd_args, timeout)?;
+    let result = run_with_timeout(bman_bin, &cmd_args, timeout, run_idx)?;
     let elapsed = start.elapsed().as_secs_f64();
 
     // Read final state (even on crash/timeout for partial results)
@@ -163,9 +164,15 @@ struct RunResult {
 /// Run a command in its own process group with a timeout.
 ///
 /// Captures stderr for diagnostics (rate limits, retries, errors).
+/// Streams lines matching `PROGRESS:` to stderr with a run prefix.
 /// Uses `setsid` + `killpg` to kill the entire process tree on timeout,
 /// preventing orphaned LM plugin processes.
-fn run_with_timeout(program: &str, args: &[String], timeout: u64) -> Result<RunResult> {
+fn run_with_timeout(
+    program: &str,
+    args: &[String],
+    timeout: u64,
+    run_idx: usize,
+) -> Result<RunResult> {
     let mut cmd = Command::new(program);
     cmd.args(args)
         .stdout(Stdio::null())
@@ -184,9 +191,26 @@ fn run_with_timeout(program: &str, args: &[String], timeout: u64) -> Result<RunR
         .with_context(|| format!("spawn {}", program))?;
     let pid = child.id() as libc::pid_t;
 
-    // Read stderr in a background thread so we don't block or deadlock.
+    // Read stderr line-by-line, streaming PROGRESS lines and accumulating the rest.
     let stderr_handle = child.stderr.take().expect("stderr was piped");
-    let stderr_thread = std::thread::spawn(move || std::io::read_to_string(stderr_handle));
+    let run_num = run_idx + 1;
+    let stderr_thread = std::thread::spawn(move || {
+        let reader = std::io::BufReader::new(stderr_handle);
+        let mut buf = String::new();
+        for line in reader.lines() {
+            match line {
+                Ok(line) => {
+                    if line.starts_with("PROGRESS:") {
+                        eprintln!("  [run {}] {}", run_num, line);
+                    }
+                    buf.push_str(&line);
+                    buf.push('\n');
+                }
+                Err(_) => break,
+            }
+        }
+        buf
+    });
 
     let deadline = Instant::now() + Duration::from_secs(timeout);
 
@@ -208,8 +232,7 @@ fn run_with_timeout(program: &str, args: &[String], timeout: u64) -> Result<RunR
 
     let stderr = stderr_thread
         .join()
-        .expect("stderr reader thread panicked")
-        .unwrap_or_default();
+        .expect("stderr reader thread panicked");
 
     Ok(RunResult {
         timed_out,

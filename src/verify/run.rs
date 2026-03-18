@@ -115,9 +115,9 @@ const MAX_LM_RETRIES: usize = 3;
 
 /// Work item in the unified pipeline.
 ///
-/// Priority: Verify > ExtractChunk.
-/// This drains forward — surfaces push through to verification ASAP,
-/// extraction only happens when workers have nothing else to do.
+/// One worker is reserved for extraction while chunks remain (and other
+/// workers are verifying), preventing large man pages from starving the
+/// extraction pipeline. Otherwise verify takes priority.
 #[derive(Debug)]
 enum WorkItem {
     /// Extract surfaces from a help text chunk and probe-validate them.
@@ -146,6 +146,8 @@ struct PipelineState {
     attempt_counts: HashMap<String, usize>,
     /// Total non-verified outcomes per surface across all workers.
     global_failures: HashMap<String, usize>,
+    /// Number of workers currently performing extraction.
+    extracting_count: usize,
     /// Number of extraction chunks completed.
     chunks_completed: usize,
     /// Total number of extraction chunks.
@@ -155,12 +157,32 @@ struct PipelineState {
 }
 
 impl PipelineState {
-    /// Claim the next work item with priority: Verify > ExtractChunk.
+    /// Claim the next work item.
     ///
     /// Verify items are generated on demand from surface state.
-    /// Only ExtractChunk items come from the explicit queue.
+    /// ExtractChunk items come from the explicit queue.
+    ///
+    /// Worker reservation: when no worker is currently extracting and chunks
+    /// remain, one worker is reserved for extraction — but only when other
+    /// workers are actively verifying (in_progress non-empty), so a single
+    /// worker never gets stuck extracting everything before verifying.
     fn claim_work(&mut self) -> Option<WorkItem> {
-        // Priority 1: Verify — surfaces ready for verification
+        // Reserve one worker for extraction when chunks remain and others are verifying
+        if self.extracting_count == 0
+            && self.chunks_completed < self.chunks_total
+            && !self.in_progress.is_empty()
+        {
+            if let Some(idx) = self
+                .work_queue
+                .iter()
+                .position(|item| matches!(item, WorkItem::ExtractChunk { .. }))
+            {
+                self.extracting_count += 1;
+                return self.work_queue.remove(idx);
+            }
+        }
+
+        // Primary: Verify — surfaces ready for verification
         let mut verify_candidates: Vec<(usize, usize, String)> = self
             .state
             .entries
@@ -217,12 +239,13 @@ impl PipelineState {
             return Some(WorkItem::Verify { surface_ids: batch });
         }
 
-        // Priority 2: ExtractChunk items from queue
+        // Fallback: ExtractChunk items from queue
         if let Some(idx) = self
             .work_queue
             .iter()
             .position(|item| matches!(item, WorkItem::ExtractChunk { .. }))
         {
+            self.extracting_count += 1;
             return self.work_queue.remove(idx);
         }
 
@@ -441,6 +464,7 @@ fn run_pipeline(
         resolved: HashSet::new(),
         attempt_counts: HashMap::new(),
         global_failures: HashMap::new(),
+        extracting_count: 0,
         chunks_completed: 0,
         chunks_total,
         last_checkpoint_cycle: state.cycle,
@@ -689,8 +713,8 @@ fn print_timing_summary(worker_timings: &[WorkerTimings], wall: Duration) {
 
 /// Run a single pipeline worker.
 ///
-/// Each worker has its own LM plugin and processes items in priority order:
-/// Verify > ExtractChunk.
+/// Each worker has its own LM plugin. One worker is reserved for extraction
+/// while chunks remain; otherwise verify takes priority.
 #[allow(clippy::too_many_arguments)]
 fn run_pipeline_worker(
     worker_idx: usize,
@@ -795,6 +819,7 @@ fn run_pipeline_worker(
                     let before = ps.state.entries.len();
                     add_surfaces_to_state(&mut ps.state, surfaces);
                     ps.chunks_completed += 1;
+                    ps.extracting_count -= 1;
                     let added = ps.state.entries.len() - before;
                     if verbose && added > 0 {
                         eprintln!(
@@ -1101,6 +1126,20 @@ fn run_pipeline_worker(
                                 cycle, verified
                             );
                         }
+                    }
+
+                    // Compact progress line (not verbose-gated) for eval harness streaming
+                    if cycle.is_multiple_of(5) || any_verified {
+                        let v = ps.state.entries.iter()
+                            .filter(|e| matches!(e.status, Status::Verified))
+                            .count();
+                        let t = ps.state.entries.len();
+                        let ch = ps.chunks_completed;
+                        let ct = ps.chunks_total;
+                        eprintln!(
+                            "PROGRESS: cycle={} verified={}/{} chunks={}/{}",
+                            cycle, v, t, ch, ct
+                        );
                     }
 
                     condvar.notify_all();
