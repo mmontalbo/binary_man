@@ -388,32 +388,32 @@ pub(super) fn run_scenario(
 ///
 /// After setup completes, the sandbox can run multiple commands sequentially,
 /// ensuring they share the same filesystem state (including git commit hashes).
-struct PreparedSandbox {
+pub(super) struct PreparedSandbox {
     /// The temporary directory (kept alive for cleanup on drop).
-    _temp_dir: tempfile::TempDir,
+    pub(super) _temp_dir: tempfile::TempDir,
     /// Working directory path inside the sandbox.
-    work_dir: PathBuf,
+    pub(super) work_dir: PathBuf,
     /// Sandbox /tmp directory for observable side effects.
-    sandbox_tmp: PathBuf,
+    pub(super) sandbox_tmp: PathBuf,
     /// Results from setup commands (empty if all succeeded).
-    setup_results: Vec<SetupResult>,
+    pub(super) setup_results: Vec<SetupResult>,
     /// Whether setup failed.
-    setup_failed: bool,
+    pub(super) setup_failed: bool,
     /// Error summary if setup failed.
-    setup_error: Option<String>,
+    pub(super) setup_error: Option<String>,
     /// Timestamp when sandbox was created.
-    captured_at_ms: u128,
+    pub(super) captured_at_ms: u128,
     /// Environment variables captured for telemetry.
-    env: HashMap<String, String>,
+    pub(super) env: HashMap<String, String>,
     /// The seed used to create this sandbox.
-    seed: Seed,
+    pub(super) seed: Seed,
 }
 
 /// Prepare a sandbox by creating directory, writing files, and running setup.
 ///
 /// Returns a prepared sandbox that can be used to run multiple commands.
 /// Setup commands run in a writable sandbox.
-fn prepare_sandbox(scenario_id: &str, seed: &Seed) -> Result<PreparedSandbox> {
+pub(super) fn prepare_sandbox(scenario_id: &str, seed: &Seed) -> Result<PreparedSandbox> {
     let captured_at_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
@@ -536,7 +536,7 @@ fn prepare_sandbox(scenario_id: &str, seed: &Seed) -> Result<PreparedSandbox> {
 ///
 /// The sandbox work directory is mounted read-only to detect commands
 /// that attempt to mutate state.
-fn run_in_sandbox(
+pub(super) fn run_in_sandbox(
     sandbox: &PreparedSandbox,
     binary: &str,
     argv: &[String],

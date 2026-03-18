@@ -289,7 +289,7 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
             let similar_seeds: Vec<_> = state
                 .seed_bank
                 .iter()
-                .filter(|s| s.is_similar_to(&entry.id))
+                .filter(|s| s.is_similar_to(&entry.id) || (s.surface_id == entry.id && s.is_starter_seed()))
                 .collect();
             if !similar_seeds.is_empty() {
                 prompt.push_str("\n**Suggested seeds** (from similar verified surfaces):\n");
@@ -613,7 +613,7 @@ pub(super) fn build_retry_prompt(
             let similar_seeds: Vec<_> = state
                 .seed_bank
                 .iter()
-                .filter(|s| s.is_similar_to(id))
+                .filter(|s| s.is_similar_to(id) || (s.surface_id == *id && s.is_starter_seed()))
                 .take(2)
                 .collect();
             if !similar_seeds.is_empty() {

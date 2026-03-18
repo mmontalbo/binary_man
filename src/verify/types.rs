@@ -494,6 +494,11 @@ pub struct VerifiedSeed {
 }
 
 impl VerifiedSeed {
+    /// Check if this seed was created by the batch probe phase.
+    pub(super) fn is_starter_seed(&self) -> bool {
+        self.hint.as_ref().is_some_and(|h| h.starts_with("batch_probe:"))
+    }
+
     /// Check if this seed might be relevant for another surface.
     ///
     /// Uses simple heuristics:

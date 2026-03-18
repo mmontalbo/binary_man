@@ -11,9 +11,10 @@ use super::apply::{
     apply_action, merge_probe_result, merge_test_result, run_probe_scenario, run_test_scenario,
 };
 use super::bootstrap::{
-    add_surfaces_to_state, build_extraction_prompt, build_state_from_surfaces,
-    parse_extraction_response, parse_surfaces_from_help, prepare_extraction,
-    probe_validate_surfaces, save_surface_cache, DiscoveredSurface,
+    add_surfaces_to_state, apply_batch_probe_hits, batch_probe_surfaces,
+    build_extraction_prompt, build_state_from_surfaces, parse_extraction_response,
+    parse_surfaces_from_help, prepare_extraction, probe_validate_surfaces, save_surface_cache,
+    DiscoveredSurface,
 };
 use super::lm::{
     log_prompt, log_raw_response, log_response, parse_lm_response, LmAction, LmResponse,
@@ -154,6 +155,8 @@ struct PipelineState {
     chunks_total: usize,
     /// Cycle number at last checkpoint save.
     last_checkpoint_cycle: u32,
+    /// Whether batch probe has already been run.
+    batch_probed: bool,
 }
 
 impl PipelineState {
@@ -359,6 +362,12 @@ pub fn run(
         (state, Some(prep))
     };
 
+    // Batch probe: auto-verify surfaces that show differing output mechanically
+    if state.seed_bank.is_empty() && state.cycle == 0 {
+        let hits = batch_probe_surfaces(&state, verbose);
+        apply_batch_probe_hits(&mut state, hits, verbose);
+    }
+
     // Save initial state
     state.save(pack_path)?;
 
@@ -468,6 +477,7 @@ fn run_pipeline(
         chunks_completed: 0,
         chunks_total,
         last_checkpoint_cycle: state.cycle,
+        batch_probed: !state.seed_bank.is_empty(),
     };
 
     // Pre-populate resolved set from existing state (resumed runs)
@@ -813,6 +823,7 @@ fn run_pipeline_worker(
                 timings.extract_chunks += 1;
 
                 // Add to shared state (under lock)
+                let should_batch_probe;
                 {
                     let merge_t0 = Instant::now();
                     let mut ps = lock.lock().unwrap();
@@ -827,8 +838,26 @@ fn run_pipeline_worker(
                             w, chunk_index, added, ps.chunks_completed, ps.chunks_total,
                         );
                     }
+                    // Trigger batch probe after extraction adds surfaces
+                    should_batch_probe = added > 0
+                        && !ps.batch_probed
+                        && ps.state.seed_bank.is_empty();
+                    if should_batch_probe {
+                        ps.batch_probed = true;
+                    }
                     condvar.notify_all();
                     timings.merge += merge_t0.elapsed();
+                }
+
+                // Run batch probe outside the lock (I/O heavy)
+                if should_batch_probe {
+                    let state_snapshot = lock.lock().unwrap().state.clone();
+                    let hits = batch_probe_surfaces(&state_snapshot, verbose);
+                    if !hits.is_empty() {
+                        let mut ps = lock.lock().unwrap();
+                        apply_batch_probe_hits(&mut ps.state, hits, verbose);
+                        condvar.notify_all();
+                    }
                 }
             }
 

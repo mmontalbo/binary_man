@@ -7,11 +7,13 @@
 //!
 //! Results are cached keyed on help-text hash so repeat bootstraps work offline.
 
-use super::types::{State, Status, SurfaceCategory, SurfaceEntry, STATE_SCHEMA_VERSION};
-use crate::lm::LmConfig;
+use super::evidence::{prepare_sandbox, run_in_sandbox};
+use super::types::{
+    Attempt, DiffKind, FileEntry, Outcome, Seed, State, Status, SurfaceCategory, SurfaceEntry,
+    VerifiedSeed, STATE_SCHEMA_VERSION,
+};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::process::Command;
@@ -27,99 +29,8 @@ const EXTRACT_CHUNK_TARGET_SIZE: usize = 2000;
 /// Maximum concurrent probe validations.
 const MAX_CONCURRENT_PROBES: usize = 16;
 
-/// Bootstrap a new verification state for a binary.
-///
-/// Uses LM-primary extraction when an LM is available, falling back to regex
-/// parsing for offline/no-LM mode. LM-extracted options are probe-validated
-/// by running the binary to reject hallucinations.
-///
-/// Results are cached keyed on help-text hash so repeat bootstraps are
-/// deterministic and work offline after the first run.
-pub(super) fn bootstrap(
-    binary: &str,
-    context_argv: &[String],
-    lm_config: Option<&LmConfig>,
-    pack_path: Option<&Path>,
-    verbose: bool,
-) -> Result<State> {
-    // 1. Run help discovery - collect from BOTH -h and --help
-    let help_outputs = collect_all_help_outputs(binary, context_argv)?;
-
-    // 2. Compute help text hash for cache key
-    let combined_help = help_outputs.join("\n---\n");
-    let help_hash = compute_help_hash(&combined_help);
-
-    // 3. Try cache first
-    if let Some(pp) = pack_path {
-        if let Some(cached) = load_surface_cache(pp, &help_hash) {
-            if verbose {
-                eprintln!(
-                    "Using cached surface extraction ({} surfaces, hash {})",
-                    cached.len(),
-                    &help_hash[..12]
-                );
-            }
-            return build_state_from_surfaces(binary, context_argv, cached, &help_outputs);
-        }
-    }
-
-    // 4. Extract surfaces: LM primary, regex fallback
-    let mut seen: HashMap<String, DiscoveredSurface> = HashMap::new();
-
-    let used_lm = if let Some(lm_cfg) = lm_config {
-        match lm_extract_surfaces(lm_cfg, binary, context_argv, &help_outputs, verbose) {
-            Ok(lm_surfaces) => {
-                if verbose {
-                    eprintln!(
-                        "LM extracted {} candidate surface(s), probe-validating...",
-                        lm_surfaces.len()
-                    );
-                }
-                // Probe-validate each LM-extracted option
-                let validated =
-                    probe_validate_surfaces(binary, context_argv, lm_surfaces, verbose);
-                if verbose {
-                    eprintln!("{} surface(s) passed probe validation", validated.len());
-                }
-                for surface in validated {
-                    seen.entry(surface.id.clone()).or_insert(surface);
-                }
-                true
-            }
-            Err(e) => {
-                if verbose {
-                    eprintln!("LM extraction failed ({}), falling back to regex", e);
-                }
-                false
-            }
-        }
-    } else {
-        false
-    };
-
-    // Regex fallback (or merge): always run regex to catch anything LM missed
-    for output in &help_outputs {
-        for surface in parse_surfaces_from_help(output) {
-            seen.entry(surface.id.clone()).or_insert(surface);
-        }
-    }
-
-    if verbose && !used_lm {
-        eprintln!("Using regex-only surface extraction");
-    }
-
-    let surfaces: Vec<DiscoveredSurface> = seen.into_values().collect();
-
-    // 5. Cache the extraction results
-    if let Some(pp) = pack_path {
-        save_surface_cache(pp, &help_hash, &surfaces);
-    }
-
-    build_state_from_surfaces(binary, context_argv, surfaces, &help_outputs)
-}
-
 /// Build a State from discovered surfaces and help outputs.
-fn build_state_from_surfaces(
+pub(super) fn build_state_from_surfaces(
     binary: &str,
     context_argv: &[String],
     surfaces: Vec<DiscoveredSurface>,
@@ -171,15 +82,15 @@ fn build_state_from_surfaces(
 
 /// Discovered surface from help output.
 #[derive(Debug, Clone)]
-struct DiscoveredSurface {
+pub(super) struct DiscoveredSurface {
     /// Option name (e.g., "--stat", "-v").
-    id: String,
+    pub id: String,
     /// Full description from help text (multi-line descriptions joined).
-    description: String,
+    pub description: String,
     /// Surrounding context (nearby options) for additional hints.
-    context: Option<String>,
+    pub context: Option<String>,
     /// Value hint (e.g., "<n>", "<file>").
-    value_hint: Option<String>,
+    pub value_hint: Option<String>,
 }
 
 /// Collect help output from both -h and --help flags.
@@ -313,7 +224,7 @@ struct OptionBlock {
 /// (lines that are indented more than the option line or start with whitespace only).
 ///
 /// It also captures surrounding context from neighboring options.
-fn parse_surfaces_from_help(help_text: &str) -> Vec<DiscoveredSurface> {
+pub(super) fn parse_surfaces_from_help(help_text: &str) -> Vec<DiscoveredSurface> {
     // First pass: parse all option blocks with full multi-line descriptions
     let blocks = parse_option_blocks(help_text);
 
@@ -681,7 +592,7 @@ fn truncate_context_desc(desc: &str, max_len: usize) -> String {
 ///
 /// `--no-X` → `Modifier { base: "--X" }`. Everything else defaults to `General`
 /// and is enriched by the LM classification pass.
-fn classify_surface_mechanical(id: &str) -> SurfaceCategory {
+pub(super) fn classify_surface_mechanical(id: &str) -> SurfaceCategory {
     if let Some(base_name) = id.strip_prefix("--no-") {
         return SurfaceCategory::Modifier {
             base: format!("--{}", base_name),
@@ -694,7 +605,7 @@ fn classify_surface_mechanical(id: &str) -> SurfaceCategory {
 ///
 /// Returns everything before the first option definition line. This gives the
 /// LM context about what the command does when classifying surfaces.
-fn extract_help_preamble(help_text: &str) -> String {
+pub(super) fn extract_help_preamble(help_text: &str) -> String {
     let mut preamble_lines = Vec::new();
     for line in help_text.lines() {
         let trimmed = line.trim_start();
@@ -725,7 +636,7 @@ fn extract_help_preamble(help_text: &str) -> String {
 /// Looks for a line matching "EXAMPLES" (with optional leading whitespace)
 /// and captures until the next section header (all-caps word at the same or
 /// lower indent level).
-fn extract_examples_section(help_text: &str) -> String {
+pub(super) fn extract_examples_section(help_text: &str) -> String {
     let lines: Vec<&str> = help_text.lines().collect();
     let mut start = None;
     let mut header_indent = 0;
@@ -792,6 +703,95 @@ fn is_combinator(opt: &str) -> bool {
     matches!(opt, "-and" | "-or" | "-not" | "-a" | "-o")
 }
 
+// ==================== Pipeline helpers ====================
+
+/// Result of preparing for surface extraction.
+///
+/// Contains everything the pipeline needs to drive extraction. If cache hits,
+/// `cached_surfaces` is populated and `chunks` is empty — skip LM extraction.
+pub(super) struct ExtractionPrep {
+    /// Collected help outputs from the binary.
+    pub help_outputs: Vec<String>,
+    /// Hash of help text for cache keying.
+    pub help_hash: String,
+    /// Raw help text chunks for LM extraction. Empty if cache hit.
+    pub chunks: Vec<String>,
+    /// Cached surfaces if cache hit.
+    pub cached_surfaces: Option<Vec<DiscoveredSurface>>,
+}
+
+/// Prepare for surface extraction: collect help, check cache, build chunks.
+///
+/// Returns everything the pipeline needs to drive extraction independently.
+/// If the cache hits, `cached_surfaces` is populated and `chunks` is empty.
+pub(super) fn prepare_extraction(
+    binary: &str,
+    context_argv: &[String],
+    pack_path: Option<&Path>,
+    verbose: bool,
+) -> Result<ExtractionPrep> {
+    let help_outputs = collect_all_help_outputs(binary, context_argv)?;
+    let combined_help = help_outputs.join("\n---\n");
+    let help_hash = compute_help_hash(&combined_help);
+
+    if let Some(pp) = pack_path {
+        if let Some(cached) = load_surface_cache(pp, &help_hash) {
+            if verbose {
+                eprintln!(
+                    "Using cached surface extraction ({} surfaces, hash {})",
+                    cached.len(),
+                    &help_hash[..12]
+                );
+            }
+            return Ok(ExtractionPrep {
+                help_outputs,
+                help_hash,
+                chunks: vec![],
+                cached_surfaces: Some(cached),
+            });
+        }
+    }
+
+    let combined = help_outputs.join("\n\n---\n\n");
+    let chunks = split_help_into_chunks(&combined, EXTRACT_CHUNK_TARGET_SIZE);
+
+    Ok(ExtractionPrep {
+        help_outputs,
+        help_hash,
+        chunks,
+        cached_surfaces: None,
+    })
+}
+
+/// Add discovered surfaces to state, deduplicating against existing entries.
+///
+/// Surfaces whose ID already exists in state are skipped. New surfaces are
+/// classified mechanically and added as Pending.
+pub(super) fn add_surfaces_to_state(state: &mut State, surfaces: Vec<DiscoveredSurface>) {
+    let existing_ids: std::collections::HashSet<String> =
+        state.entries.iter().map(|e| e.id.clone()).collect();
+    for surface in surfaces {
+        if existing_ids.contains(&surface.id) {
+            continue;
+        }
+        let category = classify_surface_mechanical(&surface.id);
+        state.entries.push(SurfaceEntry {
+            id: surface.id,
+            description: surface.description,
+            context: surface.context,
+            value_hint: surface.value_hint,
+            category,
+            status: Status::Pending,
+            probes: vec![],
+            attempts: vec![],
+            retried: false,
+            critique_feedback: None,
+            critique_demotions: 0,
+            characterization: None,
+        });
+    }
+}
+
 // ==================== LM-based surface extraction ====================
 
 
@@ -846,7 +846,7 @@ fn load_surface_cache(pack_path: &Path, help_hash: &str) -> Option<Vec<Discovere
 }
 
 /// Save surface extraction results to cache.
-fn save_surface_cache(pack_path: &Path, help_hash: &str, surfaces: &[DiscoveredSurface]) {
+pub(super) fn save_surface_cache(pack_path: &Path, help_hash: &str, surfaces: &[DiscoveredSurface]) {
     let cache = SurfaceCache {
         help_hash: help_hash.to_string(),
         surfaces: surfaces
@@ -867,7 +867,7 @@ fn save_surface_cache(pack_path: &Path, help_hash: &str, surfaces: &[DiscoveredS
 }
 
 /// Build the extraction prompt for the LM.
-fn build_extraction_prompt(binary: &str, context_argv: &[String], help_text: &str) -> String {
+pub(super) fn build_extraction_prompt(binary: &str, context_argv: &[String], help_text: &str) -> String {
     let cmd_name = if context_argv.is_empty() {
         binary.to_string()
     } else {
@@ -917,76 +917,6 @@ struct LmExtractedSurface {
     value_hint: Option<String>,
     #[serde(default)]
     description: Option<String>,
-}
-
-/// Extract surfaces using an LM.
-///
-/// Splits help text into chunks and extracts in parallel using multiple LM
-/// instances. Small texts naturally produce 1 chunk — same code path.
-fn lm_extract_surfaces(
-    lm_config: &LmConfig,
-    binary: &str,
-    context_argv: &[String],
-    help_outputs: &[String],
-    verbose: bool,
-) -> Result<Vec<DiscoveredSurface>> {
-    let combined_help = help_outputs.join("\n\n---\n\n");
-    let chunks = split_help_into_chunks(&combined_help, EXTRACT_CHUNK_TARGET_SIZE);
-
-    if verbose {
-        eprintln!(
-            "  Extracting surfaces: {} chars, {} chunk(s)",
-            combined_help.len(),
-            chunks.len()
-        );
-    }
-
-    let batches: Vec<(Vec<String>, String)> = chunks
-        .iter()
-        .enumerate()
-        .map(|(i, chunk)| {
-            let prompt = build_extraction_prompt(binary, context_argv, chunk);
-            (vec![format!("chunk_{}", i)], prompt)
-        })
-        .collect();
-
-    let all_results = super::run::run_parallel_lm_batches(
-        batches,
-        lm_config,
-        verbose,
-        "Extract",
-        |response_text, _batch_ids| {
-            parse_extraction_response(response_text).unwrap_or_default()
-        },
-    );
-
-    // Flatten and deduplicate (prefer longer descriptions on conflict)
-    let mut seen: HashMap<String, DiscoveredSurface> = HashMap::new();
-    for batch in all_results {
-        for surface in batch {
-            seen.entry(surface.id.clone())
-                .and_modify(|existing| {
-                    if surface.description.len() > existing.description.len() {
-                        existing.description = surface.description.clone();
-                    }
-                    if existing.value_hint.is_none() && surface.value_hint.is_some() {
-                        existing.value_hint = surface.value_hint.clone();
-                    }
-                })
-                .or_insert(surface);
-        }
-    }
-
-    let surfaces: Vec<DiscoveredSurface> = seen.into_values().collect();
-    if surfaces.is_empty() {
-        anyhow::bail!("LM extraction produced no surfaces");
-    }
-
-    if verbose {
-        eprintln!("  Extracted {} unique surfaces", surfaces.len());
-    }
-
-    Ok(surfaces)
 }
 
 /// Split help text into chunks at section boundaries.
@@ -1088,7 +1018,7 @@ fn is_section_header(line: &str) -> bool {
 }
 
 /// Parse the LM extraction response into discovered surfaces.
-fn parse_extraction_response(response: &str) -> Result<Vec<DiscoveredSurface>> {
+pub(super) fn parse_extraction_response(response: &str) -> Result<Vec<DiscoveredSurface>> {
     // Extract JSON array from response (may be wrapped in code fences or prose)
     let json_text = extract_json_array(response)
         .ok_or_else(|| anyhow::anyhow!("no JSON array found in LM response"))?;
@@ -1202,7 +1132,7 @@ const REJECTION_PATTERNS: &[&str] = &[
 /// For each extracted option, runs `binary [context_argv...] <option>` in an
 /// empty tmpdir and checks stderr for rejection patterns. Options that the
 /// binary rejects are filtered out as hallucinations.
-fn probe_validate_surfaces(
+pub(super) fn probe_validate_surfaces(
     binary: &str,
     context_argv: &[String],
     candidates: Vec<DiscoveredSurface>,
@@ -1298,6 +1228,370 @@ fn probe_option(binary: &str, context_argv: &[String], option: &str) -> ProbeOut
     // This includes "missing argument" / "requires a value" errors,
     // which confirm the option is real.
     ProbeOutcome::Accepted
+}
+
+/// Build a rich filesystem fixture seed for batch probing.
+///
+/// Creates ~15 files with varied names, types, timestamps, permissions,
+/// sizes, and content. Works for find, ls, grep, stat, chmod, etc.
+fn build_rich_fixture() -> Seed {
+    Seed {
+        files: vec![
+            FileEntry {
+                path: "hello.txt".to_string(),
+                content: "Hello, world!\nThis is a test file.\n".to_string(),
+            },
+            FileEntry {
+                path: "data.csv".to_string(),
+                content: "name,age,city\nAlice,30,NYC\nBob,25,LA\nCharlie,35,Chicago\n"
+                    .to_string(),
+            },
+            FileEntry {
+                path: "app.log".to_string(),
+                content: "2024-01-01 INFO Starting up\n2024-01-01 ERROR Failed to connect\n2024-01-01 WARN Retrying\n".to_string(),
+            },
+            FileEntry {
+                path: ".hidden".to_string(),
+                content: "secret config\n".to_string(),
+            },
+            FileEntry {
+                path: "noext".to_string(),
+                content: "file without extension\n".to_string(),
+            },
+            FileEntry {
+                path: "empty.txt".to_string(),
+                content: String::new(),
+            },
+            FileEntry {
+                path: "multi_line.txt".to_string(),
+                content: "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\n"
+                    .to_string(),
+            },
+            FileEntry {
+                path: "binary.bin".to_string(),
+                content: "\x00\x01\x02\x7fELF".to_string(),
+            },
+            FileEntry {
+                path: "subdir/nested.txt".to_string(),
+                content: "nested file content\n".to_string(),
+            },
+            FileEntry {
+                path: "subdir/deep/level3.txt".to_string(),
+                content: "deeply nested\n".to_string(),
+            },
+            FileEntry {
+                path: "script.sh".to_string(),
+                content: "#!/bin/sh\necho hello\n".to_string(),
+            },
+            FileEntry {
+                path: "pattern.txt".to_string(),
+                content: "foo bar baz\nfoo qux\nbar baz foo\nno match here\n".to_string(),
+            },
+            FileEntry {
+                path: "spaces in name.txt".to_string(),
+                content: "file with spaces\n".to_string(),
+            },
+            FileEntry {
+                path: "UPPER.TXT".to_string(),
+                content: "uppercase extension\n".to_string(),
+            },
+        ],
+        setup: vec![
+            // Create a symlink
+            vec![
+                "ln".to_string(),
+                "-s".to_string(),
+                "hello.txt".to_string(),
+                "link.txt".to_string(),
+            ],
+            // Make script executable
+            vec![
+                "chmod".to_string(),
+                "+x".to_string(),
+                "script.sh".to_string(),
+            ],
+            // Set old timestamp on a file
+            vec![
+                "touch".to_string(),
+                "-t".to_string(),
+                "200001010000".to_string(),
+                "noext".to_string(),
+            ],
+            // Remove all permissions on one file
+            vec![
+                "chmod".to_string(),
+                "000".to_string(),
+                "empty.txt".to_string(),
+            ],
+            // Create an empty directory
+            vec!["mkdir".to_string(), "emptydir".to_string()],
+        ],
+    }
+}
+
+/// Infer plausible arguments for a surface entry based on its value_hint.
+///
+/// Returns `Some(args)` if we can guess reasonable args, `None` to skip.
+fn infer_batch_args(entry: &SurfaceEntry) -> Option<Vec<String>> {
+    let hint = match &entry.value_hint {
+        None => return Some(vec![]),
+        Some(h) => h.to_lowercase(),
+    };
+
+    if hint.is_empty() {
+        return Some(vec![]);
+    }
+
+    let hint = hint.trim();
+
+    // Numeric hints
+    if hint == "n"
+        || hint == "num"
+        || hint == "number"
+        || hint == "count"
+        || hint == "depth"
+        || hint == "level"
+        || hint == "max-depth"
+    {
+        return Some(vec!["1".to_string()]);
+    }
+
+    // Pattern/glob hints
+    if hint == "pattern" || hint == "glob" || hint == "regex" || hint == "expr" {
+        return Some(vec!["*.txt".to_string()]);
+    }
+
+    // Type hints (find -type)
+    if hint == "type" || hint == "filetype" {
+        return Some(vec!["f".to_string()]);
+    }
+
+    // File/path hints
+    if hint == "file"
+        || hint == "path"
+        || hint == "dir"
+        || hint == "directory"
+        || hint == "name"
+        || hint == "filename"
+    {
+        return Some(vec![".".to_string()]);
+    }
+
+    // Format/mode/style — try without a value (flag-like)
+    if hint == "format"
+        || hint == "fmt"
+        || hint == "mode"
+        || hint == "style"
+        || hint == "when"
+        || hint == "color"
+    {
+        return Some(vec![]);
+    }
+
+    // Unknown hint — skip
+    None
+}
+
+/// Run batch probe against all pending surfaces using a rich fixture.
+///
+/// For each surface, runs the binary with and without the option in the
+/// same sandbox. Surfaces that show differing output get a starter seed
+/// added to the seed bank.
+/// A batch probe hit: a surface that showed differing output from control.
+pub(super) struct BatchProbeHit {
+    pub surface_id: String,
+    pub args: Vec<String>,
+    pub diff_kind: DiffKind,
+    pub stdout_preview: Option<String>,
+    pub control_stdout_preview: Option<String>,
+}
+
+/// Run batch probe against all pending surfaces using a rich fixture.
+///
+/// For each surface, runs the binary with and without the option in the
+/// same sandbox. Returns hits for surfaces that show differing output.
+pub(super) fn batch_probe_surfaces(state: &State, verbose: bool) -> Vec<BatchProbeHit> {
+    let fixture_seed = build_rich_fixture();
+
+    // Collect pending surfaces with inferred args
+    let candidates: Vec<(String, Vec<String>)> = state
+        .entries
+        .iter()
+        .filter(|e| matches!(e.status, Status::Pending))
+        .filter_map(|e| {
+            let args = infer_batch_args(e)?;
+            Some((e.id.clone(), args))
+        })
+        .collect();
+
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+
+    if verbose {
+        eprintln!(
+            "Batch probe: testing {} surfaces against rich fixture",
+            candidates.len()
+        );
+    }
+
+    // Prepare sandbox once
+    let sandbox = match prepare_sandbox("batch_probe", &fixture_seed) {
+        Ok(s) => s,
+        Err(e) => {
+            if verbose {
+                eprintln!("Batch probe: sandbox setup failed: {}", e);
+            }
+            return Vec::new();
+        }
+    };
+
+    if sandbox.setup_failed {
+        if verbose {
+            eprintln!(
+                "Batch probe: fixture setup failed: {}",
+                sandbox.setup_error.as_deref().unwrap_or("unknown")
+            );
+        }
+        return Vec::new();
+    }
+
+    // Run control (no option)
+    let control_argv: Vec<String> = state.context_argv.clone();
+    let control = match run_in_sandbox(&sandbox, &state.binary, &control_argv, false) {
+        Ok(e) => e,
+        Err(e) => {
+            if verbose {
+                eprintln!("Batch probe: control run failed: {}", e);
+            }
+            return Vec::new();
+        }
+    };
+
+    let control_stdout = &control.stdout;
+    let control_stderr = &control.stderr;
+    let control_exit = control.exit_code;
+
+    let mut hits = Vec::new();
+
+    // Probe each surface
+    for (surface_id, extra_args) in &candidates {
+        let mut argv = state.context_argv.clone();
+        argv.push(surface_id.clone());
+        argv.extend(extra_args.iter().cloned());
+
+        let evidence = match run_in_sandbox(&sandbox, &state.binary, &argv, false) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        // Skip if setup/execution failed
+        if evidence.setup_failed || evidence.execution_error.is_some() {
+            continue;
+        }
+
+        let stdout_differs = evidence.stdout != *control_stdout;
+        let stderr_differs = evidence.stderr != *control_stderr;
+        let exit_code_differs = evidence.exit_code != control_exit;
+
+        if !stdout_differs && !stderr_differs && !exit_code_differs {
+            continue;
+        }
+
+        // Filter out error-only diffs: if the option crashed (non-zero exit, no stdout)
+        // while control succeeded, this isn't a useful seed
+        let option_errored = evidence.exit_code.is_some_and(|c| c != 0)
+            && evidence.stdout.is_empty()
+            && control_exit.is_some_and(|c| c == 0);
+        if option_errored {
+            continue;
+        }
+
+        let diff_kind = match (stdout_differs, stderr_differs, exit_code_differs) {
+            (true, false, false) => DiffKind::Stdout,
+            (false, true, false) => DiffKind::Stderr,
+            (false, false, true) => DiffKind::ExitCode,
+            _ => DiffKind::Multiple,
+        };
+
+        let stdout_preview = if evidence.stdout.is_empty() {
+            None
+        } else {
+            Some(evidence.stdout.chars().take(200).collect())
+        };
+        let control_stdout_preview = if control_stdout.is_empty() {
+            None
+        } else {
+            Some(control_stdout.chars().take(200).collect())
+        };
+
+        hits.push(BatchProbeHit {
+            surface_id: surface_id.clone(),
+            args: argv,
+            diff_kind,
+            stdout_preview,
+            control_stdout_preview,
+        });
+    }
+
+    if verbose {
+        eprintln!(
+            "Batch probe: {} hits from {} candidates",
+            hits.len(),
+            candidates.len()
+        );
+    }
+
+    hits
+}
+
+/// Apply batch probe hits to state: mark surfaces Verified and populate seed bank.
+pub(super) fn apply_batch_probe_hits(state: &mut State, hits: Vec<BatchProbeHit>, verbose: bool) {
+    let fixture_seed = build_rich_fixture();
+    let verified_count = hits.len();
+
+    for hit in hits {
+        // Find entry and mark Verified
+        if let Some(entry) = state.entries.iter_mut().find(|e| e.id == hit.surface_id) {
+            entry.status = Status::Verified;
+            entry.attempts.push(Attempt {
+                cycle: 0,
+                args: hit.args.clone(),
+                full_argv: hit.args.clone(),
+                seed: fixture_seed.clone(),
+                evidence_path: "batch_probe".to_string(),
+                outcome: Outcome::Verified {
+                    diff_kind: hit.diff_kind.clone(),
+                },
+                stdout_preview: hit.stdout_preview,
+                stderr_preview: None,
+                control_stdout_preview: hit.control_stdout_preview,
+                fs_diff: None,
+                stdout_metrics: None,
+                stderr_metrics: None,
+                prediction_matched: None,
+            });
+        }
+
+        // Add to seed bank
+        let hint = match &hit.diff_kind {
+            DiffKind::Stdout => "batch_probe:stdout",
+            DiffKind::Stderr => "batch_probe:stderr",
+            DiffKind::ExitCode => "batch_probe:exit_code",
+            _ => "batch_probe:multiple",
+        };
+        state.seed_bank.push(VerifiedSeed {
+            surface_id: hit.surface_id,
+            args: hit.args,
+            seed: fixture_seed.clone(),
+            verified_at: 0,
+            hint: Some(hint.to_string()),
+        });
+    }
+
+    if verbose {
+        eprintln!("Batch probe: verified {} surfaces", verified_count);
+    }
 }
 
 #[cfg(test)]
