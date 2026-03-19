@@ -65,6 +65,22 @@ struct CycleTiming {
     evidence: Duration,
     critique: Duration,
     rechar: Duration,
+    /// Prompt size in bytes (approximate token proxy).
+    prompt_bytes: usize,
+    /// Total actions returned by LM.
+    actions_total: usize,
+    /// Actions that failed validation and were skipped.
+    actions_invalid: usize,
+    /// Probes executed (including auto-promoted).
+    probes_run: usize,
+    /// Tests executed (including auto-promoted probes that became tests).
+    tests_run: usize,
+    /// Surfaces newly verified this cycle.
+    verified_delta: usize,
+    /// Tests that returned OutputsEqual.
+    outcomes_equal: usize,
+    /// Tests that returned SetupFailed.
+    outcomes_setup_failed: usize,
 }
 
 /// Cumulative timing per worker thread.
@@ -79,6 +95,15 @@ struct WorkerTimings {
     extract: Duration,
     verify_cycles: u32,
     extract_chunks: u32,
+    // Action accounting (cumulative across cycles)
+    actions_total: usize,
+    actions_invalid: usize,
+    probes_run: usize,
+    tests_run: usize,
+    verified_delta: usize,
+    outcomes_equal: usize,
+    outcomes_setup_failed: usize,
+    prompt_bytes_total: usize,
 }
 
 impl WorkerTimings {
@@ -94,6 +119,14 @@ impl WorkerTimings {
             extract: Duration::ZERO,
             verify_cycles: 0,
             extract_chunks: 0,
+            actions_total: 0,
+            actions_invalid: 0,
+            probes_run: 0,
+            tests_run: 0,
+            verified_delta: 0,
+            outcomes_equal: 0,
+            outcomes_setup_failed: 0,
+            prompt_bytes_total: 0,
         }
     }
 
@@ -158,6 +191,8 @@ struct PipelineState {
     last_checkpoint_cycle: u32,
     /// Whether batch probe has already been run.
     batch_probed: bool,
+    /// Last global cycle that produced at least one verification.
+    last_verified_cycle: u32,
 }
 
 impl PipelineState {
@@ -495,6 +530,7 @@ fn run_pipeline(
         chunks_total,
         last_checkpoint_cycle: state.cycle,
         batch_probed: !state.seed_bank.is_empty(),
+        last_verified_cycle: 0,
     };
 
     // Pre-populate resolved set from existing state (resumed runs)
@@ -904,9 +940,14 @@ fn run_pipeline_worker(
 
                 // Snapshot state for this cycle
                 let clone_t0 = Instant::now();
-                let mut worker_state = {
+                let (mut worker_state, stall_cycles) = {
                     let ps = lock.lock().unwrap();
-                    ps.state.clone()
+                    let sc = if ps.last_verified_cycle > 0 {
+                        cycle.saturating_sub(ps.last_verified_cycle)
+                    } else {
+                        0
+                    };
+                    (ps.state.clone(), sc)
                 };
                 timings.state_clone += clone_t0.elapsed();
                 worker_state.cycle = cycle;
@@ -997,6 +1038,7 @@ fn run_pipeline_worker(
                     .cloned()
                     .collect();
 
+                let mut cycle_timing: Option<CycleTiming> = None;
                 if !active_ids.is_empty() {
                     // Execute verification cycle (outside lock)
                     if let Ok(ct) = execute_cycle(
@@ -1010,11 +1052,21 @@ fn run_pipeline_worker(
                         None,
                         &mut last_response,
                         lm_config,
+                        stall_cycles,
                     ) {
                         timings.lm_calls += ct.lm_call;
                         timings.evidence += ct.evidence;
                         timings.critique += ct.critique;
                         timings.rechar += ct.rechar;
+                        timings.actions_total += ct.actions_total;
+                        timings.actions_invalid += ct.actions_invalid;
+                        timings.probes_run += ct.probes_run;
+                        timings.tests_run += ct.tests_run;
+                        timings.verified_delta += ct.verified_delta;
+                        timings.outcomes_equal += ct.outcomes_equal;
+                        timings.outcomes_setup_failed += ct.outcomes_setup_failed;
+                        timings.prompt_bytes_total += ct.prompt_bytes;
+                        cycle_timing = Some(ct);
                     }
                     timings.verify_cycles += 1;
                 }
@@ -1148,6 +1200,7 @@ fn run_pipeline_worker(
 
                     if any_verified {
                         last_verify_cycle = cycle;
+                        ps.last_verified_cycle = cycle;
                     }
 
                     // Periodic checkpoint
@@ -1182,9 +1235,48 @@ fn run_pipeline_worker(
                         let t = ps.state.entries.len();
                         let ch = ps.chunks_completed;
                         let ct = ps.chunks_total;
+                        let pb = ps.state.entries.iter()
+                            .filter(|e| {
+                                matches!(e.status, Status::Pending)
+                                    && e.attempts.iter().any(|a| {
+                                        matches!(a.outcome, Outcome::Verified { .. })
+                                            && a.prediction_matched == Some(false)
+                                    })
+                            })
+                            .count();
+                        let stall_len = if ps.last_verified_cycle > 0 {
+                            cycle.saturating_sub(ps.last_verified_cycle)
+                        } else {
+                            0
+                        };
+                        // Per-cycle action accounting from the most recent cycle
+                        let (ct_lm_ms, ct_ev_ms, ct_prompt_kb, ct_actions, ct_invalid,
+                             ct_probes, ct_tests, ct_vdelta, ct_oe, ct_sf) =
+                            if let Some(ref ctr) = cycle_timing {
+                                (
+                                    ctr.lm_call.as_millis() as u64,
+                                    ctr.evidence.as_millis() as u64,
+                                    ctr.prompt_bytes / 1024,
+                                    ctr.actions_total,
+                                    ctr.actions_invalid,
+                                    ctr.probes_run,
+                                    ctr.tests_run,
+                                    ctr.verified_delta,
+                                    ctr.outcomes_equal,
+                                    ctr.outcomes_setup_failed,
+                                )
+                            } else {
+                                (0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+                            };
+                        let targets_str = surface_ids.join(",");
                         eprintln!(
-                            "PROGRESS: cycle={} verified={}/{} chunks={}/{}",
-                            cycle, v, t, ch, ct
+                            "PROGRESS: cycle={} verified={}/{} chunks={}/{} pred_blocked={} \
+                             stall={} lm_ms={} ev_ms={} prompt_kb={} actions={} invalid={} \
+                             probes={} tests={} vdelta={} oe={} sf={} targets={}",
+                            cycle, v, t, ch, ct, pb, stall_len,
+                            ct_lm_ms, ct_ev_ms, ct_prompt_kb,
+                            ct_actions, ct_invalid, ct_probes, ct_tests,
+                            ct_vdelta, ct_oe, ct_sf, targets_str,
                         );
                     }
 
@@ -1326,6 +1418,7 @@ fn execute_cycle(
     prior_attempts: Option<&std::collections::HashMap<String, Vec<Attempt>>>,
     last_response: &mut Option<LmResponse>,
     lm_config: &LmConfig,
+    stall_cycles: u32,
 ) -> Result<CycleTiming> {
     let mut timing = CycleTiming::default();
     // Resolve auto mode based on plugin type
@@ -1336,7 +1429,7 @@ fn execute_cycle(
     };
 
     // Build prompt based on effective context mode
-    let prompt = match effective_mode {
+    let mut prompt = match effective_mode {
         ContextMode::Full | ContextMode::Reset => {
             if let Some(prior) = prior_attempts {
                 build_retry_prompt(state, pending_ids, prior)
@@ -1355,6 +1448,18 @@ fn execute_cycle(
             }
         }
     };
+
+    // Inject stall hint when the pipeline has gone multiple cycles without
+    // any verification (global counter, not per-worker).
+    if stall_cycles >= 3 {
+        prompt.push_str(&format!(
+            "\n## Stall Warning\nLast {} cycles produced zero new verifications. \
+             Focus on untried surfaces and consider different seed strategies.\n\n",
+            stall_cycles
+        ));
+    }
+
+    timing.prompt_bytes = prompt.len();
     log_prompt(pack_path, state.cycle, &prompt)?;
 
     if verbose {
@@ -1406,6 +1511,7 @@ fn execute_cycle(
     let response_for_tracking = response.clone();
 
     // Partition and validate actions
+    timing.actions_total = response.actions.len();
     let mut baselines = Vec::new();
     let mut probes = Vec::new();
     let mut tests = Vec::new();
@@ -1416,6 +1522,7 @@ fn execute_cycle(
 
         if let Err(e) = validate_action(&action, state) {
             eprintln!("  Skipping invalid action: {}", e);
+            timing.actions_invalid += 1;
             continue;
         }
         match &action {
@@ -1499,6 +1606,7 @@ fn execute_cycle(
         });
 
         // Collect probes that show differing outputs for auto-promotion
+        timing.probes_run = probe_results.len();
         let mut auto_promote = Vec::new();
         for result in probe_results {
             if verbose {
@@ -1570,6 +1678,7 @@ fn execute_cycle(
                     .collect()
             });
 
+            timing.tests_run += promote_results.len();
             for result in promote_results {
                 let is_verified = matches!(result.outcome, Outcome::Verified { .. });
                 if verbose {
@@ -1663,10 +1772,17 @@ fn execute_cycle(
         });
 
         // Merge results into state and collect newly verified / failed IDs
+        timing.tests_run += results.len();
         let mut newly_equal = Vec::new();
         for result in results {
             let is_verified = matches!(result.outcome, Outcome::Verified { .. });
             let is_equal = matches!(result.outcome, Outcome::OutputsEqual);
+            if is_equal {
+                timing.outcomes_equal += 1;
+            }
+            if matches!(result.outcome, Outcome::SetupFailed { .. }) {
+                timing.outcomes_setup_failed += 1;
+            }
             if verbose {
                 eprintln!(
                     "  {} → {:?}",
@@ -1738,6 +1854,9 @@ fn execute_cycle(
             }
         }
     }
+
+    // Track verified count
+    timing.verified_delta = newly_verified.len();
 
     // Track response for incremental mode
     *last_response = Some(response_for_tracking);
