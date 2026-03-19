@@ -112,6 +112,9 @@ fn main() -> Result<()> {
     );
 
     // Display
+    if !args.json {
+        display::show_surface_variance(&runs);
+    }
     if let Some(ref baseline_ref) = args.compare {
         let baseline_data = baseline::load(&pack_name, baseline_ref)?;
         display::show_comparison(&current, &baseline_data, args.json);
@@ -194,6 +197,11 @@ fn save_eval_data(
         if !run.stderr.is_empty() {
             let stderr_path = dir.join(format!("run_{}_stderr.txt", i));
             std::fs::write(&stderr_path, &run.stderr)?;
+        }
+        // Preserve the full state.json for post-hoc analysis
+        if let Some(ref state_json) = run.state_json {
+            let state_path = dir.join(format!("run_{}_state.json", i));
+            std::fs::write(&state_path, state_json)?;
         }
     }
     // Save summary

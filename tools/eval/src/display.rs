@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::compare;
 use crate::summary::{RunOutcome, Summary};
 use crate::{Args, GitInfo};
@@ -23,7 +25,78 @@ pub fn print_run_progress(run: &RunOutcome, idx: usize, total: usize) {
     if run.lm_stats.lm_retries > 0 {
         parts.push(format!("{} retries", run.lm_stats.lm_retries));
     }
+    if run.progress_stats.prediction_blocked > 0 {
+        parts.push(format!("{} pred-blocked", run.progress_stats.prediction_blocked));
+    }
+    if let Some(ref ed) = run.progress_stats.extract_done {
+        parts.push(format!("extract: {}surf {:.0}s", ed.surfaces, ed.elapsed_ms as f64 / 1000.0));
+    }
     eprintln!("Run {}/{}... {}", idx + 1, total, parts.join(", "));
+}
+
+/// Show surface manifest variance across runs (if manifests differ).
+pub fn show_surface_variance(runs: &[RunOutcome]) {
+    let manifests: Vec<&Vec<String>> = runs
+        .iter()
+        .map(|r| &r.progress_stats.surface_manifest)
+        .collect();
+
+    // Skip if no manifests were captured
+    if manifests.iter().all(|m| m.is_empty()) {
+        return;
+    }
+
+    let counts: Vec<usize> = manifests.iter().map(|m| m.len()).collect();
+    let all_same = counts.windows(2).all(|w| w[0] == w[1])
+        && manifests.windows(2).all(|w| {
+            let a: HashSet<&String> = w[0].iter().collect();
+            let b: HashSet<&String> = w[1].iter().collect();
+            a == b
+        });
+
+    if all_same {
+        eprintln!(
+            "\n  Surface manifest: {} surfaces (consistent across {} runs)",
+            counts[0], runs.len()
+        );
+    } else {
+        eprintln!("\n  Surface manifest variance:");
+        for (i, m) in manifests.iter().enumerate() {
+            eprintln!("    Run {}: {} surfaces", i + 1, m.len());
+        }
+        // Show which surfaces differ
+        let union: HashSet<&String> = manifests.iter().flat_map(|m| m.iter()).collect();
+        let intersection: HashSet<&String> = if manifests.is_empty() {
+            HashSet::new()
+        } else {
+            let first: HashSet<&String> = manifests[0].iter().collect();
+            manifests[1..].iter().fold(first, |acc, m| {
+                let s: HashSet<&String> = m.iter().collect();
+                acc.intersection(&s).copied().collect()
+            })
+        };
+        let only_some: Vec<&&String> = union.difference(&intersection).collect();
+        if !only_some.is_empty() {
+            eprintln!(
+                "    Common: {}  Varying: {}",
+                intersection.len(),
+                only_some.len()
+            );
+            for sid in &only_some {
+                let in_runs: Vec<usize> = manifests
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, m)| m.contains(sid))
+                    .map(|(i, _)| i + 1)
+                    .collect();
+                eprintln!(
+                    "      {} (in runs: {})",
+                    sid,
+                    in_runs.iter().map(|r| r.to_string()).collect::<Vec<_>>().join(",")
+                );
+            }
+        }
+    }
 }
 
 /// Display metrics for a single version (no comparison).
@@ -112,6 +185,58 @@ pub fn show_standalone(current: &Summary, git: &GitInfo, args: &Args, json: bool
             "\n  Crashed: {}  Timed out: {}",
             current.crashed, current.timed_out
         );
+    }
+
+    // Pipeline stats
+    if current.max_prediction_blocked > 0 || current.max_stall > 0
+        || current.mean_actions_per_cycle > 0.0
+    {
+        eprintln!("\n  Pipeline stats:");
+        if current.max_prediction_blocked > 0 {
+            eprintln!(
+                "    Prediction blocked:  {} (max across runs)",
+                current.max_prediction_blocked
+            );
+        }
+        if current.max_stall > 0 {
+            eprintln!(
+                "    Max stall:           {} cycles (longest dry streak)",
+                current.max_stall
+            );
+        }
+        if current.mean_actions_per_cycle > 0.0 {
+            eprintln!(
+                "    Actions/cycle:       {:.1} avg ({:.0}% waste)",
+                current.mean_actions_per_cycle,
+                current.mean_action_waste_rate * 100.0
+            );
+        }
+        if current.mean_prompt_kb > 0.0 {
+            eprintln!(
+                "    Prompt size:         {:.0}KB avg/cycle",
+                current.mean_prompt_kb
+            );
+        }
+    }
+
+    // Extraction stats
+    if current.mean_extract_ms > 0.0 {
+        eprintln!("\n  Extraction:");
+        eprintln!(
+            "    Mean time:           {:.1}s",
+            current.mean_extract_ms / 1000.0
+        );
+        if current.extract_surface_min != current.extract_surface_max {
+            eprintln!(
+                "    Surface count:       {}-{} (variance across runs)",
+                current.extract_surface_min, current.extract_surface_max
+            );
+        } else if current.extract_surface_min > 0 {
+            eprintln!(
+                "    Surface count:       {} (consistent)",
+                current.extract_surface_min
+            );
+        }
     }
 
     // LM stats

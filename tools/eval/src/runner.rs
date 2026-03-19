@@ -5,7 +5,7 @@ use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use crate::summary::{LmStats, RunOutcome, SurfaceOutcome};
+use crate::summary::{LmStats, ProgressStats, RunOutcome, SurfaceOutcome};
 
 /// Execute one full end-to-end bman run, return outcome.
 pub fn run_single(
@@ -34,20 +34,22 @@ pub fn run_single(
 
     // Read final state (even on crash/timeout for partial results)
     let state_path = tmpdir.path().join("state.json");
-    let (surfaces, cycles) = if state_path.exists() {
+    let (surfaces, cycles, state_json) = if state_path.exists() {
         let raw = std::fs::read_to_string(&state_path)?;
         match serde_json::from_str::<serde_json::Value>(&raw) {
             Ok(state) => (
                 extract_surface_outcomes(&state),
                 state["cycle"].as_u64().unwrap_or(0) as u32,
+                Some(raw),
             ),
-            Err(_) => (HashMap::new(), 0),
+            Err(_) => (HashMap::new(), 0, Some(raw)),
         }
     } else {
-        (HashMap::new(), 0)
+        (HashMap::new(), 0, None)
     };
 
     let lm_stats = LmStats::from_stderr(&result.stderr);
+    let progress_stats = ProgressStats::from_stderr(&result.stderr);
 
     Ok(RunOutcome {
         run_index: run_idx,
@@ -57,7 +59,9 @@ pub fn run_single(
         crashed: result.crashed,
         surfaces,
         stderr: result.stderr,
+        state_json,
         lm_stats,
+        progress_stats,
     })
 }
 

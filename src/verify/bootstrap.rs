@@ -226,7 +226,10 @@ struct OptionBlock {
 /// It also captures surrounding context from neighboring options.
 pub(super) fn parse_surfaces_from_help(help_text: &str) -> Vec<DiscoveredSurface> {
     // First pass: parse all option blocks with full multi-line descriptions
-    let blocks = parse_option_blocks(help_text);
+    let mut blocks = parse_option_blocks(help_text);
+
+    // Also extract options from usage/synopsis lines (e.g. "Usage: find [-H] [-L] [-P]")
+    blocks.extend(parse_usage_line_options(help_text));
 
     // Second pass: convert to surfaces with surrounding context
     let mut surfaces = Vec::new();
@@ -250,6 +253,56 @@ pub(super) fn parse_surfaces_from_help(help_text: &str) -> Vec<DiscoveredSurface
     }
 
     surfaces
+}
+
+/// Extract options from usage/synopsis lines.
+///
+/// Many commands list key options in their usage line in bracketed form:
+///   `Usage: find [-H] [-L] [-P] [-Olevel] [-D debugopts] [path...]`
+///
+/// These are often missed by the indented-option-block parser because they
+/// don't follow the standard option documentation format.
+fn parse_usage_line_options(help_text: &str) -> Vec<OptionBlock> {
+    let mut blocks = Vec::new();
+
+    // Match bracketed single-letter options: [-X], [-Xvalue], [-X value]
+    // The flag is a dash + single alphanumeric char. Anything after it
+    // (lowercase attached text or space-separated word) is the value hint.
+    let bracket_opt = regex::Regex::new(
+        r"\[-([a-zA-Z0-9])(?:([a-z]\S*)|\s+([a-z]\S*))?\]",
+    )
+    .expect("valid regex");
+
+    for line in help_text.lines() {
+        let trimmed = line.trim_start().to_lowercase();
+        // Only scan usage/synopsis lines
+        if !(trimmed.starts_with("usage:") || trimmed.starts_with("synopsis:")) {
+            continue;
+        }
+
+        for caps in bracket_opt.captures_iter(line) {
+            let flag_char = &caps[1];
+            let id = format!("-{}", flag_char);
+
+            if is_help_option(&id) || is_combinator(&id) {
+                continue;
+            }
+
+            // Value hint from attached text ([-Olevel]) or space-separated ([-D debugopts])
+            let value_hint = caps
+                .get(2)
+                .or_else(|| caps.get(3))
+                .map(|m| m.as_str().to_string());
+
+            blocks.push(OptionBlock {
+                id,
+                description: String::new(),
+                value_hint,
+            });
+        }
+    }
+
+    blocks
 }
 
 /// Parse help text into option blocks, joining multi-line descriptions.
@@ -1542,19 +1595,17 @@ pub(super) fn batch_probe_surfaces(state: &State, verbose: bool) -> Vec<BatchPro
         });
     }
 
-    if verbose {
-        eprintln!(
-            "Batch probe: {} hits from {} candidates",
-            hits.len(),
-            candidates.len()
-        );
-    }
+    eprintln!(
+        "Batch probe: {} hits from {} candidates",
+        hits.len(),
+        candidates.len()
+    );
 
     hits
 }
 
 /// Apply batch probe hits to state: mark surfaces Verified and populate seed bank.
-pub(super) fn apply_batch_probe_hits(state: &mut State, hits: Vec<BatchProbeHit>, verbose: bool) {
+pub(super) fn apply_batch_probe_hits(state: &mut State, hits: Vec<BatchProbeHit>, _verbose: bool) {
     let fixture_seed = build_rich_fixture();
     let verified_count = hits.len();
 
@@ -1597,9 +1648,7 @@ pub(super) fn apply_batch_probe_hits(state: &mut State, hits: Vec<BatchProbeHit>
         });
     }
 
-    if verbose {
-        eprintln!("Batch probe: verified {} surfaces", verified_count);
-    }
+    eprintln!("Batch probe: verified {} surfaces", verified_count);
 }
 
 #[cfg(test)]
@@ -2008,6 +2057,55 @@ Show changes between commits, commit and working tree, etc.
             hint.contains("patience"),
             "value_hint should contain 'patience', got: {}",
             hint
+        );
+    }
+
+    #[test]
+    fn test_parse_usage_line_options() {
+        let help = r#"Usage: find [-H] [-L] [-P] [-Olevel] [-D debugopts] [path...] [expression]
+
+Default path is the current directory; default expression is -print.
+"#;
+
+        let surfaces = parse_surfaces_from_help(help);
+        let ids: Vec<&str> = surfaces.iter().map(|s| s.id.as_str()).collect();
+
+        assert!(ids.contains(&"-H"), "Should find -H, got: {:?}", ids);
+        assert!(ids.contains(&"-L"), "Should find -L, got: {:?}", ids);
+        assert!(ids.contains(&"-P"), "Should find -P, got: {:?}", ids);
+        assert!(ids.contains(&"-O"), "Should find -O, got: {:?}", ids);
+        assert!(ids.contains(&"-D"), "Should find -D, got: {:?}", ids);
+
+        // Value hints
+        let o = surfaces.iter().find(|s| s.id == "-O").unwrap();
+        assert_eq!(o.value_hint, Some("level".to_string()));
+        let d = surfaces.iter().find(|s| s.id == "-D").unwrap();
+        assert_eq!(d.value_hint, Some("debugopts".to_string()));
+
+        // Non-option brackets should not be extracted
+        assert!(!ids.iter().any(|id| id.contains("path")));
+        assert!(!ids.iter().any(|id| id.contains("expression")));
+    }
+
+    #[test]
+    fn test_usage_line_dedup_with_option_blocks() {
+        // -H appears in both usage line and option block — should appear once
+        let help = r#"Usage: cmd [-H] [-v]
+
+Options:
+  -H    Dereference symlinks
+  -v    Verbose output
+"#;
+
+        let surfaces = parse_surfaces_from_help(help);
+        let h_count = surfaces.iter().filter(|s| s.id == "-H").count();
+        assert_eq!(h_count, 1, "-H should appear exactly once");
+        // The option block version should win (has description)
+        let h = surfaces.iter().find(|s| s.id == "-H").unwrap();
+        assert!(
+            h.description.contains("Dereference"),
+            "Should have description from option block, got: {:?}",
+            h.description
         );
     }
 }
