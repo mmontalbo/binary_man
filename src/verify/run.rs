@@ -437,10 +437,17 @@ pub fn run(
     // Determine number of workers
     let num_workers = if parallel_sessions {
         let total = state.entries.len().max(10);
-        if session_size > 0 {
+        let base = if session_size > 0 {
             total.div_ceil(session_size).clamp(1, 8)
         } else {
             1
+        };
+        // Ensure at least 2 workers when extraction chunks remain so one
+        // worker can extract while the other verifies.
+        if prep.as_ref().is_some_and(|p| p.cached_surfaces.is_none() && !p.chunks.is_empty()) {
+            base.max(2)
+        } else {
+            base
         }
     } else {
         1
