@@ -91,7 +91,11 @@ pub(super) fn normalize_action(action: LmAction, state: &State) -> LmAction {
 ///
 /// Returns `Ok(())` if the action is valid, or `Err` with a description
 /// of what's wrong.
-pub(super) fn validate_action(action: &LmAction, state: &State) -> Result<(), String> {
+pub(super) fn validate_action(
+    action: &LmAction,
+    state: &State,
+    target_ids: Option<&[String]>,
+) -> Result<(), String> {
     match action {
         LmAction::SetBaseline { .. } => {
             if state.baseline.is_some() {
@@ -131,6 +135,22 @@ pub(super) fn validate_action(action: &LmAction, state: &State) -> Result<(), St
             }
         }
     }
+
+    // Reject off-batch surfaces when target constraint is active
+    if let Some(targets) = target_ids {
+        let surface_id = match action {
+            LmAction::Test { surface_id, .. } | LmAction::Probe { surface_id, .. } => {
+                Some(surface_id.as_str())
+            }
+            _ => None,
+        };
+        if let Some(sid) = surface_id {
+            if !targets.iter().any(|t| t == sid) {
+                return Err(format!("Surface {} is not in current batch", sid));
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -190,7 +210,7 @@ mod tests {
         let action = LmAction::SetBaseline {
             seed: Seed::default(),
         };
-        assert!(validate_action(&action, &state).is_ok());
+        assert!(validate_action(&action, &state, None).is_ok());
     }
 
     #[test]
@@ -205,7 +225,7 @@ mod tests {
         let action = LmAction::SetBaseline {
             seed: Seed::default(),
         };
-        let result = validate_action(&action, &state);
+        let result = validate_action(&action, &state, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("already exists"));
     }
@@ -217,7 +237,7 @@ mod tests {
         let action = LmAction::SetBaseline {
             seed: Seed::default(),
         };
-        assert!(validate_action(&action, &state).is_ok());
+        assert!(validate_action(&action, &state, None).is_ok());
     }
 
     #[test]
@@ -231,7 +251,7 @@ mod tests {
             trigger: None,
             expected_diff: None,
         };
-        assert!(validate_action(&action, &state).is_ok());
+        assert!(validate_action(&action, &state, None).is_ok());
     }
 
     #[test]
@@ -245,7 +265,7 @@ mod tests {
             trigger: None,
             expected_diff: None,
         };
-        let result = validate_action(&action, &state);
+        let result = validate_action(&action, &state, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Unknown surface"));
     }
@@ -261,7 +281,7 @@ mod tests {
             trigger: None,
             expected_diff: None,
         };
-        let result = validate_action(&action, &state);
+        let result = validate_action(&action, &state, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not pending"));
     }
@@ -278,7 +298,7 @@ mod tests {
             trigger: None,
             expected_diff: None,
         };
-        let result = validate_action(&action, &state);
+        let result = validate_action(&action, &state, None);
         assert!(result.is_ok());
     }
 
@@ -298,7 +318,7 @@ mod tests {
             trigger: None,
             expected_diff: None,
         };
-        assert!(validate_action(&action, &state).is_ok());
+        assert!(validate_action(&action, &state, None).is_ok());
     }
 
     #[test]
@@ -310,7 +330,7 @@ mod tests {
         let action = LmAction::SetBaseline {
             seed: Seed::default(),
         };
-        assert!(validate_action(&action, &state).is_ok());
+        assert!(validate_action(&action, &state, None).is_ok());
     }
 
     #[test]
@@ -321,7 +341,7 @@ mod tests {
             extra_args: vec![],
             seed: Seed::default(),
         };
-        assert!(validate_action(&action, &state).is_ok());
+        assert!(validate_action(&action, &state, None).is_ok());
     }
 
     #[test]
@@ -332,7 +352,7 @@ mod tests {
             extra_args: vec![],
             seed: Seed::default(),
         };
-        let result = validate_action(&action, &state);
+        let result = validate_action(&action, &state, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Unknown surface"));
     }
@@ -345,7 +365,7 @@ mod tests {
             extra_args: vec![],
             seed: Seed::default(),
         };
-        let result = validate_action(&action, &state);
+        let result = validate_action(&action, &state, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not pending"));
     }
@@ -383,8 +403,57 @@ mod tests {
             extra_args: vec![],
             seed: Seed::default(),
         };
-        let result = validate_action(&action, &state);
+        let result = validate_action(&action, &state, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("probe budget"));
+    }
+
+    #[test]
+    fn test_validate_off_batch_rejected() {
+        let state = test_state();
+        let targets = vec!["--quiet".to_string()]; // --verbose is NOT in batch
+
+        let action = LmAction::Test {
+            surface_id: "--verbose".to_string(),
+            extra_args: vec![],
+            seed: Seed::default(),
+            prediction: None,
+            trigger: None,
+            expected_diff: None,
+        };
+        let result = validate_action(&action, &state, Some(&targets));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not in current batch"));
+    }
+
+    #[test]
+    fn test_validate_in_batch_accepted() {
+        let state = test_state();
+        let targets = vec!["--verbose".to_string()];
+
+        let action = LmAction::Test {
+            surface_id: "--verbose".to_string(),
+            extra_args: vec![],
+            seed: Seed::default(),
+            prediction: None,
+            trigger: None,
+            expected_diff: None,
+        };
+        assert!(validate_action(&action, &state, Some(&targets)).is_ok());
+    }
+
+    #[test]
+    fn test_validate_no_batch_constraint() {
+        let state = test_state();
+        // None means no batch constraint — any pending surface is allowed
+        let action = LmAction::Test {
+            surface_id: "--verbose".to_string(),
+            extra_args: vec![],
+            seed: Seed::default(),
+            prediction: None,
+            trigger: None,
+            expected_diff: None,
+        };
+        assert!(validate_action(&action, &state, None).is_ok());
     }
 }

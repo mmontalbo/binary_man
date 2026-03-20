@@ -202,15 +202,13 @@ impl PipelineState {
     /// ExtractChunk items come from the explicit queue.
     ///
     /// Worker reservation: when no worker is currently extracting and chunks
-    /// remain, one worker is reserved for extraction — but only when other
-    /// workers are actively verifying (in_progress non-empty), so a single
-    /// worker never gets stuck extracting everything before verifying.
+    /// remain, one worker is reserved for extraction. With a single worker,
+    /// extraction is prioritized to discover surfaces before verifying.
     fn claim_work(&mut self) -> Option<WorkItem> {
-        // Reserve one worker for extraction when chunks remain and others are verifying
-        if self.extracting_count == 0
-            && self.chunks_completed < self.chunks_total
-            && !self.in_progress.is_empty()
-        {
+        // Reserve one worker for extraction when chunks remain.
+        // With multiple workers this interleaves with verification;
+        // with a single worker this ensures extraction isn't starved.
+        if self.extracting_count == 0 && self.chunks_completed < self.chunks_total {
             if let Some(idx) = self
                 .work_queue
                 .iter()
@@ -332,17 +330,30 @@ fn category_priority(category: &SurfaceCategory, state: &State) -> usize {
     }
 }
 
-/// Check if a surface's recent attempts show stagnation (consecutive OutputsEqual).
+/// Check if a surface's recent attempts or probes show stagnation.
+///
+/// Test stagnation: 3 consecutive OutputsEqual test outcomes.
+/// Probe stagnation: 3 consecutive identical probes (no diff, no setup failure).
 fn is_stagnant(entry: &SurfaceEntry) -> bool {
-    if entry.attempts.len() < STAGNATION_THRESHOLD {
-        return false;
-    }
-    entry
-        .attempts
-        .iter()
-        .rev()
-        .take(STAGNATION_THRESHOLD)
-        .all(|a| matches!(a.outcome, Outcome::OutputsEqual))
+    // Test stagnation (existing): consecutive OutputsEqual
+    let test_stagnant = entry.attempts.len() >= STAGNATION_THRESHOLD
+        && entry
+            .attempts
+            .iter()
+            .rev()
+            .take(STAGNATION_THRESHOLD)
+            .all(|a| matches!(a.outcome, Outcome::OutputsEqual));
+
+    // Probe stagnation (new): consecutive identical probes
+    let probe_stagnant = entry.probes.len() >= STAGNATION_THRESHOLD
+        && entry
+            .probes
+            .iter()
+            .rev()
+            .take(STAGNATION_THRESHOLD)
+            .all(|p| !p.outputs_differ && !p.setup_failed);
+
+    test_stagnant || probe_stagnant
 }
 
 /// Run the verification loop.
@@ -1507,30 +1518,32 @@ fn execute_cycle(
         eprintln!("  LM returned {} action(s)", response.actions.len());
     }
 
-    // Save response for incremental mode before consuming actions
-    let response_for_tracking = response.clone();
-
     // Partition and validate actions
     timing.actions_total = response.actions.len();
     let mut baselines = Vec::new();
     let mut probes = Vec::new();
     let mut tests = Vec::new();
+    let mut valid_actions = Vec::new();
 
     for action in response.actions {
         // Normalize action to handle --option=value and -Uvalue formats
         let action = normalize_action(action, state);
 
-        if let Err(e) = validate_action(&action, state) {
+        if let Err(e) = validate_action(&action, state, Some(pending_ids)) {
             eprintln!("  Skipping invalid action: {}", e);
             timing.actions_invalid += 1;
             continue;
         }
+        valid_actions.push(action.clone());
         match &action {
             LmAction::SetBaseline { .. } => baselines.push(action),
             LmAction::Probe { .. } => probes.push(action),
             LmAction::Test { .. } => tests.push(action),
         }
     }
+
+    // Build clean response for incremental prompt tracking (exclude rejected actions)
+    let response_for_tracking = LmResponse { actions: valid_actions };
 
     // 1. Apply baselines first (must complete before probes/tests)
     for action in baselines {

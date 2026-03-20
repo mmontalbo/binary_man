@@ -27,7 +27,7 @@ pub const STATE_SCHEMA_VERSION: u32 = 7;
 /// Probes are now bilateral (run both control and option) and auto-promote
 /// on success, so they're the primary exploration mechanism. Budget is
 /// generous since probes don't burn test attempts.
-pub const MAX_PROBES_PER_SURFACE: usize = 8;
+pub const MAX_PROBES_PER_SURFACE: usize = 6;
 
 /// Classification of a surface for scheduling and execution strategy.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

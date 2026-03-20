@@ -35,15 +35,27 @@ fn join_option_value(surface_id: &str, extra_args: Vec<String>) -> Vec<String> {
         return args;
     }
 
-    // Join value to the surface_id
-    let joined = if surface_id.starts_with("--") {
-        format!("{}={}", surface_id, first)
-    } else {
-        format!("{}{}", surface_id, first)
-    };
+    // Long options: --opt=value
+    if surface_id.starts_with("--") {
+        let joined = format!("{}={}", surface_id, first);
+        let mut args = vec![joined];
+        args.extend(extra_args.into_iter().skip(1));
+        return args;
+    }
 
-    let mut args = vec![joined];
-    args.extend(extra_args.into_iter().skip(1));
+    // Short options: only concatenate for 2-char surfaces with numeric values
+    // e.g., -U3 (git), -j4 (make). Never for -D help, -maxdepth 1, etc.
+    if surface_id.len() == 2 && first.chars().all(|c| c.is_ascii_digit()) {
+        let joined = format!("{}{}", surface_id, first);
+        let mut args = vec![joined];
+        args.extend(extra_args.into_iter().skip(1));
+        return args;
+    }
+
+    // Default: keep separate (multi-char single-dash like -maxdepth, or
+    // 2-char with non-numeric value like -D help)
+    let mut args = vec![surface_id.to_string()];
+    args.extend(extra_args);
     args
 }
 
@@ -434,6 +446,65 @@ mod tests {
         DiffKind, Seed, SurfaceCategory, SurfaceEntry, STATE_SCHEMA_VERSION,
     };
     use std::collections::HashMap;
+
+    #[test]
+    fn test_join_option_value_long_option() {
+        // --unified=3
+        assert_eq!(
+            join_option_value("--unified", vec!["3".to_string()]),
+            vec!["--unified=3"]
+        );
+    }
+
+    #[test]
+    fn test_join_option_value_short_numeric() {
+        // -U3 (git diff context lines)
+        assert_eq!(
+            join_option_value("-U", vec!["3".to_string()]),
+            vec!["-U3"]
+        );
+    }
+
+    #[test]
+    fn test_join_option_value_short_non_numeric() {
+        // -D help (find debug option) — must NOT concatenate
+        assert_eq!(
+            join_option_value("-D", vec!["help".to_string()]),
+            vec!["-D", "help"]
+        );
+    }
+
+    #[test]
+    fn test_join_option_value_multi_char_single_dash() {
+        // -maxdepth 1 (find) — must NOT concatenate
+        assert_eq!(
+            join_option_value("-maxdepth", vec!["1".to_string()]),
+            vec!["-maxdepth", "1"]
+        );
+        // -regextype posix-extended
+        assert_eq!(
+            join_option_value("-regextype", vec!["posix-extended".to_string()]),
+            vec!["-regextype", "posix-extended"]
+        );
+    }
+
+    #[test]
+    fn test_join_option_value_no_extra_args() {
+        assert_eq!(
+            join_option_value("--verbose", vec![]),
+            vec!["--verbose"]
+        );
+        assert_eq!(join_option_value("-n", vec![]), vec!["-n"]);
+    }
+
+    #[test]
+    fn test_join_option_value_flag_as_first_arg() {
+        // First arg starts with '-', treated as a separate flag
+        assert_eq!(
+            join_option_value("--color", vec!["--always".to_string()]),
+            vec!["--color", "--always"]
+        );
+    }
 
     #[test]
     fn test_sanitize_id() {

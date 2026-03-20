@@ -858,8 +858,15 @@ pub(super) fn build_incremental_prompt(
     }
     prompt.push('\n');
 
-    // Valid surface constraint — prevents hallucinated surface IDs
-    prompt.push_str(&format_valid_surfaces_constraint(state, target_ids));
+    // Only list batch targets in incremental prompt (full prompt retains all pending)
+    if !target_ids.is_empty() {
+        prompt.push_str("## Valid Surface IDs\n\n");
+        prompt.push_str("You may ONLY use these surface_id values:\n");
+        for id in target_ids {
+            prompt.push_str(&format!("`{}`  ", id));
+        }
+        prompt.push_str("\n\n");
+    }
 
     // Short instructions reminder
     prompt.push_str(
