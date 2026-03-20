@@ -1257,15 +1257,33 @@ fn run_pipeline_worker(
                         let t = ps.state.entries.len();
                         let ch = ps.chunks_completed;
                         let ct = ps.chunks_total;
-                        let pb = ps.state.entries.iter()
-                            .filter(|e| {
-                                matches!(e.status, Status::Pending)
-                                    && e.attempts.iter().any(|a| {
-                                        matches!(a.outcome, Outcome::Verified { .. })
-                                            && a.prediction_matched == Some(false)
-                                    })
-                            })
-                            .count();
+                        // Count pred_blocked surfaces and break down by channel match
+                        let mut pb = 0u32;
+                        let mut pb_chan_ok = 0u32;  // right channel, wrong content
+                        let mut pb_chan_miss = 0u32; // wrong channel entirely
+                        for e in &ps.state.entries {
+                            if !matches!(e.status, Status::Pending) {
+                                continue;
+                            }
+                            let blocked = e.attempts.iter().any(|a| {
+                                matches!(a.outcome, Outcome::Verified { .. })
+                                    && a.prediction_matched == Some(false)
+                            });
+                            if blocked {
+                                pb += 1;
+                                // Check channel match on the most recent pred_blocked attempt
+                                if let Some(a) = e.attempts.iter().rev().find(|a| {
+                                    matches!(a.outcome, Outcome::Verified { .. })
+                                        && a.prediction_matched == Some(false)
+                                }) {
+                                    match a.prediction_channel_matched {
+                                        Some(true) => pb_chan_ok += 1,
+                                        Some(false) => pb_chan_miss += 1,
+                                        None => {} // legacy data, no channel info
+                                    }
+                                }
+                            }
+                        }
                         let stall_len = if ps.last_verified_cycle > 0 {
                             cycle.saturating_sub(ps.last_verified_cycle)
                         } else {
@@ -1293,9 +1311,11 @@ fn run_pipeline_worker(
                         let targets_str = surface_ids.join(",");
                         eprintln!(
                             "PROGRESS: cycle={} verified={}/{} chunks={}/{} pred_blocked={} \
+                             pb_chan_ok={} pb_chan_miss={} \
                              stall={} lm_ms={} ev_ms={} prompt_kb={} actions={} invalid={} \
                              probes={} tests={} vdelta={} oe={} sf={} targets={}",
-                            cycle, v, t, ch, ct, pb, stall_len,
+                            cycle, v, t, ch, ct, pb, pb_chan_ok, pb_chan_miss,
+                            stall_len,
                             ct_lm_ms, ct_ev_ms, ct_prompt_kb,
                             ct_actions, ct_invalid, ct_probes, ct_tests,
                             ct_vdelta, ct_oe, ct_sf, targets_str,

@@ -290,6 +290,10 @@ pub struct Attempt {
     /// None if no prediction was provided, Some(true) if matched, Some(false) if not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prediction_matched: Option<bool>,
+    /// Whether the predicted *channel* (stdout/stderr/exitcode) actually changed.
+    /// True = right channel, wrong content. False = wrong channel entirely.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prediction_channel_matched: Option<bool>,
 }
 
 /// Filesystem changes detected between before/after command execution.

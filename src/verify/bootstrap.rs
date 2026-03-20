@@ -1629,6 +1629,7 @@ pub(super) fn apply_batch_probe_hits(state: &mut State, hits: Vec<BatchProbeHit>
                 stdout_metrics: None,
                 stderr_metrics: None,
                 prediction_matched: None,
+                prediction_channel_matched: None,
             });
         }
 

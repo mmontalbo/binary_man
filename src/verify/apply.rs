@@ -105,6 +105,10 @@ pub struct TestResult {
     pub stderr_metrics: Option<OutputMetrics>,
     /// Whether the LM's prediction matched the actual outcome.
     pub prediction_matched: Option<bool>,
+    /// Whether the predicted *channel* (stdout/stderr/exitcode) actually changed,
+    /// even if the specific prediction content was wrong. Used for telemetry to
+    /// distinguish "right channel, wrong content" from "wrong channel entirely".
+    pub prediction_channel_matched: Option<bool>,
 }
 
 /// Verify whether a prediction matches the actual outcome.
@@ -131,6 +135,29 @@ fn verify_prediction(
         }
         PredictedDiff::ExitCodeDifferent => {
             // Exit codes should differ
+            option_evidence.exit_code != control_evidence.exit_code
+        }
+    }
+}
+
+/// Check whether the predicted *channel* actually changed.
+///
+/// More lenient than `verify_prediction`: only checks if the predicted
+/// output channel (stdout, stderr, exit code) differs between control
+/// and option, ignoring specific content.
+fn verify_prediction_channel(
+    prediction: &Prediction,
+    option_evidence: &Evidence,
+    control_evidence: &Evidence,
+) -> bool {
+    match &prediction.diff_type {
+        PredictedDiff::StdoutEmpty | PredictedDiff::StdoutContains(_) => {
+            option_evidence.stdout != control_evidence.stdout
+        }
+        PredictedDiff::StderrDifferent => {
+            option_evidence.stderr != control_evidence.stderr
+        }
+        PredictedDiff::ExitCodeDifferent => {
             option_evidence.exit_code != control_evidence.exit_code
         }
     }
@@ -200,6 +227,9 @@ pub(super) fn run_test_scenario(
     let prediction_matched = prediction
         .as_ref()
         .map(|p| verify_prediction(p, &option_evidence, &control_evidence));
+    let prediction_channel_matched = prediction
+        .as_ref()
+        .map(|p| verify_prediction_channel(p, &option_evidence, &control_evidence));
 
     Ok(TestResult {
         surface_id: surface_id.to_string(),
@@ -215,6 +245,7 @@ pub(super) fn run_test_scenario(
         stdout_metrics,
         stderr_metrics,
         prediction_matched,
+        prediction_channel_matched,
     })
 }
 
@@ -237,6 +268,7 @@ pub(super) fn merge_test_result(state: &mut State, result: TestResult) {
             stdout_metrics: result.stdout_metrics,
             stderr_metrics: result.stderr_metrics,
             prediction_matched: result.prediction_matched,
+            prediction_channel_matched: result.prediction_channel_matched,
         });
 
         if matches!(result.outcome, Outcome::Verified { .. }) {
