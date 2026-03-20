@@ -442,10 +442,14 @@ pub fn run(
         } else {
             1
         };
-        // Ensure at least 2 workers when extraction chunks remain so one
-        // worker can extract while the other verifies.
-        if prep.as_ref().is_some_and(|p| p.cached_surfaces.is_none() && !p.chunks.is_empty()) {
-            base.max(2)
+        // When extraction chunks remain, use chunks+1 workers so all
+        // chunks extract in parallel while one worker verifies.
+        if let Some(p) = prep.as_ref() {
+            if p.cached_surfaces.is_none() && !p.chunks.is_empty() {
+                base.max(p.chunks.len() + 1).min(8)
+            } else {
+                base
+            }
         } else {
             base
         }
