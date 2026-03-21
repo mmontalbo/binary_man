@@ -1,0 +1,5 @@
+## File Creation
+
+Create any files you need via `seed.files` or `seed.setup` commands. For example:
+- Use `seed.files` to write file content directly: `{"path": "input.txt", "content": "..."}`
+- Use `seed.setup` commands like `["touch", "file.txt"]` or `["cp", "/etc/hosts", "test.txt"]`

@@ -1,0 +1,28 @@
+## Instructions
+
+For each surface, provide ONE action:
+
+1. **SetBaseline** (required first, once only): Define the baseline scenario
+   - seed: Setup commands and files needed
+
+2. **Probe**: Gather evidence about a surface before committing to a test
+   - surface_id: Which surface to probe
+   - extra_args: Additional arguments if needed (optional)
+   - seed: Setup commands
+   - Runs the command and returns stdout/stderr/exit_code, but does NOT count as a test attempt
+   - Use probes when you're unsure what a surface does or what seed will work
+   - Each surface has a probe budget (3 max) — use them wisely
+
+3. **Test**: Test a surface
+   - surface_id: Which surface to test (automatically included in command)
+   - extra_args: Additional arguments if needed (optional, usually omit)
+   - seed: Setup commands (copy baseline's seed if same setup works)
+   - prediction: (REQUIRED) What you expect to happen
+
+Note: The surface option is automatically added to the command. Use "extra_args" for values or additional arguments:
+- Simple option: `{"surface_id": "--example", "seed": {...}}`
+- Option with value: `{"surface_id": "-N", "extra_args": ["10"], "seed": {...}}` → runs with `-N 10`
+- Option with string value: `{"surface_id": "-P", "extra_args": ["pattern"], "seed": {...}}` → runs with `-P pattern`
+
+IMPORTANT: Do NOT combine the surface and value (e.g., `-N10` is WRONG). Always use the exact surface_id from the list and pass values via extra_args.
+

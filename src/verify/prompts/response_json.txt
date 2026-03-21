@@ -1,0 +1,16 @@
+
+Respond with JSON:
+```json
+{
+  "actions": [
+    { "kind": "SetBaseline", "seed": { "setup": [["touch", "file.txt"]], "files": [] } },
+    { "kind": "Probe", "surface_id": "--unfamiliar-option", "seed": { "setup": [["touch", "file.txt"]], "files": [] } },
+    { "kind": "Test", "surface_id": "--example", "seed": { "setup": [["touch", "file.txt"]], "files": [] }, "prediction": {"diff_type": {"StdoutContains": "expected text"}, "reason": "changes output format"} }
+  ]
+}
+```
+
+CRITICAL: Each setup command is an ARRAY of strings: `["cmd", "arg1", "arg2"]`, NOT a single string.
+
+IMPORTANT: Only use surface_id values from the "Surfaces Needing Work" section above. Do NOT invent or guess option names - only test surfaces explicitly listed in this prompt.
+

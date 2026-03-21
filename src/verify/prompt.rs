@@ -884,127 +884,18 @@ Remember: Output must DIFFER from control run to verify. Try different seeds if 
     prompt
 }
 
-const INSTRUCTIONS: &str = r#"IMPORTANT: Your entire response must be a single JSON object. No prose, no explanations, no markdown outside the JSON. Begin your response with `{` and end with `}`.
-
-## Instructions
-
-For each surface, provide ONE action:
-
-1. **SetBaseline** (required first, once only): Define the baseline scenario
-   - seed: Setup commands and files needed
-
-2. **Probe**: Gather evidence about a surface before committing to a test
-   - surface_id: Which surface to probe
-   - extra_args: Additional arguments if needed (optional)
-   - seed: Setup commands
-   - Runs the command and returns stdout/stderr/exit_code, but does NOT count as a test attempt
-   - Use probes when you're unsure what a surface does or what seed will work
-   - Each surface has a probe budget (3 max) — use them wisely
-
-3. **Test**: Test a surface
-   - surface_id: Which surface to test (automatically included in command)
-   - extra_args: Additional arguments if needed (optional, usually omit)
-   - seed: Setup commands (copy baseline's seed if same setup works)
-   - prediction: (REQUIRED) What you expect to happen
-
-Note: The surface option is automatically added to the command. Use "extra_args" for values or additional arguments:
-- Simple option: `{"surface_id": "--example", "seed": {...}}`
-- Option with value: `{"surface_id": "-N", "extra_args": ["10"], "seed": {...}}` → runs with `-N 10`
-- Option with string value: `{"surface_id": "-P", "extra_args": ["pattern"], "seed": {...}}` → runs with `-P pattern`
-
-IMPORTANT: Do NOT combine the surface and value (e.g., `-N10` is WRONG). Always use the exact surface_id from the list and pass values via extra_args.
-
-## Probes (Cheap Exploration)
-
-Probes run BOTH control and option commands with your seed and tell you whether outputs differ — without counting against your attempt budget. If a probe shows differing outputs, it is automatically promoted to a formal Test.
-
-**Strategy: Use probes to explore, not tests.** Submit multiple probes with different seeds for hard surfaces. Each probe that shows differing outputs gets auto-promoted — you don't need to submit a separate Test.
-
-When to probe:
-- You're unsure what seed will trigger different output (probe several variants)
-- The characterization suggests a specific trigger — probe to confirm before committing
-- Previous tests returned OutputsEqual — probe with varied seeds to find one that works
-
-You can submit MULTIPLE probes for the same surface in one cycle. They run in parallel.
-
-Example probes (multiple seeds for one surface):
-```json
-{"kind": "Probe", "surface_id": "--example", "seed": {"setup": [["touch", "a.txt"]], "files": []}}
-{"kind": "Probe", "surface_id": "--example", "seed": {"setup": [["touch", "b.txt"]], "files": []}}
-```
-
-Probe results show: option_stdout, control_stdout, and whether they DIFFER or are identical.
-
-## Predictions
-
-Every Test action MUST include a prediction. Predictions are load-bearing — if your prediction doesn't match the actual outcome, the surface stays Pending even if outputs differed. This forces you to understand what the option does, not just guess at seeds.
-
-- **StdoutEmpty**: Output will be empty/suppressed (for --no-*, --quiet, --silent options)
-- **StdoutContains**: Output will contain specific text (use {"StdoutContains": "text"})
-- **StderrDifferent**: Stderr will differ (for options that change warning/error output)
-- **ExitCodeDifferent**: Exit code will differ (for options that affect success/failure)
-
-Example with prediction:
-```json
-{
-  "kind": "Test",
-  "surface_id": "--quiet",
-  "seed": {"setup": [["touch", "file.txt"]], "files": []},
-  "prediction": {"diff_type": "StdoutEmpty", "reason": "suppresses output"}
-}
-```
-
-If prediction matches actual outcome -> verified.
-If prediction fails but outputs differed -> surface stays Pending. You'll see what you predicted vs what actually happened, so you can fix either the seed or the prediction.
-
-## Execution Model
-
-Each test runs TWO scenarios with the SAME seed:
-1. Control run: base command (no extra args)
-2. Option run: base command + surface_id + extra_args
-
-The option is **verified if outputs DIFFER**.
-
-Each scenario runs in a fresh empty temp directory. ALL commands run in this SAME directory:
-- seed.files are written first
-- seed.setup commands run in sequence
-- The main command runs last
-
-Do NOT use `cd`, `sh -c`, or create subdirectories. Work in the current directory.
-Arguments are passed directly to the process as an array — NOT through a shell. Do NOT use shell escaping. For find's -exec/-execdir terminator, use ";" not "\;".
-The working directory is READ-ONLY during test execution. /tmp is writable if needed.
-
-Respond with JSON:
-```json
-{
-  "actions": [
-    { "kind": "SetBaseline", "seed": { "setup": [["touch", "file.txt"]], "files": [] } },
-    { "kind": "Probe", "surface_id": "--unfamiliar-option", "seed": { "setup": [["touch", "file.txt"]], "files": [] } },
-    { "kind": "Test", "surface_id": "--example", "seed": { "setup": [["touch", "file.txt"]], "files": [] }, "prediction": {"diff_type": {"StdoutContains": "expected text"}, "reason": "changes output format"} }
-  ]
-}
-```
-
-CRITICAL: Each setup command is an ARRAY of strings: `["cmd", "arg1", "arg2"]`, NOT a single string.
-
-IMPORTANT: Only use surface_id values from the "Surfaces Needing Work" section above. Do NOT invent or guess option names - only test surfaces explicitly listed in this prompt.
-
-## Key Principles
-
-- Output must DIFFER from control (same seed, no extra args) to verify a surface
-- **PROBE FIRST**: When unsure, submit multiple Probes with different seeds — they're free and auto-promote on success
-- **PROVEN SEEDS**: When a probe shows "OUTPUTS DIFFER", your next action for that surface MUST be a Test using that probe's exact seed and args — do not redesign the seed
-- Craft seeds that match the **Trigger** condition described for each surface
-- If OutputsEqual, try STRUCTURALLY different seeds (different file content, different setup), not minor variations
-- Learn from probe results: if control_stdout and option_stdout are identical, the seed doesn't exercise the option
-- Include predictions for suppression options (--no-*, --quiet) to avoid false demotions
-
-## File Creation
-
-Create any files you need via `seed.files` or `seed.setup` commands. For example:
-- Use `seed.files` to write file content directly: `{"path": "input.txt", "content": "..."}`
-- Use `seed.setup` commands like `["touch", "file.txt"]` or `["cp", "/etc/hosts", "test.txt"]`
-"#;
+const INSTRUCTIONS: &str = concat!(
+    include_str!("prompts/response_format.txt"),
+    include_str!("prompts/actions.txt"),
+    include_str!("prompts/probes.txt"),
+    include_str!("prompts/predictions.txt"),
+    include_str!("prompts/execution_model.txt"),
+    include_str!("prompts/no_shell_escaping.txt"),
+    include_str!("prompts/sandbox_writable_tmp.txt"),
+    include_str!("prompts/response_json.txt"),
+    include_str!("prompts/key_principles.txt"),
+    include_str!("prompts/file_creation.txt"),
+);
 
 #[cfg(test)]
 mod tests {

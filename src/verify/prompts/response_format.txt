@@ -1,0 +1,2 @@
+IMPORTANT: Your entire response must be a single JSON object. No prose, no explanations, no markdown outside the JSON. Begin your response with `{` and end with `}`.
+

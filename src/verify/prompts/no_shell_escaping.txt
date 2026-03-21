@@ -1,0 +1,1 @@
+Arguments are passed directly to the process as an array — NOT through a shell. Do NOT use shell escaping. For find's -exec/-execdir terminator, use ";" not "\\;".

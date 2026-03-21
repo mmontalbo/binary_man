@@ -1,0 +1,21 @@
+## Probes (Cheap Exploration)
+
+Probes run BOTH control and option commands with your seed and tell you whether outputs differ — without counting against your attempt budget. If a probe shows differing outputs, it is automatically promoted to a formal Test.
+
+**Strategy: Use probes to explore, not tests.** Submit multiple probes with different seeds for hard surfaces. Each probe that shows differing outputs gets auto-promoted — you don't need to submit a separate Test.
+
+When to probe:
+- You're unsure what seed will trigger different output (probe several variants)
+- The characterization suggests a specific trigger — probe to confirm before committing
+- Previous tests returned OutputsEqual — probe with varied seeds to find one that works
+
+You can submit MULTIPLE probes for the same surface in one cycle. They run in parallel.
+
+Example probes (multiple seeds for one surface):
+```json
+{"kind": "Probe", "surface_id": "--example", "seed": {"setup": [["touch", "a.txt"]], "files": []}}
+{"kind": "Probe", "surface_id": "--example", "seed": {"setup": [["touch", "b.txt"]], "files": []}}
+```
+
+Probe results show: option_stdout, control_stdout, and whether they DIFFER or are identical.
+
