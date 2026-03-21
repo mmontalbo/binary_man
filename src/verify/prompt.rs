@@ -971,6 +971,8 @@ Each scenario runs in a fresh empty temp directory. ALL commands run in this SAM
 - The main command runs last
 
 Do NOT use `cd`, `sh -c`, or create subdirectories. Work in the current directory.
+Arguments are passed directly to the process as an array — NOT through a shell. Do NOT use shell escaping. For find's -exec/-execdir terminator, use ";" not "\;".
+The working directory is READ-ONLY during test execution. /tmp is writable if needed.
 
 Respond with JSON:
 ```json
@@ -1036,6 +1038,7 @@ mod tests {
             seed_bank: vec![],
             help_preamble: String::new(),
             examples_section: String::new(),
+            experiment_params: None,
         };
 
         let prompt = build_prompt(&state, &["--stat".to_string()]);
@@ -1082,6 +1085,7 @@ mod tests {
             seed_bank: vec![],
             help_preamble: String::new(),
             examples_section: String::new(),
+            experiment_params: None,
         };
 
         let prompt = build_prompt(&state, &["--stat".to_string()]);
@@ -1126,6 +1130,7 @@ mod tests {
                     fs_diff: None,
                     stdout_metrics: None,
                     stderr_metrics: None,
+                    prediction: None,
                     prediction_matched: None,
                     prediction_channel_matched: None,
                 }],
@@ -1139,6 +1144,7 @@ mod tests {
             seed_bank: vec![],
             help_preamble: String::new(),
             examples_section: String::new(),
+            experiment_params: None,
         };
 
         let prompt = build_prompt(&state, &["--verbose".to_string()]);
@@ -1192,6 +1198,7 @@ mod tests {
             seed_bank: vec![],
             help_preamble: String::new(),
             examples_section: String::new(),
+            experiment_params: None,
         };
 
         let prompt = build_prompt(&state, &["--dereference".to_string()]);
@@ -1234,6 +1241,7 @@ mod tests {
                     fs_diff: None,
                     stdout_metrics: None,
                     stderr_metrics: None,
+                    prediction: None,
                     prediction_matched: None,
                     prediction_channel_matched: None,
                 }],
@@ -1247,6 +1255,7 @@ mod tests {
             seed_bank: vec![],
             help_preamble: String::new(),
             examples_section: String::new(),
+            experiment_params: None,
         };
 
         let prompt = build_prompt(&state, &["--all".to_string()]);
@@ -1291,6 +1300,7 @@ mod tests {
                         fs_diff: None,
                         stdout_metrics: None,
                         stderr_metrics: None,
+                        prediction: None,
                         prediction_matched: None,
                     prediction_channel_matched: None,
                     },
@@ -1307,6 +1317,7 @@ mod tests {
                         fs_diff: None,
                         stdout_metrics: None,
                         stderr_metrics: None,
+                        prediction: None,
                         prediction_matched: None,
                     prediction_channel_matched: None,
                     },
@@ -1321,6 +1332,7 @@ mod tests {
             seed_bank: vec![],
             help_preamble: String::new(),
             examples_section: String::new(),
+            experiment_params: None,
         };
 
         let prompt = build_prompt(&state, &["--opt".to_string()]);
@@ -1402,6 +1414,7 @@ stderr: error: pathspec 'main' did not match"#
             fs_diff: None,
             stdout_metrics: None,
             stderr_metrics: None,
+            prediction: None,
             prediction_matched: None,
                     prediction_channel_matched: None,
         };
@@ -1453,6 +1466,7 @@ stderr: error: pathspec 'main' did not match"#
             seed_bank: vec![],
             help_preamble: String::new(),
             examples_section: String::new(),
+            experiment_params: None,
         };
 
         let issues = crate::verify::types::extract_known_issues(&state);
@@ -1494,6 +1508,7 @@ stderr: error: already a git repo"#
                     fs_diff: None,
                     stdout_metrics: None,
                     stderr_metrics: None,
+                    prediction: None,
                     prediction_matched: None,
                     prediction_channel_matched: None,
                 }],
@@ -1507,6 +1522,7 @@ stderr: error: already a git repo"#
             seed_bank: vec![],
             help_preamble: String::new(),
             examples_section: String::new(),
+            experiment_params: None,
         };
 
         let issues = crate::verify::types::extract_known_issues(&state);
@@ -1525,6 +1541,7 @@ stderr: error: already a git repo"#
             seed_bank: vec![],
             help_preamble: String::new(),
             examples_section: String::new(),
+            experiment_params: None,
         };
 
         let issues = crate::verify::types::extract_known_issues(&state);
@@ -1550,6 +1567,7 @@ stderr: pathspec 'main' did not match"#
             fs_diff: None,
             stdout_metrics: None,
             stderr_metrics: None,
+            prediction: None,
             prediction_matched: None,
                     prediction_channel_matched: None,
         };
@@ -1593,6 +1611,7 @@ stderr: pathspec 'main' did not match"#
             seed_bank: vec![],
             help_preamble: String::new(),
             examples_section: String::new(),
+            experiment_params: None,
         };
 
         let prompt = build_prompt(&state, &["--stat".to_string()]);
@@ -1628,6 +1647,7 @@ stderr: pathspec 'main' did not match"#
             seed_bank: vec![],
             help_preamble: String::new(),
             examples_section: String::new(),
+            experiment_params: None,
         };
 
         let prompt = build_prompt(&state, &["--all".to_string()]);
@@ -1674,6 +1694,7 @@ stderr: pathspec 'main' did not match"#
             seed_bank: vec![],
             help_preamble: String::new(),
             examples_section: String::new(),
+            experiment_params: None,
         };
 
         let prompt = build_prompt(&state, &["--all".to_string()]);
@@ -1712,6 +1733,7 @@ stderr: pathspec 'main' did not match"#
             fs_diff: None,
             stdout_metrics: None,
             stderr_metrics: None,
+            prediction: None,
             prediction_matched: None,
                     prediction_channel_matched: None,
         }];
@@ -1739,6 +1761,7 @@ stderr: pathspec 'main' did not match"#
             fs_diff: None,
             stdout_metrics: None,
             stderr_metrics: None,
+            prediction: None,
             prediction_matched: None,
                     prediction_channel_matched: None,
         };
@@ -1836,6 +1859,7 @@ stderr: pathspec 'main' did not match"#
             seed_bank: vec![],
             help_preamble: String::new(),
             examples_section: String::new(),
+            experiment_params: None,
         };
 
         // Prior attempts from before the retry
@@ -1856,6 +1880,7 @@ stderr: pathspec 'main' did not match"#
                     fs_diff: None,
                     stdout_metrics: None,
                     stderr_metrics: None,
+                    prediction: None,
                     prediction_matched: None,
                     prediction_channel_matched: None,
                 },
@@ -1877,6 +1902,7 @@ stderr: pathspec 'main' did not match"#
                     fs_diff: None,
                     stdout_metrics: None,
                     stderr_metrics: None,
+                    prediction: None,
                     prediction_matched: None,
                     prediction_channel_matched: None,
                 },
@@ -1927,6 +1953,7 @@ stderr: pathspec 'main' did not match"#
             seed_bank: vec![],
             help_preamble: String::new(),
             examples_section: String::new(),
+            experiment_params: None,
         };
 
         // No prior attempts for this surface
@@ -1974,6 +2001,7 @@ stderr: pathspec 'main' did not match"#
             seed_bank: vec![],
             help_preamble: String::new(),
             examples_section: String::new(),
+            experiment_params: None,
         };
 
         let prompt = build_prompt(&state, &["--patience".to_string()]);
@@ -2020,6 +2048,7 @@ stderr: pathspec 'main' did not match"#
                     fs_diff: None,
                     stdout_metrics: None,
                     stderr_metrics: None,
+                    prediction: None,
                     prediction_matched: None,
                     prediction_channel_matched: None,
                 }],
@@ -2037,6 +2066,7 @@ stderr: pathspec 'main' did not match"#
             seed_bank: vec![],
             help_preamble: String::new(),
             examples_section: String::new(),
+            experiment_params: None,
         };
 
         let prompt = build_prompt(&state, &["--patience".to_string()]);

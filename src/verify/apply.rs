@@ -9,7 +9,7 @@ use super::evidence::{
 };
 use super::lm::{LmAction, PredictedDiff, Prediction};
 use super::types::{
-    Attempt, BaselineRecord, Outcome, ProbeResult, Seed, State, Status, VerifiedSeed,
+    Attempt, BaselineRecord, DiffKind, Outcome, ProbeResult, Seed, State, Status, VerifiedSeed,
 };
 use anyhow::Result;
 use std::path::Path;
@@ -103,6 +103,8 @@ pub struct TestResult {
     pub fs_diff: Option<FsDiff>,
     pub stdout_metrics: Option<OutputMetrics>,
     pub stderr_metrics: Option<OutputMetrics>,
+    /// The LM's prediction for this attempt (if any).
+    pub prediction: Option<Prediction>,
     /// Whether the LM's prediction matched the actual outcome.
     pub prediction_matched: Option<bool>,
     /// Whether the predicted *channel* (stdout/stderr/exitcode) actually changed,
@@ -244,6 +246,7 @@ pub(super) fn run_test_scenario(
         fs_diff,
         stdout_metrics,
         stderr_metrics,
+        prediction,
         prediction_matched,
         prediction_channel_matched,
     })
@@ -254,6 +257,34 @@ pub(super) fn run_test_scenario(
 /// This is the fast, sequential part after parallel execution.
 pub(super) fn merge_test_result(state: &mut State, result: TestResult) {
     if let Some(entry) = state.entries.iter_mut().find(|e| e.id == result.surface_id) {
+        // Compute prediction gate before moving fields into the Attempt.
+        let prediction_blocked = if matches!(result.outcome, Outcome::Verified { .. })
+            && result.prediction_matched == Some(false)
+        {
+            // Gate on prediction: if the LM made a prediction and it was wrong,
+            // don't verify — keep Pending so the LM can self-correct.
+            // Exception: if the test command succeeded (diff_kind == Stdout only)
+            // but produced empty output while control had output, the option
+            // demonstrably filters output. The prediction was wrong because the
+            // seed/args didn't match (e.g. -cmin +120 on fresh files), not because
+            // the LM misunderstands the option. Accept this as verified.
+            let is_stdout_only = matches!(
+                &result.outcome,
+                Outcome::Verified { diff_kind } if *diff_kind == DiffKind::Stdout
+            );
+            let test_stdout_empty = result
+                .stdout_metrics
+                .as_ref()
+                .is_some_and(|m| m.is_empty);
+            let control_has_output = result
+                .control_stdout_preview
+                .as_ref()
+                .is_some_and(|s| !s.is_empty());
+            !(is_stdout_only && test_stdout_empty && control_has_output)
+        } else {
+            false
+        };
+
         entry.attempts.push(Attempt {
             cycle: state.cycle,
             args: result.args,
@@ -267,36 +298,29 @@ pub(super) fn merge_test_result(state: &mut State, result: TestResult) {
             fs_diff: result.fs_diff,
             stdout_metrics: result.stdout_metrics,
             stderr_metrics: result.stderr_metrics,
+            prediction: result.prediction,
             prediction_matched: result.prediction_matched,
             prediction_channel_matched: result.prediction_channel_matched,
         });
 
-        if matches!(result.outcome, Outcome::Verified { .. }) {
-            // Gate on prediction: if the LM made a prediction and it was wrong,
-            // don't verify — keep Pending so the LM can self-correct.
-            // prediction_matched == None means no prediction was provided (e.g.
-            // auto-promoted probes), which is allowed through.
-            let prediction_blocked = result.prediction_matched == Some(false);
+        if matches!(result.outcome, Outcome::Verified { .. }) && !prediction_blocked {
+            entry.status = Status::Verified;
 
-            if !prediction_blocked {
-                entry.status = Status::Verified;
-
-                // Add to seed bank if not already present
-                let seed = entry.attempts.last().map(|a| a.seed.clone()).unwrap();
-                if !state
-                    .seed_bank
-                    .iter()
-                    .any(|s| s.surface_id == result.surface_id)
-                {
-                    let args = entry.attempts.last().map(|a| a.args.clone()).unwrap();
-                    state.seed_bank.push(VerifiedSeed {
-                        surface_id: result.surface_id.clone(),
-                        args,
-                        seed,
-                        verified_at: state.cycle,
-                        hint: None,
-                    });
-                }
+            // Add to seed bank if not already present
+            let seed = entry.attempts.last().map(|a| a.seed.clone()).unwrap();
+            if !state
+                .seed_bank
+                .iter()
+                .any(|s| s.surface_id == result.surface_id)
+            {
+                let args = entry.attempts.last().map(|a| a.args.clone()).unwrap();
+                state.seed_bank.push(VerifiedSeed {
+                    surface_id: result.surface_id.clone(),
+                    args,
+                    seed,
+                    verified_at: state.cycle,
+                    hint: None,
+                });
             }
         }
     }
@@ -560,6 +584,7 @@ mod tests {
             seed_bank: vec![],
             help_preamble: String::new(),
             examples_section: String::new(),
+            experiment_params: None,
         };
 
         let action = LmAction::SetBaseline {
@@ -606,6 +631,7 @@ mod tests {
             seed_bank: vec![],
             help_preamble: String::new(),
             examples_section: String::new(),
+            experiment_params: None,
         };
 
         // Test -n flag
@@ -769,6 +795,7 @@ mod tests {
             seed_bank: vec![],
             help_preamble: String::new(),
             examples_section: String::new(),
+            experiment_params: None,
         };
 
         use crate::verify::types::FileEntry;

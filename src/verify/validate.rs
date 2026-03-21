@@ -201,6 +201,7 @@ mod tests {
             seed_bank: vec![],
             help_preamble: String::new(),
             examples_section: String::new(),
+            experiment_params: None,
         }
     }
 

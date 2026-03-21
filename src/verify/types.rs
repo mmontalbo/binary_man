@@ -73,6 +73,9 @@ pub struct State {
     /// EXAMPLES section from man page, if available.
     #[serde(default)]
     pub examples_section: String,
+    /// Snapshot of experimental parameters active for this run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub experiment_params: Option<serde_json::Value>,
 }
 
 impl State {
@@ -286,6 +289,9 @@ pub struct Attempt {
     /// Output metrics for stderr (line count, byte count).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stderr_metrics: Option<OutputMetrics>,
+    /// The LM's prediction for this attempt (if any).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prediction: Option<super::lm::Prediction>,
     /// Whether the LM's prediction matched the actual outcome.
     /// None if no prediction was provided, Some(true) if matched, Some(false) if not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -686,6 +692,7 @@ mod tests {
             seed_bank: vec![],
             help_preamble: String::new(),
             examples_section: String::new(),
+            experiment_params: None,
         };
 
         let json = serde_json::to_string_pretty(&state).unwrap();

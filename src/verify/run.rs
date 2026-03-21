@@ -46,6 +46,23 @@ const BATCH_SIZE: usize = 5;
 /// How often (in cycles) to checkpoint parallel session progress to disk.
 const CHECKPOINT_INTERVAL: u32 = 10;
 
+/// Snapshot all tunable constants for experiment traceability.
+fn experiment_params() -> serde_json::Value {
+    serde_json::json!({
+        "max_attempts": MAX_ATTEMPTS,
+        "stagnation_threshold": STAGNATION_THRESHOLD,
+        "batch_size": BATCH_SIZE,
+        "checkpoint_interval": CHECKPOINT_INTERVAL,
+        "prediction_gate": true,
+        "e1_empty_stdout_bypass": true,
+        "option_error_patterns": ["error:", "fatal:"],
+        "prompt_hints": [
+            "no_shell_escaping",
+            "sandbox_writable_tmp",
+        ],
+    })
+}
+
 /// Total failures across all sessions before a surface is globally excluded.
 const GLOBAL_FAILURE_THRESHOLD: usize = 5;
 
@@ -430,6 +447,9 @@ pub fn run(
     if uncharacterized > 0 {
         characterize_pending_surfaces(&mut state, pack_path, lm_config, verbose)?;
     }
+
+    // Stamp experiment params for traceability
+    state.experiment_params = Some(experiment_params());
 
     // Save initial state
     state.save(pack_path)?;
@@ -2071,6 +2091,7 @@ mod tests {
             seed_bank: vec![],
             help_preamble: String::new(),
             examples_section: String::new(),
+            experiment_params: None,
         };
 
         let summary = get_summary(&state);

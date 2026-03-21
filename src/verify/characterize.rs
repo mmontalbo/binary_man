@@ -491,6 +491,7 @@ mod tests {
             seed_bank: vec![],
             help_preamble: "find - search for files".to_string(),
             examples_section: String::new(),
+            experiment_params: None,
         };
 
         let ids = vec!["-empty".to_string(), "-name".to_string()];

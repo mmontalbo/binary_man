@@ -77,6 +77,7 @@ pub(super) fn build_state_from_surfaces(
         seed_bank: vec![],
         help_preamble: preamble,
         examples_section: examples,
+        experiment_params: None,
     })
 }
 
@@ -1628,6 +1629,7 @@ pub(super) fn apply_batch_probe_hits(state: &mut State, hits: Vec<BatchProbeHit>
                 fs_diff: None,
                 stdout_metrics: None,
                 stderr_metrics: None,
+                prediction: None,
                 prediction_matched: None,
                 prediction_channel_matched: None,
             });
