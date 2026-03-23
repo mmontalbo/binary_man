@@ -23,6 +23,7 @@ use super::types::{FileEntry, Seed};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::path::Path;
 
 /// Prediction of expected behavior for a test.
@@ -54,6 +55,9 @@ pub enum PredictedDiff {
 /// Response from the LM containing actions to execute.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LmResponse {
+    /// Per-surface reasoning about control equivalence, keyed by surface_id.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub analysis: HashMap<String, String>,
     /// Actions to execute in order.
     pub actions: Vec<LmAction>,
 }
@@ -210,7 +214,10 @@ fn parse_extracted_objects(text: &str) -> Result<LmResponse> {
         }
     }
 
-    Ok(LmResponse { actions })
+    Ok(LmResponse {
+        analysis: HashMap::new(),
+        actions,
+    })
 }
 
 /// Extract all top-level {...} substrings from text, handling nesting.
@@ -1219,5 +1226,62 @@ Here's my response:
         let text = r#"{"actions": [{"kind": "Test", "surface_id": "--stat", "seed": {"setup": [], "files": []}, "prediction": {"diff_type": "StderrDifferent", "reason": "stat format", "confidence": 0.9, "notes": "test"}}]}"#;
         let response = parse_lm_response(text).unwrap();
         assert_eq!(response.actions.len(), 1);
+    }
+
+    // ==================== Analysis Field Tests ====================
+
+    #[test]
+    fn test_parse_analysis_present() {
+        let text = r#"{
+            "analysis": {
+                "--stat": "Control shows raw diff. Adding --stat appends diffstat summary.",
+                "-true": "No-op unless combined with expression that suppresses default action."
+            },
+            "actions": [
+                {"kind": "Test", "surface_id": "--stat", "seed": {"setup": [["git", "init"]], "files": []}}
+            ]
+        }"#;
+        let response = parse_lm_response(text).unwrap();
+        assert_eq!(response.analysis.len(), 2);
+        assert!(response.analysis.contains_key("--stat"));
+        assert!(response.analysis.contains_key("-true"));
+        assert_eq!(response.actions.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_analysis_absent_defaults_empty() {
+        let text = r#"{
+            "actions": [
+                {"kind": "Test", "surface_id": "--stat", "seed": {"setup": [], "files": []}}
+            ]
+        }"#;
+        let response = parse_lm_response(text).unwrap();
+        assert!(response.analysis.is_empty());
+        assert_eq!(response.actions.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_analysis_extra_keys_ignored() {
+        // Analysis with extra unknown fields alongside it doesn't break parsing
+        let text = r#"{
+            "analysis": {"--stat": "control shows raw diff"},
+            "thinking": "this extra field should be ignored",
+            "actions": [
+                {"kind": "Test", "surface_id": "--stat", "seed": {"setup": [], "files": []}}
+            ]
+        }"#;
+        let response = parse_lm_response(text).unwrap();
+        assert_eq!(response.analysis.len(), 1);
+        assert_eq!(response.actions.len(), 1);
+    }
+
+    #[test]
+    fn test_analysis_not_serialized_when_empty() {
+        let response = LmResponse {
+            analysis: HashMap::new(),
+            actions: vec![],
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(!json.contains("analysis"));
     }
 }

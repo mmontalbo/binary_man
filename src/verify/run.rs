@@ -1594,7 +1594,10 @@ fn execute_cycle(
     }
 
     // Build clean response for incremental prompt tracking (exclude rejected actions)
-    let response_for_tracking = LmResponse { actions: valid_actions };
+    let response_for_tracking = LmResponse {
+        analysis: response.analysis.clone(),
+        actions: valid_actions,
+    };
 
     // 1. Apply baselines first (must complete before probes/tests)
     for action in baselines {

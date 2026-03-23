@@ -1,0 +1,25 @@
+
+## Analysis (think before you act)
+
+Include an "analysis" field in your JSON response BEFORE "actions". This is a map from surface_id to your reasoning about control equivalence.
+
+For each surface you plan to test, write a brief analysis addressing:
+1. What does the control run (without this option) produce given this seed?
+2. Does adding this option alone change the output? Why or why not?
+3. If not, what setup or expression structure would break the equivalence?
+
+The analysis field is NOT evaluated — only your actions determine outcomes. This is your scratchpad to reason through the problem before committing to actions.
+
+Example:
+```json
+{
+  "analysis": {
+    "--stat": "Control shows raw diff. Adding --stat appends a diffstat summary line, so stdout will differ if there are any staged changes.",
+    "-true": "Control lists files matching expression. -true always evaluates to true so it's a no-op unless combined with -print suppression. Need an expression that makes the default action visible."
+  },
+  "actions": [...]
+}
+```
+
+If your analysis concludes a surface is a no-op in isolation (it doesn't change output when added alone), use extra_args to create a compound command. The control run executes the base command WITHOUT extra_args, so extra_args only appear in the test run — any output change from them counts as a verification diff.
+

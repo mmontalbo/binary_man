@@ -2,6 +2,9 @@
 Respond with JSON:
 ```json
 {
+  "analysis": {
+    "--example": "Control shows default output. Adding --example changes the format, so stdout will differ with any input file."
+  },
   "actions": [
     { "kind": "SetBaseline", "seed": { "setup": [["touch", "file.txt"]], "files": [] } },
     { "kind": "Probe", "surface_id": "--unfamiliar-option", "seed": { "setup": [["touch", "file.txt"]], "files": [] } },

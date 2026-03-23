@@ -687,6 +687,22 @@ pub(super) fn build_incremental_prompt(
 
     prompt.push_str("# Cycle Update\n\n");
 
+    // Echo back prior analysis for surfaces still in the batch
+    if let Some(response) = last_response {
+        let relevant_analysis: Vec<_> = response
+            .analysis
+            .iter()
+            .filter(|(id, _)| target_ids.iter().any(|t| t == *id))
+            .collect();
+        if !relevant_analysis.is_empty() {
+            prompt.push_str("## Your Prior Analysis\n\n");
+            for (id, reasoning) in &relevant_analysis {
+                prompt.push_str(&format!("- **{}**: {}\n", id, reasoning));
+            }
+            prompt.push('\n');
+        }
+    }
+
     // Show what happened with the last actions
     if let Some(response) = last_response {
         prompt.push_str("## Previous Actions Results\n\n");
@@ -853,6 +869,38 @@ pub(super) fn build_incremental_prompt(
                     format_outcome(&last.outcome),
                     last.args
                 ));
+
+                // Detect stalling: consecutive trailing OutputsEqual with no extra_args.
+                // The surface_id-only args signature is exactly [entry.id].
+                let surface_only = vec![entry.id.clone()];
+                let consecutive_no_extra = entry
+                    .attempts
+                    .iter()
+                    .rev()
+                    .take_while(|a| {
+                        matches!(a.outcome, Outcome::OutputsEqual) && a.args == surface_only
+                    })
+                    .count();
+                // Also check probes: identical argv == context_argv + [entry.id]
+                let probe_only: Vec<String> = state
+                    .context_argv
+                    .iter()
+                    .chain(std::iter::once(&entry.id))
+                    .cloned()
+                    .collect();
+                let consecutive_probe_stall = entry
+                    .probes
+                    .iter()
+                    .rev()
+                    .take_while(|p| p.argv == probe_only)
+                    .count();
+                if consecutive_no_extra >= 2 || consecutive_probe_stall >= 2 {
+                    prompt.push_str(
+                        "  **HINT**: This surface produces identical output to control in isolation.\n\
+                         \x20 The control run does NOT include extra_args — adding other options as\n\
+                         \x20 extra_args creates a compound command that only the test run executes.\n",
+                    );
+                }
             }
         }
     }
@@ -872,7 +920,7 @@ pub(super) fn build_incremental_prompt(
     prompt.push_str(
         r#"Provide your next actions as JSON:
 ```json
-{"actions": [{"kind": "Test", "surface_id": "...", "seed": {...}}, ...]}
+{"analysis": {"surface_id": "reasoning about control equivalence..."}, "actions": [{"kind": "Test", "surface_id": "...", "seed": {...}}, ...]}
 ```
 
 Note: surface_id is automatically included in the command. Only use "extra_args" if you need additional arguments.
@@ -886,6 +934,7 @@ Remember: Output must DIFFER from control run to verify. Try different seeds if 
 
 const INSTRUCTIONS: &str = concat!(
     include_str!("prompts/response_format.txt"),
+    include_str!("prompts/analysis.txt"),
     include_str!("prompts/actions.txt"),
     include_str!("prompts/probes.txt"),
     include_str!("prompts/predictions.txt"),
