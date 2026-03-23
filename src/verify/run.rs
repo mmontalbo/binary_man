@@ -1169,6 +1169,10 @@ fn run_pipeline_worker(
                                 state_entry.probes =
                                     worker_entry.probes.clone();
                                 state_entry.retried = worker_entry.retried;
+                                state_entry.critique_demotions =
+                                    worker_entry.critique_demotions;
+                                state_entry.critique_feedback =
+                                    worker_entry.critique_feedback.clone();
                                 mark_resolved = true;
                             } else if !state_resolved {
                                 if worker_entry.attempts.len()
@@ -1182,6 +1186,15 @@ fn run_pipeline_worker(
                                 {
                                     state_entry.probes =
                                         worker_entry.probes.clone();
+                                }
+                                // Merge critique state (take highest demotion count)
+                                if worker_entry.critique_demotions
+                                    > state_entry.critique_demotions
+                                {
+                                    state_entry.critique_demotions =
+                                        worker_entry.critique_demotions;
+                                    state_entry.critique_feedback =
+                                        worker_entry.critique_feedback.clone();
                                 }
                                 if total >= MAX_ATTEMPTS
                                     && !state_entry.has_verified_attempt()
