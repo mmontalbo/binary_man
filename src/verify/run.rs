@@ -2137,8 +2137,6 @@ mod tests {
             extra_args: vec![],
             seed: Seed::default(),
             prediction: None,
-            trigger: None,
-            expected_diff: None,
         };
         assert_eq!(format_action_desc(&action), "Test --stat");
 
@@ -2147,8 +2145,6 @@ mod tests {
             extra_args: vec!["--numstat".to_string()],
             seed: Seed::default(),
             prediction: None,
-            trigger: None,
-            expected_diff: None,
         };
         assert!(format_action_desc(&action).contains("Test --stat"));
         assert!(format_action_desc(&action).contains("--numstat"));

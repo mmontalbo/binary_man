@@ -66,8 +66,6 @@ pub(super) fn normalize_action(action: LmAction, state: &State) -> LmAction {
                 extra_args,
                 seed,
                 prediction,
-                trigger: None,
-                expected_diff: None,
             }
         }
         LmAction::Probe {
@@ -249,8 +247,6 @@ mod tests {
             extra_args: vec![],
             seed: Seed::default(),
             prediction: None,
-            trigger: None,
-            expected_diff: None,
         };
         assert!(validate_action(&action, &state, None).is_ok());
     }
@@ -263,8 +259,6 @@ mod tests {
             extra_args: vec![],
             seed: Seed::default(),
             prediction: None,
-            trigger: None,
-            expected_diff: None,
         };
         let result = validate_action(&action, &state, None);
         assert!(result.is_err());
@@ -279,8 +273,6 @@ mod tests {
             extra_args: vec![],
             seed: Seed::default(),
             prediction: None,
-            trigger: None,
-            expected_diff: None,
         };
         let result = validate_action(&action, &state, None);
         assert!(result.is_err());
@@ -296,8 +288,6 @@ mod tests {
             extra_args: vec![],
             seed: Seed::default(),
             prediction: None,
-            trigger: None,
-            expected_diff: None,
         };
         let result = validate_action(&action, &state, None);
         assert!(result.is_ok());
@@ -316,8 +306,6 @@ mod tests {
             extra_args: vec![],
             seed: Seed::default(),
             prediction: None,
-            trigger: None,
-            expected_diff: None,
         };
         assert!(validate_action(&action, &state, None).is_ok());
     }
@@ -419,8 +407,6 @@ mod tests {
             extra_args: vec![],
             seed: Seed::default(),
             prediction: None,
-            trigger: None,
-            expected_diff: None,
         };
         let result = validate_action(&action, &state, Some(&targets));
         assert!(result.is_err());
@@ -437,8 +423,6 @@ mod tests {
             extra_args: vec![],
             seed: Seed::default(),
             prediction: None,
-            trigger: None,
-            expected_diff: None,
         };
         assert!(validate_action(&action, &state, Some(&targets)).is_ok());
     }
@@ -452,8 +436,6 @@ mod tests {
             extra_args: vec![],
             seed: Seed::default(),
             prediction: None,
-            trigger: None,
-            expected_diff: None,
         };
         assert!(validate_action(&action, &state, None).is_ok());
     }

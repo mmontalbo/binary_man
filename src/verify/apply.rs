@@ -646,8 +646,6 @@ mod tests {
                 extra_args: vec![],
                 seed: Seed::default(),
                 prediction: None,
-                trigger: None,
-                expected_diff: None,
             },
         )
         .unwrap();
@@ -822,8 +820,6 @@ mod tests {
                 extra_args: vec![],
                 seed,
                 prediction: None,
-                trigger: None,
-                expected_diff: None,
             },
         )
         .unwrap();

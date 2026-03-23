@@ -83,12 +83,6 @@ pub enum LmAction {
         /// Prediction of expected outcome (optional for backward compatibility).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         prediction: Option<Prediction>,
-        /// Inline characterization: what triggers this option's effect.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        trigger: Option<String>,
-        /// Inline characterization: what output difference to expect.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        expected_diff: Option<String>,
     },
     /// Probe a surface to gather evidence before committing to a test.
     ///
@@ -333,15 +327,11 @@ fn parse_action_object(obj: &Value) -> Result<Option<LmAction>> {
         let extra_args = parse_shell_args(get_key(obj, &["extra_args", "Extra_args"]))?;
         let seed = parse_seed(obj)?;
         let prediction = parse_prediction(get_key(obj, &["prediction", "Prediction"]));
-        let trigger = get_key(obj, &["trigger", "Trigger"]).and_then(|v| v.as_str()).map(String::from);
-        let expected_diff = get_key(obj, &["expected_diff", "Expected_diff"]).and_then(|v| v.as_str()).map(String::from);
         return Ok(Some(LmAction::Test {
             surface_id: surface.to_string(),
             extra_args,
             seed,
             prediction,
-            trigger,
-            expected_diff,
         }));
     }
 
