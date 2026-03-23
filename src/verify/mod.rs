@@ -20,6 +20,7 @@
 mod apply;
 mod bootstrap;
 mod characterize;
+pub(super) mod config;
 mod critique;
 mod evidence;
 mod lm;

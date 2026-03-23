@@ -9,13 +9,11 @@
 //! Re-characterization (`recharacterize_surface`) revises a characterization
 //! after accumulated evidence shows it was wrong.
 
+use super::config::CHARACTERIZE_CHUNK_SIZE;
 use super::types::{Characterization, State, Status};
 use crate::lm::{create_plugin, LmConfig};
 use anyhow::Result;
 use std::path::Path;
-
-/// Maximum surfaces per characterization LM call.
-const CHARACTERIZE_CHUNK_SIZE: usize = 20;
 
 /// Characterize all pending surfaces that lack a characterization.
 ///

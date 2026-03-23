@@ -3,17 +3,12 @@
 //! Reviews all Verified surfaces to catch false positives where outputs
 //! differed but didn't actually demonstrate the documented behavior.
 
+use super::config::{CRITIQUE_BATCH_SIZE, CRITIQUE_EXCLUSION_THRESHOLD, CRITIQUE_OUTPUT_MAX_LEN};
 use super::types::{State, Status};
 use crate::lm::LmConfig;
 use anyhow::Result;
 use std::fs;
 use std::path::Path;
-
-/// Maximum surfaces per critique batch.
-const BATCH_SIZE: usize = 10;
-
-/// Maximum chars for each output in critique prompt.
-const OUTPUT_MAX_LEN: usize = 1500;
 
 /// Critique action from LM.
 #[derive(Debug, Clone)]
@@ -55,7 +50,7 @@ pub(super) fn critique_surfaces(
     }
 
     let batches: Vec<(Vec<String>, String)> = verified_ids
-        .chunks(BATCH_SIZE)
+        .chunks(CRITIQUE_BATCH_SIZE)
         .map(|batch| {
             let batch_ids: Vec<String> = batch.to_vec();
             let prompt = build_prompt(state, &batch_ids, pack_path);
@@ -84,7 +79,7 @@ pub(super) fn critique_surfaces(
                     }
                     Action::Demote { reason } => {
                         entry.critique_demotions += 1;
-                        if entry.critique_demotions >= 2 {
+                        if entry.critique_demotions >= CRITIQUE_EXCLUSION_THRESHOLD {
                             entry.status = Status::Excluded {
                                 reason: format!(
                                     "Critique-irreconcilable after {} demotions: {}",
@@ -169,7 +164,7 @@ fn build_prompt(state: &State, surface_ids: &[String], pack_path: &Path) -> Stri
                         compute_unified_diff(&evidence.control_stdout, &evidence.option_stdout);
                     if !diff.is_empty() {
                         prompt.push_str("**Diff (control vs option)**:\n```diff\n");
-                        prompt.push_str(&super::evidence::truncate_str(&diff, OUTPUT_MAX_LEN));
+                        prompt.push_str(&super::evidence::truncate_str(&diff, CRITIQUE_OUTPUT_MAX_LEN));
                         prompt.push_str("\n```\n\n");
                     }
                 }

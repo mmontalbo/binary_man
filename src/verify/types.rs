@@ -22,12 +22,7 @@ use std::path::Path;
 /// - v7: Added per-channel probe comparison and setup failure detail
 pub const STATE_SCHEMA_VERSION: u32 = 7;
 
-/// Maximum probe runs per surface.
-///
-/// Probes are now bilateral (run both control and option) and auto-promote
-/// on success, so they're the primary exploration mechanism. Budget is
-/// generous since probes don't burn test attempts.
-pub const MAX_PROBES_PER_SURFACE: usize = 6;
+pub use super::config::MAX_PROBES_PER_SURFACE;
 
 /// Classification of a surface for scheduling and execution strategy.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

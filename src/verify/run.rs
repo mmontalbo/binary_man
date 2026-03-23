@@ -34,37 +34,10 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-/// Maximum verification attempts per surface before auto-exhausting.
-const MAX_ATTEMPTS: usize = 5;
-
-/// Consecutive OutputsEqual outcomes that trigger early stagnation exclusion.
-const STAGNATION_THRESHOLD: usize = 3;
-
-/// Maximum surfaces to include in each LM batch.
-const BATCH_SIZE: usize = 5;
-
-/// How often (in cycles) to checkpoint parallel session progress to disk.
-const CHECKPOINT_INTERVAL: u32 = 10;
-
-/// Snapshot all tunable constants for experiment traceability.
-fn experiment_params() -> serde_json::Value {
-    serde_json::json!({
-        "max_attempts": MAX_ATTEMPTS,
-        "stagnation_threshold": STAGNATION_THRESHOLD,
-        "batch_size": BATCH_SIZE,
-        "checkpoint_interval": CHECKPOINT_INTERVAL,
-        "prediction_gate": true,
-        "e1_empty_stdout_bypass": true,
-        "option_error_patterns": ["error:", "fatal:"],
-        "prompt_hints": [
-            "no_shell_escaping",
-            "sandbox_writable_tmp",
-        ],
-    })
-}
-
-/// Total failures across all sessions before a surface is globally excluded.
-const GLOBAL_FAILURE_THRESHOLD: usize = 5;
+use super::config::{
+    BATCH_SIZE, CHECKPOINT_INTERVAL, GLOBAL_FAILURE_THRESHOLD, LM_TIMEOUT_SECS, MAX_ATTEMPTS,
+    MAX_LM_RETRIES, STAGNATION_THRESHOLD,
+};
 
 /// Result of a verification run.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,12 +131,6 @@ impl WorkerTimings {
             + self.extract
     }
 }
-
-/// Default LM timeout in seconds.
-const LM_TIMEOUT_SECS: u64 = 120;
-
-/// Maximum retry attempts for LM calls.
-const MAX_LM_RETRIES: usize = 3;
 
 /// Work item in the unified pipeline.
 ///
@@ -449,7 +416,7 @@ pub fn run(
     }
 
     // Stamp experiment params for traceability
-    state.experiment_params = Some(experiment_params());
+    state.experiment_params = Some(super::config::experiment_params());
 
     // Save initial state
     state.save(pack_path)?;

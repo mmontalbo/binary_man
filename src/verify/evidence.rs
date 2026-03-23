@@ -7,6 +7,7 @@
 //! - Writable work directory only
 //! - Process isolation
 
+use super::config::{MAX_OUTPUT_BYTES, SANDBOX_TIMEOUT_SECS};
 use super::types::Seed;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -15,9 +16,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
-
-/// Default timeout for scenario execution in seconds.
-const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
 /// Filesystem changes detected between before/after command execution.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -97,9 +95,6 @@ fn shell_escape(s: &str) -> String {
         format!("'{}'", s.replace('\'', "'\\''"))
     }
 }
-
-/// Maximum bytes to capture for stdout/stderr.
-const MAX_OUTPUT_BYTES: usize = 64 * 1024;
 
 /// Result of a single setup command execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -324,7 +319,7 @@ pub(super) fn run_scenario(
     }
 
     // Execute with timeout
-    let output = match execute_with_timeout(&mut cmd, Duration::from_secs(DEFAULT_TIMEOUT_SECS)) {
+    let output = match execute_with_timeout(&mut cmd, Duration::from_secs(SANDBOX_TIMEOUT_SECS)) {
         Ok(output) => output,
         Err(e) => {
             return Ok(Evidence {
@@ -591,7 +586,7 @@ pub(super) fn run_in_sandbox(
     }
 
     // Execute with timeout
-    let output = match execute_with_timeout(&mut cmd, Duration::from_secs(DEFAULT_TIMEOUT_SECS)) {
+    let output = match execute_with_timeout(&mut cmd, Duration::from_secs(SANDBOX_TIMEOUT_SECS)) {
         Ok(output) => output,
         Err(e) => {
             return Ok(Evidence {

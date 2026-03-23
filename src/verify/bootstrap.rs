@@ -7,6 +7,7 @@
 //!
 //! Results are cached keyed on help-text hash so repeat bootstraps work offline.
 
+use super::config::{CONTEXT_WINDOW_SIZE, DESC_MAX_LEN, EXTRACT_CHUNK_TARGET_SIZE, MAX_CONCURRENT_PROBES};
 use super::evidence::{prepare_sandbox, run_in_sandbox};
 use super::types::{
     Attempt, DiffKind, FileEntry, Outcome, Seed, State, Status, SurfaceCategory, SurfaceEntry,
@@ -17,17 +18,6 @@ use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::process::Command;
-
-
-/// Maximum number of surrounding options to include as context.
-const CONTEXT_WINDOW_SIZE: usize = 2;
-
-/// Target chunk size for parallel LM extraction (chars of help text).
-/// Small texts naturally produce 1 chunk and use the same code path.
-const EXTRACT_CHUNK_TARGET_SIZE: usize = 2000;
-
-/// Maximum concurrent probe validations.
-const MAX_CONCURRENT_PROBES: usize = 16;
 
 /// Build a State from discovered surfaces and help outputs.
 pub(super) fn build_state_from_surfaces(
@@ -444,10 +434,6 @@ fn parse_option_blocks(help_text: &str) -> Vec<OptionBlock> {
 
     blocks
 }
-
-/// Maximum description length in characters.
-/// Long enough to capture behavioral detail but not overwhelm the prompt.
-const DESC_MAX_LEN: usize = 600;
 
 /// Collect continuation lines for a multi-line description.
 ///

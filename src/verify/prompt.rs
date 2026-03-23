@@ -58,8 +58,7 @@ fn format_valid_surfaces_constraint(state: &State, target_ids: &[String]) -> Str
     section
 }
 
-/// Maximum characters for seed summary in attempt history.
-const SEED_SUMMARY_MAX_LEN: usize = 200;
+use super::config::{MAX_PRIOR_ATTEMPTS, SEED_SUMMARY_MAX_LEN};
 
 /// Format attempt history for retry prompts.
 ///
@@ -157,9 +156,6 @@ fn format_outcome_compact(outcome: &Outcome) -> String {
 }
 
 /// Build the LM prompt for a set of target surfaces.
-/// Maximum prior attempts to show in prompt history (both build_prompt and retry).
-const MAX_PRIOR_ATTEMPTS: usize = 2;
-
 pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
     let mut prompt = String::new();
 
