@@ -35,9 +35,11 @@
             man-db
             groff
             coreutils
-            bubblewrap
-          ]) ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-            pkgs.strace
+          ]) ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
+            pkgs.libiconv
+            pkgs.darwin.apple_sdk.frameworks.Security
+          ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            pkgs.bubblewrap
           ];
           shellHook = ''
             export RUST_BACKTRACE=1

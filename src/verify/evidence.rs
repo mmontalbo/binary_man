@@ -1,11 +1,9 @@
 //! Scenario execution and evidence capture.
 //!
-//! This module handles running commands and capturing their outputs in a
-//! sandboxed environment using bubblewrap (bwrap). Tests run with:
-//! - Network isolation (no external requests)
-//! - Read-only root filesystem
-//! - Writable work directory only
-//! - Process isolation
+//! This module handles running commands and capturing their outputs in an
+//! isolated environment. On Linux, bubblewrap (bwrap) provides full sandbox
+//! isolation (network, filesystem, process). On macOS, commands run directly
+//! in a temporary directory without namespace isolation.
 
 use super::types::Seed;
 use anyhow::{Context, Result};
@@ -42,18 +40,22 @@ pub struct OutputMetrics {
     pub is_empty: bool,
 }
 
-/// Build a bwrap command with full sandbox isolation.
+/// Build a sandbox command that isolates the child process.
 ///
-/// The sandbox provides:
-/// Build a bwrap sandbox command.
+/// On Linux this uses bubblewrap (bwrap) for namespace-based isolation:
+/// read-only root, writable work_dir, network isolation, /proc + /dev.
+///
+/// On macOS there is no bwrap equivalent. Commands run directly in the
+/// temp work directory without namespace isolation. `TMPDIR` is redirected
+/// to the sandbox tmp directory for partial /tmp isolation.
 ///
 /// `readonly`: mount work_dir read-only (for test runs after setup).
-/// For PTY mode, pass binary/argv to wrap via `script -c`.
+///             Only enforced on Linux; ignored on macOS.
+#[cfg(target_os = "linux")]
 fn build_sandbox_command(
     work_dir: &Path,
     sandbox_tmp: &Path,
     readonly: bool,
-    pty: Option<(&str, &[String])>,
 ) -> Command {
     let mut cmd = Command::new("bwrap");
 
@@ -74,21 +76,78 @@ fn build_sandbox_command(
     cmd.args(["--chdir", &work_dir_str]);
     cmd.arg("--");
 
-    if let Some((binary, argv)) = pty {
-        cmd.args(["script", "-q"]);
-        let cmd_str: String = std::iter::once(binary.to_string())
-            .chain(argv.iter().cloned())
-            .map(|s| shell_escape(&s))
-            .collect::<Vec<_>>()
-            .join(" ");
-        cmd.args(["-c", &cmd_str]);
-        cmd.arg("/dev/null");
-    }
-
     cmd
 }
 
-/// Escape a string for shell use.
+/// macOS sandbox using `sandbox-exec` (Seatbelt).
+///
+/// Approximates bwrap isolation with:
+/// - Network denied (`deny network*`)
+/// - File writes denied except to work_dir (writable mode) and sandbox_tmp
+/// - Device writes allowed (PTY, /dev/null)
+///
+/// Paths are canonicalized because macOS symlinks (e.g. /var -> /private/var)
+/// must match the resolved paths that sandbox-exec checks against.
+#[cfg(not(target_os = "linux"))]
+fn build_sandbox_command(
+    work_dir: &Path,
+    sandbox_tmp: &Path,
+    readonly: bool,
+) -> Command {
+    let work_dir = fs::canonicalize(work_dir).unwrap_or_else(|_| work_dir.to_path_buf());
+    let sandbox_tmp = fs::canonicalize(sandbox_tmp).unwrap_or_else(|_| sandbox_tmp.to_path_buf());
+    let work_dir_str = work_dir.to_string_lossy();
+    let sandbox_tmp_str = sandbox_tmp.to_string_lossy();
+
+    let mut profile = format!(
+        "(version 1)\
+         (allow default)\
+         (deny network*)\
+         (deny file-write*)\
+         (allow file-write* (subpath \"{sandbox_tmp_str}\"))\
+         (allow file-write* (subpath \"/dev\"))"
+    );
+    if !readonly {
+        profile.push_str(&format!(
+            "(allow file-write* (subpath \"{work_dir_str}\"))"
+        ));
+    }
+
+    let mut cmd = Command::new("sandbox-exec");
+    cmd.args(["-p", &profile]);
+    cmd.current_dir(&work_dir);
+    cmd.env("TMPDIR", &sandbox_tmp);
+    cmd
+}
+
+/// Append PTY wrapper arguments to a command.
+///
+/// Uses `script` to allocate a pseudo-terminal so the child process
+/// sees an interactive TTY (enabling color output, etc.).
+///
+/// Linux (GNU coreutils): `script -q -c "cmd args" /dev/null`
+/// macOS (BSD):            `script -q /dev/null cmd args`
+#[cfg(target_os = "linux")]
+fn append_pty_wrapper(cmd: &mut Command, binary: &str, argv: &[String]) {
+    cmd.args(["script", "-q"]);
+    let cmd_str: String = std::iter::once(binary.to_string())
+        .chain(argv.iter().cloned())
+        .map(|s| shell_escape(&s))
+        .collect::<Vec<_>>()
+        .join(" ");
+    cmd.args(["-c", &cmd_str]);
+    cmd.arg("/dev/null");
+}
+
+#[cfg(not(target_os = "linux"))]
+fn append_pty_wrapper(cmd: &mut Command, binary: &str, argv: &[String]) {
+    cmd.args(["script", "-q", "/dev/null"]);
+    cmd.arg(binary);
+    cmd.args(argv);
+}
+
+/// Escape a string for shell use (needed for GNU script's `-c` flag).
+#[cfg(target_os = "linux")]
 fn shell_escape(s: &str) -> String {
     if s.chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '/')
@@ -101,6 +160,91 @@ fn shell_escape(s: &str) -> String {
 
 /// Maximum bytes to capture for stdout/stderr.
 const MAX_OUTPUT_BYTES: usize = 64 * 1024;
+
+/// Result of running seed setup commands.
+struct SetupOutcome {
+    results: Vec<SetupResult>,
+    failed: bool,
+    error: Option<String>,
+}
+
+/// Run seed setup commands in the sandbox, stopping on first failure.
+fn run_setup_commands(
+    seed: &Seed,
+    work_dir: &Path,
+    sandbox_tmp: &Path,
+) -> SetupOutcome {
+    let mut results = Vec::new();
+
+    for (index, setup_cmd) in seed.setup.iter().enumerate() {
+        if setup_cmd.is_empty() {
+            continue;
+        }
+
+        let mut cmd = build_sandbox_command(work_dir, sandbox_tmp, false);
+        cmd.arg(&setup_cmd[0]);
+        cmd.args(&setup_cmd[1..]);
+        cmd.stdout(Stdio::null());
+        cmd.stderr(Stdio::piped());
+
+        let output = cmd.output();
+
+        match output {
+            Ok(out) => {
+                let exit_code = out.status.code();
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let stderr_truncated = if stderr.len() > 200 {
+                    format!("{}...", &stderr[..200])
+                } else {
+                    stderr.to_string()
+                };
+
+                if !out.status.success() {
+                    let error = format!(
+                        "Setup command #{} failed: {:?}\nstderr: {}",
+                        index,
+                        setup_cmd,
+                        stderr_truncated.trim()
+                    );
+                    results.push(SetupResult {
+                        index,
+                        argv: setup_cmd.clone(),
+                        exit_code,
+                        stderr: stderr_truncated,
+                    });
+                    return SetupOutcome {
+                        results,
+                        failed: true,
+                        error: Some(error),
+                    };
+                }
+            }
+            Err(e) => {
+                let error = format!(
+                    "Setup command #{} failed to execute: {:?}\nerror: {}",
+                    index, setup_cmd, e
+                );
+                results.push(SetupResult {
+                    index,
+                    argv: setup_cmd.clone(),
+                    exit_code: None,
+                    stderr: e.to_string(),
+                });
+                return SetupOutcome {
+                    results,
+                    failed: true,
+                    error: Some(error),
+                };
+            }
+        }
+    }
+
+    SetupOutcome {
+        results,
+        failed: false,
+        error: None,
+    }
+}
 
 /// Result of a single setup command execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -219,79 +363,17 @@ pub(super) fn run_scenario(
             .with_context(|| format!("write seed file {}", file.path))?;
     }
 
-    // Run seed setup commands, capturing per-command results
-    let mut setup_results = Vec::new();
-    let mut setup_failed = false;
-    let mut failed_cmd_summary = String::new();
-
-    for (index, setup_cmd) in seed.setup.iter().enumerate() {
-        if setup_cmd.is_empty() {
-            continue;
-        }
-
-        // Run setup commands in sandbox to prevent malicious actions
-        let mut cmd = build_sandbox_command(work_dir, &sandbox_tmp, false, None);
-        cmd.arg(&setup_cmd[0]);
-        cmd.args(&setup_cmd[1..]);
-        cmd.stdout(Stdio::null());
-        cmd.stderr(Stdio::piped());
-
-        let output = cmd.output();
-
-        match output {
-            Ok(out) => {
-                let exit_code = out.status.code();
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                let stderr_truncated = if stderr.len() > 200 {
-                    format!("{}...", &stderr[..200])
-                } else {
-                    stderr.to_string()
-                };
-
-                if !out.status.success() {
-                    setup_results.push(SetupResult {
-                        index,
-                        argv: setup_cmd.clone(),
-                        exit_code,
-                        stderr: stderr_truncated.clone(),
-                    });
-                    failed_cmd_summary = format!(
-                        "Setup command #{} failed: {:?}\nstderr: {}",
-                        index,
-                        setup_cmd,
-                        stderr_truncated.trim()
-                    );
-                    setup_failed = true;
-                    break;
-                }
-            }
-            Err(e) => {
-                setup_results.push(SetupResult {
-                    index,
-                    argv: setup_cmd.clone(),
-                    exit_code: None,
-                    stderr: e.to_string(),
-                });
-                failed_cmd_summary = format!(
-                    "Setup command #{} failed to execute: {:?}\nerror: {}",
-                    index, setup_cmd, e
-                );
-                setup_failed = true;
-                break;
-            }
-        }
-    }
-
-    // If setup failed, capture what we can and return
-    if setup_failed {
+    // Run seed setup commands in sandbox
+    let setup = run_setup_commands(seed, work_dir, &sandbox_tmp);
+    if setup.failed {
         return Ok(Evidence {
             argv: argv.to_vec(),
             seed: seed.clone(),
             stdout: String::new(),
-            stderr: failed_cmd_summary,
+            stderr: setup.error.unwrap_or_default(),
             exit_code: None,
             setup_failed: true,
-            setup_results,
+            setup_results: setup.results,
             execution_error: None,
             captured_at_ms,
             fs_diff: None,
@@ -306,15 +388,13 @@ pub(super) fn run_scenario(
     let fs_state_before = capture_fs_state(work_dir);
 
     // Build the main command with full sandbox isolation
-    // If with_pty is true, use script to allocate a PTY for color/formatting capture
-    let mut cmd = if with_pty {
-        build_sandbox_command(work_dir, &sandbox_tmp, false, Some((binary, argv)))
+    let mut cmd = build_sandbox_command(work_dir, &sandbox_tmp, false);
+    if with_pty {
+        append_pty_wrapper(&mut cmd, binary, argv);
     } else {
-        let mut c = build_sandbox_command(work_dir, &sandbox_tmp, false, None);
-        c.arg(binary);
-        c.args(argv);
-        c
-    };
+        cmd.arg(binary);
+        cmd.args(argv);
+    }
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
@@ -463,76 +543,16 @@ fn prepare_sandbox(scenario_id: &str, seed: &Seed) -> Result<PreparedSandbox> {
             .with_context(|| format!("write seed file {}", file.path))?;
     }
 
-    // Run seed setup commands
-    let mut setup_results = Vec::new();
-    let mut setup_failed = false;
-    let mut setup_error = None;
-
-    for (index, setup_cmd) in seed.setup.iter().enumerate() {
-        if setup_cmd.is_empty() {
-            continue;
-        }
-
-        // Run setup commands in sandbox (writable mode)
-        let mut cmd = build_sandbox_command(&work_dir, &sandbox_tmp, false, None);
-        cmd.arg(&setup_cmd[0]);
-        cmd.args(&setup_cmd[1..]);
-        cmd.stdout(Stdio::null());
-        cmd.stderr(Stdio::piped());
-
-        let output = cmd.output();
-
-        match output {
-            Ok(out) => {
-                let exit_code = out.status.code();
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                let stderr_truncated = if stderr.len() > 200 {
-                    format!("{}...", &stderr[..200])
-                } else {
-                    stderr.to_string()
-                };
-
-                if !out.status.success() {
-                    setup_results.push(SetupResult {
-                        index,
-                        argv: setup_cmd.clone(),
-                        exit_code,
-                        stderr: stderr_truncated.clone(),
-                    });
-                    setup_error = Some(format!(
-                        "Setup command #{} failed: {:?}\nstderr: {}",
-                        index,
-                        setup_cmd,
-                        stderr_truncated.trim()
-                    ));
-                    setup_failed = true;
-                    break;
-                }
-            }
-            Err(e) => {
-                setup_results.push(SetupResult {
-                    index,
-                    argv: setup_cmd.clone(),
-                    exit_code: None,
-                    stderr: e.to_string(),
-                });
-                setup_error = Some(format!(
-                    "Setup command #{} failed to execute: {:?}\nerror: {}",
-                    index, setup_cmd, e
-                ));
-                setup_failed = true;
-                break;
-            }
-        }
-    }
+    // Run seed setup commands in sandbox
+    let setup = run_setup_commands(seed, &work_dir, &sandbox_tmp);
 
     Ok(PreparedSandbox {
         _temp_dir: temp_dir,
         work_dir,
         sandbox_tmp,
-        setup_results,
-        setup_failed,
-        setup_error,
+        setup_results: setup.results,
+        setup_failed: setup.failed,
+        setup_error: setup.error,
         captured_at_ms,
         env,
         seed: seed.clone(),
@@ -574,14 +594,13 @@ fn run_in_sandbox(
     let fs_state_before = capture_fs_state(&sandbox.sandbox_tmp);
 
     // Build command with READ-ONLY work directory
-    let mut cmd = if with_pty {
-        build_sandbox_command(&sandbox.work_dir, &sandbox.sandbox_tmp, true, Some((binary, argv)))
+    let mut cmd = build_sandbox_command(&sandbox.work_dir, &sandbox.sandbox_tmp, true);
+    if with_pty {
+        append_pty_wrapper(&mut cmd, binary, argv);
     } else {
-        let mut c = build_sandbox_command(&sandbox.work_dir, &sandbox.sandbox_tmp, true, None);
-        c.arg(binary);
-        c.args(argv);
-        c
-    };
+        cmd.arg(binary);
+        cmd.args(argv);
+    }
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
@@ -1373,5 +1392,111 @@ mod tests {
             }
             _ => panic!("Expected Verified with SideEffect diff, got {:?}", outcome),
         }
+    }
+
+    // --- Sandbox behavioral tests ---
+    // These verify that the sandbox actually enforces isolation properties,
+    // not just that commands run. They work on both Linux (bwrap) and
+    // macOS (sandbox-exec).
+
+    /// Helper: run a shell command in the sandbox and return its output.
+    fn sandbox_run(work_dir: &Path, sandbox_tmp: &Path, readonly: bool, shell_cmd: &str) -> std::process::Output {
+        let mut cmd = build_sandbox_command(work_dir, sandbox_tmp, readonly);
+        cmd.args(["sh", "-c", shell_cmd]);
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+        cmd.output().expect("failed to run sandbox command")
+    }
+
+    /// Helper: set up a temp work directory with sandbox_tmp subdirectory.
+    fn sandbox_dirs() -> (tempfile::TempDir, PathBuf) {
+        let temp = tempfile::tempdir().unwrap();
+        let sandbox_tmp = temp.path().join("tmp");
+        fs::create_dir_all(&sandbox_tmp).unwrap();
+        let sandbox_tmp_path = sandbox_tmp.to_path_buf();
+        (temp, sandbox_tmp_path)
+    }
+
+    #[test]
+    fn test_sandbox_blocks_writes_outside_workdir() {
+        let (temp, sandbox_tmp) = sandbox_dirs();
+        let out = sandbox_run(
+            temp.path(),
+            &sandbox_tmp,
+            false,
+            "echo probe > /var/tmp/bman_sandbox_probe_test 2>&1",
+        );
+        // The write should fail — /var/tmp is outside the allowed paths
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            !out.status.success() || stdout.contains("ermission") || stderr.contains("ermission"),
+            "Write outside sandbox should be denied.\nstdout: {stdout}\nstderr: {stderr}"
+        );
+        // Clean up just in case the sandbox leaked
+        let _ = fs::remove_file("/var/tmp/bman_sandbox_probe_test");
+    }
+
+    #[test]
+    fn test_sandbox_allows_workdir_writes() {
+        let (temp, sandbox_tmp) = sandbox_dirs();
+        let out = sandbox_run(
+            temp.path(),
+            &sandbox_tmp,
+            false, // writable
+            "echo allowed > test_write.txt && cat test_write.txt",
+        );
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success(), "Writes to work_dir should succeed");
+        assert_eq!(stdout.trim(), "allowed");
+    }
+
+    #[test]
+    fn test_sandbox_readonly_blocks_workdir_writes() {
+        let (temp, sandbox_tmp) = sandbox_dirs();
+        // Pre-create a file so we can try to overwrite it
+        fs::write(temp.path().join("existing.txt"), "original").unwrap();
+
+        let _out = sandbox_run(
+            temp.path(),
+            &sandbox_tmp,
+            true, // readonly
+            "echo modified > existing.txt 2>&1",
+        );
+        // The write should fail in readonly mode
+        let content = fs::read_to_string(temp.path().join("existing.txt")).unwrap();
+        assert_eq!(content, "original", "File should not be modified in readonly mode");
+    }
+
+    #[test]
+    fn test_sandbox_allows_sandbox_tmp_writes() {
+        let (temp, sandbox_tmp) = sandbox_dirs();
+        let out = sandbox_run(
+            temp.path(),
+            &sandbox_tmp,
+            true, // even in readonly, sandbox_tmp should be writable
+            &format!("echo tmpdata > {}/probe.txt && cat {}/probe.txt",
+                sandbox_tmp.to_string_lossy(), sandbox_tmp.to_string_lossy()),
+        );
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success(), "Writes to sandbox_tmp should succeed even in readonly mode");
+        assert_eq!(stdout.trim(), "tmpdata");
+    }
+
+    #[test]
+    fn test_sandbox_blocks_network() {
+        let (temp, sandbox_tmp) = sandbox_dirs();
+        // Use bash /dev/tcp to probe network — works on both GNU and macOS bash
+        let out = sandbox_run(
+            temp.path(),
+            &sandbox_tmp,
+            false,
+            "bash -c '(echo > /dev/tcp/1.1.1.1/80) 2>/dev/null && echo connected || echo blocked'",
+        );
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            stdout.contains("blocked"),
+            "Network should be blocked in sandbox.\nstdout: {stdout}"
+        );
     }
 }

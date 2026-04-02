@@ -10,15 +10,6 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-/// Set process to die when parent exits (Linux-specific).
-#[cfg(target_os = "linux")]
-fn set_die_with_parent() {
-    unsafe {
-        // PR_SET_PDEATHSIG = 1, SIGKILL = 9
-        libc::prctl(1, 9);
-    }
-}
-
 /// External command plugin.
 ///
 /// Wraps any command that reads prompts from stdin and writes
@@ -67,10 +58,9 @@ impl LmPlugin for CommandPlugin {
         cmd.stderr(Stdio::inherit());
 
         // Ensure child process dies when parent exits
-        #[cfg(target_os = "linux")]
         unsafe {
             cmd.pre_exec(|| {
-                set_die_with_parent();
+                super::set_die_with_parent();
                 Ok(())
             });
         }

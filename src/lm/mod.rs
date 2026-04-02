@@ -13,6 +13,28 @@ pub use command::CommandPlugin;
 use anyhow::Result;
 use std::time::Duration;
 
+/// Configure a child process to die when its parent exits.
+///
+/// On Linux this uses `prctl(PR_SET_PDEATHSIG, SIGKILL)` — a kernel
+/// guarantee that survives even if the parent is SIGKILLed.
+///
+/// On macOS there is no equivalent kernel primitive. The parent process
+/// handles cleanup via `Drop` impls, which covers normal exits but not
+/// `SIGKILL` of the parent. This is an accepted limitation.
+///
+/// Called inside `pre_exec` closures to prevent orphaned subprocesses.
+#[cfg(target_os = "linux")]
+pub(crate) fn set_die_with_parent() {
+    unsafe {
+        libc::prctl(1, 9); // PR_SET_PDEATHSIG = 1, SIGKILL = 9
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn set_die_with_parent() {
+    // No equivalent on macOS; parent cleanup is handled by Drop impls.
+}
+
 /// A language model plugin for bman verification.
 ///
 /// Plugins manage the lifecycle of LM connections and provide prompt/response
