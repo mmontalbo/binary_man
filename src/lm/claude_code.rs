@@ -16,15 +16,6 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-/// Set process to die when parent exits (Linux-specific).
-#[cfg(target_os = "linux")]
-fn set_die_with_parent() {
-    unsafe {
-        // PR_SET_PDEATHSIG = 1, SIGKILL = 9
-        libc::prctl(1, 9);
-    }
-}
-
 /// Input message format for Claude CLI stream-json mode.
 #[derive(Serialize)]
 struct ClaudeInput {
@@ -99,10 +90,9 @@ impl ClaudeCodePlugin {
         cmd.stderr(Stdio::inherit());
 
         // Ensure child process dies when parent exits
-        #[cfg(target_os = "linux")]
         unsafe {
             cmd.pre_exec(|| {
-                set_die_with_parent();
+                super::set_die_with_parent();
                 Ok(())
             });
         }
