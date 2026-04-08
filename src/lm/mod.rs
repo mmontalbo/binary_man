@@ -6,9 +6,11 @@
 
 mod claude_code;
 mod command;
+mod ollama;
 
 pub use claude_code::ClaudeCodePlugin;
 pub use command::CommandPlugin;
+pub use ollama::OllamaPlugin;
 
 use anyhow::Result;
 use std::time::Duration;
@@ -63,6 +65,8 @@ pub trait LmPlugin: Send {
 pub enum LmConfig {
     /// Native Claude Code integration: "claude:haiku", "claude:sonnet"
     Claude { model: String },
+    /// Ollama local server: "ollama:model-tag"
+    Ollama { model: String },
     /// External command (any stdin→stdout LM wrapper)
     Command { cmd: String },
 }
@@ -80,6 +84,13 @@ pub fn parse_lm_arg(arg: &str, env_fallback: Option<&str>) -> LmConfig {
     // Check for native Claude plugin syntax
     if let Some(model) = arg.strip_prefix("claude:") {
         return LmConfig::Claude {
+            model: model.to_string(),
+        };
+    }
+
+    // Check for Ollama plugin syntax
+    if let Some(model) = arg.strip_prefix("ollama:") {
+        return LmConfig::Ollama {
             model: model.to_string(),
         };
     }
@@ -108,6 +119,7 @@ pub fn parse_lm_arg(arg: &str, env_fallback: Option<&str>) -> LmConfig {
 pub fn create_plugin(config: &LmConfig) -> Box<dyn LmPlugin> {
     match config {
         LmConfig::Claude { model } => Box::new(ClaudeCodePlugin::new(model)),
+        LmConfig::Ollama { model } => Box::new(OllamaPlugin::new(model)),
         LmConfig::Command { cmd } => Box::new(CommandPlugin::new(cmd)),
     }
 }
