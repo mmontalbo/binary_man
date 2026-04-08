@@ -15,6 +15,7 @@ pub fn run_single(
     max_cycles: u32,
     timeout: u64,
     run_idx: usize,
+    lm: &str,
 ) -> Result<RunOutcome> {
     let tmpdir =
         tempfile::tempdir().with_context(|| format!("create tmpdir for run {}", run_idx))?;
@@ -24,6 +25,8 @@ pub fn run_single(
         tmpdir.path().to_string_lossy().to_string(),
         "--max-cycles".to_string(),
         max_cycles.to_string(),
+        "--lm".to_string(),
+        lm.to_string(),
         binary.to_string(),
     ];
     cmd_args.extend(entry_point.iter().cloned());
@@ -73,6 +76,7 @@ pub fn run_parallel(
     max_cycles: u32,
     timeout: u64,
     num_runs: usize,
+    lm: &str,
 ) -> Result<Vec<RunOutcome>> {
     let results: Vec<Result<RunOutcome>> = std::thread::scope(|s| {
         let handles: Vec<_> = (0..num_runs)
@@ -85,6 +89,7 @@ pub fn run_parallel(
                         max_cycles,
                         timeout,
                         i,
+                        lm,
                     )?;
                     crate::display::print_run_progress(&r, i, num_runs);
                     Ok(r)

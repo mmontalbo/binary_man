@@ -48,6 +48,10 @@ struct Args {
     #[arg(long)]
     parallel: bool,
 
+    /// LM backend (e.g. "claude:haiku", "ollama:devstral-small-2:24b")
+    #[arg(long, default_value = "claude:haiku")]
+    lm: String,
+
     /// Descriptive note for this evaluation
     #[arg(long)]
     note: Option<String>,
@@ -80,6 +84,7 @@ fn main() -> Result<()> {
             args.max_cycles,
             args.timeout,
             args.runs,
+            &args.lm,
         )?
     } else {
         eprintln!("\nRunning {} trials sequentially...", args.runs);
@@ -92,6 +97,7 @@ fn main() -> Result<()> {
                 args.max_cycles,
                 args.timeout,
                 i,
+                &args.lm,
             )?;
             display::print_run_progress(&r, i, args.runs);
             runs.push(r);
@@ -217,6 +223,7 @@ fn save_eval_data(
         "max_cycles": args.max_cycles,
         "timeout": args.timeout,
         "parallel": args.parallel,
+        "lm": args.lm,
         "note": args.note,
     });
     let path = dir.join("meta.json");
