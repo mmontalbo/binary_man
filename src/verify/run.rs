@@ -288,6 +288,140 @@ impl PipelineState {
             matches!(e.status, Status::Pending) && !self.resolved.contains(&e.id)
         })
     }
+
+    /// Merge worker results back into canonical state.
+    ///
+    /// Returns true if any surface was newly verified this cycle.
+    fn merge_worker_results(
+        &mut self,
+        surface_ids: &[String],
+        worker_state: &State,
+        cycle: u32,
+    ) -> bool {
+        let mut any_verified = false;
+
+        for id in surface_ids {
+            self.in_progress.remove(id);
+
+            let Some(worker_entry) =
+                worker_state.entries.iter().find(|e| &e.id == id)
+            else {
+                continue;
+            };
+
+            // Update attempt/failure counts
+            let prev_attempts =
+                *self.attempt_counts.get(id).unwrap_or(&0);
+            let new_attempts = worker_entry.attempts.len();
+            *self.attempt_counts.entry(id.clone()).or_insert(0) =
+                prev_attempts.max(new_attempts);
+
+            let new_failures = worker_entry
+                .attempts
+                .iter()
+                .skip(prev_attempts)
+                .filter(|a| !matches!(a.outcome, Outcome::Verified { .. }))
+                .count();
+            if new_failures > 0 {
+                *self.global_failures.entry(id.clone()).or_insert(0) +=
+                    new_failures;
+            }
+
+            // Merge into canonical state
+            let total = *self.attempt_counts.get(id).unwrap_or(&0);
+            let failures =
+                *self.global_failures.get(id).unwrap_or(&0);
+            let mut mark_resolved = false;
+
+            if let Some(state_entry) =
+                self.state.entries.iter_mut().find(|e| &e.id == id)
+            {
+                let worker_resolved =
+                    !matches!(worker_entry.status, Status::Pending);
+                let state_resolved =
+                    !matches!(state_entry.status, Status::Pending);
+
+                if worker_resolved && !state_resolved {
+                    state_entry.status = worker_entry.status.clone();
+                    state_entry.attempts =
+                        worker_entry.attempts.clone();
+                    state_entry.probes =
+                        worker_entry.probes.clone();
+                    state_entry.retried = worker_entry.retried;
+                    state_entry.critique_demotions =
+                        worker_entry.critique_demotions;
+                    state_entry.critique_feedback =
+                        worker_entry.critique_feedback.clone();
+                    mark_resolved = true;
+                } else if !state_resolved {
+                    if worker_entry.attempts.len()
+                        > state_entry.attempts.len()
+                    {
+                        state_entry.attempts =
+                            worker_entry.attempts.clone();
+                    }
+                    if worker_entry.probes.len()
+                        > state_entry.probes.len()
+                    {
+                        state_entry.probes =
+                            worker_entry.probes.clone();
+                    }
+                    // Merge critique state (take highest demotion count)
+                    if worker_entry.critique_demotions
+                        > state_entry.critique_demotions
+                    {
+                        state_entry.critique_demotions =
+                            worker_entry.critique_demotions;
+                        state_entry.critique_feedback =
+                            worker_entry.critique_feedback.clone();
+                    }
+                    // Post-merge auto-exclude (adds stagnation check
+                    // the old inline code was missing)
+                    if try_auto_exclude(state_entry, total, failures) {
+                        mark_resolved = true;
+                    }
+                }
+
+                // Merge characterization updates from rechar
+                if let Some(ref wc) = worker_entry.characterization {
+                    if state_entry
+                        .characterization
+                        .as_ref()
+                        .is_none_or(|sc| sc.revision < wc.revision)
+                    {
+                        state_entry.characterization =
+                            Some(wc.clone());
+                    }
+                }
+
+                if matches!(worker_entry.status, Status::Verified) {
+                    any_verified = true;
+                }
+            }
+
+            if mark_resolved {
+                self.resolved.insert(id.clone());
+            }
+        }
+
+        // Merge seed bank
+        for seed in &worker_state.seed_bank {
+            if !self
+                .state
+                .seed_bank
+                .iter()
+                .any(|s| s.surface_id == seed.surface_id)
+            {
+                self.state.seed_bank.push(seed.clone());
+            }
+        }
+
+        if any_verified {
+            self.last_verified_cycle = cycle;
+        }
+
+        any_verified
+    }
 }
 
 /// Compute scheduling priority for a surface category.
@@ -338,6 +472,122 @@ fn is_stagnant(entry: &SurfaceEntry) -> bool {
             .all(|p| !p.outputs_differ && !p.setup_failed);
 
     test_stagnant || probe_stagnant
+}
+
+/// Try to auto-exclude a surface based on global attempt/failure counts and stagnation.
+///
+/// Returns true if the surface was excluded. Call sites:
+/// - Pre-execution (worker snapshot): quick-reject before LM call
+/// - Post-merge (canonical state): final check after merging worker results
+fn try_auto_exclude(
+    entry: &mut SurfaceEntry,
+    global_attempts: usize,
+    global_failures: usize,
+) -> bool {
+    if !matches!(entry.status, Status::Pending) || entry.has_verified_attempt() {
+        return false;
+    }
+    if global_attempts >= MAX_ATTEMPTS {
+        entry.status = Status::Excluded {
+            reason: format!("Exhausted after {} attempts", global_attempts),
+        };
+        return true;
+    }
+    if is_stagnant(entry) {
+        entry.status = Status::Excluded {
+            reason: format!(
+                "Stagnant ({} consecutive OutputsEqual)",
+                STAGNATION_THRESHOLD,
+            ),
+        };
+        return true;
+    }
+    if global_failures >= GLOBAL_FAILURE_THRESHOLD {
+        entry.status = Status::Excluded {
+            reason: format!("Globally hopeless ({} failures)", global_failures),
+        };
+        return true;
+    }
+    false
+}
+
+/// Emit a compact progress line for eval harness streaming.
+fn emit_progress(
+    ps: &PipelineState,
+    cycle: u32,
+    cycle_timing: Option<&CycleTiming>,
+    surface_ids: &[String],
+) {
+    let v = ps
+        .state
+        .entries
+        .iter()
+        .filter(|e| matches!(e.status, Status::Verified))
+        .count();
+    let t = ps.state.entries.len();
+    let ch = ps.chunks_completed;
+    let ct = ps.chunks_total;
+    // Count pred_blocked surfaces and break down by channel match
+    let mut pb = 0u32;
+    let mut pb_chan_ok = 0u32; // right channel, wrong content
+    let mut pb_chan_miss = 0u32; // wrong channel entirely
+    for e in &ps.state.entries {
+        if !matches!(e.status, Status::Pending) {
+            continue;
+        }
+        let blocked = e.attempts.iter().any(|a| {
+            matches!(a.outcome, Outcome::Verified { .. })
+                && a.prediction_matched == Some(false)
+        });
+        if blocked {
+            pb += 1;
+            // Check channel match on the most recent pred_blocked attempt
+            if let Some(a) = e.attempts.iter().rev().find(|a| {
+                matches!(a.outcome, Outcome::Verified { .. })
+                    && a.prediction_matched == Some(false)
+            }) {
+                match a.prediction_channel_matched {
+                    Some(true) => pb_chan_ok += 1,
+                    Some(false) => pb_chan_miss += 1,
+                    None => {} // legacy data, no channel info
+                }
+            }
+        }
+    }
+    let stall_len = if ps.last_verified_cycle > 0 {
+        cycle.saturating_sub(ps.last_verified_cycle)
+    } else {
+        0
+    };
+    // Per-cycle action accounting from the most recent cycle
+    let (ct_lm_ms, ct_ev_ms, ct_prompt_kb, ct_actions, ct_invalid, ct_probes, ct_tests,
+        ct_vdelta, ct_oe, ct_sf) = if let Some(ctr) = cycle_timing
+    {
+        (
+            ctr.lm_call.as_millis() as u64,
+            ctr.evidence.as_millis() as u64,
+            ctr.prompt_bytes / 1024,
+            ctr.actions_total,
+            ctr.actions_invalid,
+            ctr.probes_run,
+            ctr.tests_run,
+            ctr.verified_delta,
+            ctr.outcomes_equal,
+            ctr.outcomes_setup_failed,
+        )
+    } else {
+        (0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    };
+    let targets_str = surface_ids.join(",");
+    eprintln!(
+        "PROGRESS: cycle={} verified={}/{} chunks={}/{} pred_blocked={} \
+         pb_chan_ok={} pb_chan_miss={} \
+         stall={} lm_ms={} ev_ms={} prompt_kb={} actions={} invalid={} \
+         probes={} tests={} vdelta={} oe={} sf={} targets={}",
+        cycle, v, t, ch, ct, pb, pb_chan_ok, pb_chan_miss, stall_len, ct_lm_ms, ct_ev_ms,
+        ct_prompt_kb, ct_actions, ct_invalid, ct_probes, ct_tests, ct_vdelta, ct_oe, ct_sf,
+        targets_str,
+    );
 }
 
 /// Run the verification loop.
@@ -1007,36 +1257,10 @@ fn run_pipeline_worker(
                 {
                     let ps = lock.lock().unwrap();
                     for entry in &mut worker_state.entries {
-                        if surface_ids.contains(&entry.id)
-                            && matches!(entry.status, Status::Pending)
-                            && !entry.has_verified_attempt()
-                        {
-                            let global_attempts =
-                                *ps.attempt_counts.get(&entry.id).unwrap_or(&0);
-                            let global_failures =
-                                *ps.global_failures.get(&entry.id).unwrap_or(&0);
-                            if global_attempts >= MAX_ATTEMPTS {
-                                entry.status = Status::Excluded {
-                                    reason: format!(
-                                        "Exhausted after {} attempts",
-                                        global_attempts
-                                    ),
-                                };
-                            } else if is_stagnant(entry) {
-                                entry.status = Status::Excluded {
-                                    reason: format!(
-                                        "Stagnant ({} consecutive OutputsEqual)",
-                                        STAGNATION_THRESHOLD,
-                                    ),
-                                };
-                            } else if global_failures >= GLOBAL_FAILURE_THRESHOLD {
-                                entry.status = Status::Excluded {
-                                    reason: format!(
-                                        "Globally hopeless ({} failures)",
-                                        global_failures
-                                    ),
-                                };
-                            }
+                        if surface_ids.contains(&entry.id) {
+                            let ga = *ps.attempt_counts.get(&entry.id).unwrap_or(&0);
+                            let gf = *ps.global_failures.get(&entry.id).unwrap_or(&0);
+                            try_auto_exclude(entry, ga, gf);
                         }
                     }
                 }
@@ -1090,145 +1314,11 @@ fn run_pipeline_worker(
                 {
                     let merge_t0 = Instant::now();
                     let mut ps = lock.lock().unwrap();
-                    let mut any_verified = false;
-
-                    for id in &surface_ids {
-                        ps.in_progress.remove(id);
-
-                        let Some(worker_entry) =
-                            worker_state.entries.iter().find(|e| &e.id == id)
-                        else {
-                            continue;
-                        };
-
-                        // Update attempt/failure counts
-                        let prev_attempts =
-                            *ps.attempt_counts.get(id).unwrap_or(&0);
-                        let new_attempts = worker_entry.attempts.len();
-                        *ps.attempt_counts.entry(id.clone()).or_insert(0) =
-                            prev_attempts.max(new_attempts);
-
-                        let new_failures = worker_entry
-                            .attempts
-                            .iter()
-                            .skip(prev_attempts)
-                            .filter(|a| !matches!(a.outcome, Outcome::Verified { .. }))
-                            .count();
-                        if new_failures > 0 {
-                            *ps.global_failures.entry(id.clone()).or_insert(0) +=
-                                new_failures;
-                        }
-
-                        // Merge into canonical state
-                        // Pre-fetch counts to avoid borrowing ps while
-                        // iter_mut holds a mutable ref to ps.state.entries.
-                        let total = *ps.attempt_counts.get(id).unwrap_or(&0);
-                        let failures =
-                            *ps.global_failures.get(id).unwrap_or(&0);
-                        let mut mark_resolved = false;
-
-                        if let Some(state_entry) =
-                            ps.state.entries.iter_mut().find(|e| &e.id == id)
-                        {
-                            let worker_resolved =
-                                !matches!(worker_entry.status, Status::Pending);
-                            let state_resolved =
-                                !matches!(state_entry.status, Status::Pending);
-
-                            if worker_resolved && !state_resolved {
-                                state_entry.status = worker_entry.status.clone();
-                                state_entry.attempts =
-                                    worker_entry.attempts.clone();
-                                state_entry.probes =
-                                    worker_entry.probes.clone();
-                                state_entry.retried = worker_entry.retried;
-                                state_entry.critique_demotions =
-                                    worker_entry.critique_demotions;
-                                state_entry.critique_feedback =
-                                    worker_entry.critique_feedback.clone();
-                                mark_resolved = true;
-                            } else if !state_resolved {
-                                if worker_entry.attempts.len()
-                                    > state_entry.attempts.len()
-                                {
-                                    state_entry.attempts =
-                                        worker_entry.attempts.clone();
-                                }
-                                if worker_entry.probes.len()
-                                    > state_entry.probes.len()
-                                {
-                                    state_entry.probes =
-                                        worker_entry.probes.clone();
-                                }
-                                // Merge critique state (take highest demotion count)
-                                if worker_entry.critique_demotions
-                                    > state_entry.critique_demotions
-                                {
-                                    state_entry.critique_demotions =
-                                        worker_entry.critique_demotions;
-                                    state_entry.critique_feedback =
-                                        worker_entry.critique_feedback.clone();
-                                }
-                                if total >= MAX_ATTEMPTS
-                                    && !state_entry.has_verified_attempt()
-                                {
-                                    state_entry.status = Status::Excluded {
-                                        reason: format!(
-                                            "Exhausted after {} attempts",
-                                            total
-                                        ),
-                                    };
-                                    mark_resolved = true;
-                                } else if failures >= GLOBAL_FAILURE_THRESHOLD
-                                    && !state_entry.has_verified_attempt()
-                                {
-                                    state_entry.status = Status::Excluded {
-                                        reason: format!(
-                                            "Globally hopeless ({} failures)",
-                                            failures
-                                        ),
-                                    };
-                                    mark_resolved = true;
-                                }
-                            }
-
-                            // Merge characterization updates from rechar
-                            if let Some(ref wc) = worker_entry.characterization {
-                                if state_entry
-                                    .characterization
-                                    .as_ref()
-                                    .is_none_or(|sc| sc.revision < wc.revision)
-                                {
-                                    state_entry.characterization =
-                                        Some(wc.clone());
-                                }
-                            }
-
-                            if matches!(worker_entry.status, Status::Verified) {
-                                any_verified = true;
-                            }
-                        }
-
-                        if mark_resolved {
-                            ps.resolved.insert(id.clone());
-                        }
-                    }
-
-                    // Merge seed bank
-                    for seed in &worker_state.seed_bank {
-                        if !ps
-                            .state
-                            .seed_bank
-                            .iter()
-                            .any(|s| s.surface_id == seed.surface_id)
-                        {
-                            ps.state.seed_bank.push(seed.clone());
-                        }
-                    }
+                    let any_verified =
+                        ps.merge_worker_results(&surface_ids, &worker_state, cycle);
 
                     if any_verified {
                         last_verify_cycle = cycle;
-                        ps.last_verified_cycle = cycle;
                     }
 
                     // Periodic checkpoint
@@ -1255,77 +1345,8 @@ fn run_pipeline_worker(
                         }
                     }
 
-                    // Compact progress line (not verbose-gated) for eval harness streaming
                     if cycle.is_multiple_of(5) || any_verified {
-                        let v = ps.state.entries.iter()
-                            .filter(|e| matches!(e.status, Status::Verified))
-                            .count();
-                        let t = ps.state.entries.len();
-                        let ch = ps.chunks_completed;
-                        let ct = ps.chunks_total;
-                        // Count pred_blocked surfaces and break down by channel match
-                        let mut pb = 0u32;
-                        let mut pb_chan_ok = 0u32;  // right channel, wrong content
-                        let mut pb_chan_miss = 0u32; // wrong channel entirely
-                        for e in &ps.state.entries {
-                            if !matches!(e.status, Status::Pending) {
-                                continue;
-                            }
-                            let blocked = e.attempts.iter().any(|a| {
-                                matches!(a.outcome, Outcome::Verified { .. })
-                                    && a.prediction_matched == Some(false)
-                            });
-                            if blocked {
-                                pb += 1;
-                                // Check channel match on the most recent pred_blocked attempt
-                                if let Some(a) = e.attempts.iter().rev().find(|a| {
-                                    matches!(a.outcome, Outcome::Verified { .. })
-                                        && a.prediction_matched == Some(false)
-                                }) {
-                                    match a.prediction_channel_matched {
-                                        Some(true) => pb_chan_ok += 1,
-                                        Some(false) => pb_chan_miss += 1,
-                                        None => {} // legacy data, no channel info
-                                    }
-                                }
-                            }
-                        }
-                        let stall_len = if ps.last_verified_cycle > 0 {
-                            cycle.saturating_sub(ps.last_verified_cycle)
-                        } else {
-                            0
-                        };
-                        // Per-cycle action accounting from the most recent cycle
-                        let (ct_lm_ms, ct_ev_ms, ct_prompt_kb, ct_actions, ct_invalid,
-                             ct_probes, ct_tests, ct_vdelta, ct_oe, ct_sf) =
-                            if let Some(ref ctr) = cycle_timing {
-                                (
-                                    ctr.lm_call.as_millis() as u64,
-                                    ctr.evidence.as_millis() as u64,
-                                    ctr.prompt_bytes / 1024,
-                                    ctr.actions_total,
-                                    ctr.actions_invalid,
-                                    ctr.probes_run,
-                                    ctr.tests_run,
-                                    ctr.verified_delta,
-                                    ctr.outcomes_equal,
-                                    ctr.outcomes_setup_failed,
-                                )
-                            } else {
-                                (0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-                            };
-                        let targets_str = surface_ids.join(",");
-                        eprintln!(
-                            "PROGRESS: cycle={} verified={}/{} chunks={}/{} pred_blocked={} \
-                             pb_chan_ok={} pb_chan_miss={} \
-                             stall={} lm_ms={} ev_ms={} prompt_kb={} actions={} invalid={} \
-                             probes={} tests={} vdelta={} oe={} sf={} targets={}",
-                            cycle, v, t, ch, ct, pb, pb_chan_ok, pb_chan_miss,
-                            stall_len,
-                            ct_lm_ms, ct_ev_ms, ct_prompt_kb,
-                            ct_actions, ct_invalid, ct_probes, ct_tests,
-                            ct_vdelta, ct_oe, ct_sf, targets_str,
-                        );
+                        emit_progress(&ps, cycle, cycle_timing.as_ref(), &surface_ids);
                     }
 
                     condvar.notify_all();
