@@ -117,6 +117,7 @@ def parse_args() -> argparse.Namespace:
 
 def fail(message: str) -> int:
     sys.stderr.write(f"commit lint error: {message}\n")
+    sys.stderr.write("hint: use `python tools/format_commit.py` to generate a correctly formatted message\n")
     return 1
 
 
