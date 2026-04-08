@@ -242,6 +242,9 @@ pub struct Summary {
     pub extract_surface_min: usize,
     #[serde(default)]
     pub extract_surface_max: usize,
+    /// Per-run surface counts for variance tracking.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub surface_counts_per_run: Vec<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -437,6 +440,10 @@ pub fn build(runs: &[RunOutcome]) -> Summary {
             .map(|ed| ed.surfaces)
             .max()
             .unwrap_or(0),
+        surface_counts_per_run: runs
+            .iter()
+            .map(|r| r.surfaces.len())
+            .collect(),
     }
 }
 

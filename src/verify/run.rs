@@ -395,6 +395,10 @@ pub fn run(
 
     // Batch probe: auto-verify surfaces that show differing output mechanically
     if state.seed_bank.is_empty() && state.cycle == 0 {
+        eprintln!(
+            "PROGRESS: phase=batch_probe surfaces={}",
+            state.entries.len()
+        );
         let hits = batch_probe_surfaces(&state, verbose);
         apply_batch_probe_hits(&mut state, hits, verbose);
     }
@@ -412,7 +416,9 @@ pub fn run(
         })
         .count();
     if uncharacterized > 0 {
+        eprintln!("PROGRESS: phase=characterize pending={}", uncharacterized);
         characterize_pending_surfaces(&mut state, pack_path, lm_config, verbose)?;
+        eprintln!("PROGRESS: phase=characterize_done");
     }
 
     // Stamp experiment params for traceability

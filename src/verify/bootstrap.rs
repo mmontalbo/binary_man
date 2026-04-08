@@ -1450,7 +1450,10 @@ pub(super) struct BatchProbeHit {
 ///
 /// For each surface, runs the binary with and without the option in the
 /// same sandbox. Returns hits for surfaces that show differing output.
-pub(super) fn batch_probe_surfaces(state: &State, verbose: bool) -> Vec<BatchProbeHit> {
+pub(super) fn batch_probe_surfaces(
+    state: &State,
+    verbose: bool,
+) -> Vec<BatchProbeHit> {
     let fixture_seed = build_rich_fixture();
 
     // Collect pending surfaces with inferred args
@@ -1496,9 +1499,8 @@ pub(super) fn batch_probe_surfaces(state: &State, verbose: bool) -> Vec<BatchPro
         return Vec::new();
     }
 
-    // Run control (no option)
-    let control_argv: Vec<String> = state.context_argv.clone();
-    let control = match run_in_sandbox(&sandbox, &state.binary, &control_argv, false) {
+    // Run a single shared control
+    let control = match run_in_sandbox(&sandbox, &state.binary, &state.context_argv, false) {
         Ok(e) => e,
         Err(e) => {
             if verbose {
@@ -1508,14 +1510,11 @@ pub(super) fn batch_probe_surfaces(state: &State, verbose: bool) -> Vec<BatchPro
         }
     };
 
-    let control_stdout = &control.stdout;
-    let control_stderr = &control.stderr;
-    let control_exit = control.exit_code;
-
     let mut hits = Vec::new();
 
     // Probe each surface
     for (surface_id, extra_args) in &candidates {
+        // Option argv: context_argv + surface_id + extra_args
         let mut argv = state.context_argv.clone();
         argv.push(surface_id.clone());
         argv.extend(extra_args.iter().cloned());
@@ -1530,9 +1529,9 @@ pub(super) fn batch_probe_surfaces(state: &State, verbose: bool) -> Vec<BatchPro
             continue;
         }
 
-        let stdout_differs = evidence.stdout != *control_stdout;
-        let stderr_differs = evidence.stderr != *control_stderr;
-        let exit_code_differs = evidence.exit_code != control_exit;
+        let stdout_differs = evidence.stdout != control.stdout;
+        let stderr_differs = evidence.stderr != control.stderr;
+        let exit_code_differs = evidence.exit_code != control.exit_code;
 
         if !stdout_differs && !stderr_differs && !exit_code_differs {
             continue;
@@ -1542,7 +1541,7 @@ pub(super) fn batch_probe_surfaces(state: &State, verbose: bool) -> Vec<BatchPro
         // while control succeeded, this isn't a useful seed
         let option_errored = evidence.exit_code.is_some_and(|c| c != 0)
             && evidence.stdout.is_empty()
-            && control_exit.is_some_and(|c| c == 0);
+            && control.exit_code.is_some_and(|c| c == 0);
         if option_errored {
             continue;
         }
@@ -1551,7 +1550,7 @@ pub(super) fn batch_probe_surfaces(state: &State, verbose: bool) -> Vec<BatchPro
         // has output is degenerate — it means "matched nothing", not meaningful
         // behavior verification. These are the most common false positive in
         // batch probe (58% of find's hits were this pattern).
-        if evidence.stdout.is_empty() && !control_stdout.is_empty() && stdout_differs {
+        if evidence.stdout.is_empty() && !control.stdout.is_empty() && stdout_differs {
             continue;
         }
 
@@ -1567,10 +1566,10 @@ pub(super) fn batch_probe_surfaces(state: &State, verbose: bool) -> Vec<BatchPro
         } else {
             Some(evidence.stdout.chars().take(200).collect())
         };
-        let control_stdout_preview = if control_stdout.is_empty() {
+        let control_stdout_preview = if control.stdout.is_empty() {
             None
         } else {
-            Some(control_stdout.chars().take(200).collect())
+            Some(control.stdout.chars().take(200).collect())
         };
 
         hits.push(BatchProbeHit {

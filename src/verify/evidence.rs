@@ -386,6 +386,7 @@ pub(super) fn run_scenario(
         cmd.arg(binary);
         cmd.args(argv);
     }
+    cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
@@ -588,6 +589,7 @@ pub(super) fn run_in_sandbox(
         cmd.arg(binary);
         cmd.args(argv);
     }
+    cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
