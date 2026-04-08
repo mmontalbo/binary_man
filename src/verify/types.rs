@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
+use super::config::STAGNATION_THRESHOLD;
+
 /// Current schema version for state serialization.
 ///
 /// Version history:
@@ -153,6 +155,50 @@ impl SurfaceEntry {
         self.attempts
             .iter()
             .any(|a| matches!(a.outcome, Outcome::Verified { .. }))
+    }
+
+    /// Check if recent attempts or probes show stagnation.
+    ///
+    /// Test stagnation: N consecutive OutputsEqual test outcomes.
+    /// Probe stagnation: N consecutive identical probes (no diff, no setup failure).
+    pub(super) fn is_stagnant(&self) -> bool {
+        let test_stagnant = self.attempts.len() >= STAGNATION_THRESHOLD
+            && self
+                .attempts
+                .iter()
+                .rev()
+                .take(STAGNATION_THRESHOLD)
+                .all(|a| matches!(a.outcome, Outcome::OutputsEqual));
+
+        let probe_stagnant = self.probes.len() >= STAGNATION_THRESHOLD
+            && self
+                .probes
+                .iter()
+                .rev()
+                .take(STAGNATION_THRESHOLD)
+                .all(|p| !p.outputs_differ && !p.setup_failed);
+
+        test_stagnant || probe_stagnant
+    }
+
+    /// Check if this surface has enough evidence of failure to warrant recharacterization.
+    ///
+    /// Gates (ALL must be true):
+    /// - Has a characterization with revision < 2
+    /// - No probe has ever shown outputs_differ
+    /// - Either 2+ test attempts or 4+ identical probes
+    pub(super) fn needs_recharacterization(&self) -> bool {
+        self.characterization
+            .as_ref()
+            .is_some_and(|c| c.revision < 2)
+            && !self.probes.iter().any(|p| p.outputs_differ)
+            && (self.attempts.len() >= 2
+                || self
+                    .probes
+                    .iter()
+                    .filter(|p| !p.outputs_differ && !p.setup_failed)
+                    .count()
+                    >= 4)
     }
 
     /// Find the negation counterpart for this surface, checking both directions.

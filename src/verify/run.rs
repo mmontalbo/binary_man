@@ -73,63 +73,70 @@ struct CycleTiming {
     outcomes_setup_failed: usize,
 }
 
+impl std::ops::AddAssign<&CycleTiming> for CycleTiming {
+    fn add_assign(&mut self, rhs: &CycleTiming) {
+        self.lm_call += rhs.lm_call;
+        self.evidence += rhs.evidence;
+        self.critique += rhs.critique;
+        self.rechar += rhs.rechar;
+        self.prompt_bytes += rhs.prompt_bytes;
+        self.actions_total += rhs.actions_total;
+        self.actions_invalid += rhs.actions_invalid;
+        self.probes_run += rhs.probes_run;
+        self.tests_run += rhs.tests_run;
+        self.verified_delta += rhs.verified_delta;
+        self.outcomes_equal += rhs.outcomes_equal;
+        self.outcomes_setup_failed += rhs.outcomes_setup_failed;
+    }
+}
+
 /// Cumulative timing per worker thread.
 struct WorkerTimings {
-    lm_calls: Duration,
-    evidence: Duration,
-    critique: Duration,
-    rechar: Duration,
+    /// Accumulated from each execute_cycle call.
+    cycle: CycleTiming,
     state_clone: Duration,
     lock_wait: Duration,
     merge: Duration,
     extract: Duration,
     verify_cycles: u32,
     extract_chunks: u32,
-    // Action accounting (cumulative across cycles)
-    actions_total: usize,
-    actions_invalid: usize,
-    probes_run: usize,
-    tests_run: usize,
-    verified_delta: usize,
-    outcomes_equal: usize,
-    outcomes_setup_failed: usize,
-    prompt_bytes_total: usize,
 }
 
 impl WorkerTimings {
     fn new() -> Self {
         WorkerTimings {
-            lm_calls: Duration::ZERO,
-            evidence: Duration::ZERO,
-            critique: Duration::ZERO,
-            rechar: Duration::ZERO,
+            cycle: CycleTiming::default(),
             state_clone: Duration::ZERO,
             lock_wait: Duration::ZERO,
             merge: Duration::ZERO,
             extract: Duration::ZERO,
             verify_cycles: 0,
             extract_chunks: 0,
-            actions_total: 0,
-            actions_invalid: 0,
-            probes_run: 0,
-            tests_run: 0,
-            verified_delta: 0,
-            outcomes_equal: 0,
-            outcomes_setup_failed: 0,
-            prompt_bytes_total: 0,
         }
     }
 
     fn total_wall(&self) -> Duration {
-        self.lm_calls
-            + self.evidence
-            + self.critique
-            + self.rechar
+        self.cycle.lm_call
+            + self.cycle.evidence
+            + self.cycle.critique
+            + self.cycle.rechar
             + self.state_clone
             + self.lock_wait
             + self.merge
             + self.extract
     }
+}
+
+/// Stable configuration shared across the pipeline.
+///
+/// Bundles the 5 params that are threaded unchanged through
+/// `run_pipeline` → `run_pipeline_worker` → `execute_cycle`.
+struct VerifyContext<'a> {
+    pack_path: &'a Path,
+    lm_config: &'a LmConfig,
+    verbose: bool,
+    context_mode: ContextMode,
+    with_pty: bool,
 }
 
 /// Work item in the unified pipeline.
@@ -448,32 +455,6 @@ fn category_priority(category: &SurfaceCategory, state: &State) -> usize {
     }
 }
 
-/// Check if a surface's recent attempts or probes show stagnation.
-///
-/// Test stagnation: 3 consecutive OutputsEqual test outcomes.
-/// Probe stagnation: 3 consecutive identical probes (no diff, no setup failure).
-fn is_stagnant(entry: &SurfaceEntry) -> bool {
-    // Test stagnation (existing): consecutive OutputsEqual
-    let test_stagnant = entry.attempts.len() >= STAGNATION_THRESHOLD
-        && entry
-            .attempts
-            .iter()
-            .rev()
-            .take(STAGNATION_THRESHOLD)
-            .all(|a| matches!(a.outcome, Outcome::OutputsEqual));
-
-    // Probe stagnation (new): consecutive identical probes
-    let probe_stagnant = entry.probes.len() >= STAGNATION_THRESHOLD
-        && entry
-            .probes
-            .iter()
-            .rev()
-            .take(STAGNATION_THRESHOLD)
-            .all(|p| !p.outputs_differ && !p.setup_failed);
-
-    test_stagnant || probe_stagnant
-}
-
 /// Try to auto-exclude a surface based on global attempt/failure counts and stagnation.
 ///
 /// Returns true if the surface was excluded. Call sites:
@@ -493,7 +474,7 @@ fn try_auto_exclude(
         };
         return true;
     }
-    if is_stagnant(entry) {
+    if entry.is_stagnant() {
         entry.status = Status::Excluded {
             reason: format!(
                 "Stagnant ({} consecutive OutputsEqual)",
@@ -701,17 +682,14 @@ pub fn run(
     };
 
     // Run unified pipeline
-    let result = run_pipeline(
+    let ctx = VerifyContext {
         pack_path,
-        &mut state,
-        prep,
-        max_cycles,
         lm_config,
         verbose,
         context_mode,
-        num_workers,
         with_pty,
-    );
+    };
+    let result = run_pipeline(&mut state, prep, max_cycles, num_workers, &ctx);
 
     // Mark remaining Pending surfaces as Excluded (or recover verified ones)
     let mut final_excluded = 0;
@@ -766,17 +744,12 @@ pub fn run(
 ///
 /// All work items (extraction, characterization, verification) flow through
 /// a single priority queue. Workers pull the highest-priority item available.
-#[allow(clippy::too_many_arguments)]
 fn run_pipeline(
-    pack_path: &Path,
     state: &mut State,
     prep: Option<super::bootstrap::ExtractionPrep>,
     max_cycles: u32,
-    lm_config: &LmConfig,
-    verbose: bool,
-    context_mode: ContextMode,
     num_workers: usize,
-    with_pty: bool,
+    ctx: &VerifyContext<'_>,
 ) -> RunResult {
     let binary = state.binary.clone();
     let context_argv = state.context_argv.clone();
@@ -825,7 +798,7 @@ fn run_pipeline(
         should_save_cache = false;
     }
 
-    if verbose {
+    if ctx.verbose {
         let pending = pipeline_state
             .state
             .entries
@@ -868,12 +841,8 @@ fn run_pipeline(
                         &global_cycle,
                         &binary,
                         &context_argv,
-                        pack_path,
-                        lm_config,
                         max_cycles,
-                        verbose,
-                        context_mode,
-                        with_pty,
+                        ctx,
                     )
                 })
             })
@@ -905,11 +874,11 @@ fn run_pipeline(
                     value_hint: e.value_hint.clone(),
                 })
                 .collect();
-            save_surface_cache(pack_path, &prep.help_hash, &surfaces);
+            save_surface_cache(ctx.pack_path, &prep.help_hash, &surfaces);
         }
     }
 
-    if verbose {
+    if ctx.verbose {
         let verified = state
             .entries
             .iter()
@@ -968,10 +937,7 @@ fn print_timing_summary(worker_timings: &[WorkerTimings], wall: Duration) {
     let mut total_cycles: u32 = 0;
     let mut total_extracts: u32 = 0;
     for wt in worker_timings {
-        total.lm_calls += wt.lm_calls;
-        total.evidence += wt.evidence;
-        total.critique += wt.critique;
-        total.rechar += wt.rechar;
+        total.cycle += &wt.cycle;
         total.state_clone += wt.state_clone;
         total.lock_wait += wt.lock_wait;
         total.merge += wt.merge;
@@ -985,23 +951,23 @@ fn print_timing_summary(worker_timings: &[WorkerTimings], wall: Duration) {
     eprintln!("\n  Timing breakdown (wall: {}):", fmt_dur(wall));
     eprintln!(
         "    LM calls (verify):   {:>8}  {}",
-        fmt_dur(total.lm_calls),
-        pct(total.lm_calls, wall)
+        fmt_dur(total.cycle.lm_call),
+        pct(total.cycle.lm_call, wall)
     );
     eprintln!(
         "    Evidence execution:  {:>8}  {}",
-        fmt_dur(total.evidence),
-        pct(total.evidence, wall)
+        fmt_dur(total.cycle.evidence),
+        pct(total.cycle.evidence, wall)
     );
     eprintln!(
         "    Critique:            {:>8}  {}",
-        fmt_dur(total.critique),
-        pct(total.critique, wall)
+        fmt_dur(total.cycle.critique),
+        pct(total.cycle.critique, wall)
     );
     eprintln!(
         "    Recharacterize (LM): {:>8}  {}",
-        fmt_dur(total.rechar),
-        pct(total.rechar, wall)
+        fmt_dur(total.cycle.rechar),
+        pct(total.cycle.rechar, wall)
     );
     eprintln!(
         "    Extract (LM):        {:>8}  {}",
@@ -1043,25 +1009,20 @@ fn print_timing_summary(worker_timings: &[WorkerTimings], wall: Duration) {
 ///
 /// Each worker has its own LM plugin. One worker is reserved for extraction
 /// while chunks remain; otherwise verify takes priority.
-#[allow(clippy::too_many_arguments)]
 fn run_pipeline_worker(
     worker_idx: usize,
     pipeline: &(Mutex<PipelineState>, Condvar),
     global_cycle: &AtomicU32,
     binary: &str,
     context_argv: &[String],
-    pack_path: &Path,
-    lm_config: &LmConfig,
     max_cycles: u32,
-    verbose: bool,
-    context_mode: ContextMode,
-    with_pty: bool,
+    ctx: &VerifyContext<'_>,
 ) -> WorkerTimings {
     let mut timings = WorkerTimings::new();
     let (lock, condvar) = pipeline;
     let w = worker_idx + 1;
 
-    let mut plugin = create_plugin(lm_config);
+    let mut plugin = create_plugin(ctx.lm_config);
     if let Err(e) = plugin.init() {
         eprintln!("  W{}: failed to init LM: {}", w, e);
         return timings;
@@ -1102,19 +1063,19 @@ fn run_pipeline_worker(
                 chunk_index,
                 chunk_text,
             } => {
-                if verbose {
+                if ctx.verbose {
                     eprintln!("  W{}: extracting chunk {}", w, chunk_index);
                 }
 
                 // Build prompt and call LM (outside lock)
                 let ext_t0 = Instant::now();
                 let prompt = build_extraction_prompt(binary, context_argv, &chunk_text);
-                let response = invoke_lm_with_retry(&mut *plugin, &prompt, verbose);
+                let response = invoke_lm_with_retry(&mut *plugin, &prompt, ctx.verbose);
 
                 let mut surfaces = match response {
                     Ok(text) => parse_extraction_response(&text).unwrap_or_default(),
                     Err(e) => {
-                        if verbose {
+                        if ctx.verbose {
                             eprintln!(
                                 "  W{}: extraction chunk {} failed: {}",
                                 w, chunk_index, e
@@ -1126,7 +1087,7 @@ fn run_pipeline_worker(
 
                 // Probe-validate (outside lock)
                 if !surfaces.is_empty() {
-                    if verbose {
+                    if ctx.verbose {
                         eprintln!(
                             "  W{}: probe-validating {} candidates",
                             w,
@@ -1134,7 +1095,7 @@ fn run_pipeline_worker(
                         );
                     }
                     surfaces =
-                        probe_validate_surfaces(binary, context_argv, surfaces, verbose);
+                        probe_validate_surfaces(binary, context_argv, surfaces, ctx.verbose);
                 }
 
                 timings.extract += ext_t0.elapsed();
@@ -1150,7 +1111,7 @@ fn run_pipeline_worker(
                     ps.chunks_completed += 1;
                     ps.extracting_count -= 1;
                     let added = ps.state.entries.len() - before;
-                    if verbose && added > 0 {
+                    if ctx.verbose && added > 0 {
                         eprintln!(
                             "  W{}: chunk {} added {} surfaces ({}/{})",
                             w, chunk_index, added, ps.chunks_completed, ps.chunks_total,
@@ -1170,10 +1131,10 @@ fn run_pipeline_worker(
                 // Run batch probe outside the lock (I/O heavy)
                 if should_batch_probe {
                     let state_snapshot = lock.lock().unwrap().state.clone();
-                    let hits = batch_probe_surfaces(&state_snapshot, verbose);
+                    let hits = batch_probe_surfaces(&state_snapshot, ctx.verbose);
                     if !hits.is_empty() {
                         let mut ps = lock.lock().unwrap();
-                        apply_batch_probe_hits(&mut ps.state, hits, verbose);
+                        apply_batch_probe_hits(&mut ps.state, hits, ctx.verbose);
                         condvar.notify_all();
                     }
                 }
@@ -1189,13 +1150,13 @@ fn run_pipeline_worker(
                         ps.in_progress.remove(id);
                     }
                     condvar.notify_all();
-                    if verbose {
+                    if ctx.verbose {
                         eprintln!("  W{}: hit max cycles ({})", w, max_cycles);
                     }
                     break;
                 }
 
-                if verbose {
+                if ctx.verbose {
                     eprintln!(
                         "  W{} cycle {}: {}",
                         w, cycle,
@@ -1226,32 +1187,23 @@ fn run_pipeline_worker(
                         .filter(|e| {
                             surface_ids.contains(&e.id)
                                 && matches!(e.status, Status::Pending)
-                                && e.characterization
-                                    .as_ref()
-                                    .is_some_and(|c| c.revision < 2)
-                                && !e.probes.iter().any(|p| p.outputs_differ)
-                                && (e.attempts.len() >= 2
-                                    || e.probes
-                                        .iter()
-                                        .filter(|p| !p.outputs_differ && !p.setup_failed)
-                                        .count()
-                                        >= 4)
+                                && e.needs_recharacterization()
                         })
                         .map(|e| e.id.clone())
                         .collect();
                     for id in &rechar_candidates {
                         super::characterize::recharacterize_surface(
                             &mut worker_state,
-                            pack_path,
-                            lm_config,
-                            verbose,
+                            ctx.pack_path,
+                            ctx.lm_config,
+                            ctx.verbose,
                             id,
                         )
                         .ok();
                     }
                 }
 
-                timings.rechar += rechar_t0.elapsed();
+                timings.cycle.rechar += rechar_t0.elapsed();
 
                 // Auto-exhaust check (peek at shared counters)
                 {
@@ -1281,30 +1233,15 @@ fn run_pipeline_worker(
                 if !active_ids.is_empty() {
                     // Execute verification cycle (outside lock)
                     if let Ok(ct) = execute_cycle(
-                        pack_path,
                         &mut *plugin,
                         &mut worker_state,
                         &active_ids,
-                        verbose,
-                        context_mode,
-                        with_pty,
                         None,
                         &mut last_response,
-                        lm_config,
                         stall_cycles,
+                        ctx,
                     ) {
-                        timings.lm_calls += ct.lm_call;
-                        timings.evidence += ct.evidence;
-                        timings.critique += ct.critique;
-                        timings.rechar += ct.rechar;
-                        timings.actions_total += ct.actions_total;
-                        timings.actions_invalid += ct.actions_invalid;
-                        timings.probes_run += ct.probes_run;
-                        timings.tests_run += ct.tests_run;
-                        timings.verified_delta += ct.verified_delta;
-                        timings.outcomes_equal += ct.outcomes_equal;
-                        timings.outcomes_setup_failed += ct.outcomes_setup_failed;
-                        timings.prompt_bytes_total += ct.prompt_bytes;
+                        timings.cycle += &ct;
                         cycle_timing = Some(ct);
                     }
                     timings.verify_cycles += 1;
@@ -1327,11 +1264,11 @@ fn run_pipeline_worker(
                     {
                         ps.last_checkpoint_cycle = cycle;
                         ps.state.cycle = cycle;
-                        if let Err(e) = ps.state.save(pack_path) {
-                            if verbose {
+                        if let Err(e) = ps.state.save(ctx.pack_path) {
+                            if ctx.verbose {
                                 eprintln!("  Checkpoint save failed: {}", e);
                             }
-                        } else if verbose {
+                        } else if ctx.verbose {
                             let verified = ps
                                 .state
                                 .entries
@@ -1357,7 +1294,7 @@ fn run_pipeline_worker(
                 if last_verify_cycle > 0 && cycle - last_verify_cycle >= 10 {
                     stall_resets += 1;
                     if stall_resets >= 2 {
-                        if verbose {
+                        if ctx.verbose {
                             eprintln!(
                                 "  W{}: winding down ({} resets with no progress)",
                                 w, stall_resets,
@@ -1365,7 +1302,7 @@ fn run_pipeline_worker(
                         }
                         break;
                     }
-                    if verbose {
+                    if ctx.verbose {
                         eprintln!(
                             "  W{}: stalled, resetting LM (reset {}/2)",
                             w, stall_resets,
@@ -1380,10 +1317,42 @@ fn run_pipeline_worker(
     }
 
     plugin.shutdown().ok();
-    if verbose {
+    if ctx.verbose {
         eprintln!("  W{}: done", w);
     }
     timings
+}
+
+/// Run a list of independent scenarios in parallel, collecting successful results.
+///
+/// Each param is moved into a spawned thread and passed to `run_fn`.
+/// Failures and panics are logged with `label` and filtered out.
+fn run_scenarios_parallel<P: Send, R: Send>(
+    params: Vec<P>,
+    run_fn: impl Fn(P) -> Result<R> + Send + Sync,
+    label: &str,
+) -> Vec<R> {
+    thread::scope(|s| {
+        let run_fn = &run_fn;
+        let handles: Vec<_> = params
+            .into_iter()
+            .map(|p| s.spawn(move || run_fn(p)))
+            .collect();
+        handles
+            .into_iter()
+            .filter_map(|h| match h.join() {
+                Ok(Ok(r)) => Some(r),
+                Ok(Err(e)) => {
+                    eprintln!("  {} failed: {}", label, e);
+                    None
+                }
+                Err(_) => {
+                    eprintln!("  {} panicked", label);
+                    None
+                }
+            })
+            .collect()
+    })
 }
 
 /// Run batches of LM prompts in parallel, each with its own plugin instance.
@@ -1475,23 +1444,18 @@ pub(crate) fn invoke_lm_with_retry(
 ///
 /// Builds the prompt, invokes the LM, parses the response, and executes
 /// the resulting test actions. Updates `state` in place.
-#[allow(clippy::too_many_arguments)]
 fn execute_cycle(
-    pack_path: &Path,
     plugin: &mut dyn LmPlugin,
     state: &mut State,
     pending_ids: &[String],
-    verbose: bool,
-    context_mode: ContextMode,
-    with_pty: bool,
     prior_attempts: Option<&std::collections::HashMap<String, Vec<Attempt>>>,
     last_response: &mut Option<LmResponse>,
-    lm_config: &LmConfig,
     stall_cycles: u32,
+    ctx: &VerifyContext<'_>,
 ) -> Result<CycleTiming> {
     let mut timing = CycleTiming::default();
     // Resolve auto mode based on plugin type
-    let effective_mode = match context_mode {
+    let effective_mode = match ctx.context_mode {
         ContextMode::Auto if plugin.is_stateful() => ContextMode::Incremental,
         ContextMode::Auto => ContextMode::Full,
         other => other,
@@ -1529,13 +1493,13 @@ fn execute_cycle(
     }
 
     timing.prompt_bytes = prompt.len();
-    log_prompt(pack_path, state.cycle, &prompt)?;
+    log_prompt(ctx.pack_path, state.cycle, &prompt)?;
 
-    if verbose {
+    if ctx.verbose {
         eprintln!("  Invoking LM...");
     }
     let t0 = Instant::now();
-    let response_text = invoke_lm_with_retry(plugin, &prompt, verbose)?;
+    let response_text = invoke_lm_with_retry(plugin, &prompt, ctx.verbose)?;
     timing.lm_call += t0.elapsed();
 
     // Parse response — on failure, log raw text and reset session immediately
@@ -1543,20 +1507,20 @@ fn execute_cycle(
     let response = match parse_lm_response(&response_text) {
         Ok(r) => r,
         Err(e) => {
-            if verbose {
+            if ctx.verbose {
                 eprintln!("  Parse error: {}", e);
             }
-            log_raw_response(pack_path, state.cycle, &response_text).ok();
+            log_raw_response(ctx.pack_path, state.cycle, &response_text).ok();
             plugin.reset().ok();
             *last_response = None;
             return Ok(timing);
         }
     };
-    log_response(pack_path, state.cycle, &response)?;
+    log_response(ctx.pack_path, state.cycle, &response)?;
 
     // Reset mode: reset plugin after each successful call
     if matches!(effective_mode, ContextMode::Reset) && plugin.is_stateful() {
-        if verbose {
+        if ctx.verbose {
             eprintln!("  Resetting LM session (context_mode=reset)");
         }
         plugin.reset()?;
@@ -1564,7 +1528,7 @@ fn execute_cycle(
 
     // Handle empty response
     if response.actions.is_empty() {
-        if verbose {
+        if ctx.verbose {
             eprintln!("  LM returned no actions, resetting session");
         }
         plugin.reset().ok();
@@ -1572,7 +1536,7 @@ fn execute_cycle(
         return Ok(timing);
     }
 
-    if verbose {
+    if ctx.verbose {
         eprintln!("  LM returned {} action(s)", response.actions.len());
     }
 
@@ -1608,10 +1572,10 @@ fn execute_cycle(
 
     // 1. Apply baselines first (must complete before probes/tests)
     for action in baselines {
-        if verbose {
+        if ctx.verbose {
             eprintln!("  Applying: {}", format_action_desc(&action));
         }
-        if let Err(e) = apply_action(state, pack_path, action) {
+        if let Err(e) = apply_action(state, ctx.pack_path, action) {
             eprintln!("  Action failed: {}", e);
         }
     }
@@ -1622,7 +1586,7 @@ fn execute_cycle(
     // 2. Run probes in parallel (bilateral comparison)
     let evidence_start = Instant::now();
     if !probes.is_empty() {
-        if verbose {
+        if ctx.verbose {
             eprintln!("  Running {} probe(s) in parallel...", probes.len());
         }
 
@@ -1642,48 +1606,27 @@ fn execute_cycle(
             })
             .collect();
 
-        let probe_results: Vec<_> = thread::scope(|s| {
-            let handles: Vec<_> = probe_params
-                .into_iter()
-                .map(|(surface_id, extra_args, seed)| {
-                    let binary = &state.binary;
-                    let context_argv = &state.context_argv;
-                    let cycle = state.cycle;
-                    s.spawn(move || {
-                        run_probe_scenario(
-                            binary,
-                            context_argv,
-                            cycle,
-                            &surface_id,
-                            extra_args,
-                            seed,
-                            with_pty,
-                        )
-                    })
-                })
-                .collect();
-
-            handles
-                .into_iter()
-                .filter_map(|h| match h.join() {
-                    Ok(Ok(result)) => Some(result),
-                    Ok(Err(e)) => {
-                        eprintln!("  Probe scenario failed: {}", e);
-                        None
-                    }
-                    Err(_) => {
-                        eprintln!("  Probe thread panicked");
-                        None
-                    }
-                })
-                .collect()
-        });
+        let probe_results = {
+            let binary = &state.binary;
+            let context_argv = &state.context_argv;
+            let cycle = state.cycle;
+            let with_pty = ctx.with_pty;
+            run_scenarios_parallel(
+                probe_params,
+                |(surface_id, extra_args, seed)| {
+                    run_probe_scenario(
+                        binary, context_argv, cycle, &surface_id, extra_args, seed, with_pty,
+                    )
+                },
+                "Probe",
+            )
+        };
 
         // Collect probes that show differing outputs for auto-promotion
         timing.probes_run = probe_results.len();
         let mut auto_promote = Vec::new();
         for result in probe_results {
-            if verbose {
+            if ctx.verbose {
                 let status = if result.setup_failed {
                     "SetupFailed".to_string()
                 } else if result.outputs_differ {
@@ -1710,52 +1653,34 @@ fn execute_cycle(
 
         // Auto-promote differing probes to Tests (no LM round-trip needed)
         if !auto_promote.is_empty() {
-            if verbose {
+            if ctx.verbose {
                 eprintln!(
                     "  Auto-promoting {} probe(s) to tests...",
                     auto_promote.len()
                 );
             }
-            let promote_results: Vec<_> = thread::scope(|s| {
-                let handles: Vec<_> = auto_promote
-                    .into_iter()
-                    .map(|(surface_id, extra_args, seed)| {
-                        let binary = &state.binary;
-                        let context_argv = &state.context_argv;
-                        let cycle = state.cycle;
-                        s.spawn(move || {
-                            run_test_scenario(
-                                pack_path,
-                                binary,
-                                context_argv,
-                                cycle,
-                                &surface_id,
-                                extra_args,
-                                seed,
-                                with_pty,
-                                None, // No prediction for auto-promoted tests
-                            )
-                        })
-                    })
-                    .collect();
-
-                handles
-                    .into_iter()
-                    .filter_map(|h| match h.join() {
-                        Ok(Ok(result)) => Some(result),
-                        Ok(Err(e)) => {
-                            eprintln!("  Auto-promote test failed: {}", e);
-                            None
-                        }
-                        Err(_) => None,
-                    })
-                    .collect()
-            });
+            let promote_results = {
+                let binary = &state.binary;
+                let context_argv = &state.context_argv;
+                let cycle = state.cycle;
+                let pack_path = ctx.pack_path;
+                let with_pty = ctx.with_pty;
+                run_scenarios_parallel(
+                    auto_promote,
+                    |(surface_id, extra_args, seed)| {
+                        run_test_scenario(
+                            pack_path, binary, context_argv, cycle, &surface_id,
+                            extra_args, seed, with_pty, None,
+                        )
+                    },
+                    "Auto-promote",
+                )
+            };
 
             timing.tests_run += promote_results.len();
             for result in promote_results {
                 let is_verified = matches!(result.outcome, Outcome::Verified { .. });
-                if verbose {
+                if ctx.verbose {
                     eprintln!(
                         "  Auto-promoted {} → {:?}",
                         result.surface_id,
@@ -1776,7 +1701,7 @@ fn execute_cycle(
 
     // 3. Run tests in parallel
     if !tests.is_empty() {
-        if verbose {
+        if ctx.verbose {
             eprintln!("  Running {} test(s) in parallel...", tests.len());
         }
 
@@ -1793,7 +1718,7 @@ fn execute_cycle(
                     ..
                 } = action
                 {
-                    let surface_pty = with_pty
+                    let surface_pty = ctx.with_pty
                         || state.entries.iter().any(|e| {
                             e.id == surface_id
                                 && matches!(e.category, SurfaceCategory::TtyDependent)
@@ -1805,45 +1730,22 @@ fn execute_cycle(
             })
             .collect();
 
-        // Run scenarios in parallel using thread::scope
-        let results: Vec<_> = thread::scope(|s| {
-            let handles: Vec<_> = test_params
-                .into_iter()
-                .map(|(surface_id, extra_args, seed, prediction, surface_pty)| {
-                    let binary = &state.binary;
-                    let context_argv = &state.context_argv;
-                    let cycle = state.cycle;
-                    s.spawn(move || {
-                        run_test_scenario(
-                            pack_path,
-                            binary,
-                            context_argv,
-                            cycle,
-                            &surface_id,
-                            extra_args,
-                            seed,
-                            surface_pty,
-                            prediction,
-                        )
-                    })
-                })
-                .collect();
-
-            handles
-                .into_iter()
-                .filter_map(|h| match h.join() {
-                    Ok(Ok(result)) => Some(result),
-                    Ok(Err(e)) => {
-                        eprintln!("  Test scenario failed: {}", e);
-                        None
-                    }
-                    Err(_) => {
-                        eprintln!("  Test thread panicked");
-                        None
-                    }
-                })
-                .collect()
-        });
+        let results = {
+            let binary = &state.binary;
+            let context_argv = &state.context_argv;
+            let cycle = state.cycle;
+            let pack_path = ctx.pack_path;
+            run_scenarios_parallel(
+                test_params,
+                |(surface_id, extra_args, seed, prediction, surface_pty)| {
+                    run_test_scenario(
+                        pack_path, binary, context_argv, cycle, &surface_id,
+                        extra_args, seed, surface_pty, prediction,
+                    )
+                },
+                "Test",
+            )
+        };
 
         // Merge results into state and collect newly verified / failed IDs
         timing.tests_run += results.len();
@@ -1857,7 +1759,7 @@ fn execute_cycle(
             if matches!(result.outcome, Outcome::SetupFailed { .. }) {
                 timing.outcomes_setup_failed += 1;
             }
-            if verbose {
+            if ctx.verbose {
                 eprintln!(
                     "  {} → {:?}",
                     result.surface_id,
@@ -1888,41 +1790,24 @@ fn execute_cycle(
             let t0 = Instant::now();
             super::critique::critique_surfaces(
                 state,
-                pack_path,
-                lm_config,
-                verbose,
+                ctx.pack_path,
+                ctx.lm_config,
+                ctx.verbose,
                 &newly_verified,
             )?;
             timing.critique += t0.elapsed();
         }
 
-        // Evidence-gated recharacterization: only recharacterize when there's
-        // genuine evidence the characterization is wrong, not just on any failure.
-        // Gates (ALL must be true):
-        //   - 3+ total attempts
-        //   - No probe has ever shown outputs_differ (trigger never validated)
-        //   - revision < 2 (hard ceiling to prevent wasted cycles)
         for surface_id in &newly_equal {
             let needs_rechar = state
                 .entries
                 .iter()
                 .find(|e| e.id == *surface_id)
-                .is_some_and(|e| {
-                    let has_room = e.characterization.as_ref().is_some_and(|c| c.revision < 2);
-                    let no_probe_validated = !e.probes.iter().any(|p| p.outputs_differ);
-                    let enough_attempts = e.attempts.len() >= 2;
-                    let enough_identical_probes = e
-                        .probes
-                        .iter()
-                        .filter(|p| !p.outputs_differ && !p.setup_failed)
-                        .count()
-                        >= 4;
-                    has_room && no_probe_validated && (enough_attempts || enough_identical_probes)
-                });
+                .is_some_and(|e| e.needs_recharacterization());
             if needs_rechar {
                 let t0 = Instant::now();
                 super::characterize::recharacterize_surface(
-                    state, pack_path, lm_config, verbose, surface_id,
+                    state, ctx.pack_path, ctx.lm_config, ctx.verbose, surface_id,
                 )?;
                 timing.rechar += t0.elapsed();
             }
