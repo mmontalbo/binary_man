@@ -3,8 +3,10 @@
 //! Builds structured prompts that give the LM all the context it needs to
 //! decide on actions. The prompt format is intentionally simple and human-readable.
 
+use super::config::COMPANION_HINTS;
 use super::types::{
     extract_known_issues, Attempt, KnownIssue, Outcome, State, Status, SurfaceCategory,
+    SurfaceEntry,
 };
 
 /// Format the known issues section for the prompt.
@@ -59,6 +61,28 @@ fn format_valid_surfaces_constraint(state: &State, target_ids: &[String]) -> Str
 }
 
 use super::config::{MAX_PRIOR_ATTEMPTS, SEED_SUMMARY_MAX_LEN};
+
+/// Format companion dependency hint for a surface entry.
+///
+/// Returns None if hints are disabled or the entry is a Modifier
+/// (which already gets "include base in extra_args").
+/// Emits a generic reminder that some options need companion flags.
+fn format_companion_hint(entry: &SurfaceEntry) -> Option<String> {
+    if !COMPANION_HINTS {
+        return None;
+    }
+    // Skip for Modifier surfaces — they already get base-inclusion guidance
+    if matches!(entry.category, SurfaceCategory::Modifier { .. }) {
+        return None;
+    }
+    Some(
+        "**Dependency note**: Some options are no-ops without a companion flag \
+         (e.g., a mode flag like -c or -x). If this option doesn't produce \
+         observable output alone, try combining it with related flags \
+         from its description.\n"
+            .to_string(),
+    )
+}
 
 /// Format attempt history for retry prompts.
 ///
@@ -235,6 +259,11 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
                     "\n**First attempt** — reason about what input would make this \
                      option produce visibly different output, then build a seed for that.\n",
                 );
+            }
+
+            // Show companion dependency hint
+            if let Some(hint) = format_companion_hint(entry) {
+                prompt.push_str(&format!("\n{}", hint));
             }
 
             // Show critique feedback if a prior verification was rejected
@@ -472,6 +501,11 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
                                  \x20   Does the seed actually create the trigger condition?\n",
                                 char.trigger, char.expected_diff
                             ));
+                            if COMPANION_HINTS {
+                                prompt.push_str(
+                                    "    This option may need a companion flag (e.g., a mode flag) to produce output.\n",
+                                );
+                            }
                         } else {
                             prompt.push_str(
                                 "    → Outputs matched! Try a different seed that exercises the option's effect.\n",
@@ -588,6 +622,11 @@ pub(super) fn build_retry_prompt(
                     char.trigger, char.expected_diff
                 ));
                 prompt.push_str("→ Build a seed that creates the trigger condition.\n");
+            }
+
+            // Show companion dependency hint
+            if let Some(hint) = format_companion_hint(entry) {
+                prompt.push_str(&format!("\n{}", hint));
             }
 
             // Include prior attempt history if available (each surface only sees its own)
@@ -750,6 +789,11 @@ pub(super) fn build_incremental_prompt(
                                                 "    → Trigger was \"{}\". Does your seed create that condition?\n",
                                                 char.trigger
                                             ));
+                                            if COMPANION_HINTS {
+                                                prompt.push_str(
+                                                    "    This option may need a companion flag (e.g., a mode flag) to produce output.\n",
+                                                );
+                                            }
                                         }
                                     }
                                     // Include stderr for OptionError
@@ -852,6 +896,11 @@ pub(super) fn build_incremental_prompt(
                     );
                 }
                 _ => {}
+            }
+
+            // Companion dependency hint (skip for Modifier — already has base-inclusion guidance)
+            if let Some(hint) = format_companion_hint(entry) {
+                prompt.push_str(&format!("  {}", hint));
             }
 
             if let Some(feedback) = &entry.critique_feedback {

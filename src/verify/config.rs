@@ -47,6 +47,13 @@ pub const CHECKPOINT_INTERVAL: u32 = 10;
 /// Maximum concurrent probes during batch probe phase.
 pub const MAX_CONCURRENT_PROBES: usize = 16;
 
+// ── Companions ───────────────────────────────────────────────────
+
+/// Include generic companion dependency hints in verification prompts.
+/// When true, prompts remind the LM that some options need companion flags
+/// for observable output (e.g., a mode flag like -c or -x).
+pub const COMPANION_HINTS: bool = true;
+
 // ── Extraction ───────────────────────────────────────────────────
 
 /// Target size (in characters) for each extraction chunk sent to LM.
@@ -94,5 +101,6 @@ pub fn experiment_params() -> serde_json::Value {
             "no_shell_escaping",
             "sandbox_writable_tmp",
         ],
+        "companion_hints": COMPANION_HINTS,
     })
 }

@@ -14,6 +14,7 @@ use super::types::{Characterization, State, Status};
 use crate::lm::{create_plugin, LmConfig};
 use anyhow::Result;
 use std::path::Path;
+use std::thread;
 
 /// Characterize all pending surfaces that lack a characterization.
 ///
@@ -49,28 +50,55 @@ pub(super) fn characterize_pending_surfaces(
         );
     }
 
-    let mut plugin = create_plugin(lm_config);
-    plugin.init()?;
+    // Build all prompts upfront (needs &state, which we can't send across threads)
+    let chunks: Vec<Vec<String>> = pending_ids
+        .chunks(CHARACTERIZE_CHUNK_SIZE)
+        .map(|c| c.to_vec())
+        .collect();
 
-    let mut total_characterized = 0;
+    let prompts: Vec<String> = chunks
+        .iter()
+        .map(|chunk| build_bulk_characterize_prompt(state, chunk))
+        .collect();
 
-    for chunk in pending_ids.chunks(CHARACTERIZE_CHUNK_SIZE) {
-        let prompt = build_bulk_characterize_prompt(state, chunk);
-
-        let response_text =
-            match super::run::invoke_lm_with_retry(&mut *plugin, &prompt, verbose) {
-                Ok(text) => text,
-                Err(e) => {
-                    if verbose {
-                        eprintln!("  Characterization chunk failed: {}", e);
+    // Run LM calls in parallel across chunks
+    let results_collected: Vec<Vec<(String, Characterization)>> = thread::scope(|s| {
+        let handles: Vec<_> = chunks
+            .iter()
+            .zip(prompts.iter())
+            .enumerate()
+            .map(|(i, (chunk_ids, prompt))| {
+                s.spawn(move || {
+                    let mut plugin = create_plugin(lm_config);
+                    if plugin.init().is_err() {
+                        return vec![];
                     }
-                    continue;
-                }
-            };
+                    let response_text =
+                        match super::run::invoke_lm_with_retry(&mut *plugin, prompt, verbose) {
+                            Ok(text) => text,
+                            Err(e) => {
+                                if verbose {
+                                    eprintln!("  Characterization chunk {} failed: {}", i, e);
+                                }
+                                plugin.shutdown().ok();
+                                return vec![];
+                            }
+                        };
+                    plugin.shutdown().ok();
+                    parse_characterize_response(&response_text, chunk_ids)
+                })
+            })
+            .collect();
 
-        let chunk_ids: Vec<String> = chunk.to_vec();
-        let results = parse_characterize_response(&response_text, &chunk_ids);
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap_or_default())
+            .collect()
+    });
 
+    // Apply results to state
+    let mut total_characterized = 0;
+    for results in results_collected {
         for (surface_id, char) in results {
             if let Some(entry) = state.entries.iter_mut().find(|e| e.id == surface_id) {
                 entry.characterization = Some(char);
@@ -78,8 +106,6 @@ pub(super) fn characterize_pending_surfaces(
             }
         }
     }
-
-    plugin.shutdown().ok();
 
     if verbose {
         eprintln!(
