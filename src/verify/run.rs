@@ -9,6 +9,7 @@
 
 use super::apply::{
     apply_action, merge_probe_result, merge_test_result, run_probe_scenario, run_test_scenario,
+    ScenarioContext,
 };
 use super::characterize::characterize_pending_surfaces;
 use super::bootstrap::{
@@ -1440,6 +1441,221 @@ pub(crate) fn invoke_lm_with_retry(
     Err(anyhow!("LM invocation failed after retries"))
 }
 
+/// Run probe scenarios in parallel, auto-promote differing probes to formal tests.
+/// Returns surface IDs newly verified via auto-promotion.
+fn execute_probes(
+    state: &mut State,
+    probes: Vec<LmAction>,
+    ctx: &VerifyContext<'_>,
+    timing: &mut CycleTiming,
+) -> Vec<String> {
+    let mut newly_verified = Vec::new();
+    if probes.is_empty() {
+        return newly_verified;
+    }
+
+    if ctx.verbose {
+        eprintln!("  Running {} probe(s) in parallel...", probes.len());
+    }
+
+    let probe_params: Vec<_> = probes
+        .into_iter()
+        .filter_map(|action| {
+            if let LmAction::Probe {
+                surface_id,
+                extra_args,
+                seed,
+            } = action
+            {
+                Some((surface_id, extra_args, seed))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let probe_results = {
+        let sc = ScenarioContext {
+            pack_path: ctx.pack_path,
+            binary: &state.binary,
+            context_argv: &state.context_argv,
+            cycle: state.cycle,
+            with_pty: ctx.with_pty,
+        };
+        run_scenarios_parallel(
+            probe_params,
+            |(surface_id, extra_args, seed)| {
+                run_probe_scenario(&sc, &surface_id, extra_args, seed)
+            },
+            "Probe",
+        )
+    };
+
+    timing.probes_run = probe_results.len();
+    let mut auto_promote = Vec::new();
+    for result in probe_results {
+        if ctx.verbose {
+            let status = if result.setup_failed {
+                "SetupFailed".to_string()
+            } else if result.outputs_differ {
+                "DIFFER (auto-promote)".to_string()
+            } else {
+                match result.exit_code {
+                    Some(0) => "identical".to_string(),
+                    Some(c) => format!("exit {}", c),
+                    None => "NoExit".to_string(),
+                }
+            };
+            eprintln!("  Probe {} → {}", result.surface_id, status);
+        }
+        if result.outputs_differ && !result.setup_failed {
+            auto_promote.push((
+                result.surface_id.clone(),
+                result.extra_args.clone(),
+                result.seed.clone(),
+            ));
+        }
+        merge_probe_result(state, result);
+    }
+
+    if !auto_promote.is_empty() {
+        if ctx.verbose {
+            eprintln!(
+                "  Auto-promoting {} probe(s) to tests...",
+                auto_promote.len()
+            );
+        }
+        let promote_results = {
+            let sc = ScenarioContext {
+                pack_path: ctx.pack_path,
+                binary: &state.binary,
+                context_argv: &state.context_argv,
+                cycle: state.cycle,
+                with_pty: ctx.with_pty,
+            };
+            run_scenarios_parallel(
+                auto_promote,
+                |(surface_id, extra_args, seed)| {
+                    run_test_scenario(&sc, &surface_id, extra_args, seed, sc.with_pty, None)
+                },
+                "Auto-promote",
+            )
+        };
+
+        timing.tests_run += promote_results.len();
+        for result in promote_results {
+            let is_verified = matches!(result.outcome, Outcome::Verified { .. });
+            if ctx.verbose {
+                eprintln!(
+                    "  Auto-promoted {} → {:?}",
+                    result.surface_id,
+                    if is_verified {
+                        "Verified"
+                    } else {
+                        "not verified"
+                    }
+                );
+            }
+            if is_verified {
+                newly_verified.push(result.surface_id.clone());
+            }
+            merge_test_result(state, result);
+        }
+    }
+
+    newly_verified
+}
+
+/// Run test scenarios in parallel and merge results.
+/// Returns (newly_verified_ids, newly_equal_ids).
+fn execute_tests(
+    state: &mut State,
+    tests: Vec<LmAction>,
+    ctx: &VerifyContext<'_>,
+    timing: &mut CycleTiming,
+) -> (Vec<String>, Vec<String>) {
+    if ctx.verbose {
+        eprintln!("  Running {} test(s) in parallel...", tests.len());
+    }
+
+    let test_params: Vec<_> = tests
+        .into_iter()
+        .filter_map(|action| {
+            if let LmAction::Test {
+                surface_id,
+                extra_args,
+                seed,
+                prediction,
+                ..
+            } = action
+            {
+                let surface_pty = ctx.with_pty
+                    || state.entries.iter().any(|e| {
+                        e.id == surface_id
+                            && matches!(e.category, SurfaceCategory::TtyDependent)
+                    });
+                Some((surface_id, extra_args, seed, prediction, surface_pty))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let results = {
+        let sc = ScenarioContext {
+            pack_path: ctx.pack_path,
+            binary: &state.binary,
+            context_argv: &state.context_argv,
+            cycle: state.cycle,
+            with_pty: ctx.with_pty,
+        };
+        run_scenarios_parallel(
+            test_params,
+            |(surface_id, extra_args, seed, prediction, surface_pty)| {
+                run_test_scenario(&sc, &surface_id, extra_args, seed, surface_pty, prediction)
+            },
+            "Test",
+        )
+    };
+
+    timing.tests_run += results.len();
+    let mut newly_verified = Vec::new();
+    let mut newly_equal = Vec::new();
+    for result in results {
+        let is_verified = matches!(result.outcome, Outcome::Verified { .. });
+        let is_equal = matches!(result.outcome, Outcome::OutputsEqual);
+        if is_equal {
+            timing.outcomes_equal += 1;
+        }
+        if matches!(result.outcome, Outcome::SetupFailed { .. }) {
+            timing.outcomes_setup_failed += 1;
+        }
+        if ctx.verbose {
+            eprintln!(
+                "  {} → {:?}",
+                result.surface_id,
+                match &result.outcome {
+                    Outcome::Verified { diff_kind } => format!("Verified ({:?})", diff_kind),
+                    Outcome::OutputsEqual => "OutputsEqual".to_string(),
+                    Outcome::SetupFailed { .. } => "SetupFailed".to_string(),
+                    Outcome::Crashed { .. } => "Crashed".to_string(),
+                    Outcome::ExecutionError { .. } => "ExecutionError".to_string(),
+                    Outcome::OptionError { .. } => "OptionError".to_string(),
+                }
+            );
+        }
+        if is_verified {
+            newly_verified.push(result.surface_id.clone());
+        }
+        if is_equal {
+            newly_equal.push(result.surface_id.clone());
+        }
+        merge_test_result(state, result);
+    }
+
+    (newly_verified, newly_equal)
+}
+
 /// Execute a single verification cycle for the given pending surfaces.
 ///
 /// Builds the prompt, invokes the LM, parses the response, and executes
@@ -1580,212 +1796,17 @@ fn execute_cycle(
         }
     }
 
-    // Track verified surfaces across both probes (auto-promoted) and tests
-    let mut newly_verified = Vec::new();
-
-    // 2. Run probes in parallel (bilateral comparison)
+    // 2. Run probes in parallel (bilateral comparison + auto-promote)
     let evidence_start = Instant::now();
-    if !probes.is_empty() {
-        if ctx.verbose {
-            eprintln!("  Running {} probe(s) in parallel...", probes.len());
-        }
-
-        let probe_params: Vec<_> = probes
-            .into_iter()
-            .filter_map(|action| {
-                if let LmAction::Probe {
-                    surface_id,
-                    extra_args,
-                    seed,
-                } = action
-                {
-                    Some((surface_id, extra_args, seed))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        let probe_results = {
-            let binary = &state.binary;
-            let context_argv = &state.context_argv;
-            let cycle = state.cycle;
-            let with_pty = ctx.with_pty;
-            run_scenarios_parallel(
-                probe_params,
-                |(surface_id, extra_args, seed)| {
-                    run_probe_scenario(
-                        binary, context_argv, cycle, &surface_id, extra_args, seed, with_pty,
-                    )
-                },
-                "Probe",
-            )
-        };
-
-        // Collect probes that show differing outputs for auto-promotion
-        timing.probes_run = probe_results.len();
-        let mut auto_promote = Vec::new();
-        for result in probe_results {
-            if ctx.verbose {
-                let status = if result.setup_failed {
-                    "SetupFailed".to_string()
-                } else if result.outputs_differ {
-                    "DIFFER (auto-promote)".to_string()
-                } else {
-                    match result.exit_code {
-                        Some(0) => "identical".to_string(),
-                        Some(c) => format!("exit {}", c),
-                        None => "NoExit".to_string(),
-                    }
-                };
-                eprintln!("  Probe {} → {}", result.surface_id, status);
-            }
-            // Auto-promote: probe showed outputs differ → run as formal Test
-            if result.outputs_differ && !result.setup_failed {
-                auto_promote.push((
-                    result.surface_id.clone(),
-                    result.extra_args.clone(),
-                    result.seed.clone(),
-                ));
-            }
-            merge_probe_result(state, result);
-        }
-
-        // Auto-promote differing probes to Tests (no LM round-trip needed)
-        if !auto_promote.is_empty() {
-            if ctx.verbose {
-                eprintln!(
-                    "  Auto-promoting {} probe(s) to tests...",
-                    auto_promote.len()
-                );
-            }
-            let promote_results = {
-                let binary = &state.binary;
-                let context_argv = &state.context_argv;
-                let cycle = state.cycle;
-                let pack_path = ctx.pack_path;
-                let with_pty = ctx.with_pty;
-                run_scenarios_parallel(
-                    auto_promote,
-                    |(surface_id, extra_args, seed)| {
-                        run_test_scenario(
-                            pack_path, binary, context_argv, cycle, &surface_id,
-                            extra_args, seed, with_pty, None,
-                        )
-                    },
-                    "Auto-promote",
-                )
-            };
-
-            timing.tests_run += promote_results.len();
-            for result in promote_results {
-                let is_verified = matches!(result.outcome, Outcome::Verified { .. });
-                if ctx.verbose {
-                    eprintln!(
-                        "  Auto-promoted {} → {:?}",
-                        result.surface_id,
-                        if is_verified {
-                            "Verified"
-                        } else {
-                            "not verified"
-                        }
-                    );
-                }
-                if is_verified {
-                    newly_verified.push(result.surface_id.clone());
-                }
-                merge_test_result(state, result);
-            }
-        }
-    }
+    let mut newly_verified = execute_probes(state, probes, ctx, &mut timing);
 
     // 3. Run tests in parallel
     if !tests.is_empty() {
-        if ctx.verbose {
-            eprintln!("  Running {} test(s) in parallel...", tests.len());
-        }
-
-        // Extract test parameters for parallel execution.
-        // Auto-enable PTY for TTY-dependent surfaces.
-        let test_params: Vec<_> = tests
-            .into_iter()
-            .filter_map(|action| {
-                if let LmAction::Test {
-                    surface_id,
-                    extra_args,
-                    seed,
-                    prediction,
-                    ..
-                } = action
-                {
-                    let surface_pty = ctx.with_pty
-                        || state.entries.iter().any(|e| {
-                            e.id == surface_id
-                                && matches!(e.category, SurfaceCategory::TtyDependent)
-                        });
-                    Some((surface_id, extra_args, seed, prediction, surface_pty))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        let results = {
-            let binary = &state.binary;
-            let context_argv = &state.context_argv;
-            let cycle = state.cycle;
-            let pack_path = ctx.pack_path;
-            run_scenarios_parallel(
-                test_params,
-                |(surface_id, extra_args, seed, prediction, surface_pty)| {
-                    run_test_scenario(
-                        pack_path, binary, context_argv, cycle, &surface_id,
-                        extra_args, seed, surface_pty, prediction,
-                    )
-                },
-                "Test",
-            )
-        };
-
-        // Merge results into state and collect newly verified / failed IDs
-        timing.tests_run += results.len();
-        let mut newly_equal = Vec::new();
-        for result in results {
-            let is_verified = matches!(result.outcome, Outcome::Verified { .. });
-            let is_equal = matches!(result.outcome, Outcome::OutputsEqual);
-            if is_equal {
-                timing.outcomes_equal += 1;
-            }
-            if matches!(result.outcome, Outcome::SetupFailed { .. }) {
-                timing.outcomes_setup_failed += 1;
-            }
-            if ctx.verbose {
-                eprintln!(
-                    "  {} → {:?}",
-                    result.surface_id,
-                    match &result.outcome {
-                        Outcome::Verified { diff_kind } => format!("Verified ({:?})", diff_kind),
-                        Outcome::OutputsEqual => "OutputsEqual".to_string(),
-                        Outcome::SetupFailed { .. } => "SetupFailed".to_string(),
-                        Outcome::Crashed { .. } => "Crashed".to_string(),
-                        Outcome::ExecutionError { .. } => "ExecutionError".to_string(),
-                        Outcome::OptionError { .. } => "OptionError".to_string(),
-                    }
-                );
-            }
-            if is_verified {
-                newly_verified.push(result.surface_id.clone());
-            }
-            if is_equal {
-                newly_equal.push(result.surface_id.clone());
-            }
-            merge_test_result(state, result);
-        }
-
+        let (test_verified, newly_equal) = execute_tests(state, tests, ctx, &mut timing);
+        newly_verified.extend(test_verified);
         timing.evidence += evidence_start.elapsed();
 
         // Inline critique: immediately review newly verified surfaces.
-        // Demoted surfaces go back to Pending and get retried in subsequent cycles.
         if !newly_verified.is_empty() {
             let t0 = Instant::now();
             super::critique::critique_surfaces(
@@ -1800,9 +1821,7 @@ fn execute_cycle(
 
         for surface_id in &newly_equal {
             let needs_rechar = state
-                .entries
-                .iter()
-                .find(|e| e.id == *surface_id)
+                .find_entry(surface_id)
                 .is_some_and(|e| e.needs_recharacterization());
             if needs_rechar {
                 let t0 = Instant::now();

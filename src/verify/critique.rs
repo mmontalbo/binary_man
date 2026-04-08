@@ -70,7 +70,7 @@ pub(super) fn critique_surfaces(
     let mut demoted_count = 0;
     for judgments in all_judgments {
         for (surface_id, action) in judgments {
-            if let Some(entry) = state.entries.iter_mut().find(|e| e.id == surface_id) {
+            if let Some(entry) = state.find_entry_mut(&surface_id) {
                 match action {
                     Action::Accept => {
                         if verbose {
@@ -143,7 +143,7 @@ fn build_prompt(state: &State, surface_ids: &[String], pack_path: &Path) -> Stri
     prompt.push_str("## Surfaces to Review\n\n");
 
     for surface_id in surface_ids {
-        if let Some(entry) = state.entries.iter().find(|e| e.id == *surface_id) {
+        if let Some(entry) = state.find_entry(surface_id) {
             prompt.push_str(&format!("### {}\n\n", surface_id));
             prompt.push_str(&format!("**Description**: {}\n\n", entry.description));
 

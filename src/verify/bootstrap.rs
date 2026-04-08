@@ -1597,7 +1597,7 @@ pub(super) fn apply_batch_probe_hits(state: &mut State, hits: Vec<BatchProbeHit>
 
     for hit in hits {
         // Find entry and mark Verified
-        if let Some(entry) = state.entries.iter_mut().find(|e| e.id == hit.surface_id) {
+        if let Some(entry) = state.find_entry_mut(&hit.surface_id) {
             entry.status = Status::Verified;
             entry.attempts.push(Attempt {
                 cycle: 0,

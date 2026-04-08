@@ -101,7 +101,7 @@ pub(super) fn validate_action(
             }
         }
         LmAction::Test { surface_id, .. } => {
-            match state.entries.iter().find(|e| &e.id == surface_id) {
+            match state.find_entry(surface_id) {
                 None => return Err(format!("Unknown surface: {}", surface_id)),
                 Some(entry) if !matches!(entry.status, Status::Pending) => {
                     return Err(format!(
@@ -113,7 +113,7 @@ pub(super) fn validate_action(
             }
         }
         LmAction::Probe { surface_id, .. } => {
-            match state.entries.iter().find(|e| &e.id == surface_id) {
+            match state.find_entry(surface_id) {
                 None => return Err(format!("Unknown surface: {}", surface_id)),
                 Some(entry) if !matches!(entry.status, Status::Pending) => {
                     return Err(format!(

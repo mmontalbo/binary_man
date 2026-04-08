@@ -228,7 +228,7 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
     // Target surfaces
     prompt.push_str("## Surfaces Needing Work\n\n");
     for id in target_ids {
-        if let Some(entry) = state.entries.iter().find(|e| &e.id == id) {
+        if let Some(entry) = state.find_entry(id) {
             prompt.push_str(&format!("### {}\n", entry.id));
             if entry.retried {
                 prompt.push_str("  **Previously excluded** - try a different/creative approach\n");
@@ -338,7 +338,7 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
                     // Include the source surface's characterization trigger so the LM
                     // understands *why* this seed worked, not just its structure.
                     if let Some(source_entry) =
-                        state.entries.iter().find(|e| e.id == seed.surface_id)
+                        state.find_entry(&seed.surface_id)
                     {
                         if let Some(char) = &source_entry.characterization {
                             prompt.push_str(&format!(" (trigger: \"{}\")", char.trigger));
@@ -605,7 +605,7 @@ pub(super) fn build_retry_prompt(
     );
 
     for id in target_ids {
-        if let Some(entry) = state.entries.iter().find(|e| &e.id == id) {
+        if let Some(entry) = state.find_entry(id) {
             prompt.push_str(&format!("### {}\n", entry.id));
             prompt.push_str(&format!("Description: {}\n", entry.description));
             if let Some(context) = &entry.context {
@@ -671,7 +671,7 @@ pub(super) fn build_retry_prompt(
                 for seed in similar_seeds {
                     prompt.push_str(&format!("  From `{}`", seed.surface_id));
                     if let Some(source_entry) =
-                        state.entries.iter().find(|e| e.id == seed.surface_id)
+                        state.find_entry(&seed.surface_id)
                     {
                         if let Some(char) = &source_entry.characterization {
                             prompt.push_str(&format!(" (trigger: \"{}\")", char.trigger));
@@ -751,7 +751,7 @@ pub(super) fn build_incremental_prompt(
                     }
                 }
                 super::lm::LmAction::Test { surface_id, .. } => {
-                    if let Some(entry) = state.entries.iter().find(|e| &e.id == surface_id) {
+                    if let Some(entry) = state.find_entry(surface_id) {
                         match &entry.status {
                             super::types::Status::Verified => {
                                 prompt.push_str(&format!("- Test {}: ✓ Verified\n", surface_id));
@@ -819,7 +819,7 @@ pub(super) fn build_incremental_prompt(
                     }
                 }
                 super::lm::LmAction::Probe { surface_id, .. } => {
-                    if let Some(entry) = state.entries.iter().find(|e| &e.id == surface_id) {
+                    if let Some(entry) = state.find_entry(surface_id) {
                         if let Some(probe) = entry.probes.last() {
                             let status = if probe.setup_failed {
                                 "SetupFailed".to_string()
@@ -874,7 +874,7 @@ pub(super) fn build_incremental_prompt(
     // Surfaces needing work (brief version with category hints)
     prompt.push_str("## Next Surfaces to Work On\n\n");
     for id in target_ids {
-        if let Some(entry) = state.entries.iter().find(|e| &e.id == id) {
+        if let Some(entry) = state.find_entry(id) {
             prompt.push_str(&format!("- **{}**: {}\n", entry.id, entry.description));
 
             // Category-specific hints to guide the LM

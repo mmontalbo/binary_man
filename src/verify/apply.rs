@@ -14,6 +14,18 @@ use super::types::{
 use anyhow::Result;
 use std::path::Path;
 
+/// Shared context for running test/probe scenarios.
+///
+/// Bundles the stable parameters that are the same for every scenario
+/// within a single verification cycle.
+pub(super) struct ScenarioContext<'a> {
+    pub pack_path: &'a Path,
+    pub binary: &'a str,
+    pub context_argv: &'a [String],
+    pub cycle: u32,
+    pub with_pty: bool,
+}
+
 /// Join a surface option with its value argument.
 ///
 /// Many CLI tools require values attached to their option token:
@@ -63,14 +75,14 @@ fn join_option_value(surface_id: &str, extra_args: Vec<String>) -> Vec<String> {
 ///
 /// Contains bilateral comparison data — both control and option outputs.
 #[derive(Debug)]
-pub struct ProbeRunResult {
+pub(super) struct ProbeRunResult {
     pub surface_id: String,
     pub extra_args: Vec<String>,
     pub argv: Vec<String>,
     pub seed: Seed,
     pub stdout_preview: Option<String>,
     pub stderr_preview: Option<String>,
-    pub exit_code: Option<u32>,
+    pub exit_code: Option<i32>,
     pub control_stdout_preview: Option<String>,
     /// Whether control and option outputs differ (any channel).
     pub outputs_differ: bool,
@@ -81,7 +93,7 @@ pub struct ProbeRunResult {
     pub stderr_differs: bool,
     pub exit_code_differs: bool,
     pub control_stderr_preview: Option<String>,
-    pub control_exit_code: Option<u32>,
+    pub control_exit_code: Option<i32>,
     /// Which setup command failed, if any.
     pub setup_detail: Option<String>,
 }
@@ -90,7 +102,7 @@ pub struct ProbeRunResult {
 ///
 /// Contains all data needed to update state after parallel execution.
 #[derive(Debug)]
-pub struct TestResult {
+pub(super) struct TestResult {
     pub surface_id: String,
     pub args: Vec<String>,
     pub full_argv: Vec<String>,
@@ -173,24 +185,20 @@ fn verify_prediction_channel(
 /// IMPORTANT: Control and option commands run in the SAME sandbox to ensure
 /// they see identical filesystem state (including git commit hashes). This
 /// prevents false positives from timestamp-dependent content like git commits.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn run_test_scenario(
-    pack_path: &Path,
-    binary: &str,
-    context_argv: &[String],
-    cycle: u32,
+    sc: &ScenarioContext<'_>,
     surface_id: &str,
     extra_args: Vec<String>,
     seed: Seed,
-    with_pty: bool,
+    surface_pty: bool,
     prediction: Option<Prediction>,
 ) -> Result<TestResult> {
-    let scenario_id = format!("{}_c{}", sanitize_id(surface_id), cycle);
+    let scenario_id = format!("{}_c{}", sanitize_id(surface_id), sc.cycle);
 
     // Construct args: join option + value when needed (e.g. -U1, --unified=1)
     let args = join_option_value(surface_id, extra_args);
 
-    let control_argv: Vec<String> = context_argv.to_vec();
+    let control_argv: Vec<String> = sc.context_argv.to_vec();
     let full_argv: Vec<String> = control_argv.iter().chain(args.iter()).cloned().collect();
 
     // Run both control and option in the SAME sandbox
@@ -198,18 +206,18 @@ pub(super) fn run_test_scenario(
     // The sandbox is read-only after setup to catch commands that mutate state
     let (control_evidence, option_evidence) = run_scenario_pair(
         &scenario_id,
-        binary,
+        sc.binary,
         &control_argv,
         &full_argv,
         &seed,
-        with_pty,
+        surface_pty,
     )?;
 
     // Write evidence files
     let control_path = format!("evidence/{}_control.json", scenario_id);
-    write_evidence(pack_path, &control_path, &control_evidence)?;
+    write_evidence(sc.pack_path, &control_path, &control_evidence)?;
     let evidence_path = format!("evidence/{}.json", scenario_id);
-    write_evidence(pack_path, &evidence_path, &option_evidence)?;
+    write_evidence(sc.pack_path, &evidence_path, &option_evidence)?;
 
     // Compute outcome by comparing option to control (same seed, different argv)
     let outcome = compute_outcome(&option_evidence, &control_evidence);
@@ -256,6 +264,8 @@ pub(super) fn run_test_scenario(
 ///
 /// This is the fast, sequential part after parallel execution.
 pub(super) fn merge_test_result(state: &mut State, result: TestResult) {
+    let already_seeded = state.has_seed_for(&result.surface_id);
+
     if let Some(entry) = state.entries.iter_mut().find(|e| e.id == result.surface_id) {
         // Compute prediction gate before moving fields into the Attempt.
         let prediction_blocked = if matches!(result.outcome, Outcome::Verified { .. })
@@ -307,20 +317,16 @@ pub(super) fn merge_test_result(state: &mut State, result: TestResult) {
             entry.status = Status::Verified;
 
             // Add to seed bank if not already present
-            let seed = entry.attempts.last().map(|a| a.seed.clone()).unwrap();
-            if !state
-                .seed_bank
-                .iter()
-                .any(|s| s.surface_id == result.surface_id)
-            {
-                let args = entry.attempts.last().map(|a| a.args.clone()).unwrap();
-                state.seed_bank.push(VerifiedSeed {
-                    surface_id: result.surface_id.clone(),
-                    args,
-                    seed,
-                    verified_at: state.cycle,
-                    hint: None,
-                });
+            if !already_seeded {
+                if let Some(last) = entry.attempts.last() {
+                    state.seed_bank.push(VerifiedSeed {
+                        surface_id: result.surface_id.clone(),
+                        args: last.args.clone(),
+                        seed: last.seed.clone(),
+                        verified_at: state.cycle,
+                        hint: None,
+                    });
+                }
             }
         }
     }
@@ -331,32 +337,28 @@ pub(super) fn merge_test_result(state: &mut State, result: TestResult) {
 /// Runs BOTH control and option commands in the same sandbox (bilateral
 /// comparison). Returns whether outputs differ so the caller can
 /// auto-promote to a Test without an extra LM round-trip.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn run_probe_scenario(
-    binary: &str,
-    context_argv: &[String],
-    cycle: u32,
+    sc: &ScenarioContext<'_>,
     surface_id: &str,
     extra_args: Vec<String>,
     seed: Seed,
-    with_pty: bool,
 ) -> Result<ProbeRunResult> {
-    let scenario_id = format!("probe_{}_c{}", sanitize_id(surface_id), cycle);
+    let scenario_id = format!("probe_{}_c{}", sanitize_id(surface_id), sc.cycle);
 
     // Construct args: join option + value when needed
     let args = join_option_value(surface_id, extra_args.clone());
 
-    let control_argv: Vec<String> = context_argv.to_vec();
+    let control_argv: Vec<String> = sc.context_argv.to_vec();
     let full_argv: Vec<String> = control_argv.iter().chain(args.iter()).cloned().collect();
 
     // Run both control and option in the same sandbox (bilateral)
     let (control_evidence, option_evidence) = run_scenario_pair(
         &scenario_id,
-        binary,
+        sc.binary,
         &control_argv,
         &full_argv,
         &seed,
-        with_pty,
+        sc.with_pty,
     )?;
 
     let stdout_preview = make_output_preview(&option_evidence.stdout, OUTPUT_PREVIEW_MAX_LEN);
@@ -394,23 +396,23 @@ pub(super) fn run_probe_scenario(
         seed,
         stdout_preview,
         stderr_preview,
-        exit_code: option_evidence.exit_code.map(|c| c as u32),
+        exit_code: option_evidence.exit_code,
         control_stdout_preview,
         outputs_differ,
         setup_failed: option_evidence.setup_failed,
-        cycle,
+        cycle: sc.cycle,
         stdout_differs,
         stderr_differs,
         exit_code_differs,
         control_stderr_preview,
-        control_exit_code: control_evidence.exit_code.map(|c| c as u32),
+        control_exit_code: control_evidence.exit_code,
         setup_detail,
     })
 }
 
 /// Merge a probe result into state.
 pub(super) fn merge_probe_result(state: &mut State, result: ProbeRunResult) {
-    if let Some(entry) = state.entries.iter_mut().find(|e| e.id == result.surface_id) {
+    if let Some(entry) = state.find_entry_mut(&result.surface_id) {
         entry.probes.push(ProbeResult {
             cycle: result.cycle,
             argv: result.argv,
@@ -459,17 +461,14 @@ pub(super) fn apply_action(state: &mut State, pack_path: &Path, action: LmAction
             prediction,
             ..
         } => {
-            let result = run_test_scenario(
+            let sc = ScenarioContext {
                 pack_path,
-                &state.binary,
-                &state.context_argv,
-                state.cycle,
-                &surface_id,
-                extra_args,
-                seed,
-                false,
-                prediction,
-            )?;
+                binary: &state.binary,
+                context_argv: &state.context_argv,
+                cycle: state.cycle,
+                with_pty: false,
+            };
+            let result = run_test_scenario(&sc, &surface_id, extra_args, seed, false, prediction)?;
             merge_test_result(state, result);
         }
 
@@ -479,15 +478,14 @@ pub(super) fn apply_action(state: &mut State, pack_path: &Path, action: LmAction
             seed,
             ..
         } => {
-            let result = run_probe_scenario(
-                &state.binary,
-                &state.context_argv,
-                state.cycle,
-                &surface_id,
-                extra_args,
-                seed,
-                false,
-            )?;
+            let sc = ScenarioContext {
+                pack_path,
+                binary: &state.binary,
+                context_argv: &state.context_argv,
+                cycle: state.cycle,
+                with_pty: false,
+            };
+            let result = run_probe_scenario(&sc, &surface_id, extra_args, seed)?;
             merge_probe_result(state, result);
         }
     }

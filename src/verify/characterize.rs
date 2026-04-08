@@ -100,7 +100,7 @@ pub(super) fn characterize_pending_surfaces(
     let mut total_characterized = 0;
     for results in results_collected {
         for (surface_id, char) in results {
-            if let Some(entry) = state.entries.iter_mut().find(|e| e.id == surface_id) {
+            if let Some(entry) = state.find_entry_mut(&surface_id) {
                 entry.characterization = Some(char);
                 total_characterized += 1;
             }
@@ -152,7 +152,7 @@ fn build_bulk_characterize_prompt(state: &State, surface_ids: &[String]) -> Stri
     prompt.push_str("## Options\n\n");
 
     for id in surface_ids {
-        if let Some(entry) = state.entries.iter().find(|e| &e.id == id) {
+        if let Some(entry) = state.find_entry(id) {
             prompt.push_str(&format!("### {}\n", entry.id));
             prompt.push_str(&format!("Description: {}\n", entry.description));
             if let Some(hint) = &entry.value_hint {
@@ -193,7 +193,7 @@ pub(super) fn recharacterize_surface(
     verbose: bool,
     surface_id: &str,
 ) -> Result<()> {
-    let entry = match state.entries.iter().find(|e| e.id == surface_id) {
+    let entry = match state.find_entry(surface_id) {
         Some(e) => e,
         None => return Ok(()),
     };
@@ -252,7 +252,7 @@ pub(super) fn recharacterize_surface(
     let results = parse_characterize_response(&response_text, &[surface_id.to_string()]);
     if let Some((_, mut new_char)) = results.into_iter().next() {
         new_char.revision = old_char.revision + 1;
-        if let Some(entry) = state.entries.iter_mut().find(|e| e.id == surface_id) {
+        if let Some(entry) = state.find_entry_mut(surface_id) {
             if verbose {
                 eprintln!(
                     "  {} re-characterized: \"{}\" → \"{}\"",
@@ -284,7 +284,7 @@ fn build_recharacterize_prompt(
     prompt.push_str("# Re-characterize Option\n\n");
     prompt.push_str(&format!("Command: `{}`\n\n", base_command));
 
-    if let Some(entry) = state.entries.iter().find(|e| e.id == surface_id) {
+    if let Some(entry) = state.find_entry(surface_id) {
         prompt.push_str(&format!("## {} \n", surface_id));
         prompt.push_str(&format!("Description: {}\n\n", entry.description));
 

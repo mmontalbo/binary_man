@@ -92,6 +92,21 @@ impl State {
         fs::write(&state_path, content)
             .with_context(|| format!("write state to {}", state_path.display()))
     }
+
+    /// Look up an entry by surface ID.
+    pub(super) fn find_entry(&self, id: &str) -> Option<&SurfaceEntry> {
+        self.entries.iter().find(|e| e.id == id)
+    }
+
+    /// Look up an entry mutably by surface ID.
+    pub(super) fn find_entry_mut(&mut self, id: &str) -> Option<&mut SurfaceEntry> {
+        self.entries.iter_mut().find(|e| e.id == id)
+    }
+
+    /// Check whether the seed bank already contains a seed for this surface.
+    pub(super) fn has_seed_for(&self, surface_id: &str) -> bool {
+        self.seed_bank.iter().any(|s| s.surface_id == surface_id)
+    }
 }
 
 /// Record of the baseline scenario execution.
@@ -267,7 +282,7 @@ pub struct ProbeResult {
     pub stderr_preview: Option<String>,
     /// Exit code of the option command.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exit_code: Option<u32>,
+    pub exit_code: Option<i32>,
     /// Preview of control stdout (first ~200 chars).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control_stdout_preview: Option<String>,
@@ -291,7 +306,7 @@ pub struct ProbeResult {
     pub control_stderr_preview: Option<String>,
     /// Exit code of the control command.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub control_exit_code: Option<u32>,
+    pub control_exit_code: Option<i32>,
     /// Detail of which setup command failed (e.g., "git init (exit 128)").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub setup_detail: Option<String>,
