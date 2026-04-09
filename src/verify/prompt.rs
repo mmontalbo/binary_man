@@ -418,6 +418,9 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
                     }
                     if probe.setup_failed {
                         prompt.push_str("    result: SetupFailed\n");
+                        if let Some(stderr) = &probe.stderr_preview {
+                            prompt.push_str(&format!("    stderr: {:?}\n", stderr));
+                        }
                     } else {
                         prompt.push_str(&format!("    exit_code: {:?}\n", probe.exit_code));
                         if let Some(stdout) = &probe.stdout_preview {
