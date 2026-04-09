@@ -13,6 +13,13 @@ use std::time::Duration;
 /// Default Ollama API base URL.
 const DEFAULT_BASE_URL: &str = "http://127.0.0.1:11434";
 
+/// Reserve this many tokens for the next prompt + response (rough estimate).
+/// We truncate history when estimated usage exceeds num_ctx minus this reserve.
+const CONTEXT_RESERVE_TOKENS: usize = 8192;
+
+/// Rough chars-per-token estimate for English/code mixed content.
+const CHARS_PER_TOKEN: usize = 4;
+
 /// A single message in the conversation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ChatMessage {
@@ -68,6 +75,22 @@ impl OllamaPlugin {
             messages: Vec::new(),
         }
     }
+
+    /// Drop oldest message pairs until estimated token usage fits within budget.
+    fn truncate_history(&mut self, max_tokens: usize, new_prompt_len: usize) {
+        let estimate_tokens =
+            |msgs: &[ChatMessage], extra: usize| -> usize {
+                let char_total: usize = msgs.iter().map(|m| m.content.len()).sum();
+                (char_total + extra) / CHARS_PER_TOKEN
+            };
+
+        while estimate_tokens(&self.messages, new_prompt_len) > max_tokens
+            && self.messages.len() >= 2
+        {
+            // Drop oldest pair (user, assistant)
+            self.messages.drain(..2);
+        }
+    }
 }
 
 impl LmPlugin for OllamaPlugin {
@@ -82,6 +105,11 @@ impl LmPlugin for OllamaPlugin {
     }
 
     fn prompt(&mut self, prompt: &str, timeout: Duration) -> Result<String> {
+        // Truncate old messages if approaching the context window limit.
+        // Keep dropping the oldest pair (user+assistant) until we're under budget.
+        let max_history_tokens = 32768_usize.saturating_sub(CONTEXT_RESERVE_TOKENS);
+        self.truncate_history(max_history_tokens, prompt.len());
+
         // Append user message to history
         self.messages.push(ChatMessage {
             role: "user".to_string(),
