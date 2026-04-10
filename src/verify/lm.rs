@@ -370,7 +370,9 @@ fn parse_seed(obj: &Value) -> Result<Seed> {
     let files_value = obj.get("files").or_else(|| obj.get("Files"));
     let files = parse_files(files_value)?;
 
-    Ok(Seed { setup, files })
+    let mut seed = Seed { setup, files };
+    repair_seed(&mut seed);
+    Ok(seed)
 }
 
 /// Parse setup commands flexibly - handles multiple formats LMs produce.
@@ -600,6 +602,133 @@ pub(super) fn log_raw_response(pack_path: &Path, cycle: u32, raw: &str) -> Resul
 
     let path = log_dir.join(format!("c{cycle}_response_raw.txt"));
     std::fs::write(&path, raw).with_context(|| format!("write raw response to {}", path.display()))
+}
+
+/// Repair shell-redirect patterns in seed setup by converting them to files entries.
+///
+/// Local LMs frequently produce `["echo", "content", ">", "file.txt"]` despite instructions
+/// saying not to. Since setup runs via execvp (no shell), the `>` becomes a literal argument.
+/// This function detects those patterns and mechanically converts them to files entries.
+fn repair_seed(seed: &mut Seed) {
+    let mut remaining = Vec::new();
+
+    for cmd in seed.setup.drain(..) {
+        if let Some(repairs) = try_repair_sh_c(&cmd) {
+            for (path, content) in repairs {
+                if !seed.files.iter().any(|f| f.path == path) {
+                    seed.files.push(FileEntry { path, content });
+                }
+            }
+        } else if let Some((path, content)) = try_extract_redirect(&cmd) {
+            if !seed.files.iter().any(|f| f.path == path) {
+                seed.files.push(FileEntry { path, content });
+            }
+        } else {
+            remaining.push(cmd);
+        }
+    }
+
+    seed.setup = remaining;
+}
+
+/// Try to extract a redirect pattern from a single setup command.
+///
+/// Matches:
+/// - `["echo", content..., ">"|">>", path]`
+/// - `["echo", "-e", content..., ">"|">>", path]` (interprets \n, \t)
+/// - `["printf", fmt, ">"|">>", path]`
+fn try_extract_redirect(cmd: &[String]) -> Option<(String, String)> {
+    if cmd.len() < 3 {
+        return None;
+    }
+
+    // Find the redirect operator position (last occurrence)
+    let redir_pos = cmd.iter().rposition(|s| s == ">" || s == ">>")?;
+
+    // Must have exactly one arg after the redirect (the path)
+    if redir_pos + 1 != cmd.len() - 1 {
+        return None;
+    }
+
+    let path = cmd[redir_pos + 1].clone();
+    let program = cmd[0].as_str();
+
+    match program {
+        "echo" => {
+            let (content_parts, echo_e) = if cmd.get(1).map(|s| s.as_str()) == Some("-e") {
+                (&cmd[2..redir_pos], true)
+            } else {
+                (&cmd[1..redir_pos], false)
+            };
+            let joined = content_parts.join(" ");
+            let content = if echo_e {
+                interpret_echo_e(&joined)
+            } else {
+                format!("{joined}\n")
+            };
+            Some((path, content))
+        }
+        "printf" => {
+            // printf fmt [args...] > path — just use the format string
+            if redir_pos < 2 {
+                return None;
+            }
+            let content = interpret_echo_e(&cmd[1..redir_pos].join(" "));
+            Some((path, content))
+        }
+        _ => None,
+    }
+}
+
+/// Try to repair `["sh", "-c", cmd_str]` or `["bash", "-c", cmd_str]`.
+///
+/// Parses the inner command string for simple redirect patterns.
+/// Returns None for complex cases (pipes, chains, multiple commands).
+fn try_repair_sh_c(cmd: &[String]) -> Option<Vec<(String, String)>> {
+    if cmd.len() != 3 {
+        return None;
+    }
+    let shell = cmd[0].as_str();
+    if shell != "sh" && shell != "bash" {
+        return None;
+    }
+    if cmd[1] != "-c" {
+        return None;
+    }
+
+    let inner = &cmd[2];
+
+    // Bail on complex shell constructs
+    if inner.contains('|') || inner.contains("&&") || inner.contains(';') {
+        return None;
+    }
+
+    // Parse the inner command as shell words
+    let words = shell_words::split(inner).ok()?;
+    try_extract_redirect(&words).map(|r| vec![r])
+}
+
+/// Interpret echo -e / printf escape sequences: \n, \t, \\
+fn interpret_echo_e(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('n') => result.push('\n'),
+                Some('t') => result.push('\t'),
+                Some('\\') => result.push('\\'),
+                Some(other) => {
+                    result.push('\\');
+                    result.push(other);
+                }
+                None => result.push('\\'),
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
 }
 
 #[cfg(test)]
@@ -1273,5 +1402,178 @@ Here's my response:
         };
         let json = serde_json::to_string(&response).unwrap();
         assert!(!json.contains("analysis"));
+    }
+
+    // ==================== Seed Repair Tests ====================
+
+    #[test]
+    fn test_repair_echo_redirect() {
+        let mut seed = Seed {
+            setup: vec![
+                vec!["git".into(), "init".into()],
+                vec!["echo".into(), "hello".into(), ">".into(), "file.txt".into()],
+            ],
+            files: vec![],
+        };
+        repair_seed(&mut seed);
+        assert_eq!(seed.setup, vec![vec!["git", "init"]]);
+        assert_eq!(seed.files.len(), 1);
+        assert_eq!(seed.files[0].path, "file.txt");
+        assert_eq!(seed.files[0].content, "hello\n");
+    }
+
+    #[test]
+    fn test_repair_echo_multiword_redirect() {
+        let mut seed = Seed {
+            setup: vec![vec![
+                "echo".into(), "hello".into(), "world".into(), ">".into(), "f.txt".into(),
+            ]],
+            files: vec![],
+        };
+        repair_seed(&mut seed);
+        assert_eq!(seed.files[0].content, "hello world\n");
+        assert_eq!(seed.files[0].path, "f.txt");
+        assert!(seed.setup.is_empty());
+    }
+
+    #[test]
+    fn test_repair_echo_append_redirect() {
+        let mut seed = Seed {
+            setup: vec![vec![
+                "echo".into(), "line".into(), ">>".into(), "out.txt".into(),
+            ]],
+            files: vec![],
+        };
+        repair_seed(&mut seed);
+        assert_eq!(seed.files[0].content, "line\n");
+        assert_eq!(seed.files[0].path, "out.txt");
+    }
+
+    #[test]
+    fn test_repair_echo_e_redirect() {
+        let mut seed = Seed {
+            setup: vec![vec![
+                "echo".into(), "-e".into(), "a\\nb".into(), ">".into(), "f.txt".into(),
+            ]],
+            files: vec![],
+        };
+        repair_seed(&mut seed);
+        assert_eq!(seed.files[0].content, "a\nb");
+        assert_eq!(seed.files[0].path, "f.txt");
+    }
+
+    #[test]
+    fn test_repair_printf_redirect() {
+        let mut seed = Seed {
+            setup: vec![vec![
+                "printf".into(), "no newline".into(), ">".into(), "f.txt".into(),
+            ]],
+            files: vec![],
+        };
+        repair_seed(&mut seed);
+        assert_eq!(seed.files[0].content, "no newline");
+        assert_eq!(seed.files[0].path, "f.txt");
+    }
+
+    #[test]
+    fn test_repair_sh_c_redirect() {
+        let mut seed = Seed {
+            setup: vec![vec![
+                "sh".into(), "-c".into(), "echo hello > file.txt".into(),
+            ]],
+            files: vec![],
+        };
+        repair_seed(&mut seed);
+        assert!(seed.setup.is_empty());
+        assert_eq!(seed.files[0].path, "file.txt");
+        assert_eq!(seed.files[0].content, "hello\n");
+    }
+
+    #[test]
+    fn test_repair_bash_c_redirect() {
+        let mut seed = Seed {
+            setup: vec![vec![
+                "bash".into(), "-c".into(), "echo foo > bar.txt".into(),
+            ]],
+            files: vec![],
+        };
+        repair_seed(&mut seed);
+        assert_eq!(seed.files[0].path, "bar.txt");
+        assert_eq!(seed.files[0].content, "foo\n");
+    }
+
+    #[test]
+    fn test_repair_sh_c_complex_skipped() {
+        // Pipes and chains should NOT be repaired
+        let mut seed = Seed {
+            setup: vec![vec![
+                "sh".into(), "-c".into(), "echo a | tee file.txt".into(),
+            ]],
+            files: vec![],
+        };
+        repair_seed(&mut seed);
+        assert_eq!(seed.setup.len(), 1); // left alone
+        assert!(seed.files.is_empty());
+    }
+
+    #[test]
+    fn test_repair_skips_existing_file() {
+        let mut seed = Seed {
+            setup: vec![vec![
+                "echo".into(), "new".into(), ">".into(), "f.txt".into(),
+            ]],
+            files: vec![FileEntry { path: "f.txt".into(), content: "original\n".into() }],
+        };
+        repair_seed(&mut seed);
+        // Should not overwrite existing file entry
+        assert_eq!(seed.files.len(), 1);
+        assert_eq!(seed.files[0].content, "original\n");
+    }
+
+    #[test]
+    fn test_repair_non_redirect_untouched() {
+        let mut seed = Seed {
+            setup: vec![
+                vec!["git".into(), "init".into()],
+                vec!["git".into(), "add".into(), ".".into()],
+            ],
+            files: vec![],
+        };
+        repair_seed(&mut seed);
+        assert_eq!(seed.setup.len(), 2);
+        assert!(seed.files.is_empty());
+    }
+
+    #[test]
+    fn test_repair_mixed_commands() {
+        let mut seed = Seed {
+            setup: vec![
+                vec!["git".into(), "init".into()],
+                vec!["echo".into(), "content".into(), ">".into(), "a.txt".into()],
+                vec!["git".into(), "add".into(), ".".into()],
+                vec!["echo".into(), "other".into(), ">".into(), "b.txt".into()],
+            ],
+            files: vec![],
+        };
+        repair_seed(&mut seed);
+        assert_eq!(seed.setup, vec![vec!["git", "init"], vec!["git", "add", "."]]);
+        assert_eq!(seed.files.len(), 2);
+        assert_eq!(seed.files[0].path, "a.txt");
+        assert_eq!(seed.files[1].path, "b.txt");
+    }
+
+    #[test]
+    fn test_repair_integration_via_parse() {
+        // End-to-end: LM produces echo redirect in setup, gets repaired during parsing
+        let text = r#"{"test": "--stat", "setup": [["git", "init"], ["echo", "hello", ">", "file.txt"]], "files": []}"#;
+        let response = parse_lm_response(text).unwrap();
+        if let LmAction::Test { seed, .. } = &response.actions[0] {
+            assert_eq!(seed.setup, vec![vec!["git", "init"]]);
+            assert_eq!(seed.files.len(), 1);
+            assert_eq!(seed.files[0].path, "file.txt");
+            assert_eq!(seed.files[0].content, "hello\n");
+        } else {
+            panic!("Expected Test action");
+        }
     }
 }
