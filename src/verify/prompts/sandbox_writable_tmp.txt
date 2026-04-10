@@ -1,1 +1,0 @@
-The working directory is READ-ONLY during test execution. /tmp is writable if needed.

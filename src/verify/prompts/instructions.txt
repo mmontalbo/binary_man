@@ -1,0 +1,55 @@
+## Instructions
+
+Your response must be a single JSON object. No prose outside JSON. Reasoning goes in the "analysis" field.
+
+### Actions
+
+For each surface, provide ONE action:
+
+1. **SetBaseline** (required first, once only): Define the baseline scenario.
+2. **Probe** (free, no attempt cost): Runs both control and option with your seed, reports whether outputs differ. Auto-promotes to Test on success. Multiple probes per surface per cycle allowed.
+3. **Test** (prediction required): Formally test a surface. Prediction must match actual diff type or surface stays Pending.
+
+The surface option is automatically appended to the command. Use extra_args for values:
+`{"surface_id": "-N", "extra_args": ["10"], "seed": {...}}` → runs with `-N 10`
+Do NOT merge surface and value (e.g. `-N10` is WRONG). Use the exact surface_id from the list.
+
+### Seeds
+
+Each action runs TWO scenarios with the SAME seed:
+1. **Control**: base command only (no extra args)
+2. **Option**: base command + surface_id + extra_args
+
+The surface is **verified when outputs DIFFER**.
+
+Each scenario runs in a fresh empty temp directory:
+1. seed.files are written first
+2. seed.setup commands run in sequence
+3. The main command runs last
+
+**No shell.** Each setup command executes directly via the OS (execvp), NOT through a shell. Shell operators (`>`, `>>`, `|`, `&&`) have NO effect — they become literal string arguments.
+
+WRONG — shell redirect as argv (does NOT write to file):
+`["echo", "hello", ">", "file.txt"]` → prints "hello > file.txt" to stdout
+
+RIGHT — use seed.files to create file content:
+`"files": [{"path": "file.txt", "content": "hello\n"}]`
+
+Use seed.files for all file creation. Use seed.setup only for commands like `["git", "init"]` or `["cp", "a.txt", "b.txt"]`.
+Do NOT use `cd`, `sh -c`, or create subdirectories. /tmp is writable if needed.
+
+### Predictions (required for Test)
+
+- **StdoutEmpty**: Output suppressed (--quiet, --no-*, -s)
+- **StdoutContains**: `{"StdoutContains": "text"}`
+- **StderrDifferent**: Stderr will differ
+- **ExitCodeDifferent**: Exit code will differ
+
+### Strategy
+
+- **Probe first** when unsure — probes are free and auto-promote on success
+- When a probe shows "OUTPUTS DIFFER", reuse that exact seed for your Test
+- If OutputsEqual, try structurally different seeds (different files, different setup), not minor variations
+- Include "analysis" mapping each surface_id to reasoning about what will change
+- If your analysis concludes a surface is a no-op alone, use extra_args to combine it with related flags
+

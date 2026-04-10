@@ -3,10 +3,8 @@
 //! Builds structured prompts that give the LM all the context it needs to
 //! decide on actions. The prompt format is intentionally simple and human-readable.
 
-use super::config::COMPANION_HINTS;
 use super::types::{
-    extract_known_issues, Attempt, KnownIssue, Outcome, State, Status, SurfaceCategory,
-    SurfaceEntry,
+    extract_known_issues, Attempt, KnownIssue, Outcome, State, SurfaceCategory,
 };
 
 /// Format the known issues section for the prompt.
@@ -26,63 +24,7 @@ fn format_known_issues_section(issues: &[KnownIssue]) -> String {
     section
 }
 
-/// Build a constraint section listing the valid pending surface IDs.
-///
-/// This prevents the LM from hallucinating surface names or targeting
-/// already-resolved surfaces, which wastes ~47% of actions.
-fn format_valid_surfaces_constraint(state: &State, target_ids: &[String]) -> String {
-    let all_pending: Vec<&str> = state
-        .entries
-        .iter()
-        .filter(|e| matches!(e.status, Status::Pending))
-        .map(|e| e.id.as_str())
-        .collect();
-
-    // Only emit constraint if there are surfaces outside the target set
-    // (otherwise the "Surfaces Needing Work" section is already sufficient)
-    if all_pending.len() <= target_ids.len() {
-        return String::new();
-    }
-
-    let mut section = String::from("## Valid Surface IDs\n\n");
-    section.push_str(
-        "You may ONLY use these surface_id values. Any other surface_id will be rejected:\n",
-    );
-    for id in &all_pending {
-        let marker = if target_ids.iter().any(|t| t == id) {
-            " ← target"
-        } else {
-            ""
-        };
-        section.push_str(&format!("- `{}`{}\n", id, marker));
-    }
-    section.push('\n');
-    section
-}
-
 use super::config::{MAX_PRIOR_ATTEMPTS, SEED_SUMMARY_MAX_LEN};
-
-/// Format companion dependency hint for a surface entry.
-///
-/// Returns None if hints are disabled or the entry is a Modifier
-/// (which already gets "include base in extra_args").
-/// Emits a generic reminder that some options need companion flags.
-fn format_companion_hint(entry: &SurfaceEntry) -> Option<String> {
-    if !COMPANION_HINTS {
-        return None;
-    }
-    // Skip for Modifier surfaces — they already get base-inclusion guidance
-    if matches!(entry.category, SurfaceCategory::Modifier { .. }) {
-        return None;
-    }
-    Some(
-        "**Dependency note**: Some options are no-ops without a companion flag \
-         (e.g., a mode flag like -c or -x). If this option doesn't produce \
-         observable output alone, try combining it with related flags \
-         from its description.\n"
-            .to_string(),
-    )
-}
 
 /// Format attempt history for retry prompts.
 ///
@@ -197,6 +139,9 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
         base_command
     ));
 
+    // Instructions front-loaded for salience
+    prompt.push_str(INSTRUCTIONS);
+
     // Known issues section (aggregated from all SetupFailed attempts)
     let known_issues = extract_known_issues(state);
     prompt.push_str(&format_known_issues_section(&known_issues));
@@ -253,17 +198,11 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
                         char.revision
                     ));
                 }
-                prompt.push_str("→ Build a seed that creates the trigger condition.\n");
             } else if entry.attempts.is_empty() {
                 prompt.push_str(
                     "\n**First attempt** — reason about what input would make this \
                      option produce visibly different output, then build a seed for that.\n",
                 );
-            }
-
-            // Show companion dependency hint
-            if let Some(hint) = format_companion_hint(entry) {
-                prompt.push_str(&format!("\n{}", hint));
             }
 
             // Show critique feedback if a prior verification was rejected
@@ -275,88 +214,17 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
                 ));
             }
 
-            // Prescriptive strategy guidance based on OutputsEqual count.
-            // Escalates the approach as repeated attempts fail, forcing the LM
-            // to change strategy rather than retry the same approach.
+            // Strategy hint when stuck
             let oe_count = entry
                 .attempts
                 .iter()
                 .filter(|a| matches!(a.outcome, Outcome::OutputsEqual))
                 .count();
-            if oe_count >= 4 {
-                prompt.push_str(
-                    "\n**STRATEGY (final attempt):** Invert your approach entirely. \
-                     If prior seeds were complex, try the simplest possible seed. \
-                     If they were simple, construct a more elaborate scenario. \
-                     If all used the same file type, try a different one.\n",
-                );
-            } else if oe_count >= 3 {
+            if oe_count >= 2 {
                 prompt.push_str(&format!(
-                    "\n**STRATEGY (re-evaluate):** Your trigger assumption may be wrong. \
-                     Ignore the characterization and reason directly from the help text: \
-                     what does \"{}\" actually do? What input would make that visible?\n",
-                    entry.description,
+                    "\n**STUCK**: {} attempts returned identical output. Try a fundamentally different seed.\n",
+                    oe_count
                 ));
-            } else if oe_count >= 2 {
-                prompt.push_str(
-                    "\n**STRATEGY (change approach):** Previous seeds produced identical output. \
-                     Your next seed MUST differ structurally from all prior attempts — \
-                     different files, different setup commands, different content strategy. \
-                     Minor variations of the same approach will not work.\n",
-                );
-            }
-
-            // Default-on hint: detect options that are likely enabled by default
-            // (positive form of a negation pair) and have stagnated in probes.
-            if let Some(neg_form) = entry.find_negation_form(&state.entries) {
-                let identical_probes = entry
-                    .probes
-                    .iter()
-                    .filter(|p| !p.outputs_differ && !p.setup_failed)
-                    .count();
-                if identical_probes >= 3 {
-                    prompt.push_str(&format!(
-                        "\n**DEFAULT-ON:** This option appears to be enabled by default ({} probes \
-                         returned identical). To verify it, disable the behavior first (e.g., \
-                         via configuration or by including {} in your seed setup), then test \
-                         whether this option re-enables it.\n",
-                        identical_probes, neg_form
-                    ));
-                }
-            }
-
-            // Suggest similar verified seeds from the seed bank
-            let similar_seeds: Vec<_> = state
-                .seed_bank
-                .iter()
-                .filter(|s| s.is_similar_to(&entry.id) || (s.surface_id == entry.id && s.is_starter_seed()))
-                .collect();
-            if !similar_seeds.is_empty() {
-                prompt.push_str("\n**Suggested seeds** (from similar verified surfaces):\n");
-                for seed in similar_seeds.iter().take(2) {
-                    prompt.push_str(&format!("  From `{}`", seed.surface_id));
-                    // Include the source surface's characterization trigger so the LM
-                    // understands *why* this seed worked, not just its structure.
-                    if let Some(source_entry) =
-                        state.find_entry(&seed.surface_id)
-                    {
-                        if let Some(char) = &source_entry.characterization {
-                            prompt.push_str(&format!(" (trigger: \"{}\")", char.trigger));
-                        }
-                    }
-                    prompt.push_str(":\n");
-                    if !seed.args.is_empty() {
-                        prompt.push_str(&format!("    args: {:?}\n", seed.args));
-                    }
-                    if !seed.seed.setup.is_empty() {
-                        prompt.push_str(&format!("    setup: {:?}\n", seed.seed.setup));
-                    }
-                    if !seed.seed.files.is_empty() {
-                        let file_names: Vec<&str> =
-                            seed.seed.files.iter().map(|f| f.path.as_str()).collect();
-                        prompt.push_str(&format!("    files: {:?}\n", file_names));
-                    }
-                }
             }
 
             // Show probe results (bilateral comparison evidence)
@@ -480,35 +348,12 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
                             prompt.push_str(&format!("    control_stdout: {:?}\n", control));
                         }
 
-                        // Show output metrics to help LM understand output characteristics
-                        if let Some(metrics) = &attempt.stdout_metrics {
-                            prompt.push_str(&format!(
-                                "    (Outputs identical: {} lines, {} bytes)\n",
-                                metrics.line_count, metrics.byte_count
-                            ));
-                        }
-
-                        // Show fs_diff if any files were created/modified
-                        if let Some(fs_diff) = &attempt.fs_diff {
-                            prompt.push_str(&format!(
-                                "    fs_diff: created={:?}, modified={:?}\n",
-                                fs_diff.created, fs_diff.modified
-                            ));
-                        }
-
-                        // Diagnosis: compare characterization against reality
+                        // Brief diagnosis
                         if let Some(char) = &entry.characterization {
                             prompt.push_str(&format!(
-                                "    → DIAGNOSIS: Your trigger was \"{}\", expected \"{}\".\n\
-                                 \x20   The seed didn't satisfy the trigger — outputs were identical.\n\
-                                 \x20   Does the seed actually create the trigger condition?\n",
-                                char.trigger, char.expected_diff
+                                "    → Trigger was \"{}\". Does your seed create that condition?\n",
+                                char.trigger
                             ));
-                            if COMPANION_HINTS {
-                                prompt.push_str(
-                                    "    This option may need a companion flag (e.g., a mode flag) to produce output.\n",
-                                );
-                            }
                         } else {
                             prompt.push_str(
                                 "    → Outputs matched! Try a different seed that exercises the option's effect.\n",
@@ -529,11 +374,8 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
         }
     }
 
-    // Valid surface constraint — prevents hallucinated surface IDs
-    prompt.push_str(&format_valid_surfaces_constraint(state, target_ids));
-
-    // Instructions
-    prompt.push_str(INSTRUCTIONS);
+    // Response JSON example as recency anchor (last thing before LM generates)
+    prompt.push_str(RESPONSE_ANCHOR);
 
     prompt
 }
@@ -580,6 +422,9 @@ pub(super) fn build_retry_prompt(
         base_command
     ));
 
+    // Instructions front-loaded
+    prompt.push_str(INSTRUCTIONS);
+
     // Known issues section
     let known_issues = extract_known_issues(state);
     prompt.push_str(&format_known_issues_section(&known_issues));
@@ -624,15 +469,9 @@ pub(super) fn build_retry_prompt(
                     "\n**Trigger**: {}\n**Expected diff**: {}\n",
                     char.trigger, char.expected_diff
                 ));
-                prompt.push_str("→ Build a seed that creates the trigger condition.\n");
             }
 
-            // Show companion dependency hint
-            if let Some(hint) = format_companion_hint(entry) {
-                prompt.push_str(&format!("\n{}", hint));
-            }
-
-            // Include prior attempt history if available (each surface only sees its own)
+            // Include prior attempt history if available
             if let Some(attempts) = prior_attempts.get(id) {
                 if !attempts.is_empty() {
                     prompt.push_str(&format!(
@@ -641,58 +480,15 @@ pub(super) fn build_retry_prompt(
                     ));
                 }
 
-                // Strategy guidance based on OutputsEqual count from prior attempts
                 let oe_count = attempts
                     .iter()
                     .filter(|a| matches!(a.outcome, Outcome::OutputsEqual))
                     .count();
-                if oe_count >= 3 {
+                if oe_count >= 2 {
                     prompt.push_str(&format!(
-                        "\n**STRATEGY (re-evaluate):** {} prior attempts produced identical output. \
-                         Your trigger assumption is likely wrong. \
-                         Reason directly from the help text: what does \"{}\" actually do? \
-                         Try a fundamentally different approach.\n",
-                        oe_count, entry.description,
+                        "\n**STUCK**: {} attempts returned identical output. Try a fundamentally different seed.\n",
+                        oe_count
                     ));
-                } else if oe_count >= 2 {
-                    prompt.push_str(
-                        "\n**STRATEGY (change approach):** Previous seeds produced identical output. \
-                         Your next seed MUST differ structurally from all prior attempts.\n",
-                    );
-                }
-            }
-
-            // Include seed suggestions from similar verified surfaces
-            let similar_seeds: Vec<_> = state
-                .seed_bank
-                .iter()
-                .filter(|s| s.is_similar_to(id) || (s.surface_id == *id && s.is_starter_seed()))
-                .take(2)
-                .collect();
-            if !similar_seeds.is_empty() {
-                prompt.push_str("\n**Suggested seeds** (from similar verified surfaces):\n");
-                for seed in similar_seeds {
-                    prompt.push_str(&format!("  From `{}`", seed.surface_id));
-                    if let Some(source_entry) =
-                        state.find_entry(&seed.surface_id)
-                    {
-                        if let Some(char) = &source_entry.characterization {
-                            prompt.push_str(&format!(" (trigger: \"{}\")", char.trigger));
-                        }
-                    }
-                    prompt.push_str(":\n");
-                    if !seed.args.is_empty() {
-                        prompt.push_str(&format!("    args: {:?}\n", seed.args));
-                    }
-                    if !seed.seed.setup.is_empty() {
-                        prompt.push_str(&format!("    setup: {:?}\n", seed.seed.setup));
-                    }
-                    if !seed.seed.files.is_empty() {
-                        prompt.push_str(&format!(
-                            "    files: {:?}\n",
-                            seed.seed.files.iter().map(|f| &f.path).collect::<Vec<_>>()
-                        ));
-                    }
                 }
             }
 
@@ -700,11 +496,8 @@ pub(super) fn build_retry_prompt(
         }
     }
 
-    // Valid surface constraint — prevents hallucinated surface IDs
-    prompt.push_str(&format_valid_surfaces_constraint(state, target_ids));
-
-    // Instructions
-    prompt.push_str(INSTRUCTIONS);
+    // Response JSON example as recency anchor
+    prompt.push_str(RESPONSE_ANCHOR);
 
     prompt
 }
@@ -792,11 +585,6 @@ pub(super) fn build_incremental_prompt(
                                                 "    → Trigger was \"{}\". Does your seed create that condition?\n",
                                                 char.trigger
                                             ));
-                                            if COMPANION_HINTS {
-                                                prompt.push_str(
-                                                    "    This option may need a companion flag (e.g., a mode flag) to produce output.\n",
-                                                );
-                                            }
                                         }
                                     }
                                     // Include stderr for OptionError
@@ -901,11 +689,6 @@ pub(super) fn build_incremental_prompt(
                 _ => {}
             }
 
-            // Companion dependency hint (skip for Modifier — already has base-inclusion guidance)
-            if let Some(hint) = format_companion_hint(entry) {
-                prompt.push_str(&format!("  {}", hint));
-            }
-
             if let Some(feedback) = &entry.critique_feedback {
                 prompt.push_str(&format!("  **CRITIQUE**: {}\n", feedback));
             }
@@ -964,35 +747,22 @@ pub(super) fn build_incremental_prompt(
         prompt.push_str("\n\n");
     }
 
-    // Short instructions reminder
+    // Seed reminder + JSON format (recency anchor for cycle updates)
     prompt.push_str(
-        r#"Provide your next actions as JSON:
+        r#"Remember: seed.files creates files, seed.setup runs commands as argv arrays (NOT shell). Output must DIFFER from control to verify.
+
+Provide your next actions as JSON:
 ```json
-{"analysis": {"surface_id": "reasoning about control equivalence..."}, "actions": [{"kind": "Test", "surface_id": "...", "seed": {...}}, ...]}
+{"analysis": {"surface_id": "reasoning..."}, "actions": [{"kind": "Test", "surface_id": "...", "seed": {"setup": [], "files": [{"path": "f.txt", "content": "data\n"}]}, "prediction": {"diff_type": {"StdoutContains": "text"}, "reason": "..."}}]}
 ```
-
-Note: surface_id is automatically included in the command. Only use "extra_args" if you need additional arguments.
-
-Remember: Output must DIFFER from control run to verify. Try different seeds if OutputsEqual.
 "#,
     );
 
     prompt
 }
 
-const INSTRUCTIONS: &str = concat!(
-    include_str!("prompts/response_format.txt"),
-    include_str!("prompts/analysis.txt"),
-    include_str!("prompts/actions.txt"),
-    include_str!("prompts/probes.txt"),
-    include_str!("prompts/predictions.txt"),
-    include_str!("prompts/execution_model.txt"),
-    include_str!("prompts/no_shell_escaping.txt"),
-    include_str!("prompts/sandbox_writable_tmp.txt"),
-    include_str!("prompts/response_json.txt"),
-    include_str!("prompts/key_principles.txt"),
-    include_str!("prompts/file_creation.txt"),
-);
+const INSTRUCTIONS: &str = include_str!("prompts/instructions.txt");
+const RESPONSE_ANCHOR: &str = include_str!("prompts/response_json.txt");
 
 #[cfg(test)]
 mod tests {
@@ -1996,7 +1766,6 @@ stderr: pathspec 'main' did not match"#
 
         assert!(prompt.contains("**Trigger**: file with repeated similar lines"));
         assert!(prompt.contains("**Expected diff**: different hunk grouping"));
-        assert!(prompt.contains("Build a seed that creates the trigger condition"));
     }
 
     #[test]
@@ -2059,9 +1828,9 @@ stderr: pathspec 'main' did not match"#
 
         let prompt = build_prompt(&state, &["--patience".to_string()]);
 
-        // Should show diagnosis referencing the characterization
-        assert!(prompt.contains("DIAGNOSIS"));
+        // Should show brief diagnosis referencing the characterization trigger
+        assert!(prompt.contains("Trigger was"));
         assert!(prompt.contains("file with repeated similar lines"));
-        assert!(prompt.contains("Does the seed actually create the trigger condition"));
+        assert!(prompt.contains("Does your seed create that condition"));
     }
 }

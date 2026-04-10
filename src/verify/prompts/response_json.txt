@@ -6,14 +6,14 @@ Respond with JSON:
     "--example": "Control shows default output. Adding --example changes the format, so stdout will differ with any input file."
   },
   "actions": [
-    { "kind": "SetBaseline", "seed": { "setup": [["touch", "file.txt"]], "files": [] } },
-    { "kind": "Probe", "surface_id": "--unfamiliar-option", "seed": { "setup": [["touch", "file.txt"]], "files": [] } },
-    { "kind": "Test", "surface_id": "--example", "seed": { "setup": [["touch", "file.txt"]], "files": [] }, "prediction": {"diff_type": {"StdoutContains": "expected text"}, "reason": "changes output format"} }
+    { "kind": "SetBaseline", "seed": { "setup": [], "files": [{"path": "data.txt", "content": "alpha\nbeta\ngamma\n"}] } },
+    { "kind": "Probe", "surface_id": "--unfamiliar-option", "seed": { "setup": [], "files": [{"path": "data.txt", "content": "alpha\nbeta\ngamma\n"}] } },
+    { "kind": "Test", "surface_id": "--example", "seed": { "setup": [], "files": [{"path": "data.txt", "content": "alpha\nbeta\ngamma\n"}] }, "prediction": {"diff_type": {"StdoutContains": "expected text"}, "reason": "changes output format"} }
   ]
 }
 ```
 
-CRITICAL: Each setup command is an ARRAY of strings: `["cmd", "arg1", "arg2"]`, NOT a single string.
+CRITICAL: Each setup command is an ARRAY of strings: `["cmd", "arg1", "arg2"]`, NOT a single string. Use seed.files to create file content — do NOT use echo/printf with shell redirects in setup (they are not executed through a shell).
 
 IMPORTANT: Only use surface_id values from the "Surfaces Needing Work" section above. Do NOT invent or guess option names - only test surfaces explicitly listed in this prompt.
 

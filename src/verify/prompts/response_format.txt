@@ -1,2 +1,0 @@
-IMPORTANT: Your entire response must be a single JSON object. No prose outside the JSON. Put reasoning in the "analysis" field. Begin your response with `{` and end with `}`.
-
