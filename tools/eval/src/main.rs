@@ -209,6 +209,17 @@ fn save_eval_data(
             let state_path = dir.join(format!("run_{}_state.json", i));
             std::fs::write(&state_path, state_json)?;
         }
+        // Preserve lm_log directory (prompts + responses) for post-hoc analysis
+        if !run.lm_log_files.is_empty() {
+            let lm_log_dir = dir.join(format!("run_{}_lm_log", i));
+            std::fs::create_dir_all(&lm_log_dir)
+                .with_context(|| format!("create {}", lm_log_dir.display()))?;
+            for (name, bytes) in &run.lm_log_files {
+                let path = lm_log_dir.join(name);
+                std::fs::write(&path, bytes)
+                    .with_context(|| format!("write {}", path.display()))?;
+            }
+        }
     }
     // Save summary
     let path = dir.join("summary.json");

@@ -15,6 +15,10 @@ pub struct RunOutcome {
     /// Raw state.json content from the run's tmpdir (preserved for post-hoc analysis).
     #[serde(skip)]
     pub state_json: Option<String>,
+    /// Files from the run's lm_log directory (filename → bytes). Preserved
+    /// for post-hoc analysis of prompts and LM responses.
+    #[serde(skip)]
+    pub lm_log_files: Vec<(String, Vec<u8>)>,
     /// Counts of LM-related events parsed from stderr.
     pub lm_stats: LmStats,
     /// Pipeline progress stats parsed from PROGRESS lines.

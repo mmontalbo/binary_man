@@ -51,6 +51,9 @@ pub fn run_single(
         (HashMap::new(), 0, None)
     };
 
+    // Preserve lm_log files (prompts + responses) before the tmpdir is dropped.
+    let lm_log_files = collect_lm_log_files(&tmpdir.path().join("lm_log"));
+
     let lm_stats = LmStats::from_stderr(&result.stderr);
     let progress_stats = ProgressStats::from_stderr(&result.stderr);
 
@@ -63,9 +66,31 @@ pub fn run_single(
         surfaces,
         stderr: result.stderr,
         state_json,
+        lm_log_files,
         lm_stats,
         progress_stats,
     })
+}
+
+/// Read all files from an lm_log directory as (filename, bytes) pairs.
+/// Returns an empty Vec if the directory doesn't exist or can't be read.
+fn collect_lm_log_files(lm_log_dir: &std::path::Path) -> Vec<(String, Vec<u8>)> {
+    let entries = match std::fs::read_dir(lm_log_dir) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+    let mut files = Vec::new();
+    for entry in entries.flatten() {
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if let Ok(bytes) = std::fs::read(entry.path()) {
+            files.push((name, bytes));
+        }
+    }
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    files
 }
 
 /// Run multiple trials in parallel using scoped threads.
