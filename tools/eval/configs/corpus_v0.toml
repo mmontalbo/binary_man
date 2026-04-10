@@ -1,0 +1,16 @@
+name = "corpus_v0"
+parallel_groups = true
+
+[defaults]
+runs = 1
+max_cycles = 80
+
+[[groups]]
+lms = ["claude:haiku"]
+binaries = [["ls"], ["grep"], ["git", "diff"]]
+timeout = 600
+
+[[groups]]
+lms = ["ollama:qwen3-coder:30b", "ollama:devstral-small-2:24b"]
+binaries = [["ls"], ["grep"], ["git", "diff"]]
+timeout = 1800

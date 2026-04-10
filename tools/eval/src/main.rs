@@ -5,6 +5,7 @@ use std::path::PathBuf;
 mod baseline;
 mod compare;
 mod display;
+mod matrix;
 mod runner;
 mod stats;
 mod summary;
@@ -12,8 +13,8 @@ mod summary;
 #[derive(Parser, Debug)]
 #[command(about = "A/B testing harness for bman verification")]
 struct Args {
-    /// Binary to evaluate (e.g., "ls", "git")
-    #[arg(value_name = "BINARY")]
+    /// Binary to evaluate (e.g., "ls", "git"). Required unless --matrix is used.
+    #[arg(value_name = "BINARY", default_value = "")]
     binary: String,
 
     /// Entry point arguments (e.g., "diff" for "git diff")
@@ -55,10 +56,28 @@ struct Args {
     /// Descriptive note for this evaluation
     #[arg(long)]
     note: Option<String>,
+
+    /// Run a matrix of LMs x binaries from a TOML config file
+    #[arg(long, value_name = "CONFIG")]
+    matrix: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
+
+    // Handle --matrix mode
+    if let Some(ref config_path) = args.matrix {
+        if !args.binary.is_empty() {
+            anyhow::bail!("--matrix cannot be combined with positional BINARY argument");
+        }
+        let git = git_info()?;
+        let bman_bin = build_bman()?;
+        return matrix::run(config_path, &bman_bin, &git);
+    }
+
+    if args.binary.is_empty() {
+        anyhow::bail!("BINARY argument is required (or use --matrix)");
+    }
 
     // Handle --tag-baseline (no runs needed)
     if let Some(ref name) = args.tag_baseline {
@@ -111,7 +130,18 @@ fn main() -> Result<()> {
         .with_context(|| format!("create eval dir {}", eval_dir.display()))?;
 
     let current = summary::build(&runs);
-    save_eval_data(&eval_dir, &runs, &current, &args, &git)?;
+    let meta = serde_json::json!({
+        "commit": git.commit,
+        "subject": git.subject,
+        "dirty": git.dirty,
+        "runs": args.runs,
+        "max_cycles": args.max_cycles,
+        "timeout": args.timeout,
+        "parallel": args.parallel,
+        "lm": args.lm,
+        "note": args.note,
+    });
+    save_eval_data(&eval_dir, &runs, &current, &meta)?;
     eprintln!(
         "Results saved to {}",
         eval_dir.display()
@@ -132,7 +162,7 @@ fn main() -> Result<()> {
 }
 
 /// Derive pack name from binary + entry point.
-fn pack_name(binary: &str, entry_point: &[String]) -> String {
+pub(crate) fn pack_name(binary: &str, entry_point: &[String]) -> String {
     let mut name = binary.to_string();
     for ep in entry_point {
         name.push('-');
@@ -143,10 +173,10 @@ fn pack_name(binary: &str, entry_point: &[String]) -> String {
 
 /// Git metadata for the current working directory.
 #[derive(Debug, Clone, serde::Serialize)]
-struct GitInfo {
-    commit: String,
-    subject: String,
-    dirty: bool,
+pub(crate) struct GitInfo {
+    pub(crate) commit: String,
+    pub(crate) subject: String,
+    pub(crate) dirty: bool,
 }
 
 fn git_info() -> Result<GitInfo> {
@@ -188,12 +218,11 @@ fn eval_data_dir(pack_name: &str, commit: &str) -> PathBuf {
         .join(commit)
 }
 
-fn save_eval_data(
+pub(crate) fn save_eval_data(
     dir: &std::path::Path,
     runs: &[summary::RunOutcome],
     current: &summary::Summary,
-    args: &Args,
-    git: &GitInfo,
+    meta: &serde_json::Value,
 ) -> Result<()> {
     // Save each run (JSON + stderr log)
     for (i, run) in runs.iter().enumerate() {
@@ -226,19 +255,8 @@ fn save_eval_data(
     let json = serde_json::to_string_pretty(current)?;
     std::fs::write(&path, json)?;
     // Save meta
-    let meta = serde_json::json!({
-        "commit": git.commit,
-        "subject": git.subject,
-        "dirty": git.dirty,
-        "runs": args.runs,
-        "max_cycles": args.max_cycles,
-        "timeout": args.timeout,
-        "parallel": args.parallel,
-        "lm": args.lm,
-        "note": args.note,
-    });
     let path = dir.join("meta.json");
-    let json = serde_json::to_string_pretty(&meta)?;
+    let json = serde_json::to_string_pretty(meta)?;
     std::fs::write(&path, json)?;
     Ok(())
 }
