@@ -1,4 +1,4 @@
-name = "exp_e4_prompt_restructure"
+name = "exp_e5_auto_repair"
 parallel_groups = true
 
 [defaults]
