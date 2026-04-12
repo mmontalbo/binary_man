@@ -6,3 +6,4 @@
 tools/eval_data/
 __pycache__/
 tools/eval/configs/scratch.toml
+.claude/
