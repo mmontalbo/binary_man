@@ -1,0 +1,16 @@
+name = "exp_e5_cross_binary"
+parallel_groups = true
+
+[defaults]
+runs = 1
+max_cycles = 80
+
+[[groups]]
+lms = ["claude:haiku"]
+binaries = [["ls"], ["find"], ["grep"]]
+timeout = 600
+
+[[groups]]
+lms = ["ollama:qwen3-coder:30b", "ollama:devstral-small-2:24b"]
+binaries = [["ls"], ["find"], ["grep"]]
+timeout = 1800

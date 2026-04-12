@@ -349,7 +349,8 @@ fn default_category() -> SurfaceCategory {
 pub struct Seed {
     /// Setup commands to run before the main command.
     /// Each inner Vec is a command with arguments.
-    #[serde(default)]
+    /// Accepts nested `[["git","init"],["git","add","."]]` or flat `["git","init"]`.
+    #[serde(default, deserialize_with = "deserialize_setup")]
     pub setup: Vec<Vec<String>>,
     /// Files to create before execution.
     /// Accepts both array format `[{"path": "f", "content": "c"}]`
@@ -386,6 +387,59 @@ where
         }
         Value::Null => Ok(Vec::new()),
         _ => Err(de::Error::custom("files must be an array or object")),
+    }
+}
+
+/// Deserialize setup from either nested or flat array format.
+///
+/// Nested (correct): `[["git","init"],["git","add","."]]`
+/// Flat (common LM mistake): `["git","init","&&","git","add","."]`
+///   → split on "&&" into separate commands.
+fn deserialize_setup<'de, D>(deserializer: D) -> Result<Vec<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de;
+    use serde_json::Value;
+
+    let value = Value::deserialize(deserializer)?;
+    match value {
+        Value::Array(arr) if arr.is_empty() => Ok(vec![]),
+        Value::Array(arr) => {
+            // Check first element to decide format
+            if arr[0].is_array() {
+                // Nested format: each element is a command array
+                arr.into_iter()
+                    .map(|v| match v {
+                        Value::Array(cmd) => Ok(cmd
+                            .into_iter()
+                            .filter_map(|s| s.as_str().map(String::from))
+                            .collect()),
+                        Value::String(s) => shell_words::split(&s).map_err(de::Error::custom),
+                        _ => Ok(vec![]),
+                    })
+                    .collect()
+            } else {
+                // Flat format: split on "&&" into separate commands
+                let tokens: Vec<String> = arr
+                    .into_iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect();
+                Ok(tokens
+                    .split(|t| t == "&&")
+                    .filter(|cmd| !cmd.is_empty())
+                    .map(|cmd| cmd.to_vec())
+                    .collect())
+            }
+        }
+        Value::String(s) if s.is_empty() => Ok(vec![]),
+        Value::String(s) => s
+            .split("&&")
+            .filter(|part| !part.trim().is_empty())
+            .map(|part| shell_words::split(part.trim()).map_err(de::Error::custom))
+            .collect(),
+        Value::Null => Ok(vec![]),
+        _ => Err(de::Error::custom("setup must be an array or string")),
     }
 }
 
@@ -808,6 +862,34 @@ mod tests {
             hint: None,
         };
         assert!(color_seed.is_similar_to("--color-moved-ws"));
+    }
+
+    #[test]
+    fn test_seed_setup_nested_array() {
+        let json = r#"{"setup": [["git","init"],["git","add","."]], "files": []}"#;
+        let seed: Seed = serde_json::from_str(json).unwrap();
+        assert_eq!(seed.setup, vec![vec!["git", "init"], vec!["git", "add", "."]]);
+    }
+
+    #[test]
+    fn test_seed_setup_flat_array() {
+        let json = r#"{"setup": ["git","init"], "files": []}"#;
+        let seed: Seed = serde_json::from_str(json).unwrap();
+        assert_eq!(seed.setup, vec![vec!["git", "init"]]);
+    }
+
+    #[test]
+    fn test_seed_setup_flat_array_with_ampersand() {
+        let json = r#"{"setup": ["git","init","&&","git","add","."], "files": []}"#;
+        let seed: Seed = serde_json::from_str(json).unwrap();
+        assert_eq!(seed.setup, vec![vec!["git", "init"], vec!["git", "add", "."]]);
+    }
+
+    #[test]
+    fn test_seed_setup_string() {
+        let json = r#"{"setup": "git init && git add .", "files": []}"#;
+        let seed: Seed = serde_json::from_str(json).unwrap();
+        assert_eq!(seed.setup, vec![vec!["git", "init"], vec!["git", "add", "."]]);
     }
 
 }
