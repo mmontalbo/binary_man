@@ -467,12 +467,12 @@ fn draw_surface_detail(frame: &mut Frame, app: &mut App, area: Rect) {
 
                 render_seed(&mut lines, &a.setup_commands, &a.files);
                 if is_batch_probe {
-                    push_optional(&mut lines, "control", &a.control_stdout_preview);
-                    push_optional(&mut lines, "option", &a.stdout_preview);
+                    render_execution_output(&mut lines, "control", &a.control_stdout_preview);
+                    render_execution_output(&mut lines, "option", &a.stdout_preview);
                 } else {
-                    push_optional(&mut lines, "stdout", &a.stdout_preview);
+                    render_execution_output(&mut lines, "stdout", &a.stdout_preview);
                 }
-                push_optional(&mut lines, "stderr", &a.stderr_preview);
+                render_execution_output(&mut lines, "stderr", &a.stderr_preview);
 
                 if let Some(pred) = &a.prediction {
                     if !pred.is_empty() {
@@ -517,8 +517,8 @@ fn draw_surface_detail(frame: &mut Frame, app: &mut App, area: Rect) {
                         Style::default().fg(Color::Red),
                     ));
                 }
-                push_optional(&mut lines, "control", &p.control_stdout_preview);
-                push_optional(&mut lines, "stdout", &p.stdout_preview);
+                render_execution_output(&mut lines, "control", &p.control_stdout_preview);
+                render_execution_output(&mut lines, "stdout", &p.stdout_preview);
 
                 prior_events.push((cycle, format!("probe \u{2192} {}", label)));
             }
@@ -707,13 +707,38 @@ fn render_action_json(
     }
 }
 
-fn push_optional(lines: &mut Vec<Line<'static>>, label: &str, value: &Option<String>) {
+/// Render execution output (control/option/stdout/stderr) as a multi-line block
+/// with a visible header and per-line content. Strips escape sequences.
+fn render_execution_output(lines: &mut Vec<Line<'static>>, label: &str, value: &Option<String>) {
     if let Some(v) = value {
-        if !v.is_empty() {
-            lines.push(Line::styled(format!("  {}: {}", label, strip_escapes(v)), DIM));
+        let cleaned = strip_escapes(v);
+        if cleaned.trim().is_empty() {
+            return;
+        }
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("  {} ", label),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("({} bytes)", v.len()),
+                DIM,
+            ),
+        ]));
+        for line in cleaned.lines().take(12) {
+            lines.push(Line::styled(format!("    {}", line), Style::default()));
+        }
+        let total = cleaned.lines().count();
+        if total > 12 {
+            lines.push(Line::styled(
+                format!("    ... ({} more lines)", total - 12),
+                DIM,
+            ));
         }
     }
 }
+
 
 /// Strip ANSI and OSC escape sequences from text to prevent terminal corruption.
 /// Handles CSI sequences (\x1b[...), OSC sequences (\x1b]...\x07), and BEL (\x07).
