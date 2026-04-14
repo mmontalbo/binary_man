@@ -466,7 +466,12 @@ fn draw_surface_detail(frame: &mut Frame, app: &mut App, area: Rect) {
                 render_action_json(&mut lines, app, cycle, &surface.id, true);
 
                 render_seed(&mut lines, &a.setup_commands, &a.files);
-                push_optional(&mut lines, "stdout", &a.stdout_preview);
+                if is_batch_probe {
+                    push_optional(&mut lines, "control", &a.control_stdout_preview);
+                    push_optional(&mut lines, "option", &a.stdout_preview);
+                } else {
+                    push_optional(&mut lines, "stdout", &a.stdout_preview);
+                }
                 push_optional(&mut lines, "stderr", &a.stderr_preview);
 
                 if let Some(pred) = &a.prediction {
