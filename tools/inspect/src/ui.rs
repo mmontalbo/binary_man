@@ -579,7 +579,7 @@ fn render_seed(lines: &mut Vec<Line<'static>>, setup: &[String], files: &[(Strin
             Style::default().add_modifier(Modifier::BOLD),
         ));
         for line in content.lines().take(8) {
-            lines.push(Line::styled(format!("    {}", line), DIM));
+            lines.push(Line::styled(format!("    {}", strip_escapes(line)), DIM));
         }
         let total = content.lines().count();
         if total > 8 {
@@ -697,9 +697,54 @@ fn render_action_json(
 fn push_optional(lines: &mut Vec<Line<'static>>, label: &str, value: &Option<String>) {
     if let Some(v) = value {
         if !v.is_empty() {
-            lines.push(Line::styled(format!("  {}: {}", label, v), DIM));
+            lines.push(Line::styled(format!("  {}: {}", label, strip_escapes(v)), DIM));
         }
     }
+}
+
+/// Strip ANSI and OSC escape sequences from text to prevent terminal corruption.
+/// Handles CSI sequences (\x1b[...), OSC sequences (\x1b]...\x07), and BEL (\x07).
+fn strip_escapes(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            match chars.peek() {
+                Some('[') => {
+                    // CSI sequence: consume until letter
+                    chars.next();
+                    while let Some(&ch) = chars.peek() {
+                        chars.next();
+                        if ch.is_ascii_alphabetic() {
+                            break;
+                        }
+                    }
+                }
+                Some(']') => {
+                    // OSC sequence: consume until BEL (\x07) or ST (\x1b\\)
+                    chars.next();
+                    while let Some(&ch) = chars.peek() {
+                        chars.next();
+                        if ch == '\x07' {
+                            break;
+                        }
+                        if ch == '\x1b' {
+                            if chars.peek() == Some(&'\\') {
+                                chars.next();
+                            }
+                            break;
+                        }
+                    }
+                }
+                _ => {} // skip lone ESC
+            }
+        } else if c == '\x07' {
+            // stray BEL
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 // -- Status bar --
