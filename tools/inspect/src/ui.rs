@@ -382,10 +382,13 @@ fn draw_surface_detail(frame: &mut Frame, app: &mut App, area: Rect) {
             focused_line = Some(lines.len() as u16);
         }
         let marker = if is_focused { "\u{25b8} " } else { "" };
-        lines.push(Line::styled(
-            format!("{}\u{2500}\u{2500} c{} \u{2500}\u{2500}", marker, cycle),
-            DIM,
-        ));
+        let is_batch_probe = cycle == 0 && char_log.is_none();
+        let cycle_label = if is_batch_probe {
+            format!("{}\u{2500}\u{2500} c{} (batch probe) \u{2500}\u{2500}", marker, cycle)
+        } else {
+            format!("{}\u{2500}\u{2500} c{} \u{2500}\u{2500}", marker, cycle)
+        };
+        lines.push(Line::styled(cycle_label, DIM));
 
         // BMAN prompt excerpt (│ bordered, with markdown rendering)
         let prompt_excerpt = app.transcripts.iter()
@@ -407,6 +410,11 @@ fn draw_surface_detail(frame: &mut Frame, app: &mut App, area: Rect) {
             }
             prev_prompt_excerpt = Some(excerpt.clone());
             prev_prompt_cycle = Some(cycle);
+        } else if is_batch_probe {
+            lines.push(Line::styled(
+                "  verified mechanically against rich fixture (no LM involved)",
+                DIM,
+            ));
         } else if show_context {
             if prior_events.is_empty() {
                 lines.push(Line::styled("  no prior activity", DIM));
