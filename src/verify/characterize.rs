@@ -69,6 +69,9 @@ pub(super) fn characterize_pending_surfaces(
             .enumerate()
             .map(|(i, (chunk_ids, prompt))| {
                 s.spawn(move || {
+                    // Log prompt
+                    log_characterize_prompt(pack_path, i, prompt).ok();
+
                     let mut plugin = create_plugin(lm_config);
                     if plugin.init().is_err() {
                         return vec![];
@@ -85,6 +88,10 @@ pub(super) fn characterize_pending_surfaces(
                             }
                         };
                     plugin.shutdown().ok();
+
+                    // Log response
+                    log_characterize_response(pack_path, i, &response_text).ok();
+
                     parse_characterize_response(&response_text, chunk_ids)
                 })
             })
@@ -233,6 +240,9 @@ pub(super) fn recharacterize_surface(
 
     let prompt = build_recharacterize_prompt(state, surface_id, &old_char);
 
+    // Log recharacterization prompt
+    log_recharacterize_prompt(pack_path, surface_id, &prompt).ok();
+
     let mut plugin = create_plugin(lm_config);
     plugin.init()?;
 
@@ -247,6 +257,9 @@ pub(super) fn recharacterize_surface(
         }
     };
     plugin.shutdown().ok();
+
+    // Log recharacterization response
+    log_recharacterize_response(pack_path, surface_id, &response_text).ok();
 
     // Parse single-surface response
     let results = parse_characterize_response(&response_text, &[surface_id.to_string()]);
@@ -411,6 +424,47 @@ pub(super) fn parse_characterize_response(
     }
 
     results
+}
+
+// -- Logging --
+
+fn log_characterize_prompt(pack_path: &Path, chunk: usize, prompt: &str) -> Result<()> {
+    let log_dir = pack_path.join("lm_log");
+    std::fs::create_dir_all(&log_dir)?;
+    let path = log_dir.join(format!("char_{chunk}_prompt.md"));
+    std::fs::write(&path, prompt)?;
+    Ok(())
+}
+
+fn log_characterize_response(pack_path: &Path, chunk: usize, response: &str) -> Result<()> {
+    let log_dir = pack_path.join("lm_log");
+    std::fs::create_dir_all(&log_dir)?;
+    let path = log_dir.join(format!("char_{chunk}_response.txt"));
+    std::fs::write(&path, response)?;
+    Ok(())
+}
+
+fn log_recharacterize_prompt(pack_path: &Path, surface_id: &str, prompt: &str) -> Result<()> {
+    let log_dir = pack_path.join("lm_log");
+    std::fs::create_dir_all(&log_dir)?;
+    // Sanitize surface_id for filename (replace -- with _)
+    let safe_id = surface_id.replace('-', "_");
+    let path = log_dir.join(format!("rechar_{safe_id}_prompt.md"));
+    std::fs::write(&path, prompt)?;
+    Ok(())
+}
+
+fn log_recharacterize_response(
+    pack_path: &Path,
+    surface_id: &str,
+    response: &str,
+) -> Result<()> {
+    let log_dir = pack_path.join("lm_log");
+    std::fs::create_dir_all(&log_dir)?;
+    let safe_id = surface_id.replace('-', "_");
+    let path = log_dir.join(format!("rechar_{safe_id}_response.txt"));
+    std::fs::write(&path, response)?;
+    Ok(())
 }
 
 #[cfg(test)]

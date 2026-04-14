@@ -1732,6 +1732,7 @@ fn execute_cycle(
             return Ok(timing);
         }
     };
+    log_raw_response(ctx.pack_path, state.cycle, &response_text).ok();
     log_response(ctx.pack_path, state.cycle, &response)?;
 
     // Reset mode: reset plugin after each successful call

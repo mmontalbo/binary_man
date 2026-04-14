@@ -341,11 +341,19 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
 
                     // Show outputs for OutputsEqual failures - this is key diagnostic info
                     if matches!(attempt.outcome, Outcome::OutputsEqual) {
-                        if let Some(stdout) = &attempt.stdout_preview {
-                            prompt.push_str(&format!("    option_stdout: {:?}\n", stdout));
-                        }
-                        if let Some(control) = &attempt.control_stdout_preview {
-                            prompt.push_str(&format!("    control_stdout: {:?}\n", control));
+                        let both_empty = attempt.stdout_preview.as_ref().is_none_or(|s| s.is_empty())
+                            && attempt.control_stdout_preview.as_ref().is_none_or(|s| s.is_empty());
+                        if both_empty {
+                            prompt.push_str(
+                                "    ⚠ Both control and test produced 0 bytes of output. Your seed does not create conditions for the binary to generate any output.\n",
+                            );
+                        } else {
+                            if let Some(stdout) = &attempt.stdout_preview {
+                                prompt.push_str(&format!("    option_stdout: {:?}\n", stdout));
+                            }
+                            if let Some(control) = &attempt.control_stdout_preview {
+                                prompt.push_str(&format!("    control_stdout: {:?}\n", control));
+                            }
                         }
 
                         // Brief diagnosis
@@ -354,6 +362,10 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
                                 "    → Trigger was \"{}\". Does your seed create that condition?\n",
                                 char.trigger
                             ));
+                        } else if both_empty {
+                            prompt.push_str(
+                                "    → Your seed must create the initial state that makes the binary produce output, THEN the option can change that output.\n",
+                            );
                         } else {
                             prompt.push_str(
                                 "    → Outputs matched! Try a different seed that exercises the option's effect.\n",
@@ -561,17 +573,25 @@ pub(super) fn build_incremental_prompt(
                                     ));
                                     // Include evidence on OutputsEqual so the LM can diagnose WHY
                                     if matches!(attempt.outcome, Outcome::OutputsEqual) {
-                                        if let Some(control) = &attempt.control_stdout_preview {
-                                            prompt.push_str(&format!(
-                                                "    control_stdout: {:?}\n",
-                                                control
-                                            ));
-                                        }
-                                        if let Some(stdout) = &attempt.stdout_preview {
-                                            prompt.push_str(&format!(
-                                                "    option_stdout: {:?}\n",
-                                                stdout
-                                            ));
+                                        let both_empty = attempt.stdout_preview.as_ref().is_none_or(|s| s.is_empty())
+                                            && attempt.control_stdout_preview.as_ref().is_none_or(|s| s.is_empty());
+                                        if both_empty {
+                                            prompt.push_str(
+                                                "    ⚠ Both control and test produced 0 bytes of output. Your seed does not create conditions for the binary to generate any output.\n",
+                                            );
+                                        } else {
+                                            if let Some(control) = &attempt.control_stdout_preview {
+                                                prompt.push_str(&format!(
+                                                    "    control_stdout: {:?}\n",
+                                                    control
+                                                ));
+                                            }
+                                            if let Some(stdout) = &attempt.stdout_preview {
+                                                prompt.push_str(&format!(
+                                                    "    option_stdout: {:?}\n",
+                                                    stdout
+                                                ));
+                                            }
                                         }
                                         if let Some(metrics) = &attempt.stdout_metrics {
                                             prompt.push_str(&format!(
@@ -617,7 +637,13 @@ pub(super) fn build_incremental_prompt(
                             } else if probe.outputs_differ {
                                 "DIFFER → auto-promoted to Test".to_string()
                             } else {
-                                format!("identical (exit={})", probe.exit_code.unwrap_or(0))
+                                let both_empty = probe.stdout_preview.as_ref().is_none_or(|s| s.is_empty())
+                                    && probe.control_stdout_preview.as_ref().is_none_or(|s| s.is_empty());
+                                if both_empty {
+                                    format!("identical (0 bytes — seed produced no output, exit={})", probe.exit_code.unwrap_or(0))
+                                } else {
+                                    format!("identical (exit={})", probe.exit_code.unwrap_or(0))
+                                }
                             };
                             prompt.push_str(&format!(
                                 "- Probe {}: {} (probes left: {})\n",
@@ -910,8 +936,8 @@ mod tests {
         assert!(prompt.contains("**Attempts:** 1 total"));
         assert!(prompt.contains("args: [\"--verbose\"]"));
         assert!(prompt.contains("OutputsEqual"));
-        // Should show the hint for OutputsEqual
-        assert!(prompt.contains("Outputs matched!"));
+        // Should show the 0-byte hint when both outputs are empty
+        assert!(prompt.contains("0 bytes of output"));
     }
 
     #[test]
