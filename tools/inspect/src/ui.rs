@@ -34,6 +34,12 @@ fn border_block(title: &str, active: bool) -> Block<'_> {
 
 const DIM: Style = Style::new().fg(Color::DarkGray);
 
+// Border colors for message categories
+fn bman_border() -> Span<'static> { Span::styled("\u{2502} ".to_string(), DIM) }
+fn lm_border() -> Span<'static> { Span::styled("\u{2502} ".to_string(), Style::default().fg(Color::Magenta)) }
+fn tool_border() -> Span<'static> { Span::styled("\u{2502} ".to_string(), Style::default().fg(Color::Cyan)) }
+fn sys_border() -> Span<'static> { Span::styled("\u{2502} ".to_string(), Style::default().fg(Color::Yellow)) }
+
 // -- Experiment picker --
 
 fn draw_experiment_picker(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -446,12 +452,11 @@ fn draw_surface_detail(frame: &mut Frame, app: &mut App, area: Rect) {
         // LM response (magenta │ border)
         if let Some(analysis) = app.analysis_for(cycle, &surface.id) {
             lines.push(Line::from(""));
-            let lm_border = Style::default().fg(Color::Magenta);
             let wrap_w = area.width.saturating_sub(4) as usize;
             for line in analysis.lines() {
                 if line.len() <= wrap_w.max(20) {
                     lines.push(Line::from(vec![
-                        Span::styled("\u{2502} ", lm_border),
+                        lm_border(),
                         Span::styled(line.to_string(), Style::default()),
                     ]));
                 } else {
@@ -465,7 +470,7 @@ fn draw_surface_detail(frame: &mut Frame, app: &mut App, area: Rect) {
                         };
                         let (chunk, rest) = remaining.split_at(split);
                         lines.push(Line::from(vec![
-                            Span::styled("\u{2502} ", lm_border),
+                            lm_border(),
                             Span::styled(chunk.to_string(), Style::default()),
                         ]));
                         remaining = rest;
@@ -485,12 +490,25 @@ fn draw_surface_detail(frame: &mut Frame, app: &mut App, area: Rect) {
                     "SetupFailed" => Color::Red,
                     _ => Color::White,
                 };
+
+                // LM: action + prediction
+                render_action_json(&mut lines, app, cycle, &surface.id, true);
+                if let Some(pred) = &a.prediction {
+                    if !pred.is_empty() {
+                        lines.push(Line::from(vec![
+                            lm_border(),
+                            Span::styled("predicted: ", Style::default().add_modifier(Modifier::BOLD)),
+                            Span::styled(pred.clone(), Style::default().fg(Color::Cyan)),
+                        ]));
+                    }
+                }
+
+                // TOOL: outcome + seed + outputs
                 lines.push(Line::from(vec![
-                    Span::styled("  TEST \u{2192} ", Style::default().add_modifier(Modifier::BOLD)),
+                    tool_border(),
+                    Span::styled("TEST \u{2192} ", Style::default().add_modifier(Modifier::BOLD)),
                     Span::styled(a.outcome.clone(), Style::default().fg(color)),
                 ]));
-                render_action_json(&mut lines, app, cycle, &surface.id, true);
-
                 render_seed(&mut lines, &a.setup_commands, &a.files);
                 if is_batch_probe {
                     render_execution_output(&mut lines, "control", &a.control_stdout_preview);
@@ -499,17 +517,6 @@ fn draw_surface_detail(frame: &mut Frame, app: &mut App, area: Rect) {
                     render_execution_output(&mut lines, "stdout", &a.stdout_preview);
                 }
                 render_execution_output(&mut lines, "stderr", &a.stderr_preview);
-
-                if let Some(pred) = &a.prediction {
-                    if !pred.is_empty() {
-                        let lm_border = Style::default().fg(Color::Magenta);
-                        lines.push(Line::from(vec![
-                            Span::styled("\u{2502} ", lm_border),
-                            Span::styled("predicted: ", Style::default().add_modifier(Modifier::BOLD)),
-                            Span::styled(pred.clone(), Style::default().fg(Color::Cyan)),
-                        ]));
-                    }
-                }
 
                 prior_events.push((cycle, format!("test \u{2192} {}", a.outcome)));
             } else {
@@ -529,18 +536,22 @@ fn draw_surface_detail(frame: &mut Frame, app: &mut App, area: Rect) {
                         ("identical", Color::Yellow)
                     }
                 };
-                lines.push(Line::from(vec![
-                    Span::styled("  PROBE \u{2192} ", Style::default().add_modifier(Modifier::BOLD)),
-                    Span::styled(label.to_string(), Style::default().fg(color)),
-                ]));
+
+                // LM: action
                 render_action_json(&mut lines, app, cycle, &surface.id, false);
 
+                // TOOL: outcome + seed + outputs
+                lines.push(Line::from(vec![
+                    tool_border(),
+                    Span::styled("PROBE \u{2192} ", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::styled(label.to_string(), Style::default().fg(color)),
+                ]));
                 render_seed(&mut lines, &p.setup_commands, &p.files);
                 if let Some(detail) = &p.setup_detail {
-                    lines.push(Line::styled(
-                        format!("  error: {}", detail),
-                        Style::default().fg(Color::Red),
-                    ));
+                    lines.push(Line::from(vec![
+                        tool_border(),
+                        Span::styled(format!("error: {}", detail), Style::default().fg(Color::Red)),
+                    ]));
                 }
                 render_execution_output(&mut lines, "control", &p.control_stdout_preview);
                 render_execution_output(&mut lines, "stdout", &p.stdout_preview);
@@ -573,10 +584,13 @@ fn draw_surface_detail(frame: &mut Frame, app: &mut App, area: Rect) {
                 _ => ("\u{25cb}", Color::Yellow),
             };
             lines.push(Line::from(""));
-            lines.push(Line::styled(
-                format!("  {} {} \u{2192} {}", icon, running_status, new_status),
-                Style::default().fg(color),
-            ));
+            lines.push(Line::from(vec![
+                sys_border(),
+                Span::styled(
+                    format!("{} {} \u{2192} {}", icon, running_status, new_status),
+                    Style::default().fg(color),
+                ),
+            ]));
             running_status = new_status;
         }
     }
@@ -634,28 +648,28 @@ fn draw_surface_detail(frame: &mut Frame, app: &mut App, area: Rect) {
 
 fn render_seed(lines: &mut Vec<Line<'static>>, setup: &[String], files: &[(String, String)]) {
     if !setup.is_empty() {
-        lines.push(Line::styled("  \u{2500}\u{2500} setup", DIM));
+        lines.push(Line::from(vec![tool_border(), Span::styled("\u{2500}\u{2500} setup", DIM)]));
     }
     for cmd in setup {
-        lines.push(Line::styled(format!("  $ {}", cmd), Style::default()));
+        lines.push(Line::from(vec![tool_border(), Span::styled(format!("$ {}", cmd), Style::default())]));
     }
     if !files.is_empty() {
-        lines.push(Line::styled("  \u{2500}\u{2500} files", DIM));
+        lines.push(Line::from(vec![tool_border(), Span::styled("\u{2500}\u{2500} files", DIM)]));
     }
     for (path, content) in files {
-        lines.push(Line::styled(
-            format!("  file: {}", path),
-            Style::default().add_modifier(Modifier::BOLD),
-        ));
+        lines.push(Line::from(vec![
+            tool_border(),
+            Span::styled(format!("file: {}", path), Style::default().add_modifier(Modifier::BOLD)),
+        ]));
         for line in content.lines().take(8) {
-            lines.push(Line::styled(format!("    {}", strip_escapes(line)), DIM));
+            lines.push(Line::from(vec![tool_border(), Span::styled(format!("  {}", strip_escapes(line)), DIM)]));
         }
         let total = content.lines().count();
         if total > 8 {
-            lines.push(Line::styled(
-                format!("    ... ({} more lines)", total - 8),
+            lines.push(Line::from(vec![tool_border(), Span::styled(
+                format!("  ... ({} more lines)", total - 8),
                 DIM,
-            ));
+            )]));
         }
     }
 }
@@ -714,7 +728,7 @@ fn render_bordered_markdown(lines: &mut Vec<Line<'static>>, text: &str, width: u
         // Pre-wrap long lines so each segment gets the │ border
         if line.len() <= wrap_width {
             lines.push(Line::from(vec![
-                Span::styled("\u{2502} ", DIM),
+                bman_border(),
                 Span::styled(line.to_string(), style),
             ]));
         } else {
@@ -731,7 +745,7 @@ fn render_bordered_markdown(lines: &mut Vec<Line<'static>>, text: &str, width: u
                 };
                 let (chunk, rest) = remaining.split_at(split_at);
                 lines.push(Line::from(vec![
-                    Span::styled("\u{2502} ", DIM),
+                    bman_border(),
                     Span::styled(chunk.to_string(), style),
                 ]));
                 remaining = rest;
@@ -748,13 +762,12 @@ fn render_action_json(
     surface_id: &str,
     is_attempt: bool,
 ) {
-    let lm_border = Style::default().fg(Color::Magenta);
     if let Some(actions) = app.cycle_actions.get(&cycle) {
         let kind_match = if is_attempt { "Test" } else { "Probe" };
         for (sid, kind) in actions {
             if sid == surface_id && kind == kind_match {
                 lines.push(Line::from(vec![
-                    Span::styled("\u{2502} ", lm_border),
+                    lm_border(),
                     Span::styled(
                         format!("action: {} {}", kind, sid),
                         DIM,
@@ -776,8 +789,9 @@ fn render_execution_output(lines: &mut Vec<Line<'static>>, label: &str, value: &
         }
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
+            tool_border(),
             Span::styled(
-                format!("  {} ", label),
+                format!("{} ", label),
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -786,14 +800,14 @@ fn render_execution_output(lines: &mut Vec<Line<'static>>, label: &str, value: &
             ),
         ]));
         for line in cleaned.lines().take(12) {
-            lines.push(Line::styled(format!("    {}", line), Style::default()));
+            lines.push(Line::from(vec![tool_border(), Span::styled(format!("  {}", line), Style::default())]));
         }
         let total = cleaned.lines().count();
         if total > 12 {
-            lines.push(Line::styled(
-                format!("    ... ({} more lines)", total - 12),
+            lines.push(Line::from(vec![tool_border(), Span::styled(
+                format!("  ... ({} more lines)", total - 12),
                 DIM,
-            ));
+            )]));
         }
     }
 }
