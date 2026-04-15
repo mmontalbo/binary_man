@@ -1,6 +1,6 @@
 use ratatui::widgets::ListState;
 
-use crate::data::{CellState, CharacterizationLog, CycleActionsMap, CycleAnalysisMap, Experiment, Cell, Surface, Transcript};
+use crate::data::{CellState, CharacterizationLog, CycleResponseMap, Experiment, Cell, Surface, Transcript};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -22,8 +22,7 @@ pub struct App {
     pub surface_list_state: ListState,
     pub cell_state: Option<CellState>,
     pub transcripts: Vec<Transcript>,
-    pub cycle_analyses: CycleAnalysisMap,
-    pub cycle_actions: CycleActionsMap,
+    pub cycle_responses: CycleResponseMap,
     pub char_logs: Vec<CharacterizationLog>,
     pub focused_event: usize,
     pub event_cycles: Vec<u32>,
@@ -56,8 +55,7 @@ impl App {
             surface_list_state: ListState::default(),
             cell_state: None,
             transcripts: Vec::new(),
-            cycle_analyses: CycleAnalysisMap::new(),
-            cycle_actions: CycleActionsMap::new(),
+            cycle_responses: CycleResponseMap::new(),
             char_logs: Vec::new(),
             focused_event: 0,
             event_cycles: Vec::new(),
@@ -130,12 +128,6 @@ impl App {
             self.focused_event -= 1;
         }
         self.detail_scroll = u16::MAX;
-    }
-
-    pub fn analysis_for(&self, cycle: u32, surface_id: &str) -> Option<&str> {
-        self.cycle_analyses
-            .get(&(cycle, surface_id.to_string()))
-            .map(|s| s.as_str())
     }
 
     // -- Filter --
@@ -369,14 +361,13 @@ impl App {
                             let transcripts =
                                 crate::data::load_transcripts(&state.lm_log_dir)
                                     .unwrap_or_default();
-                            let (analyses, actions) =
-                                crate::data::load_cycle_data(&state.lm_log_dir);
+                            let responses =
+                                crate::data::load_cycle_responses(&state.lm_log_dir);
                             let char_logs =
                                 crate::data::load_characterization_logs(&state.lm_log_dir);
                             self.cell_state = Some(state);
                             self.transcripts = transcripts;
-                            self.cycle_analyses = analyses;
-                            self.cycle_actions = actions;
+                            self.cycle_responses = responses;
                             self.char_logs = char_logs;
                             self.surface_list_state.select(Some(0));
                             self.focus = Focus::CellView;
@@ -409,8 +400,7 @@ impl App {
                 } else {
                     self.cell_state = None;
                     self.transcripts.clear();
-                    self.cycle_analyses.clear();
-                    self.cycle_actions.clear();
+                    self.cycle_responses.clear();
                     self.char_logs.clear();
                     self.event_cycles.clear();
                     self.focused_event = 0;

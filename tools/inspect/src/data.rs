@@ -51,21 +51,14 @@ pub struct ProbeEvent {
     pub setup_failed: bool,
     pub stdout_preview: Option<String>,
     pub control_stdout_preview: Option<String>,
-    pub setup_commands: Vec<String>,
-    pub files: Vec<(String, String)>,
-    pub setup_detail: Option<String>,
+    pub raw: serde_json::Value,
 }
 
 #[derive(Debug, Clone)]
 pub struct AttemptEvent {
     pub cycle: u32,
     pub outcome: String,
-    pub stdout_preview: Option<String>,
-    pub control_stdout_preview: Option<String>,
-    pub stderr_preview: Option<String>,
-    pub setup_commands: Vec<String>,
-    pub files: Vec<(String, String)>,
-    pub prediction: Option<String>,
+    pub raw: serde_json::Value,
 }
 
 /// Prompt text for a cycle (response data loaded separately via CycleAnalysisMap).
@@ -242,75 +235,25 @@ fn parse_surface(entry: &serde_json::Value) -> Surface {
 }
 
 fn parse_probe(probe: &serde_json::Value) -> ProbeEvent {
-    let (setup_commands, files) = extract_seed_details(&probe["seed"]);
     ProbeEvent {
         cycle: probe["cycle"].as_u64().unwrap_or(0) as u32,
         outputs_differ: probe["outputs_differ"].as_bool().unwrap_or(false),
         setup_failed: probe["setup_failed"].as_bool().unwrap_or(false),
         stdout_preview: probe["stdout_preview"].as_str().map(String::from),
         control_stdout_preview: probe["control_stdout_preview"].as_str().map(String::from),
-        setup_commands,
-        files,
-        setup_detail: probe["setup_detail"].as_str().map(String::from),
+        raw: probe.clone(),
     }
 }
 
 fn parse_attempt(attempt: &serde_json::Value) -> AttemptEvent {
-    let outcome = attempt["outcome"]["kind"]
-        .as_str()
-        .unwrap_or("Unknown")
-        .to_string();
-
-    let prediction = attempt["prediction"]["reason"]
-        .as_str()
-        .map(String::from);
-
-    let (setup_commands, files) = extract_seed_details(&attempt["seed"]);
-
     AttemptEvent {
         cycle: attempt["cycle"].as_u64().unwrap_or(0) as u32,
-        outcome,
-        stdout_preview: attempt["stdout_preview"].as_str().map(String::from),
-        control_stdout_preview: attempt["control_stdout_preview"].as_str().map(String::from),
-        stderr_preview: attempt["stderr_preview"].as_str().map(String::from),
-        setup_commands,
-        files,
-        prediction,
+        outcome: attempt["outcome"]["kind"]
+            .as_str()
+            .unwrap_or("Unknown")
+            .to_string(),
+        raw: attempt.clone(),
     }
-}
-
-/// Extract setup commands as readable strings and files as (path, content) pairs.
-fn extract_seed_details(seed: &serde_json::Value) -> (Vec<String>, Vec<(String, String)>) {
-    let commands = seed["setup"]
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|cmd| {
-                    cmd.as_array().map(|a| {
-                        a.iter()
-                            .filter_map(|s| s.as_str())
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let files = seed["files"]
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|f| {
-                    let path = f["path"].as_str()?;
-                    let content = f["content"].as_str().unwrap_or("");
-                    Some((path.to_string(), content.to_string()))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    (commands, files)
 }
 
 /// Load cycle prompts for a cell (responses loaded separately via load_cycle_data).
@@ -342,22 +285,16 @@ fn parse_lm_log_filename(name: &str) -> Option<u32> {
     rest[..end].parse().ok()
 }
 
-/// Per-surface analysis text extracted from cycle responses.
-/// Key: (cycle, surface_id) → analysis string.
-pub type CycleAnalysisMap = HashMap<(u32, String), String>;
+/// Raw response text per cycle for verbatim display.
+pub type CycleResponseMap = HashMap<u32, String>;
 
-/// Per-cycle action list preserving response order.
-/// Maps cycle → [(surface_id, kind)] in the order the LM produced them.
-pub type CycleActionsMap = HashMap<u32, Vec<(String, String)>>;
-
-/// Parse all cycle response files and extract per-surface analysis entries
-/// and per-cycle action lists.
-pub fn load_cycle_data(lm_log_dir: &Path) -> (CycleAnalysisMap, CycleActionsMap) {
-    let mut analyses = CycleAnalysisMap::new();
-    let mut actions = CycleActionsMap::new();
+/// Load raw response text for each cycle.
+/// Prefers _response.json, falls back to _response_raw.txt (stripping markdown fences).
+pub fn load_cycle_responses(lm_log_dir: &Path) -> CycleResponseMap {
+    let mut responses = CycleResponseMap::new();
     let dir = match std::fs::read_dir(lm_log_dir) {
         Ok(d) => d,
-        Err(_) => return (analyses, actions),
+        Err(_) => return responses,
     };
 
     for entry in dir.flatten() {
@@ -367,8 +304,7 @@ pub fn load_cycle_data(lm_log_dir: &Path) -> (CycleAnalysisMap, CycleActionsMap)
             None => continue,
         };
 
-        // Prefer parsed JSON, fall back to raw text
-        let json_str = if name.ends_with("_response.json") {
+        let text = if name.ends_with("_response.json") {
             std::fs::read_to_string(entry.path()).ok()
         } else if name.ends_with("_response_raw.txt") {
             let parsed_path = entry.path().with_file_name(format!("c{}_response.json", cycle));
@@ -382,33 +318,12 @@ pub fn load_cycle_data(lm_log_dir: &Path) -> (CycleAnalysisMap, CycleActionsMap)
             continue;
         };
 
-        if let Some(text) = json_str {
-            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) {
-                if let Some(analysis) = val["analysis"].as_object() {
-                    for (surface_id, reasoning) in analysis {
-                        if let Some(s) = reasoning.as_str() {
-                            analyses.insert((cycle, surface_id.clone()), s.to_string());
-                        }
-                    }
-                }
-                if let Some(action_arr) = val["actions"].as_array() {
-                    let action_list: Vec<(String, String)> = action_arr
-                        .iter()
-                        .filter_map(|a| {
-                            let sid = a["surface_id"].as_str().unwrap_or("").to_string();
-                            let kind = a["kind"].as_str().unwrap_or("").to_string();
-                            if kind.is_empty() { None } else { Some((sid, kind)) }
-                        })
-                        .collect();
-                    if !action_list.is_empty() {
-                        actions.insert(cycle, action_list);
-                    }
-                }
-            }
+        if let Some(text) = text {
+            responses.insert(cycle, text);
         }
     }
 
-    (analyses, actions)
+    responses
 }
 
 /// Load characterization logs (char_N_prompt.md + char_N_response.txt).

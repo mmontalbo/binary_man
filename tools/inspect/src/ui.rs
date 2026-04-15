@@ -37,8 +37,8 @@ const DIM: Style = Style::new().fg(Color::DarkGray);
 // Border colors for message categories
 fn bman_border() -> Span<'static> { Span::styled("\u{2502} ".to_string(), DIM) }
 fn lm_border() -> Span<'static> { Span::styled("\u{2502} ".to_string(), Style::default().fg(Color::Magenta)) }
-fn tool_border() -> Span<'static> { Span::styled("\u{2502} ".to_string(), Style::default().fg(Color::Cyan)) }
-fn sys_border() -> Span<'static> { Span::styled("\u{2502} ".to_string(), Style::default().fg(Color::Yellow)) }
+fn tool_border() -> Span<'static> { Span::styled("\u{2502} ".to_string(), Style::default().fg(Color::Yellow)) }
+fn sys_border() -> Span<'static> { Span::styled("\u{2502} ".to_string(), Style::default().fg(Color::Green)) }
 
 // -- Experiment picker --
 
@@ -276,19 +276,21 @@ fn draw_surface_detail(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let mut lines: Vec<Line<'static>> = Vec::new();
 
-    // Header
+    // Header — dark background to separate from conversation below
+    let hdr = Style::default().bg(Color::Rgb(40, 40, 40));
     let status_color = match surface.status.as_str() {
         "Verified" => Color::Green,
         "Pending" => Color::Yellow,
         _ => Color::Red,
     };
+    lines.push(Line::styled("", hdr));
     lines.push(Line::from(vec![
         Span::styled(
-            surface.id.clone(),
-            Style::default().add_modifier(Modifier::BOLD),
+            format!("  {} ", surface.id),
+            hdr.add_modifier(Modifier::BOLD),
         ),
-        Span::raw("  "),
-        Span::styled(surface.status.clone(), Style::default().fg(status_color)),
+        Span::styled(" ", hdr),
+        Span::styled(surface.status.clone(), hdr.fg(status_color)),
         Span::styled(
             {
                 let np = surface.probes.len();
@@ -299,52 +301,39 @@ fn draw_surface_detail(frame: &mut Frame, app: &mut App, area: Rect) {
                     na, if na == 1 { "attempt" } else { "attempts" },
                 )
             },
-            DIM,
+            hdr.fg(Color::Gray),
         ),
     ]));
+    // Pre-wrap description and trigger with padding so they don't hit pane borders
+    let hdr_wrap = area.width.saturating_sub(6) as usize; // 2 indent + 2 border + 2 margin
     if !surface.description.is_empty() {
-        lines.push(Line::styled(surface.description.clone(), DIM));
+        for line in wrap_text(&surface.description, hdr_wrap) {
+            lines.push(Line::styled(format!("  {}", line), hdr));
+        }
     }
     if let Some(trigger) = &surface.characterization {
-        lines.push(Line::styled(format!("trigger: {}", trigger), DIM));
+        let prefixed = format!("trigger: {}", trigger);
+        for line in wrap_text(&prefixed, hdr_wrap) {
+            lines.push(Line::styled(format!("  {}", line), hdr));
+        }
     }
+    lines.push(Line::styled("", hdr));
+
+    let w = area.width.saturating_sub(4) as usize;
 
     // Characterization conversation (pre-verification)
-    // Find the chunk that contains this surface and show full prompt + response verbatim
     let char_log = crate::data::find_char_log_for_surface(&app.char_logs, &surface.id);
     if let Some(log) = char_log {
         lines.push(Line::from(""));
-        lines.push(Line::styled(
-            "\u{2500}\u{2500} characterization \u{2500}\u{2500}",
-            DIM,
-        ));
 
-        // Full prompt (collapsible)
-        let prompt_lines = log.prompt.lines().count();
-        if app.expanded {
-            lines.push(Line::from(Span::styled("\u{2502}", DIM)));
-            render_bordered_markdown(&mut lines, &log.prompt, area.width as usize);
-        } else {
-            lines.push(Line::styled(
-                format!("  (prompt — {} lines — press e to expand)", prompt_lines),
-                DIM,
-            ));
-        }
+        // Prompt — raw text, truncated to 10 lines (e to expand)
+        render_truncated_bordered(&mut lines, &log.prompt, bman_border, DIM, 10, app.expanded, w);
 
-        // Full response verbatim
         if !log.response.is_empty() {
-            let response_lines = log.response.lines().count();
             lines.push(Line::from(""));
-            if app.expanded {
-                for line in log.response.lines() {
-                    lines.push(Line::styled(format!("  {}", line), Style::default()));
-                }
-            } else {
-                lines.push(Line::styled(
-                    format!("  (response — {} lines — press e to expand)", response_lines),
-                    DIM,
-                ));
-            }
+            // Response — pretty-print JSON, truncated to 10 lines (e to expand)
+            let display_text = pretty_print_json_response(&log.response);
+            render_truncated_bordered(&mut lines, &display_text, lm_border, Style::default(), 10, app.expanded, w);
         }
     }
 
@@ -364,7 +353,6 @@ fn draw_surface_detail(frame: &mut Frame, app: &mut App, area: Rect) {
     let mut prior_events: Vec<(u32, String)> = Vec::new();
     let mut show_context = true;
     let mut prev_prompt_excerpt: Option<String> = None;
-    let mut prev_prompt_cycle: Option<u32> = None;
     let mut running_status = "Pending".to_string();
 
     for (&cycle, group) in &cycle_groups {
@@ -383,40 +371,26 @@ fn draw_surface_detail(frame: &mut Frame, app: &mut App, area: Rect) {
 
         lines.push(Line::from(""));
 
-        // Cycle header with focus marker
+        // Track focus for auto-scroll
         let is_focused = focused_cycle == Some(cycle);
         if is_focused {
             focused_line = Some(lines.len() as u16);
         }
-        let marker = if is_focused { "\u{25b8} " } else { "" };
         let is_batch_probe = cycle == 0 && char_log.is_none();
-        let cycle_label = if is_batch_probe {
-            format!("{}\u{2500}\u{2500} c{} (batch probe) \u{2500}\u{2500}", marker, cycle)
-        } else {
-            format!("{}\u{2500}\u{2500} c{} \u{2500}\u{2500}", marker, cycle)
-        };
-        lines.push(Line::styled(cycle_label, DIM));
 
-        // BMAN prompt excerpt (│ bordered, with markdown rendering)
-        let prompt_excerpt = app.transcripts.iter()
+        // BMAN: full raw prompt text
+        let prompt_text = app.transcripts.iter()
             .find(|t| t.cycle == cycle)
-            .and_then(|t| {
-                extract_surface_from_prompt(&t.prompt, &surface.id)
-            });
+            .map(|t| &t.prompt);
 
-        if let Some(excerpt) = &prompt_excerpt {
-            // Collapse identical prompts (unless expanded)
-            if Some(excerpt) == prev_prompt_excerpt.as_ref() && !app.expanded {
-                lines.push(Line::styled(
-                    format!("  (same prompt as c{} — press e to expand)", prev_prompt_cycle.unwrap_or(0)),
-                    DIM,
-                ));
+        if let Some(prompt) = prompt_text {
+            let is_same = Some(prompt) == prev_prompt_excerpt.as_ref();
+            if is_same && !app.expanded {
+                render_truncated_bordered(&mut lines, prompt, bman_border, DIM, 3, false, w);
             } else {
-                lines.push(Line::from(Span::styled("\u{2502}", DIM)));
-                render_bordered_markdown(&mut lines, excerpt, area.width as usize);
+                render_truncated_bordered(&mut lines, prompt, bman_border, DIM, 10, app.expanded, w);
             }
-            prev_prompt_excerpt = Some(excerpt.clone());
-            prev_prompt_cycle = Some(cycle);
+            prev_prompt_excerpt = Some(prompt.clone());
         } else if is_batch_probe {
             lines.push(Line::styled(
                 "  verified mechanically against rich fixture (no LM involved)",
@@ -449,112 +423,43 @@ fn draw_surface_detail(frame: &mut Frame, app: &mut App, area: Rect) {
         }
         show_context = false;
 
-        // LM response (magenta │ border)
-        if let Some(analysis) = app.analysis_for(cycle, &surface.id) {
+        // LM: raw response text for this cycle
+        if let Some(response_text) = app.cycle_responses.get(&cycle) {
             lines.push(Line::from(""));
-            let wrap_w = area.width.saturating_sub(4) as usize;
-            for line in analysis.lines() {
-                if line.len() <= wrap_w.max(20) {
-                    lines.push(Line::from(vec![
-                        lm_border(),
-                        Span::styled(line.to_string(), Style::default()),
-                    ]));
-                } else {
-                    let mut remaining = line;
-                    while !remaining.is_empty() {
-                        let w = wrap_w.max(20);
-                        let split = if remaining.len() <= w {
-                            remaining.len()
-                        } else {
-                            remaining[..w].rfind(' ').map(|i| i + 1).unwrap_or(w)
-                        };
-                        let (chunk, rest) = remaining.split_at(split);
-                        lines.push(Line::from(vec![
-                            lm_border(),
-                            Span::styled(chunk.to_string(), Style::default()),
-                        ]));
-                        remaining = rest;
-                    }
-                }
-            }
+            let display = pretty_print_json_response(response_text);
+            render_truncated_bordered(&mut lines, &display, lm_border, Style::default(), 10, app.expanded, w);
         }
 
         // Results for each event in this cycle group
         for (is_attempt, eidx) in group {
-            lines.push(Line::from(""));
             if *is_attempt {
                 let a = &surface.attempts[*eidx];
-                let color = match a.outcome.as_str() {
-                    "Verified" => Color::Green,
-                    "OutputsEqual" => Color::Yellow,
-                    "SetupFailed" => Color::Red,
-                    _ => Color::White,
-                };
+                let outcome = &a.outcome;
 
-                // LM: action + prediction
-                render_action_json(&mut lines, app, cycle, &surface.id, true);
-                if let Some(pred) = &a.prediction {
-                    if !pred.is_empty() {
-                        lines.push(Line::from(vec![
-                            lm_border(),
-                            Span::styled("predicted: ", Style::default().add_modifier(Modifier::BOLD)),
-                            Span::styled(pred.clone(), Style::default().fg(Color::Cyan)),
-                        ]));
-                    }
-                }
+                // TOOL: raw attempt JSON from state.json
+                let raw_json = serde_json::to_string_pretty(&a.raw).unwrap_or_default();
+                let cleaned = strip_escapes(&raw_json);
+                render_truncated_bordered(&mut lines, &cleaned, tool_border, Style::default(), 10, app.expanded, w);
 
-                // TOOL: outcome + seed + outputs
-                lines.push(Line::from(vec![
-                    tool_border(),
-                    Span::styled("TEST \u{2192} ", Style::default().add_modifier(Modifier::BOLD)),
-                    Span::styled(a.outcome.clone(), Style::default().fg(color)),
-                ]));
-                render_seed(&mut lines, &a.setup_commands, &a.files);
-                if is_batch_probe {
-                    render_execution_output(&mut lines, "control", &a.control_stdout_preview);
-                    render_execution_output(&mut lines, "option", &a.stdout_preview);
-                } else {
-                    render_execution_output(&mut lines, "stdout", &a.stdout_preview);
-                }
-                render_execution_output(&mut lines, "stderr", &a.stderr_preview);
-
-                prior_events.push((cycle, format!("test \u{2192} {}", a.outcome)));
+                prior_events.push((cycle, format!("test \u{2192} {}", outcome)));
             } else {
                 let p = &surface.probes[*eidx];
-                let (label, color) = if p.setup_failed {
-                    ("SetupFailed", Color::Red)
+                let label = if p.setup_failed {
+                    "SetupFailed"
                 } else if p.outputs_differ {
-                    ("DIFFER", Color::Green)
+                    "DIFFER"
                 } else {
                     let empty = p.stdout_preview.as_ref().is_none_or(|s| s.is_empty())
                         && p.control_stdout_preview
                             .as_ref()
                             .is_none_or(|s| s.is_empty());
-                    if empty {
-                        ("identical (0 bytes)", Color::Red)
-                    } else {
-                        ("identical", Color::Yellow)
-                    }
+                    if empty { "identical (0 bytes)" } else { "identical" }
                 };
 
-                // LM: action
-                render_action_json(&mut lines, app, cycle, &surface.id, false);
-
-                // TOOL: outcome + seed + outputs
-                lines.push(Line::from(vec![
-                    tool_border(),
-                    Span::styled("PROBE \u{2192} ", Style::default().add_modifier(Modifier::BOLD)),
-                    Span::styled(label.to_string(), Style::default().fg(color)),
-                ]));
-                render_seed(&mut lines, &p.setup_commands, &p.files);
-                if let Some(detail) = &p.setup_detail {
-                    lines.push(Line::from(vec![
-                        tool_border(),
-                        Span::styled(format!("error: {}", detail), Style::default().fg(Color::Red)),
-                    ]));
-                }
-                render_execution_output(&mut lines, "control", &p.control_stdout_preview);
-                render_execution_output(&mut lines, "stdout", &p.stdout_preview);
+                // TOOL: raw probe JSON from state.json
+                let raw_json = serde_json::to_string_pretty(&p.raw).unwrap_or_default();
+                let cleaned = strip_escapes(&raw_json);
+                render_truncated_bordered(&mut lines, &cleaned, tool_border, Style::default(), 10, app.expanded, w);
 
                 prior_events.push((cycle, format!("probe \u{2192} {}", label)));
             }
@@ -646,172 +551,106 @@ fn draw_surface_detail(frame: &mut Frame, app: &mut App, area: Rect) {
 
 // -- Seed rendering helpers --
 
-fn render_seed(lines: &mut Vec<Line<'static>>, setup: &[String], files: &[(String, String)]) {
-    if !setup.is_empty() {
-        lines.push(Line::from(vec![tool_border(), Span::styled("\u{2500}\u{2500} setup", DIM)]));
-    }
-    for cmd in setup {
-        lines.push(Line::from(vec![tool_border(), Span::styled(format!("$ {}", cmd), Style::default())]));
-    }
-    if !files.is_empty() {
-        lines.push(Line::from(vec![tool_border(), Span::styled("\u{2500}\u{2500} files", DIM)]));
-    }
-    for (path, content) in files {
-        lines.push(Line::from(vec![
-            tool_border(),
-            Span::styled(format!("file: {}", path), Style::default().add_modifier(Modifier::BOLD)),
-        ]));
-        for line in content.lines().take(8) {
-            lines.push(Line::from(vec![tool_border(), Span::styled(format!("  {}", strip_escapes(line)), DIM)]));
-        }
-        let total = content.lines().count();
-        if total > 8 {
-            lines.push(Line::from(vec![tool_border(), Span::styled(
-                format!("  ... ({} more lines)", total - 8),
-                DIM,
-            )]));
-        }
-    }
-}
-
-/// Extract the per-surface section from a cycle prompt.
-/// Handles both `### surface_id` (full prompt) and `- **surface_id**` (compact prompt) formats.
-fn extract_surface_from_prompt(prompt: &str, surface_id: &str) -> Option<String> {
-    // Try ### heading format first (full prompt)
-    let heading = format!("### {}\n", surface_id);
-    if let Some(start) = prompt.find(&heading) {
-        let section = &prompt[start..];
-        let end = section[heading.len()..]
-            .find("\n### ")
-            .map(|i| i + heading.len())
-            .or_else(|| section[heading.len()..].find("\n## ").map(|i| i + heading.len()))
-            .unwrap_or(section.len());
-        return Some(section[..end].trim_end().to_string());
-    }
-
-    // Try **surface_id** in bullet list format (compact prompt)
-    let bullet = format!("- **{}**", surface_id);
-    if let Some(start) = prompt.find(&bullet) {
-        let section = &prompt[start..];
-        // Read until next bullet at same indent level or section heading
-        let end = section[bullet.len()..]
-            .find("\n- **")
-            .map(|i| i + bullet.len())
-            .or_else(|| section[bullet.len()..].find("\n## ").map(|i| i + bullet.len()))
-            .unwrap_or(section.len());
-        return Some(section[..end].trim_end().to_string());
-    }
-
-    None
-}
-
-/// Render text with │ border, applying basic markdown formatting.
-/// ## headers get bold, **text** gets bold, everything else is dim.
-fn render_bordered_markdown(lines: &mut Vec<Line<'static>>, text: &str, width: usize) {
-    // Available width for text content: pane width minus borders (2) minus │ prefix (2)
-    let wrap_width = width.saturating_sub(4).max(20);
-
-    for line in text.lines() {
-        let trimmed = line.trim_start();
-        let style = if trimmed.starts_with("## ") || trimmed.starts_with("### ") || trimmed.starts_with("# ") {
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD)
-        } else if trimmed.starts_with("**") || trimmed.starts_with("- **") || trimmed.contains("**Trigger**") || trimmed.contains("**Expected diff**") || trimmed.contains("**Probes:**") || trimmed.contains("**Attempts:**") || trimmed.starts_with("\u{26a0}") {
-            Style::default().fg(Color::Gray)
-        } else if trimmed.starts_with("stderr:") || trimmed.starts_with("outcome:") || trimmed.starts_with("HINT") {
-            Style::default().fg(Color::Yellow)
-        } else {
-            DIM
-        };
-
-        // Pre-wrap long lines so each segment gets the │ border
-        if line.len() <= wrap_width {
-            lines.push(Line::from(vec![
-                bman_border(),
-                Span::styled(line.to_string(), style),
-            ]));
-        } else {
-            let mut remaining = line;
-            while !remaining.is_empty() {
-                let split_at = if remaining.len() <= wrap_width {
-                    remaining.len()
-                } else {
-                    // Try to split at a space near the wrap width
-                    remaining[..wrap_width]
-                        .rfind(' ')
-                        .map(|i| i + 1)
-                        .unwrap_or(wrap_width)
-                };
-                let (chunk, rest) = remaining.split_at(split_at);
-                lines.push(Line::from(vec![
-                    bman_border(),
-                    Span::styled(chunk.to_string(), style),
-                ]));
-                remaining = rest;
-            }
-        }
-    }
-}
-
-/// Render the raw JSON action from the cycle response for a surface.
-fn render_action_json(
+/// Render text with a colored border, showing first `max_lines` lines.
+/// If truncated, shows `... (N more lines)`. If `expanded`, shows all lines.
+fn render_truncated_bordered(
     lines: &mut Vec<Line<'static>>,
-    app: &App,
-    cycle: u32,
-    surface_id: &str,
-    is_attempt: bool,
+    text: &str,
+    border_fn: fn() -> Span<'static>,
+    style: Style,
+    max_lines: usize,
+    expanded: bool,
+    wrap_width: usize,
 ) {
-    if let Some(actions) = app.cycle_actions.get(&cycle) {
-        let kind_match = if is_attempt { "Test" } else { "Probe" };
-        for (sid, kind) in actions {
-            if sid == surface_id && kind == kind_match {
-                lines.push(Line::from(vec![
-                    lm_border(),
-                    Span::styled(
-                        format!("action: {} {}", kind, sid),
-                        DIM,
-                    ),
-                ]));
-                return;
-            }
-        }
-    }
-}
+    let all_lines: Vec<&str> = text.lines().collect();
+    let total = all_lines.len();
+    let show = if expanded { total } else { max_lines.min(total) };
 
-/// Render execution output (control/option/stdout/stderr) as a multi-line block
-/// with a visible header and per-line content. Strips escape sequences.
-fn render_execution_output(lines: &mut Vec<Line<'static>>, label: &str, value: &Option<String>) {
-    if let Some(v) = value {
-        let cleaned = strip_escapes(v);
-        if cleaned.trim().is_empty() {
-            return;
-        }
-        lines.push(Line::from(""));
+    for line in &all_lines[..show] {
+        push_bordered_wrapped(lines, border_fn, line, style, wrap_width);
+    }
+
+    if !expanded && total > max_lines {
         lines.push(Line::from(vec![
-            tool_border(),
+            border_fn(),
             Span::styled(
-                format!("{} ", label),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("({} bytes)", v.len()),
+                format!("... ({} more lines)", total - max_lines),
                 DIM,
             ),
         ]));
-        for line in cleaned.lines().take(12) {
-            lines.push(Line::from(vec![tool_border(), Span::styled(format!("  {}", line), Style::default())]));
-        }
-        let total = cleaned.lines().count();
-        if total > 12 {
-            lines.push(Line::from(vec![tool_border(), Span::styled(
-                format!("  ... ({} more lines)", total - 12),
-                DIM,
-            )]));
+    }
+}
+
+/// Push a line with a colored border, pre-wrapping if it exceeds the given width.
+/// Each wrapped segment gets its own border prefix.
+fn push_bordered_wrapped(
+    lines: &mut Vec<Line<'static>>,
+    border_fn: fn() -> Span<'static>,
+    text: &str,
+    style: Style,
+    max_width: usize,
+) {
+    if text.len() <= max_width {
+        lines.push(Line::from(vec![border_fn(), Span::styled(text.to_string(), style)]));
+    } else {
+        let mut remaining = text;
+        while !remaining.is_empty() {
+            let split = if remaining.len() <= max_width {
+                remaining.len()
+            } else {
+                remaining[..max_width].rfind(' ').map(|i| i + 1).unwrap_or(max_width)
+            };
+            let (chunk, rest) = remaining.split_at(split);
+            lines.push(Line::from(vec![border_fn(), Span::styled(chunk.to_string(), style)]));
+            remaining = rest;
         }
     }
 }
 
+
+
+
+/// Wrap text to a given width, splitting at word boundaries.
+fn wrap_text(text: &str, width: usize) -> Vec<String> {
+    let mut result = Vec::new();
+    let width = width.max(20);
+    let mut remaining = text;
+    while !remaining.is_empty() {
+        if remaining.len() <= width {
+            result.push(remaining.to_string());
+            break;
+        }
+        let split = remaining[..width]
+            .rfind(' ')
+            .map(|i| i + 1)
+            .unwrap_or(width);
+        let (chunk, rest) = remaining.split_at(split);
+        result.push(chunk.to_string());
+        remaining = rest;
+    }
+    result
+}
+
+/// Try to pretty-print a JSON response string. Strips markdown fences first.
+/// Falls back to the original text if parsing fails.
+fn pretty_print_json_response(raw: &str) -> String {
+    let trimmed = raw.trim();
+    // Strip markdown fences if present
+    let json_text = if trimmed.starts_with("```") {
+        let body = trimmed
+            .strip_prefix("```json")
+            .or_else(|| trimmed.strip_prefix("```"))
+            .unwrap_or(trimmed);
+        body.strip_suffix("```").unwrap_or(body).trim()
+    } else {
+        trimmed
+    };
+
+    match serde_json::from_str::<serde_json::Value>(json_text) {
+        Ok(val) => serde_json::to_string_pretty(&val).unwrap_or_else(|_| raw.to_string()),
+        Err(_) => raw.to_string(),
+    }
+}
 
 /// Strip ANSI and OSC escape sequences from text to prevent terminal corruption.
 /// Handles CSI sequences (\x1b[...), OSC sequences (\x1b]...\x07), and BEL (\x07).
