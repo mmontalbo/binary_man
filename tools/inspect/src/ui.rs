@@ -359,6 +359,7 @@ fn draw_surface_detail(frame: &mut Frame, app: &mut App, area: Rect) {
     let mut show_context = true;
     let mut prev_prompt_excerpt: Option<String> = None;
     let mut prev_prompt_cycle: Option<u32> = None;
+    let mut running_status = "Pending".to_string();
 
     for (&cycle, group) in &cycle_groups {
         // Gap annotation
@@ -442,10 +443,35 @@ fn draw_surface_detail(frame: &mut Frame, app: &mut App, area: Rect) {
         }
         show_context = false;
 
-        // LM analysis text
+        // LM response (magenta │ border)
         if let Some(analysis) = app.analysis_for(cycle, &surface.id) {
             lines.push(Line::from(""));
-            lines.push(Line::styled(format!("  {}", analysis), Style::default()));
+            let lm_border = Style::default().fg(Color::Magenta);
+            let wrap_w = area.width.saturating_sub(4) as usize;
+            for line in analysis.lines() {
+                if line.len() <= wrap_w.max(20) {
+                    lines.push(Line::from(vec![
+                        Span::styled("\u{2502} ", lm_border),
+                        Span::styled(line.to_string(), Style::default()),
+                    ]));
+                } else {
+                    let mut remaining = line;
+                    while !remaining.is_empty() {
+                        let w = wrap_w.max(20);
+                        let split = if remaining.len() <= w {
+                            remaining.len()
+                        } else {
+                            remaining[..w].rfind(' ').map(|i| i + 1).unwrap_or(w)
+                        };
+                        let (chunk, rest) = remaining.split_at(split);
+                        lines.push(Line::from(vec![
+                            Span::styled("\u{2502} ", lm_border),
+                            Span::styled(chunk.to_string(), Style::default()),
+                        ]));
+                        remaining = rest;
+                    }
+                }
+            }
         }
 
         // Results for each event in this cycle group
@@ -476,11 +502,10 @@ fn draw_surface_detail(frame: &mut Frame, app: &mut App, area: Rect) {
 
                 if let Some(pred) = &a.prediction {
                     if !pred.is_empty() {
+                        let lm_border = Style::default().fg(Color::Magenta);
                         lines.push(Line::from(vec![
-                            Span::styled(
-                                "    predicted: ",
-                                Style::default().add_modifier(Modifier::BOLD),
-                            ),
+                            Span::styled("\u{2502} ", lm_border),
+                            Span::styled("predicted: ", Style::default().add_modifier(Modifier::BOLD)),
                             Span::styled(pred.clone(), Style::default().fg(Color::Cyan)),
                         ]));
                     }
@@ -522,6 +547,37 @@ fn draw_surface_detail(frame: &mut Frame, app: &mut App, area: Rect) {
 
                 prior_events.push((cycle, format!("probe \u{2192} {}", label)));
             }
+        }
+
+        // SYSTEM: status transition (only when it changes)
+        let mut new_status = running_status.clone();
+        for (is_attempt, eidx) in group {
+            if *is_attempt {
+                let outcome = &surface.attempts[*eidx].outcome;
+                if outcome == "Verified" {
+                    new_status = "Verified".to_string();
+                }
+            }
+        }
+        // Check if this is the final cycle and surface ended up Excluded
+        if cycle == cycle_groups.keys().last().copied().unwrap_or(0)
+            && surface.status == "Excluded"
+            && new_status != "Verified"
+        {
+            new_status = "Excluded".to_string();
+        }
+        if new_status != running_status {
+            let (icon, color) = match new_status.as_str() {
+                "Verified" => ("\u{2713}", Color::Green),
+                "Excluded" => ("\u{2717}", Color::Red),
+                _ => ("\u{25cb}", Color::Yellow),
+            };
+            lines.push(Line::from(""));
+            lines.push(Line::styled(
+                format!("  {} {} \u{2192} {}", icon, running_status, new_status),
+                Style::default().fg(color),
+            ));
+            running_status = new_status;
         }
     }
 
@@ -692,15 +748,18 @@ fn render_action_json(
     surface_id: &str,
     is_attempt: bool,
 ) {
+    let lm_border = Style::default().fg(Color::Magenta);
     if let Some(actions) = app.cycle_actions.get(&cycle) {
         let kind_match = if is_attempt { "Test" } else { "Probe" };
         for (sid, kind) in actions {
             if sid == surface_id && kind == kind_match {
-                // Found the matching action — show compact JSON
-                lines.push(Line::styled(
-                    format!("  {{ kind: {}, surface_id: {} }}", kind, sid),
-                    DIM,
-                ));
+                lines.push(Line::from(vec![
+                    Span::styled("\u{2502} ", lm_border),
+                    Span::styled(
+                        format!("action: {} {}", kind, sid),
+                        DIM,
+                    ),
+                ]));
                 return;
             }
         }
