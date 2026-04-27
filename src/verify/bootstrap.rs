@@ -8,7 +8,7 @@
 //! Results are cached keyed on help-text hash so repeat bootstraps work offline.
 
 use super::config::{CONTEXT_WINDOW_SIZE, DESC_MAX_LEN, EXTRACT_CHUNK_TARGET_SIZE, MAX_CONCURRENT_PROBES};
-use super::evidence::{prepare_sandbox, run_in_sandbox};
+use super::evidence::{prepare_sandbox, run_in_sandbox, sanitize_id, write_evidence};
 use super::types::{
     Attempt, DiffKind, FileEntry, Outcome, Seed, State, Status, SurfaceCategory, SurfaceEntry,
     VerifiedSeed, STATE_SCHEMA_VERSION,
@@ -1444,6 +1444,7 @@ pub(super) struct BatchProbeHit {
     pub diff_kind: DiffKind,
     pub stdout_preview: Option<String>,
     pub control_stdout_preview: Option<String>,
+    pub evidence_path: String,
 }
 
 /// Run batch probe against all pending surfaces using a rich fixture.
@@ -1452,6 +1453,7 @@ pub(super) struct BatchProbeHit {
 /// same sandbox. Returns hits for surfaces that show differing output.
 pub(super) fn batch_probe_surfaces(
     state: &State,
+    pack_path: &Path,
     verbose: bool,
 ) -> Vec<BatchProbeHit> {
     let fixture_seed = build_rich_fixture();
@@ -1537,6 +1539,14 @@ pub(super) fn batch_probe_surfaces(
             continue;
         }
 
+        // Reject stderr-only diffs when both runs failed — these are just error message
+        // variations, not behavioral differences. Matches compute_outcome's filter.
+        let both_failed = evidence.exit_code.unwrap_or(0) != 0
+            && control.exit_code.unwrap_or(0) != 0;
+        if stderr_differs && !stdout_differs && !exit_code_differs && both_failed {
+            continue;
+        }
+
         // Filter out error-only diffs: if the option crashed (non-zero exit, no stdout)
         // while control succeeded, this isn't a useful seed
         let option_errored = evidence.exit_code.is_some_and(|c| c != 0)
@@ -1561,6 +1571,21 @@ pub(super) fn batch_probe_surfaces(
             _ => DiffKind::Multiple,
         };
 
+        // Write evidence files for critique
+        let sanitized = sanitize_id(surface_id);
+        let ev_path = format!("evidence/batch_probe_{}.json", sanitized);
+        let ctrl_path = format!("evidence/batch_probe_{}_control.json", sanitized);
+        if let Err(e) = write_evidence(pack_path, &ev_path, &evidence) {
+            if verbose {
+                eprintln!("Batch probe: failed to write evidence for {}: {}", surface_id, e);
+            }
+        }
+        if let Err(e) = write_evidence(pack_path, &ctrl_path, &control) {
+            if verbose {
+                eprintln!("Batch probe: failed to write control evidence for {}: {}", surface_id, e);
+            }
+        }
+
         let stdout_preview = if evidence.stdout.is_empty() {
             None
         } else {
@@ -1578,6 +1603,7 @@ pub(super) fn batch_probe_surfaces(
             diff_kind,
             stdout_preview,
             control_stdout_preview,
+            evidence_path: ev_path,
         });
     }
 
@@ -1591,9 +1617,10 @@ pub(super) fn batch_probe_surfaces(
 }
 
 /// Apply batch probe hits to state: mark surfaces Verified and populate seed bank.
-pub(super) fn apply_batch_probe_hits(state: &mut State, hits: Vec<BatchProbeHit>, _verbose: bool) {
+pub(super) fn apply_batch_probe_hits(state: &mut State, hits: Vec<BatchProbeHit>, _verbose: bool) -> Vec<String> {
     let fixture_seed = build_rich_fixture();
     let verified_count = hits.len();
+    let mut verified_ids = Vec::new();
 
     for hit in hits {
         // Find entry and mark Verified
@@ -1604,7 +1631,7 @@ pub(super) fn apply_batch_probe_hits(state: &mut State, hits: Vec<BatchProbeHit>
                 args: hit.args.clone(),
                 full_argv: hit.args.clone(),
                 seed: fixture_seed.clone(),
-                evidence_path: "batch_probe".to_string(),
+                evidence_path: hit.evidence_path.clone(),
                 outcome: Outcome::Verified {
                     diff_kind: hit.diff_kind.clone(),
                 },
@@ -1618,6 +1645,7 @@ pub(super) fn apply_batch_probe_hits(state: &mut State, hits: Vec<BatchProbeHit>
                 prediction_matched: None,
                 prediction_channel_matched: None,
             });
+            verified_ids.push(hit.surface_id.clone());
         }
 
         // Add to seed bank
@@ -1637,6 +1665,7 @@ pub(super) fn apply_batch_probe_hits(state: &mut State, hits: Vec<BatchProbeHit>
     }
 
     eprintln!("Batch probe: verified {} surfaces", verified_count);
+    verified_ids
 }
 
 #[cfg(test)]

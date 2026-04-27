@@ -372,7 +372,14 @@ pub(super) fn run_probe_scenario(
     let stdout_differs = option_evidence.stdout != control_evidence.stdout;
     let stderr_differs = option_evidence.stderr != control_evidence.stderr;
     let exit_code_differs = option_evidence.exit_code != control_evidence.exit_code;
-    let outputs_differ = stdout_differs || stderr_differs || exit_code_differs;
+
+    // Reject stderr-only diffs when both runs failed — these are just error message
+    // variations, not behavioral differences. Matches compute_outcome's filter.
+    let both_failed = option_evidence.exit_code.unwrap_or(0) != 0
+        && control_evidence.exit_code.unwrap_or(0) != 0;
+    let stderr_only_diff = stderr_differs && !stdout_differs && !exit_code_differs;
+    let outputs_differ =
+        (stdout_differs || stderr_differs || exit_code_differs) && !(stderr_only_diff && both_failed);
 
     // Extract setup failure detail: which command failed and its exit code
     let setup_detail = if option_evidence.setup_failed {
