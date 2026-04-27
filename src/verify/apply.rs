@@ -34,7 +34,11 @@ pub(super) struct ScenarioContext<'a> {
 ///
 /// When the first extra_arg is a value (doesn't start with `-`),
 /// join it to the surface_id. Remaining extra_args stay separate.
-fn join_option_value(surface_id: &str, extra_args: Vec<String>) -> Vec<String> {
+fn join_option_value(
+    surface_id: &str,
+    extra_args: Vec<String>,
+    value_hint: Option<&str>,
+) -> Vec<String> {
     if extra_args.is_empty() {
         return vec![surface_id.to_string()];
     }
@@ -47,11 +51,19 @@ fn join_option_value(surface_id: &str, extra_args: Vec<String>) -> Vec<String> {
         return args;
     }
 
-    // Long options: --opt=value
+    // Long options: only join with = when we have positive evidence of a value
+    // (value_hint from help text parsing). Without it, the option is likely boolean
+    // and the extra_arg is a positional argument, not the option's value.
     if surface_id.starts_with("--") {
-        let joined = format!("{}={}", surface_id, first);
-        let mut args = vec![joined];
-        args.extend(extra_args.into_iter().skip(1));
+        if value_hint.is_some() {
+            let joined = format!("{}={}", surface_id, first);
+            let mut args = vec![joined];
+            args.extend(extra_args.into_iter().skip(1));
+            return args;
+        }
+        // No value_hint → keep separate (boolean flag or unknown)
+        let mut args = vec![surface_id.to_string()];
+        args.extend(extra_args);
         return args;
     }
 
@@ -192,11 +204,12 @@ pub(super) fn run_test_scenario(
     seed: Seed,
     surface_pty: bool,
     prediction: Option<Prediction>,
+    value_hint: Option<&str>,
 ) -> Result<TestResult> {
     let scenario_id = format!("{}_c{}", sanitize_id(surface_id), sc.cycle);
 
     // Construct args: join option + value when needed (e.g. -U1, --unified=1)
-    let args = join_option_value(surface_id, extra_args);
+    let args = join_option_value(surface_id, extra_args, value_hint);
 
     let control_argv: Vec<String> = sc.context_argv.to_vec();
     let full_argv: Vec<String> = control_argv.iter().chain(args.iter()).cloned().collect();
@@ -342,11 +355,12 @@ pub(super) fn run_probe_scenario(
     surface_id: &str,
     extra_args: Vec<String>,
     seed: Seed,
+    value_hint: Option<&str>,
 ) -> Result<ProbeRunResult> {
     let scenario_id = format!("probe_{}_c{}", sanitize_id(surface_id), sc.cycle);
 
     // Construct args: join option + value when needed
-    let args = join_option_value(surface_id, extra_args.clone());
+    let args = join_option_value(surface_id, extra_args.clone(), value_hint);
 
     let control_argv: Vec<String> = sc.context_argv.to_vec();
     let full_argv: Vec<String> = control_argv.iter().chain(args.iter()).cloned().collect();
@@ -475,7 +489,10 @@ pub(super) fn apply_action(state: &mut State, pack_path: &Path, action: LmAction
                 cycle: state.cycle,
                 with_pty: false,
             };
-            let result = run_test_scenario(&sc, &surface_id, extra_args, seed, false, prediction)?;
+            let vh = state
+                .find_entry(&surface_id)
+                .and_then(|e| e.value_hint.as_deref());
+            let result = run_test_scenario(&sc, &surface_id, extra_args, seed, false, prediction, vh)?;
             merge_test_result(state, result);
         }
 
@@ -492,7 +509,10 @@ pub(super) fn apply_action(state: &mut State, pack_path: &Path, action: LmAction
                 cycle: state.cycle,
                 with_pty: false,
             };
-            let result = run_probe_scenario(&sc, &surface_id, extra_args, seed)?;
+            let vh = state
+                .find_entry(&surface_id)
+                .and_then(|e| e.value_hint.as_deref());
+            let result = run_probe_scenario(&sc, &surface_id, extra_args, seed, vh)?;
             merge_probe_result(state, result);
         }
     }
@@ -509,11 +529,20 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
-    fn test_join_option_value_long_option() {
-        // --unified=3
+    fn test_join_option_value_long_option_with_hint() {
+        // --unified=3 (value_hint present → join with =)
         assert_eq!(
-            join_option_value("--unified", vec!["3".to_string()]),
+            join_option_value("--unified", vec!["3".to_string()], Some("<n>")),
             vec!["--unified=3"]
+        );
+    }
+
+    #[test]
+    fn test_join_option_value_long_option_no_hint() {
+        // --ignore-case hello (no value_hint → keep separate, boolean flag)
+        assert_eq!(
+            join_option_value("--ignore-case", vec!["hello".to_string()], None),
+            vec!["--ignore-case", "hello"]
         );
     }
 
@@ -521,7 +550,7 @@ mod tests {
     fn test_join_option_value_short_numeric() {
         // -U3 (git diff context lines)
         assert_eq!(
-            join_option_value("-U", vec!["3".to_string()]),
+            join_option_value("-U", vec!["3".to_string()], Some("<n>")),
             vec!["-U3"]
         );
     }
@@ -530,7 +559,7 @@ mod tests {
     fn test_join_option_value_short_non_numeric() {
         // -D help (find debug option) — must NOT concatenate
         assert_eq!(
-            join_option_value("-D", vec!["help".to_string()]),
+            join_option_value("-D", vec!["help".to_string()], None),
             vec!["-D", "help"]
         );
     }
@@ -539,12 +568,12 @@ mod tests {
     fn test_join_option_value_multi_char_single_dash() {
         // -maxdepth 1 (find) — must NOT concatenate
         assert_eq!(
-            join_option_value("-maxdepth", vec!["1".to_string()]),
+            join_option_value("-maxdepth", vec!["1".to_string()], None),
             vec!["-maxdepth", "1"]
         );
         // -regextype posix-extended
         assert_eq!(
-            join_option_value("-regextype", vec!["posix-extended".to_string()]),
+            join_option_value("-regextype", vec!["posix-extended".to_string()], None),
             vec!["-regextype", "posix-extended"]
         );
     }
@@ -552,17 +581,17 @@ mod tests {
     #[test]
     fn test_join_option_value_no_extra_args() {
         assert_eq!(
-            join_option_value("--verbose", vec![]),
+            join_option_value("--verbose", vec![], None),
             vec!["--verbose"]
         );
-        assert_eq!(join_option_value("-n", vec![]), vec!["-n"]);
+        assert_eq!(join_option_value("-n", vec![], None), vec!["-n"]);
     }
 
     #[test]
     fn test_join_option_value_flag_as_first_arg() {
         // First arg starts with '-', treated as a separate flag
         assert_eq!(
-            join_option_value("--color", vec!["--always".to_string()]),
+            join_option_value("--color", vec!["--always".to_string()], Some("<when>")),
             vec!["--color", "--always"]
         );
     }

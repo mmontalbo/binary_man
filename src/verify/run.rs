@@ -626,13 +626,14 @@ pub fn run(
     };
 
     // Batch probe: auto-verify surfaces that show differing output mechanically
+    let mut batch_verified_ids = Vec::new();
     if state.seed_bank.is_empty() && state.cycle == 0 {
         eprintln!(
             "PROGRESS: phase=batch_probe surfaces={}",
             state.entries.len()
         );
-        let hits = batch_probe_surfaces(&state, verbose);
-        apply_batch_probe_hits(&mut state, hits, verbose);
+        let hits = batch_probe_surfaces(&state, pack_path, verbose);
+        batch_verified_ids = apply_batch_probe_hits(&mut state, hits, verbose);
     }
 
     // Upfront characterization: analyze pending surfaces before pipeline starts.
@@ -651,6 +652,13 @@ pub fn run(
         eprintln!("PROGRESS: phase=characterize pending={}", uncharacterized);
         characterize_pending_surfaces(&mut state, pack_path, lm_config, verbose)?;
         eprintln!("PROGRESS: phase=characterize_done");
+    }
+
+    // Critique batch-probe-verified surfaces
+    if !batch_verified_ids.is_empty() {
+        eprintln!("PROGRESS: phase=batch_critique surfaces={}", batch_verified_ids.len());
+        super::critique::critique_surfaces(&mut state, pack_path, lm_config, verbose, &batch_verified_ids)?;
+        eprintln!("PROGRESS: phase=batch_critique_done");
     }
 
     // Stamp experiment params for traceability
@@ -1132,7 +1140,7 @@ fn run_pipeline_worker(
                 // Run batch probe outside the lock (I/O heavy)
                 if should_batch_probe {
                     let state_snapshot = lock.lock().unwrap().state.clone();
-                    let hits = batch_probe_surfaces(&state_snapshot, ctx.verbose);
+                    let hits = batch_probe_surfaces(&state_snapshot, ctx.pack_path, ctx.verbose);
                     if !hits.is_empty() {
                         let mut ps = lock.lock().unwrap();
                         apply_batch_probe_hits(&mut ps.state, hits, ctx.verbose);
@@ -1467,7 +1475,10 @@ fn execute_probes(
                 seed,
             } = action
             {
-                Some((surface_id, extra_args, seed))
+                let vh = state
+                    .find_entry(&surface_id)
+                    .and_then(|e| e.value_hint.clone());
+                Some((surface_id, extra_args, seed, vh))
             } else {
                 None
             }
@@ -1484,8 +1495,8 @@ fn execute_probes(
         };
         run_scenarios_parallel(
             probe_params,
-            |(surface_id, extra_args, seed)| {
-                run_probe_scenario(&sc, &surface_id, extra_args, seed)
+            |(surface_id, extra_args, seed, vh)| {
+                run_probe_scenario(&sc, &surface_id, extra_args, seed, vh.as_deref())
             },
             "Probe",
         )
@@ -1509,10 +1520,14 @@ fn execute_probes(
             eprintln!("  Probe {} → {}", result.surface_id, status);
         }
         if result.outputs_differ && !result.setup_failed {
+            let vh = state
+                .find_entry(&result.surface_id)
+                .and_then(|e| e.value_hint.clone());
             auto_promote.push((
                 result.surface_id.clone(),
                 result.extra_args.clone(),
                 result.seed.clone(),
+                vh,
             ));
         }
         merge_probe_result(state, result);
@@ -1535,8 +1550,16 @@ fn execute_probes(
             };
             run_scenarios_parallel(
                 auto_promote,
-                |(surface_id, extra_args, seed)| {
-                    run_test_scenario(&sc, &surface_id, extra_args, seed, sc.with_pty, None)
+                |(surface_id, extra_args, seed, vh)| {
+                    run_test_scenario(
+                        &sc,
+                        &surface_id,
+                        extra_args,
+                        seed,
+                        sc.with_pty,
+                        None,
+                        vh.as_deref(),
+                    )
                 },
                 "Auto-promote",
             )
@@ -1594,7 +1617,10 @@ fn execute_tests(
                         e.id == surface_id
                             && matches!(e.category, SurfaceCategory::TtyDependent)
                     });
-                Some((surface_id, extra_args, seed, prediction, surface_pty))
+                let vh = state
+                    .find_entry(&surface_id)
+                    .and_then(|e| e.value_hint.clone());
+                Some((surface_id, extra_args, seed, prediction, surface_pty, vh))
             } else {
                 None
             }
@@ -1611,8 +1637,16 @@ fn execute_tests(
         };
         run_scenarios_parallel(
             test_params,
-            |(surface_id, extra_args, seed, prediction, surface_pty)| {
-                run_test_scenario(&sc, &surface_id, extra_args, seed, surface_pty, prediction)
+            |(surface_id, extra_args, seed, prediction, surface_pty, vh)| {
+                run_test_scenario(
+                    &sc,
+                    &surface_id,
+                    extra_args,
+                    seed,
+                    surface_pty,
+                    prediction,
+                    vh.as_deref(),
+                )
             },
             "Test",
         )
