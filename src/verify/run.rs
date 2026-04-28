@@ -293,7 +293,10 @@ impl PipelineState {
             return true;
         }
         self.state.entries.iter().any(|e| {
-            matches!(e.status, Status::Pending) && !self.resolved.contains(&e.id)
+            matches!(e.status, Status::Pending)
+                && !self.resolved.contains(&e.id)
+                && *self.attempt_counts.get(&e.id).unwrap_or(&0) < MAX_ATTEMPTS
+                && *self.global_failures.get(&e.id).unwrap_or(&0) < GLOBAL_FAILURE_THRESHOLD
         })
     }
 
