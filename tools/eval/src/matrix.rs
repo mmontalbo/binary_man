@@ -63,6 +63,7 @@ struct Cell {
     max_cycles: u32,
     timeout: u64,
     group_idx: usize,
+    idx: usize,
 }
 
 /// Results from running one group's cells.
@@ -151,7 +152,7 @@ fn run_groups_parallel(
                         failures: Vec::new(),
                     };
                     for cell in group_cells {
-                        let r = run_cell(cell, 0, total, cells_dir, bman_bin, git, name)?;
+                        let r = run_cell(cell, cell.idx, total, cells_dir, bman_bin, git, name)?;
                         gr.completed += r.completed;
                         gr.skipped += r.skipped;
                         gr.failures.extend(r.failures);
@@ -223,8 +224,30 @@ fn run_cell(
     std::fs::create_dir_all(&cell_dir)
         .with_context(|| format!("create {}", cell_dir.display()))?;
 
+    let label = format!(
+        "{}:{}",
+        cell.lm.split(':').next_back().unwrap_or(&cell.lm),
+        cell.pack_name
+    );
+
+    // Load any previously completed runs (from a killed experiment).
     let mut runs = Vec::new();
-    for run_idx in 0..cell.runs {
+    for i in 0..cell.runs {
+        let run_path = cell_dir.join(format!("run_{}.json", i));
+        if run_path.exists() {
+            if let Ok(raw) = std::fs::read_to_string(&run_path) {
+                if let Ok(r) = serde_json::from_str::<summary::RunOutcome>(&raw) {
+                    eprintln!("[{}] Run {}/{}... resumed from disk", label, i + 1, cell.runs);
+                    runs.push(r);
+                    continue;
+                }
+            }
+        }
+        break; // Runs must be contiguous from 0
+    }
+    let start_from = runs.len();
+
+    for run_idx in start_from..cell.runs {
         match runner::run_single(
             bman_bin,
             &cell.binary,
@@ -235,7 +258,9 @@ fn run_cell(
             &cell.lm,
         ) {
             Ok(r) => {
-                display::print_run_progress(&r, run_idx, cell.runs);
+                display::print_run_progress(&r, run_idx, cell.runs, &label);
+                // Save run immediately so it survives a kill
+                crate::save_single_run(&cell_dir, run_idx, &r)?;
                 runs.push(r);
             }
             Err(e) => {
@@ -268,8 +293,8 @@ fn run_cell(
     gr.completed = 1;
 
     eprintln!(
-        "  -> {:.0}/{} verified, {:.0} cycles, {:.0}s",
-        current.mean_verified, current.total_surfaces, current.mean_cycles, current.mean_elapsed
+        "[{}] -> {:.0}/{} verified, {:.0} cycles, {:.0}s",
+        label, current.mean_verified, current.total_surfaces, current.mean_cycles, current.mean_elapsed
     );
 
     Ok(gr)
@@ -328,6 +353,7 @@ fn expand_cells(config: &MatrixConfig) -> Vec<Cell> {
                 let pack_name = crate::pack_name(&binary, &entry_point);
                 let key = format!("{}__{}", slug(lm), slug(&pack_name));
 
+                let idx = cells.len();
                 cells.push(Cell {
                     key,
                     lm: lm.clone(),
@@ -338,6 +364,7 @@ fn expand_cells(config: &MatrixConfig) -> Vec<Cell> {
                     max_cycles,
                     timeout,
                     group_idx,
+                    idx,
                 });
             }
         }

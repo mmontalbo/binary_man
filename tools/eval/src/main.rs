@@ -118,7 +118,8 @@ fn main() -> Result<()> {
                 i,
                 &args.lm,
             )?;
-            display::print_run_progress(&r, i, args.runs);
+            let label = format!("{}:{}", args.lm.split(':').next_back().unwrap_or(&args.lm), args.binary);
+            display::print_run_progress(&r, i, args.runs, &label);
             runs.push(r);
         }
         runs
@@ -216,6 +217,34 @@ fn eval_data_dir(pack_name: &str, commit: &str) -> PathBuf {
     PathBuf::from("tools/eval_data")
         .join(pack_name)
         .join(commit)
+}
+
+/// Save a single run's data immediately (survives process kill).
+pub(crate) fn save_single_run(
+    dir: &std::path::Path,
+    run_idx: usize,
+    run: &summary::RunOutcome,
+) -> Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let path = dir.join(format!("run_{}.json", run_idx));
+    let json = serde_json::to_string_pretty(run)?;
+    std::fs::write(&path, json)?;
+    if !run.stderr.is_empty() {
+        let stderr_path = dir.join(format!("run_{}_stderr.txt", run_idx));
+        std::fs::write(&stderr_path, &run.stderr)?;
+    }
+    if let Some(ref state_json) = run.state_json {
+        let state_path = dir.join(format!("run_{}_state.json", run_idx));
+        std::fs::write(&state_path, state_json)?;
+    }
+    if !run.lm_log_files.is_empty() {
+        let lm_log_dir = dir.join(format!("run_{}_lm_log", run_idx));
+        std::fs::create_dir_all(&lm_log_dir)?;
+        for (name, bytes) in &run.lm_log_files {
+            std::fs::write(lm_log_dir.join(name), bytes)?;
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn save_eval_data(

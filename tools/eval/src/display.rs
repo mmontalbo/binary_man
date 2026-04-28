@@ -5,7 +5,7 @@ use crate::summary::{RunOutcome, Summary};
 use crate::{Args, GitInfo};
 
 /// Print progress for a single completed run.
-pub fn print_run_progress(run: &RunOutcome, idx: usize, total: usize) {
+pub fn print_run_progress(run: &RunOutcome, idx: usize, total: usize, label: &str) {
     let verified = run.surfaces.values().filter(|s| s.verified).count();
     let surfaces = run.surfaces.len();
     let mut parts = vec![
@@ -31,7 +31,7 @@ pub fn print_run_progress(run: &RunOutcome, idx: usize, total: usize) {
     if let Some(ref ed) = run.progress_stats.extract_done {
         parts.push(format!("extract: {}surf {:.0}s", ed.surfaces, ed.elapsed_ms as f64 / 1000.0));
     }
-    eprintln!("Run {}/{}... {}", idx + 1, total, parts.join(", "));
+    eprintln!("[{}] Run {}/{}... {}", label, idx + 1, total, parts.join(", "));
 }
 
 /// Show surface manifest variance across runs (if manifests differ).

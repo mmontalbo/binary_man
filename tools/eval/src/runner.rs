@@ -17,6 +17,7 @@ pub fn run_single(
     run_idx: usize,
     lm: &str,
 ) -> Result<RunOutcome> {
+    let label = format!("{}:{}", lm.split(':').next_back().unwrap_or(lm), binary);
     let tmpdir =
         tempfile::tempdir().with_context(|| format!("create tmpdir for run {}", run_idx))?;
 
@@ -32,7 +33,7 @@ pub fn run_single(
     cmd_args.extend(entry_point.iter().cloned());
 
     let start = Instant::now();
-    let result = run_with_timeout(bman_bin, &cmd_args, timeout, run_idx)?;
+    let result = run_with_timeout(bman_bin, &cmd_args, timeout, run_idx, &label)?;
     let elapsed = start.elapsed().as_secs_f64();
 
     // Read final state (even on crash/timeout for partial results)
@@ -116,7 +117,8 @@ pub fn run_parallel(
                         i,
                         lm,
                     )?;
-                    crate::display::print_run_progress(&r, i, num_runs);
+                    let label = format!("{}:{}", lm.split(':').next_back().unwrap_or(lm), binary);
+                    crate::display::print_run_progress(&r, i, num_runs, &label);
                     Ok(r)
                 })
             })
@@ -206,6 +208,7 @@ fn run_with_timeout(
     args: &[String],
     timeout: u64,
     run_idx: usize,
+    label: &str,
 ) -> Result<RunResult> {
     let mut cmd = Command::new(program);
     cmd.args(args)
@@ -228,6 +231,7 @@ fn run_with_timeout(
     // Read stderr line-by-line, streaming PROGRESS lines and accumulating the rest.
     let stderr_handle = child.stderr.take().expect("stderr was piped");
     let run_num = run_idx + 1;
+    let label = label.to_string();
     let stderr_thread = std::thread::spawn(move || {
         let reader = std::io::BufReader::new(stderr_handle);
         let mut buf = String::new();
@@ -235,7 +239,7 @@ fn run_with_timeout(
             match line {
                 Ok(line) => {
                     if line.starts_with("PROGRESS:") {
-                        eprintln!("  [run {}] {}", run_num, line);
+                        eprintln!("  [{}|run {}] {}", label, run_num, line);
                     }
                     buf.push_str(&line);
                     buf.push('\n');
