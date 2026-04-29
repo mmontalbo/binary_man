@@ -1,0 +1,17 @@
+# ls -g: like -l but do not list owner
+
+file "alpha.txt" "hello"
+file "beta.txt" "world"
+
+test args "." "-l"
+  expect stdout not-empty
+  expect exit 0
+
+test args "." "-g"
+  # FAILED: expected preserved, got Disjoint — owner column removed.
+  # expect stdout preserved vs "." "-l"
+  expect stdout lines same as "." "-l"
+  expect stdout contains "alpha.txt"
+  # -g omits owner: perms links group size (3 fields before size, not 4)
+  expect stdout every-line-matches "^(total \d+|[^ ]+ +\d+ +\S+ +\d)"
+  expect exit 0

@@ -1,0 +1,18 @@
+# ls -b: print C-style escapes for nongraphic characters
+
+file "normal.txt" "hello"
+file "has space.txt" "spaced"
+file "tab\there.txt" "tabbed"
+
+test args "."
+  expect stdout not-empty
+  expect exit 0
+
+test args "." "-b"
+  # FAILED: 0/3 discriminating — lines same + contains both true without flag
+  #   [only in option] has\ space.txt, tab\there.txt
+  #   -b escapes special chars, so escaped forms only appear in option output.
+  # expect stdout preserved vs "."
+  expect stdout contains "has\\"
+  expect stdout lines same as "."
+  expect exit 0

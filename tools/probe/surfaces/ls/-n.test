@@ -1,0 +1,17 @@
+# ls -n: like -l but list numeric user and group IDs
+
+file "alpha.txt" "hello"
+file "beta.txt" "world"
+
+test args "." "-l"
+  expect stdout not-empty
+  expect exit 0
+
+test args "." "-n"
+  # FAILED: expected preserved, got Disjoint — numeric IDs replace names.
+  # expect stdout preserved vs "." "-l"
+  expect stdout lines same as "." "-l"
+  expect stdout contains "alpha.txt"
+  # -n replaces owner/group with numeric UID/GID: perms links uid gid size
+  expect stdout every-line-matches "^(total \d+|\S+ +\d+ +\d+ +\d+ +\d)"
+  expect exit 0

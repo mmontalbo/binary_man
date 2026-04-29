@@ -1,0 +1,17 @@
+# ls -1: list one file per line
+
+file "alpha.txt" "a"
+file "beta.txt" "b"
+file "gamma.txt" "c"
+
+test args "."
+  expect stdout not-empty
+  expect exit 0
+
+test args "." "-1"
+  # 0/2 discriminating: [stdout identical — flag has no visible effect]
+  #   Piped ls already outputs one-per-line (implicit -1).
+  #   This flag is a no-op when stdout is not a terminal.
+  #   UNTESTABLE in pipe mode — would need PTY.
+  expect stdout lines same as "."
+  expect exit 0

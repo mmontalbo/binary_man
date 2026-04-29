@@ -1,0 +1,14 @@
+# ls -m: comma separated list of entries
+
+file "alpha.txt" "a"
+file "beta.txt" "b"
+file "gamma.txt" "c"
+
+test args "."
+  expect stdout not-empty
+  expect exit 0
+
+test args "." "-m"
+  expect stdout contains ","
+  expect stdout lines fewer than "."
+  expect exit 0

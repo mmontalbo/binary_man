@@ -1,0 +1,18 @@
+# ls -t: sort by time, newest first
+
+file "old.txt" "old"
+props "old.txt" mtime old
+file "recent.txt" "recent"
+props "recent.txt" mtime recent
+
+test args "."
+  expect stdout not-empty
+  expect exit 0
+
+test args "." "-t"
+  expect stdout reordered vs "."
+  expect stdout lines same as "."
+  # Pin time order: newest first
+  expect stdout line 1 contains "recent.txt"
+  expect stdout "recent.txt" before "old.txt"
+  expect exit 0

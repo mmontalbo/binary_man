@@ -64,12 +64,12 @@ fn check_one(
                             passed: true,
                             detail: format!("all {} lines match /{}/", lines.len(), pattern),
                             context: vec![],
+                            discriminates: None,
                         }
                     } else {
                         let mut ctx = vec![
                             format!("  failing: {:?}", failing.unwrap_or(&"")),
                         ];
-                        // Show first few lines for context
                         for (i, l) in lines.iter().take(3).enumerate() {
                             let mark = if re.is_match(l) { "✓" } else { "✗" };
                             ctx.push(format!("  line {}: {} {:?}", i + 1, mark, l));
@@ -78,6 +78,7 @@ fn check_one(
                             passed: false,
                             detail: format!("expected every line matches /{}/", pattern),
                             context: ctx,
+                            discriminates: None,
                         }
                     }
                 }
@@ -85,7 +86,57 @@ fn check_one(
                     passed: false,
                     detail: format!("invalid regex /{}/:  {}", pattern, e),
                     context: vec![],
+                    discriminates: None,
                 },
+            }
+        }
+
+        (OutputDimension::Stdout, Predicate::LineContains { line, text }) => {
+            let lines: Vec<&str> = obs.stdout.lines().filter(|l| !l.is_empty()).collect();
+            if *line == 0 || *line > lines.len() {
+                check(
+                    false,
+                    &format!("line {} out of range (have {} lines)", line, lines.len()),
+                    "",
+                )
+            } else {
+                let actual = lines[*line - 1];
+                check(
+                    actual.contains(text.as_str()),
+                    &format!("expected line {} contains {:?}", line, text),
+                    actual,
+                )
+            }
+        }
+        (OutputDimension::Stdout, Predicate::LineNotContains { line, text }) => {
+            let lines: Vec<&str> = obs.stdout.lines().filter(|l| !l.is_empty()).collect();
+            if *line == 0 || *line > lines.len() {
+                check(
+                    false,
+                    &format!("line {} out of range (have {} lines)", line, lines.len()),
+                    "",
+                )
+            } else {
+                let actual = lines[*line - 1];
+                check(
+                    !actual.contains(text.as_str()),
+                    &format!("expected line {} not-contains {:?}", line, text),
+                    actual,
+                )
+            }
+        }
+        (OutputDimension::Stdout, Predicate::Before { first, second }) => {
+            let lines: Vec<&str> = obs.stdout.lines().collect();
+            let pos_first = lines.iter().position(|l| l.contains(first.as_str()));
+            let pos_second = lines.iter().position(|l| l.contains(second.as_str()));
+            match (pos_first, pos_second) {
+                (Some(a), Some(b)) => check(
+                    a < b,
+                    &format!("expected {:?} before {:?}, got line {} vs {}", first, second, a + 1, b + 1),
+                    &obs.stdout,
+                ),
+                (None, _) => check(false, &format!("{:?} not found in output", first), &obs.stdout),
+                (_, None) => check(false, &format!("{:?} not found in output", second), &obs.stdout),
             }
         }
 
@@ -118,6 +169,7 @@ fn check_one(
                     passed: false,
                     detail: format!("reference invocation {:?} not found", vs_args),
                     context: vec![],
+                    discriminates: None,
                 }
             }
         }
@@ -146,6 +198,7 @@ fn check_one(
                     passed: false,
                     detail: format!("reference invocation {:?} not found", vs_args),
                     context: vec![],
+                    discriminates: None,
                 }
             }
         }
@@ -164,6 +217,7 @@ fn check_one(
                     passed: false,
                     detail: format!("reference invocation {:?} not found", vs_args),
                     context: vec![],
+                    discriminates: None,
                 }
             }
         }
@@ -174,20 +228,23 @@ fn check_one(
             CheckResult {
                 passed: true,
                 detail: "fs unchanged (not yet implemented)".to_string(),
-                    context: vec![],
+                context: vec![],
+                discriminates: None,
             }
         }
         (OutputDimension::Fs, _) => CheckResult {
             passed: false,
             detail: "fs predicates not yet implemented".to_string(),
-                    context: vec![],
+            context: vec![],
+            discriminates: None,
         },
 
         // Catch-all
         _ => CheckResult {
             passed: false,
             detail: format!("unsupported predicate combination: {:?}", exp),
-                    context: vec![],
+            context: vec![],
+            discriminates: None,
         },
     }
 }
@@ -198,7 +255,6 @@ fn check_relational_stdout(
     obs: &Observation,
     all_obs: &HashMap<Vec<String>, Observation>,
 ) -> CheckResult {
-    // Extract vs_args from the predicate
     let vs_args = match pred {
         Predicate::Reordered { vs_args }
         | Predicate::Superset { vs_args }
@@ -217,7 +273,8 @@ fn check_relational_stdout(
             return CheckResult {
                 passed: false,
                 detail: format!("not a relational predicate: {:?}", pred),
-                    context: vec![],
+                context: vec![],
+                discriminates: None,
             }
         }
     };
@@ -228,12 +285,12 @@ fn check_relational_stdout(
             return CheckResult {
                 passed: false,
                 detail: format!("reference invocation {:?} not found", vs_args),
-                    context: vec![],
+                context: vec![],
+                discriminates: None,
             }
         }
     };
 
-    // Build a compact summary of both outputs for context on failures
     let stdout_context = format!(
         "control ({} lines):\n{}\noption ({} lines):\n{}",
         other.stdout.lines().count(),
@@ -359,7 +416,8 @@ fn check_relational_stdout(
         _ => CheckResult {
             passed: false,
             detail: format!("unhandled relational predicate: {:?}", pred),
-                    context: vec![],
+            context: vec![],
+            discriminates: None,
         },
     }
 }
@@ -367,7 +425,6 @@ fn check_relational_stdout(
 fn check(passed: bool, desc: &str, context_str: &str) -> CheckResult {
     let mut context = Vec::new();
     if !passed && !context_str.is_empty() {
-        // Show up to 5 lines of context
         for line in context_str.lines().take(5) {
             context.push(format!("  {}", line));
         }
@@ -380,6 +437,6 @@ fn check(passed: bool, desc: &str, context_str: &str) -> CheckResult {
         passed,
         detail: desc.to_string(),
         context,
+        discriminates: None,
     }
 }
-

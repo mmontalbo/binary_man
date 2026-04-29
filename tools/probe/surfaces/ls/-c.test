@@ -1,0 +1,21 @@
+# ls -c: sort by ctime (status change time)
+
+file "old.txt" "old"
+props "old.txt" mtime old
+file "recent.txt" "recent"
+props "recent.txt" mtime recent
+
+test args "."
+  expect stdout not-empty
+  expect exit 0
+
+test args "." "-c"
+  # FAILED: expected lines same, 0/2 discriminating
+  #   [stdout same lines, different order] — -c sorts by ctime which
+  #   differs from alphabetical order for these files.
+  # expect stdout lines same as "."
+  expect stdout reordered vs "."
+  # Pin ctime order: most recently changed first
+  expect stdout line 1 contains "recent.txt"
+  expect stdout "recent.txt" before "old.txt"
+  expect exit 0

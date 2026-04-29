@@ -1,0 +1,21 @@
+# ls -L: dereference symlinks (show target info, not link info)
+
+file "target.txt" "hello"
+link "mylink" -> "target.txt"
+
+test args "." "-l"
+  expect stdout not-empty
+  expect stdout contains "->"
+  expect exit 0
+
+test args "." "-lL"
+  # FAILED: expected preserved, got Complement
+  #   -L replaces the symlink line (lrwxrwxrwx ... mylink -> target.txt)
+  #   with the dereferenced file line (-rw-r--r-- ... mylink).
+  #   The arrow notation disappears, permissions change → Complement.
+  # expect stdout preserved vs "." "-l"
+  expect stdout lines same as "." "-l"
+  expect stdout not-contains "->"
+  expect stdout contains "mylink"
+  expect stdout contains "target.txt"
+  expect exit 0

@@ -111,6 +111,11 @@ pub enum Predicate {
     NotContains(String),
     EveryLineMatches(String),
 
+    // Positional
+    LineContains { line: usize, text: String },
+    LineNotContains { line: usize, text: String },
+    Before { first: String, second: String },
+
     // Stderr
     Unchanged { vs_args: Vec<String> },
     StderrEmpty,
@@ -328,6 +333,36 @@ fn parse_stdout_predicate(s: &str, line_num: usize) -> Result<Predicate> {
             .parse()
             .with_context(|| format!("line {}: invalid line count", line_num))?;
         return Ok(Predicate::LinesExactly(n));
+    }
+    // Positional: "line N contains ..." / "line N not-contains ..."
+    if let Some(rest) = s.strip_prefix("line ") {
+        let rest = rest.trim();
+        // Parse "N contains ..." or "N not-contains ..."
+        let (n_str, remainder) = rest.split_once(' ')
+            .ok_or_else(|| anyhow::anyhow!("line {}: expected 'line N contains/not-contains'", line_num))?;
+        let n: usize = n_str.parse()
+            .with_context(|| format!("line {}: invalid line number", line_num))?;
+        let remainder = remainder.trim();
+        if let Some(rest) = remainder.strip_prefix("contains ") {
+            let text = parse_single_quoted(rest.trim(), line_num)?;
+            return Ok(Predicate::LineContains { line: n, text });
+        }
+        if let Some(rest) = remainder.strip_prefix("not-contains ") {
+            let text = parse_single_quoted(rest.trim(), line_num)?;
+            return Ok(Predicate::LineNotContains { line: n, text });
+        }
+        bail!("line {}: expected 'contains' or 'not-contains' after line number", line_num);
+    }
+    // Ordering: '"X" before "Y"'
+    if s.contains("\" before \"") {
+        let tokens = parse_quoted_strings(s.replace(" before ", " ").trim(), line_num)?;
+        if tokens.len() == 2 {
+            return Ok(Predicate::Before {
+                first: tokens[0].clone(),
+                second: tokens[1].clone(),
+            });
+        }
+        bail!("line {}: expected '\"X\" before \"Y\"'", line_num);
     }
 
     // Relational predicates: "reordered vs ..."

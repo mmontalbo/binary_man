@@ -1,0 +1,17 @@
+# ls -s: print allocated size of each file in blocks
+
+file "alpha.txt" "hello"
+file "beta.txt" "world"
+
+test args "."
+  expect stdout not-empty
+  expect exit 0
+
+test args "." "-s"
+  # FAILED: expected preserved prefix-added, got Preserved
+  # expect stdout preserved prefix-added vs "."
+  expect stdout preserved vs "."
+  expect stdout lines more than "."
+  # -s prefixes each line with block count; first line is "total N"
+  expect stdout every-line-matches "^(total \d+| *\d+ )"
+  expect exit 0

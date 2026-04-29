@@ -1,0 +1,17 @@
+# ls -o: like -l but do not list group information
+
+file "alpha.txt" "hello"
+file "beta.txt" "world"
+
+test args "." "-l"
+  expect stdout not-empty
+  expect exit 0
+
+test args "." "-o"
+  # FAILED: expected preserved, got Disjoint — group column removed.
+  # expect stdout preserved vs "." "-l"
+  expect stdout lines same as "." "-l"
+  expect stdout contains "alpha.txt"
+  # -o omits group: perms links owner size (3 fields before size)
+  expect stdout every-line-matches "^(total \d+|[^ ]+ +\d+ +\S+ +\d)"
+  expect exit 0

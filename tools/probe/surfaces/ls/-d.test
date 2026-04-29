@@ -1,0 +1,15 @@
+# ls -d: list directories themselves, not their contents
+
+file "file1.txt" "hello"
+file "file2.txt" "world"
+dir "subdir"
+
+test args "."
+  expect stdout not-empty
+  expect exit 0
+
+test args "." "-d"
+  expect stdout contains "."
+  expect stdout not-contains "file1.txt"
+  expect stdout lines exactly 1
+  expect exit 0

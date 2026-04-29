@@ -1,0 +1,22 @@
+# ls -x: list entries by lines instead of by columns
+
+file "alpha.txt" "a"
+file "beta.txt" "b"
+file "gamma.txt" "c"
+
+test args "."
+  expect stdout not-empty
+  expect exit 0
+
+test args "." "-x"
+  # FAILED (1): expected lines same, got 1 vs 3
+  #   Piped ls defaults to one-per-line. -x reformats entries
+  #   horizontally, fitting all 3 on one line.
+  # expect stdout lines same as "."
+  # FAILED (2): expected collapsed, got Preserved
+  #   All 3 filenames appear as substrings in the single output line,
+  #   so classifier sees entries Preserved, not Collapsed.
+  # expect stdout collapsed vs "."
+  expect stdout preserved vs "."
+  expect stdout lines fewer than "."
+  expect exit 0

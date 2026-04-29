@@ -12,4 +12,8 @@ test args "."
 test args "." "-r"
   expect stdout reordered vs "."
   expect stdout lines same as "."
+  # Pin the actual reverse-alpha order
+  expect stdout line 1 contains "gamma.txt"
+  expect stdout line 4 contains "alpha.txt"
+  expect stdout "gamma.txt" before "alpha.txt"
   expect exit 0

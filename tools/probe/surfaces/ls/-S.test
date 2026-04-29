@@ -1,0 +1,20 @@
+# ls -S: sort by file size, largest first
+
+file "aaa.txt" "a"
+file "mmm.txt" size 1000
+file "zzz.txt" "abcdefghij"
+
+test args "."
+  expect stdout not-empty
+  expect exit 0
+
+test args "." "-S"
+  # FAILED (first attempt with names small/medium/large):
+  #   expected reordered, got Identical
+  #   Fixed by choosing names (aaa, mmm, zzz) that break the correlation.
+  expect stdout reordered vs "."
+  expect stdout lines same as "."
+  # Pin size order: mmm(1000) > zzz(10) > aaa(1)
+  expect stdout line 1 contains "mmm.txt"
+  expect stdout line 3 contains "aaa.txt"
+  expect exit 0

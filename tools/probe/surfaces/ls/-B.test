@@ -1,0 +1,17 @@
+# ls -B: do not list entries ending with ~
+
+file "regular.txt" "hello"
+file "backup.txt~" "backup"
+file "another~" "more backup"
+
+test args "."
+  expect stdout not-empty
+  expect stdout contains "backup.txt~"
+  expect exit 0
+
+test args "." "-B"
+  expect stdout subset vs "."
+  expect stdout not-contains "backup.txt~"
+  expect stdout not-contains "another~"
+  expect stdout contains "regular.txt"
+  expect exit 0

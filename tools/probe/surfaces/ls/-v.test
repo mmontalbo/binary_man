@@ -1,0 +1,19 @@
+# ls -v: natural sort of version numbers within text
+
+file "file1.txt" "one"
+file "file2.txt" "two"
+file "file10.txt" "ten"
+file "file20.txt" "twenty"
+
+test args "."
+  expect stdout not-empty
+  expect exit 0
+
+test args "." "-v"
+  expect stdout reordered vs "."
+  expect stdout lines same as "."
+  # Default alpha sorts: file1, file10, file2, file20
+  # Version sort: file1, file2, file10, file20
+  # So file2 comes before file10 in version sort (after in alpha)
+  expect stdout "file2.txt" before "file10.txt"
+  expect exit 0
