@@ -282,6 +282,10 @@ pub struct ProbeResult {
     /// When true, this seed is a candidate for auto-promotion to Test.
     #[serde(default)]
     pub outputs_differ: bool,
+    /// Structured delta classification from mechanical analysis.
+    /// Describes the relationship between control and option stdout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delta_relation: Option<String>,
     /// Whether the seed setup commands failed.
     pub setup_failed: bool,
     /// Per-channel comparison: stdout differs between control and option.
@@ -344,6 +348,10 @@ pub struct Attempt {
     /// None if no prediction was provided, Some(true) if matched, Some(false) if not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prediction_matched: Option<bool>,
+    /// Structured delta classification from mechanical analysis.
+    /// Describes the relationship between control and option stdout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delta_relation: Option<String>,
     /// Whether the predicted *channel* (stdout/stderr/exitcode) actually changed.
     /// True = right channel, wrong content. False = wrong channel entirely.
     #[serde(default, skip_serializing_if = "Option::is_none")]

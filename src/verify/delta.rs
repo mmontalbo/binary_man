@@ -3,8 +3,6 @@
 //! Computes structured behavioral facts from control vs option stdout,
 //! going beyond the boolean "differs" check to describe WHAT changed.
 
-#![allow(dead_code)] // Module is new; types will be wired into pipeline incrementally
-
 use std::collections::HashSet;
 
 /// High-level relationship between control and option output.
@@ -56,6 +54,7 @@ pub enum FormatChange {
 }
 
 /// Full structured delta across ALL observation axes.
+#[allow(dead_code)] // Multi-axis analysis infrastructure; stdout axis is wired in
 #[derive(Debug, Clone)]
 pub struct StructuredDelta {
     /// Stdout relationship (the primary axis for most commands).
@@ -70,6 +69,7 @@ pub struct StructuredDelta {
 
 /// Stdout-specific delta (the most common axis).
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Count fields used in tests and analysis
 pub struct StdoutDelta {
     /// Entry-level relationship.
     pub relation: EntryRelation,
@@ -83,6 +83,7 @@ pub struct StdoutDelta {
 }
 
 /// Stderr delta.
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StderrDelta {
     /// Both stderr identical (or both empty).
@@ -96,6 +97,7 @@ pub enum StderrDelta {
 }
 
 /// Exit code delta.
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExitCodeDelta {
     /// Same exit code.
@@ -105,6 +107,7 @@ pub enum ExitCodeDelta {
 }
 
 /// Filesystem side-effect delta.
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FsDelta {
     /// No filesystem changes from either run (or identical changes).
@@ -124,6 +127,7 @@ pub enum FsDelta {
 }
 
 /// Compute a full structured delta across all observation axes.
+#[allow(dead_code)]
 pub fn compute_full_delta(
     control: &super::evidence::Evidence,
     option: &super::evidence::Evidence,
@@ -160,6 +164,7 @@ pub fn compute_full_delta(
 }
 
 /// Compute filesystem delta between control and option runs.
+#[allow(dead_code)]
 fn compute_fs_delta(
     ctrl_fs: Option<&super::evidence::FsDiff>,
     opt_fs: Option<&super::evidence::FsDiff>,

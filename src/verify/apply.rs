@@ -111,6 +111,8 @@ pub(super) struct ProbeRunResult {
     pub control_exit_code: Option<i32>,
     /// Which setup command failed, if any.
     pub setup_detail: Option<String>,
+    /// Structured delta classification.
+    pub delta_relation: Option<String>,
 }
 
 /// Result of running a test scenario (for parallel execution).
@@ -138,6 +140,8 @@ pub(super) struct TestResult {
     /// even if the specific prediction content was wrong. Used for telemetry to
     /// distinguish "right channel, wrong content" from "wrong channel entirely".
     pub prediction_channel_matched: Option<bool>,
+    /// Structured delta classification.
+    pub delta_relation: Option<String>,
 }
 
 /// Verify whether a prediction matches the actual outcome.
@@ -242,6 +246,14 @@ pub(super) fn run_test_scenario(
     // Compute outcome by comparing option to control (same seed, different argv)
     let outcome = compute_outcome(&option_evidence, &control_evidence);
 
+    // Compute structured delta for richer behavioral classification
+    let delta_relation = if !option_evidence.setup_failed && !control_evidence.setup_failed {
+        let delta = super::delta::compute_stdout_delta(&control_evidence.stdout, &option_evidence.stdout);
+        Some(format!("{:?}", delta.relation))
+    } else {
+        None
+    };
+
     // Capture output previews for debugging
     let stdout_preview = make_output_preview(&option_evidence.stdout, OUTPUT_PREVIEW_MAX_LEN);
     let stderr_preview = make_output_preview(&option_evidence.stderr, OUTPUT_PREVIEW_MAX_LEN);
@@ -277,6 +289,7 @@ pub(super) fn run_test_scenario(
         prediction,
         prediction_matched,
         prediction_channel_matched,
+        delta_relation,
     })
 }
 
@@ -331,6 +344,7 @@ pub(super) fn merge_test_result(state: &mut State, result: TestResult) {
             prediction: result.prediction,
             prediction_matched: result.prediction_matched,
             prediction_channel_matched: result.prediction_channel_matched,
+            delta_relation: result.delta_relation,
         });
 
         if matches!(result.outcome, Outcome::Verified { .. }) && !prediction_blocked {
@@ -437,6 +451,15 @@ pub(super) fn run_probe_scenario(
         control_stderr_preview,
         control_exit_code: control_evidence.exit_code,
         setup_detail,
+        delta_relation: if !option_evidence.setup_failed {
+            let d = super::delta::compute_stdout_delta(
+                &control_evidence.stdout,
+                &option_evidence.stdout,
+            );
+            Some(format!("{:?}", d.relation))
+        } else {
+            None
+        },
     })
 }
 
@@ -459,6 +482,7 @@ pub(super) fn merge_probe_result(state: &mut State, result: ProbeRunResult) {
             control_stderr_preview: result.control_stderr_preview,
             control_exit_code: result.control_exit_code,
             setup_detail: result.setup_detail,
+            delta_relation: result.delta_relation,
         });
     }
 }

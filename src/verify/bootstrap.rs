@@ -1651,6 +1651,7 @@ pub(super) fn apply_batch_probe_hits(state: &mut State, hits: Vec<BatchProbeHit>
                 prediction: None,
                 prediction_matched: None,
                 prediction_channel_matched: None,
+                delta_relation: None, // TODO: compute from evidence when available
             });
             verified_ids.push(hit.surface_id.clone());
         }

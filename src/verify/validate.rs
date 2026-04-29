@@ -384,6 +384,7 @@ mod tests {
                     control_stderr_preview: None,
                     control_exit_code: Some(0),
                     setup_detail: None,
+            delta_relation: None,
                 });
             }
         }

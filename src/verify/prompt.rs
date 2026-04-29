@@ -929,6 +929,7 @@ mod tests {
                     prediction: None,
                     prediction_matched: None,
                     prediction_channel_matched: None,
+                delta_relation: None,
                 }],
                 category: SurfaceCategory::General,
                 retried: false,
@@ -1042,6 +1043,7 @@ mod tests {
                     prediction: None,
                     prediction_matched: None,
                     prediction_channel_matched: None,
+                delta_relation: None,
                 }],
                 category: SurfaceCategory::General,
                 retried: false,
@@ -1102,6 +1104,7 @@ mod tests {
                         prediction: None,
                         prediction_matched: None,
                     prediction_channel_matched: None,
+                delta_relation: None,
                     },
                     Attempt {
                         cycle: 2,
@@ -1119,6 +1122,7 @@ mod tests {
                         prediction: None,
                         prediction_matched: None,
                     prediction_channel_matched: None,
+                delta_relation: None,
                     },
                 ],
                 category: SurfaceCategory::General,
@@ -1217,6 +1221,7 @@ stderr: error: pathspec 'main' did not match"#
             prediction: None,
             prediction_matched: None,
                     prediction_channel_matched: None,
+                delta_relation: None,
         };
 
         let state = State {
@@ -1312,6 +1317,7 @@ stderr: error: already a git repo"#
                     prediction: None,
                     prediction_matched: None,
                     prediction_channel_matched: None,
+                delta_relation: None,
                 }],
                 category: SurfaceCategory::General,
                 retried: false,
@@ -1373,6 +1379,7 @@ stderr: pathspec 'main' did not match"#
             prediction: None,
             prediction_matched: None,
                     prediction_channel_matched: None,
+                delta_relation: None,
         };
 
         let state = State {
@@ -1542,6 +1549,7 @@ stderr: pathspec 'main' did not match"#
             prediction: None,
             prediction_matched: None,
                     prediction_channel_matched: None,
+                delta_relation: None,
         }];
 
         let history = super::format_attempt_history(&attempts, 2);
@@ -1570,6 +1578,7 @@ stderr: pathspec 'main' did not match"#
             prediction: None,
             prediction_matched: None,
                     prediction_channel_matched: None,
+                delta_relation: None,
         };
 
         let attempts = vec![
@@ -1690,6 +1699,7 @@ stderr: pathspec 'main' did not match"#
                     prediction: None,
                     prediction_matched: None,
                     prediction_channel_matched: None,
+                delta_relation: None,
                 },
                 Attempt {
                     cycle: 2,
@@ -1712,6 +1722,7 @@ stderr: pathspec 'main' did not match"#
                     prediction: None,
                     prediction_matched: None,
                     prediction_channel_matched: None,
+                delta_relation: None,
                 },
             ],
         );
@@ -1859,6 +1870,7 @@ stderr: pathspec 'main' did not match"#
                     prediction: None,
                     prediction_matched: None,
                     prediction_channel_matched: None,
+                delta_relation: None,
                 }],
                 category: SurfaceCategory::General,
                 retried: false,
