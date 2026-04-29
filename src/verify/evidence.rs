@@ -557,6 +557,7 @@ pub(super) fn run_in_sandbox(
     binary: &str,
     argv: &[String],
     with_pty: bool,
+    readonly: bool,
 ) -> Result<Evidence> {
     // If setup failed, return failure evidence
     if sandbox.setup_failed {
@@ -578,11 +579,17 @@ pub(super) fn run_in_sandbox(
         });
     }
 
-    // Capture filesystem state before running (from /tmp only since work_dir is read-only)
-    let fs_state_before = capture_fs_state(&sandbox.sandbox_tmp);
+    // Capture filesystem state before running.
+    // When writable, capture from the full work_dir (to detect file mutations).
+    // When read-only, capture from sandbox_tmp only (work_dir can't change).
+    let fs_capture_dir = if readonly {
+        &sandbox.sandbox_tmp
+    } else {
+        &sandbox.work_dir
+    };
+    let fs_state_before = capture_fs_state(fs_capture_dir);
 
-    // Build command with READ-ONLY work directory
-    let mut cmd = build_sandbox_command(&sandbox.work_dir, &sandbox.sandbox_tmp, true);
+    let mut cmd = build_sandbox_command(&sandbox.work_dir, &sandbox.sandbox_tmp, readonly);
     if with_pty {
         append_pty_wrapper(&mut cmd, binary, argv);
     } else {
@@ -624,8 +631,7 @@ pub(super) fn run_in_sandbox(
         }
     };
 
-    // Capture filesystem state after (from /tmp only)
-    let fs_state_after = capture_fs_state(&sandbox.sandbox_tmp);
+    let fs_state_after = capture_fs_state(fs_capture_dir);
 
     // Compute filesystem diff
     let fs_diff = compute_fs_diff(&fs_state_before, &fs_state_after);
@@ -676,8 +682,35 @@ pub(super) fn run_scenario_pair(
     let sandbox = prepare_sandbox(scenario_id, seed)?;
 
     // Run both commands in the same sandbox (read-only mode)
-    let control_evidence = run_in_sandbox(&sandbox, binary, control_argv, with_pty)?;
-    let option_evidence = run_in_sandbox(&sandbox, binary, option_argv, with_pty)?;
+    let control_evidence = run_in_sandbox(&sandbox, binary, control_argv, with_pty, true)?;
+    let option_evidence = run_in_sandbox(&sandbox, binary, option_argv, with_pty, true)?;
+
+    Ok((control_evidence, option_evidence))
+}
+
+/// Run control and option commands in writable mode.
+///
+/// Like `run_scenario_pair` but both commands can modify the work directory.
+/// Filesystem changes (created/modified/deleted files) are captured in each
+/// Evidence's `fs_diff` field. Use this for commands whose primary effect
+/// is filesystem mutation (cp, chmod, mkdir, touch, etc.).
+///
+/// Note: control runs first and its mutations are visible to the option run.
+/// This is correct for additive commands (cp creates a file, cp --backup
+/// creates a backup of that file).
+#[allow(dead_code)] // Will be wired into pipeline when fs-modifying commands are supported
+pub(super) fn run_scenario_pair_writable(
+    scenario_id: &str,
+    binary: &str,
+    control_argv: &[String],
+    option_argv: &[String],
+    seed: &Seed,
+    with_pty: bool,
+) -> Result<(Evidence, Evidence)> {
+    let sandbox = prepare_sandbox(scenario_id, seed)?;
+
+    let control_evidence = run_in_sandbox(&sandbox, binary, control_argv, with_pty, false)?;
+    let option_evidence = run_in_sandbox(&sandbox, binary, option_argv, with_pty, false)?;
 
     Ok((control_evidence, option_evidence))
 }

@@ -1509,7 +1509,7 @@ pub(super) fn batch_probe_surfaces(
     }
 
     // Run a single shared control
-    let control = match run_in_sandbox(&sandbox, &state.binary, &base_argv, false) {
+    let control = match run_in_sandbox(&sandbox, &state.binary, &base_argv, false, true) {
         Ok(e) => e,
         Err(e) => {
             if verbose {
@@ -1528,7 +1528,7 @@ pub(super) fn batch_probe_surfaces(
         argv.push(surface_id.clone());
         argv.extend(extra_args.iter().cloned());
 
-        let evidence = match run_in_sandbox(&sandbox, &state.binary, &argv, false) {
+        let evidence = match run_in_sandbox(&sandbox, &state.binary, &argv, false, true) {
             Ok(e) => e,
             Err(_) => continue,
         };
