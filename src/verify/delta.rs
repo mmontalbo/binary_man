@@ -18,6 +18,9 @@ pub enum EntryRelation {
     Reordered,
     /// Same entries present in both, but lines are formatted differently.
     EntriesPreserved { format_change: FormatChange },
+    /// Output is a computed summary of the input (e.g., grep -c, wc -l).
+    /// The option output is dramatically shorter and represents an aggregation.
+    Collapsed,
     /// Outputs share no entries — completely different content.
     Disjoint,
     /// Both outputs are identical.
@@ -135,14 +138,27 @@ pub fn compute_structured_delta(control_stdout: &str, option_stdout: &str) -> St
         };
     }
 
-    // Lines don't match exactly — try entry-level (substring) matching.
-    // Check if each control entry appears as a substring in any option line.
-    // Also try matching after stripping escape characters and quotes from option lines.
+    // Lines don't match exactly — try entry-level matching.
+    // Level 1: Full line as substring (handles prefix/suffix/wrapping).
+    // Level 2: Shared non-numeric tokens (handles field reduction like wc -l).
+    // Level 3: Strip escapes then retry (handles -b, --hyperlink).
     let mut ctrl_found_in_opt = 0;
     for entry in &ctrl_entries {
         let found = opt_lines.iter().any(|ol| {
+            // Full substring
             ol.contains(entry)
+                // Escaped substring
                 || strip_escapes(ol).contains(entry)
+                // Shared non-numeric tokens (for field reduction: "5 5 31 fruits.txt" → "5 fruits.txt")
+                || {
+                    let ctrl_tokens: Vec<&str> = entry.split_whitespace()
+                        .filter(|t| !t.chars().all(|c| c.is_ascii_digit()))
+                        .collect();
+                    let opt_tokens: Vec<&str> = ol.split_whitespace()
+                        .filter(|t| !t.chars().all(|c| c.is_ascii_digit()))
+                        .collect();
+                    !ctrl_tokens.is_empty() && ctrl_tokens.iter().any(|ct| opt_tokens.contains(ct))
+                }
         });
         if found {
             ctrl_found_in_opt += 1;
@@ -196,6 +212,39 @@ pub fn compute_structured_delta(control_stdout: &str, option_stdout: &str) -> St
             control_line_count: ctrl_lines.len(),
             option_line_count: opt_lines.len(),
         };
+    }
+
+    // Check for collapsed/aggregated output: option is dramatically shorter
+    // and looks like a summary (numeric values, counts, reduced fields).
+    if !ctrl_lines.is_empty() && !opt_lines.is_empty() {
+        let line_ratio = opt_lines.len() as f64 / ctrl_lines.len() as f64;
+        let byte_ratio = option_stdout.len() as f64 / control_stdout.len().max(1) as f64;
+
+        // Collapsed: output is much shorter (< 50% of control lines)
+        // and contains tokens from control (e.g., filename preserved in "5 fruits.txt")
+        if line_ratio <= 0.5 || byte_ratio <= 0.5 {
+            // Check if option lines contain any control tokens (filenames, etc.)
+            let has_ctrl_token = opt_lines.iter().any(|ol| {
+                ctrl_entries.iter().any(|c| ol.contains(c))
+                    || ctrl_entries
+                        .iter()
+                        .any(|c| ol.split_whitespace().any(|t| c.split_whitespace().any(|ct| ct == t)))
+            });
+            // Or if option output is purely numeric/summary
+            let is_numeric = opt_lines
+                .iter()
+                .all(|l| l.trim().chars().all(|c| c.is_ascii_digit() || c.is_whitespace()));
+
+            if has_ctrl_token || is_numeric {
+                return StructuredDelta {
+                    relation: EntryRelation::Collapsed,
+                    control_entry_count: ctrl_entries.len(),
+                    option_entry_count: opt_lines.len(),
+                    control_line_count: ctrl_lines.len(),
+                    option_line_count: opt_lines.len(),
+                };
+            }
+        }
     }
 
     // Nothing matched — outputs are disjoint
@@ -471,6 +520,37 @@ mod tests {
                 assert_eq!(*format_change, FormatChange::Escaped);
             }
             other => panic!("Expected EntriesPreserved(Escaped), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_collapsed_count() {
+        // grep -c: lines → count
+        let ctrl = "apple\napple\n";
+        let opt = "2\n";
+        let d = compute_structured_delta(ctrl, opt);
+        assert_eq!(d.relation, EntryRelation::Collapsed);
+    }
+
+    #[test]
+    fn test_collapsed_with_filename() {
+        // wc -l on multiple files: multi-line → single summary
+        let ctrl = " 5 fruits.txt\n 4 mixed.txt\n 8 numbers.txt\n17 total\n";
+        let opt = "5\n4\n8\n17\n";
+        let d = compute_structured_delta(ctrl, opt);
+        assert_eq!(d.relation, EntryRelation::Collapsed);
+    }
+
+    #[test]
+    fn test_fields_reduced() {
+        // wc -l: same line count, fewer fields. Token "fruits.txt" preserved.
+        let ctrl = " 5  5 31 fruits.txt\n";
+        let opt = "5 fruits.txt\n";
+        let d = compute_structured_delta(ctrl, opt);
+        // "fruits.txt" appears in both → entries preserved
+        match &d.relation {
+            EntryRelation::EntriesPreserved { .. } | EntryRelation::Collapsed => {}
+            other => panic!("Expected EntriesPreserved or Collapsed, got {:?}", other),
         }
     }
 
