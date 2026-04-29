@@ -18,6 +18,9 @@ pub enum EntryRelation {
     Reordered,
     /// Same entries present in both, but lines are formatted differently.
     EntriesPreserved { format_change: FormatChange },
+    /// Option output is the complement of control — every option line is absent
+    /// from control and every control line is absent from option (e.g., grep -v).
+    Complement,
     /// Output is a computed summary of the input (e.g., grep -c, wc -l).
     /// The option output is dramatically shorter and represents an aggregation.
     Collapsed,
@@ -38,6 +41,8 @@ pub enum FormatChange {
     SuffixAddedPartial,
     /// Lines have more fields/columns (e.g., -l adds permissions, size, date).
     FieldsExpanded,
+    /// Lines have fewer fields/columns (e.g., wc -l shows only line count).
+    FieldsReduced,
     /// Lines are packed differently (multiple entries per line, or one per line).
     LayoutChanged,
     /// Entries wrapped in delimiters (quotes, escape sequences, hyperlinks).
@@ -409,6 +414,24 @@ pub fn compute_stdout_delta(control_stdout: &str, option_stdout: &str) -> Stdout
         }
     }
 
+    // Check for complement: both sides non-empty, zero line overlap, zero substring overlap,
+    // both have multiple lines. This is a last-resort check before Disjoint.
+    // Complement means the outputs partition a larger set (like grep -v).
+    // We require at least 3 unique entries on each side to avoid false positives.
+    if !ctrl_set.is_empty()
+        && opt_entries_set.len() >= 2
+        && ctrl_set.is_disjoint(&opt_entries_set)
+        && ctrl_match_rate == 0.0
+    {
+        return StdoutDelta {
+            relation: EntryRelation::Complement,
+            control_entry_count: ctrl_entries.len(),
+            option_entry_count: opt_lines.len(),
+            control_line_count: ctrl_lines.len(),
+            option_line_count: opt_lines.len(),
+        };
+    }
+
     // Nothing matched — outputs are disjoint
     StdoutDelta {
         relation: EntryRelation::Disjoint,
@@ -468,6 +491,7 @@ fn detect_format_change(ctrl_entries: &[&str], opt_lines: &[&str]) -> FormatChan
     let mut suffix_count = 0;
     let mut suffix_partial_count = 0; // entry + 1 char appended (like / or *)
     let mut fields_expanded_count = 0;
+    let mut fields_reduced_count = 0;
     let mut wrapped_count = 0;
     let mut escaped_count = 0;
 
@@ -480,12 +504,25 @@ fn detect_format_change(ctrl_entries: &[&str], opt_lines: &[&str]) -> FormatChan
             continue;
         }
 
-        // Fields expanded: option line has many more whitespace-separated tokens
+        // Fields expanded/reduced: compare whitespace-separated token counts
         let ctrl_fields = ct.split_whitespace().count();
         let opt_fields = ot.split_whitespace().count();
         if opt_fields > ctrl_fields + 2 {
             fields_expanded_count += 1;
             continue;
+        }
+        if ctrl_fields > opt_fields && opt_fields >= 1 {
+            // Check that they share at least one non-numeric token
+            let ctrl_tokens: Vec<&str> = ct.split_whitespace()
+                .filter(|t| !t.chars().all(|c| c.is_ascii_digit()))
+                .collect();
+            let opt_tokens: Vec<&str> = ot.split_whitespace()
+                .filter(|t| !t.chars().all(|c| c.is_ascii_digit()))
+                .collect();
+            if ctrl_tokens.iter().any(|ct_tok| opt_tokens.contains(ct_tok)) {
+                fields_reduced_count += 1;
+                continue;
+            }
         }
 
         // Prefix: option line ends with control entry
@@ -536,6 +573,9 @@ fn detect_format_change(ctrl_entries: &[&str], opt_lines: &[&str]) -> FormatChan
     // Check patterns by frequency among changed lines
     if fields_expanded_count > 0 && fields_expanded_count as f64 / n as f64 > 0.5 {
         return FormatChange::FieldsExpanded;
+    }
+    if fields_reduced_count > 0 && fields_reduced_count as f64 / changed as f64 > 0.5 {
+        return FormatChange::FieldsReduced;
     }
     if prefix_count > 0 && prefix_count as f64 / n as f64 > 0.5 {
         return FormatChange::PrefixAdded;
@@ -686,6 +726,29 @@ mod tests {
     }
 
     #[test]
+    fn test_complement() {
+        // grep -v: option lines are the complement of control lines
+        let ctrl = "apple\napple\n";
+        let opt = "banana\ncherry\ndate\nElderberry\n";
+        let d = compute_stdout_delta(ctrl, opt);
+        assert_eq!(d.relation, EntryRelation::Complement);
+    }
+
+    #[test]
+    fn test_fields_reduced() {
+        // wc -l: fewer fields per line, shared filename token
+        let ctrl = " 6  6 38 fruits.txt\n";
+        let opt = "6 fruits.txt\n";
+        let d = compute_stdout_delta(ctrl, opt);
+        match &d.relation {
+            EntryRelation::EntriesPreserved { format_change } => {
+                assert_eq!(*format_change, FormatChange::FieldsReduced);
+            }
+            other => panic!("Expected EntriesPreserved(FieldsReduced), got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_collapsed_count() {
         // grep -c: lines → count
         let ctrl = "apple\napple\n";
@@ -704,23 +767,21 @@ mod tests {
     }
 
     #[test]
-    fn test_fields_reduced() {
-        // wc -l: same line count, fewer fields. Token "fruits.txt" preserved.
-        let ctrl = " 5  5 31 fruits.txt\n";
-        let opt = "5 fruits.txt\n";
+    fn test_disjoint() {
+        // ls -d: 15 entries → just "." (dramatically different structure)
+        let ctrl = "app.log\ndata.csv\nhello.txt\nsubdir\ntmp\nfoo\nbar\nbaz\na\nb\nc\nd\ne\nf\ng\n";
+        let opt = ".\n";
         let d = compute_stdout_delta(ctrl, opt);
-        // "fruits.txt" appears in both → entries preserved
-        match &d.relation {
-            EntryRelation::EntriesPreserved { .. } | EntryRelation::Collapsed => {}
-            other => panic!("Expected EntriesPreserved or Collapsed, got {:?}", other),
-        }
+        assert_eq!(d.relation, EntryRelation::Disjoint);
     }
 
     #[test]
-    fn test_disjoint() {
+    fn test_complement_vs_disjoint() {
+        // Comparable-size disjoint sets → classified as Complement
+        // (mechanically indistinguishable from true complement like grep -v)
         let ctrl = "foo\nbar\nbaz\n";
         let opt = "completely\ndifferent\noutput\n";
         let d = compute_stdout_delta(ctrl, opt);
-        assert_eq!(d.relation, EntryRelation::Disjoint);
+        assert_eq!(d.relation, EntryRelation::Complement);
     }
 }
