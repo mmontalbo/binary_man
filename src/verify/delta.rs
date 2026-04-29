@@ -50,10 +50,23 @@ pub enum FormatChange {
     Unknown,
 }
 
-/// Full structured delta between control and option output.
+/// Full structured delta across ALL observation axes.
 #[derive(Debug, Clone)]
 pub struct StructuredDelta {
-    /// Entry-level relationship (the main classification).
+    /// Stdout relationship (the primary axis for most commands).
+    pub stdout: StdoutDelta,
+    /// Stderr relationship.
+    pub stderr: StderrDelta,
+    /// Exit code relationship.
+    pub exit_code: ExitCodeDelta,
+    /// Filesystem side-effect relationship.
+    pub filesystem: FsDelta,
+}
+
+/// Stdout-specific delta (the most common axis).
+#[derive(Debug, Clone)]
+pub struct StdoutDelta {
+    /// Entry-level relationship.
     pub relation: EntryRelation,
     /// Number of entries detected in control output.
     pub control_entry_count: usize,
@@ -64,6 +77,155 @@ pub struct StructuredDelta {
     pub option_line_count: usize,
 }
 
+/// Stderr delta.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StderrDelta {
+    /// Both stderr identical (or both empty).
+    Unchanged,
+    /// Option added stderr that control didn't have.
+    Added,
+    /// Option removed/suppressed stderr that control had.
+    Suppressed,
+    /// Both have stderr but content differs.
+    Changed,
+}
+
+/// Exit code delta.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExitCodeDelta {
+    /// Same exit code.
+    Unchanged,
+    /// Exit code changed.
+    Changed { control: Option<i32>, option: Option<i32> },
+}
+
+/// Filesystem side-effect delta.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FsDelta {
+    /// No filesystem changes from either run (or identical changes).
+    Unchanged,
+    /// Option created files that control didn't.
+    FilesCreated { paths: Vec<String> },
+    /// Option modified files that control didn't.
+    FilesModified { paths: Vec<String> },
+    /// Option deleted files that control didn't.
+    FilesDeleted { paths: Vec<String> },
+    /// Multiple filesystem effects.
+    Multiple {
+        created: Vec<String>,
+        modified: Vec<String>,
+        deleted: Vec<String>,
+    },
+}
+
+/// Compute a full structured delta across all observation axes.
+pub fn compute_full_delta(
+    control: &super::evidence::Evidence,
+    option: &super::evidence::Evidence,
+) -> StructuredDelta {
+    let stdout = compute_stdout_delta(&control.stdout, &option.stdout);
+
+    let stderr = match (&control.stderr, &option.stderr) {
+        (c, o) if c == o => StderrDelta::Unchanged,
+        (c, _) if c.is_empty() => StderrDelta::Added,
+        (_, o) if o.is_empty() => StderrDelta::Suppressed,
+        _ => StderrDelta::Changed,
+    };
+
+    let exit_code = if control.exit_code == option.exit_code {
+        ExitCodeDelta::Unchanged
+    } else {
+        ExitCodeDelta::Changed {
+            control: control.exit_code,
+            option: option.exit_code,
+        }
+    };
+
+    let filesystem = compute_fs_delta(
+        control.fs_diff.as_ref(),
+        option.fs_diff.as_ref(),
+    );
+
+    StructuredDelta {
+        stdout,
+        stderr,
+        exit_code,
+        filesystem,
+    }
+}
+
+/// Compute filesystem delta between control and option runs.
+fn compute_fs_delta(
+    ctrl_fs: Option<&super::evidence::FsDiff>,
+    opt_fs: Option<&super::evidence::FsDiff>,
+) -> FsDelta {
+    let opt = match opt_fs {
+        Some(fs) if fs.has_changes() => fs,
+        _ => return FsDelta::Unchanged,
+    };
+
+    // If control also has identical changes, it's unchanged
+    if let Some(ctrl) = ctrl_fs {
+        if ctrl.created == opt.created
+            && ctrl.modified == opt.modified
+            && ctrl.deleted == opt.deleted
+        {
+            return FsDelta::Unchanged;
+        }
+    }
+
+    // Compute what the option did that control didn't
+    let ctrl_created: std::collections::HashSet<&String> = ctrl_fs
+        .map(|f| f.created.iter().collect())
+        .unwrap_or_default();
+    let ctrl_modified: std::collections::HashSet<&String> = ctrl_fs
+        .map(|f| f.modified.iter().collect())
+        .unwrap_or_default();
+    let ctrl_deleted: std::collections::HashSet<&String> = ctrl_fs
+        .map(|f| f.deleted.iter().collect())
+        .unwrap_or_default();
+
+    let new_created: Vec<String> = opt
+        .created
+        .iter()
+        .filter(|p| !ctrl_created.contains(p))
+        .cloned()
+        .collect();
+    let new_modified: Vec<String> = opt
+        .modified
+        .iter()
+        .filter(|p| !ctrl_modified.contains(p))
+        .cloned()
+        .collect();
+    let new_deleted: Vec<String> = opt
+        .deleted
+        .iter()
+        .filter(|p| !ctrl_deleted.contains(p))
+        .cloned()
+        .collect();
+
+    let axes = [!new_created.is_empty(), !new_modified.is_empty(), !new_deleted.is_empty()];
+    let active = axes.iter().filter(|&&a| a).count();
+
+    if active == 0 {
+        FsDelta::Unchanged
+    } else if active == 1 {
+        if !new_created.is_empty() {
+            FsDelta::FilesCreated { paths: new_created }
+        } else if !new_modified.is_empty() {
+            FsDelta::FilesModified { paths: new_modified }
+        } else {
+            FsDelta::FilesDeleted { paths: new_deleted }
+        }
+    } else {
+        FsDelta::Multiple {
+            created: new_created,
+            modified: new_modified,
+            deleted: new_deleted,
+        }
+    }
+}
+
 /// Compute a structured delta between control and option stdout.
 ///
 /// Treats each non-empty control line as an "entry" and checks whether
@@ -71,13 +233,13 @@ pub struct StructuredDelta {
 /// This is binary-agnostic: it works for any command that produces
 /// line-oriented output where the "entity name" is preserved across
 /// format changes.
-pub fn compute_structured_delta(control_stdout: &str, option_stdout: &str) -> StructuredDelta {
+pub fn compute_stdout_delta(control_stdout: &str, option_stdout: &str) -> StdoutDelta {
     let ctrl_lines: Vec<&str> = control_stdout.lines().filter(|l| !l.is_empty()).collect();
     let opt_lines: Vec<&str> = option_stdout.lines().filter(|l| !l.is_empty()).collect();
 
     // Identical check
     if control_stdout == option_stdout {
-        return StructuredDelta {
+        return StdoutDelta {
             relation: EntryRelation::Identical,
             control_entry_count: ctrl_lines.len(),
             option_entry_count: opt_lines.len(),
@@ -99,7 +261,7 @@ pub fn compute_structured_delta(control_stdout: &str, option_stdout: &str) -> St
         && ctrl_entries.len() == opt_lines.len()
         && ctrl_entries != opt_lines.iter().map(|l| l.trim()).collect::<Vec<_>>()
     {
-        return StructuredDelta {
+        return StdoutDelta {
             relation: EntryRelation::Reordered,
             control_entry_count: ctrl_entries.len(),
             option_entry_count: opt_lines.len(),
@@ -114,7 +276,7 @@ pub fn compute_structured_delta(control_stdout: &str, option_stdout: &str) -> St
             .difference(&ctrl_set)
             .map(|s| s.to_string())
             .collect();
-        return StructuredDelta {
+        return StdoutDelta {
             relation: EntryRelation::Superset { added },
             control_entry_count: ctrl_entries.len(),
             option_entry_count: opt_lines.len(),
@@ -129,7 +291,7 @@ pub fn compute_structured_delta(control_stdout: &str, option_stdout: &str) -> St
             .difference(&opt_entries_set)
             .map(|s| s.to_string())
             .collect();
-        return StructuredDelta {
+        return StdoutDelta {
             relation: EntryRelation::Subset { removed },
             control_entry_count: ctrl_entries.len(),
             option_entry_count: opt_lines.len(),
@@ -175,7 +337,7 @@ pub fn compute_structured_delta(control_stdout: &str, option_stdout: &str) -> St
     // the entries are preserved but formatted differently.
     if ctrl_match_rate >= 0.8 {
         let format_change = detect_format_change(&ctrl_entries, &opt_lines);
-        return StructuredDelta {
+        return StdoutDelta {
             relation: EntryRelation::EntriesPreserved { format_change },
             control_entry_count: ctrl_entries.len(),
             option_entry_count: opt_lines.len(),
@@ -203,7 +365,7 @@ pub fn compute_structured_delta(control_stdout: &str, option_stdout: &str) -> St
     };
 
     if opt_token_match_rate >= 0.8 {
-        return StructuredDelta {
+        return StdoutDelta {
             relation: EntryRelation::EntriesPreserved {
                 format_change: FormatChange::LayoutChanged,
             },
@@ -236,7 +398,7 @@ pub fn compute_structured_delta(control_stdout: &str, option_stdout: &str) -> St
                 .all(|l| l.trim().chars().all(|c| c.is_ascii_digit() || c.is_whitespace()));
 
             if has_ctrl_token || is_numeric {
-                return StructuredDelta {
+                return StdoutDelta {
                     relation: EntryRelation::Collapsed,
                     control_entry_count: ctrl_entries.len(),
                     option_entry_count: opt_lines.len(),
@@ -248,7 +410,7 @@ pub fn compute_structured_delta(control_stdout: &str, option_stdout: &str) -> St
     }
 
     // Nothing matched — outputs are disjoint
-    StructuredDelta {
+    StdoutDelta {
         relation: EntryRelation::Disjoint,
         control_entry_count: ctrl_entries.len(),
         option_entry_count: opt_lines.len(),
@@ -414,7 +576,7 @@ mod tests {
 
     #[test]
     fn test_identical() {
-        let d = compute_structured_delta("foo\nbar\n", "foo\nbar\n");
+        let d = compute_stdout_delta("foo\nbar\n", "foo\nbar\n");
         assert_eq!(d.relation, EntryRelation::Identical);
     }
 
@@ -422,7 +584,7 @@ mod tests {
     fn test_superset() {
         let ctrl = "app.log\ndata.csv\nhello.txt\n";
         let opt = ".\n..\n.hidden\napp.log\ndata.csv\nhello.txt\n";
-        let d = compute_structured_delta(ctrl, opt);
+        let d = compute_stdout_delta(ctrl, opt);
         match &d.relation {
             EntryRelation::Superset { added } => {
                 assert!(added.contains(&".".to_string()));
@@ -437,7 +599,7 @@ mod tests {
     fn test_subset() {
         let ctrl = "app.log\ndata.csv\nhello.txt\npattern.txt\n";
         let opt = "app.log\nhello.txt\n";
-        let d = compute_structured_delta(ctrl, opt);
+        let d = compute_stdout_delta(ctrl, opt);
         match &d.relation {
             EntryRelation::Subset { removed } => {
                 assert!(removed.contains(&"data.csv".to_string()));
@@ -451,7 +613,7 @@ mod tests {
     fn test_reordered() {
         let ctrl = "app.log\ndata.csv\nhello.txt\n";
         let opt = "hello.txt\ndata.csv\napp.log\n";
-        let d = compute_structured_delta(ctrl, opt);
+        let d = compute_stdout_delta(ctrl, opt);
         assert_eq!(d.relation, EntryRelation::Reordered);
     }
 
@@ -459,7 +621,7 @@ mod tests {
     fn test_entries_preserved_prefix() {
         let ctrl = "app.log\ndata.csv\nhello.txt\n";
         let opt = "12345 app.log\n67890 data.csv\n11111 hello.txt\n";
-        let d = compute_structured_delta(ctrl, opt);
+        let d = compute_stdout_delta(ctrl, opt);
         match &d.relation {
             EntryRelation::EntriesPreserved { format_change } => {
                 assert_eq!(*format_change, FormatChange::PrefixAdded);
@@ -472,7 +634,7 @@ mod tests {
     fn test_entries_preserved_fields_expanded() {
         let ctrl = "app.log\ndata.csv\n";
         let opt = "-rw-r--r-- 1 user group 1234 Jan 01 app.log\n-rw-r--r-- 1 user group 5678 Jan 01 data.csv\n";
-        let d = compute_structured_delta(ctrl, opt);
+        let d = compute_stdout_delta(ctrl, opt);
         match &d.relation {
             EntryRelation::EntriesPreserved { format_change } => {
                 assert_eq!(*format_change, FormatChange::FieldsExpanded);
@@ -486,7 +648,7 @@ mod tests {
         // -F: appends / to dirs, @ to symlinks, * to executables (only some lines change)
         let ctrl = "app.log\nemptydir\nlink.txt\nscript.sh\nsubdir\n";
         let opt = "app.log\nemptydir/\nlink.txt@\nscript.sh*\nsubdir/\n";
-        let d = compute_structured_delta(ctrl, opt);
+        let d = compute_stdout_delta(ctrl, opt);
         match &d.relation {
             EntryRelation::EntriesPreserved { format_change } => {
                 assert_eq!(*format_change, FormatChange::SuffixAddedPartial);
@@ -500,7 +662,7 @@ mod tests {
         // -Q: wraps every entry in quotes
         let ctrl = "app.log\ndata.csv\nhello.txt\n";
         let opt = "\"app.log\"\n\"data.csv\"\n\"hello.txt\"\n";
-        let d = compute_structured_delta(ctrl, opt);
+        let d = compute_stdout_delta(ctrl, opt);
         match &d.relation {
             EntryRelation::EntriesPreserved { format_change } => {
                 assert_eq!(*format_change, FormatChange::Wrapped);
@@ -514,7 +676,7 @@ mod tests {
         // -b: escapes spaces
         let ctrl = "app.log\nspaces in name.txt\nhello.txt\n";
         let opt = "app.log\nspaces\\ in\\ name.txt\nhello.txt\n";
-        let d = compute_structured_delta(ctrl, opt);
+        let d = compute_stdout_delta(ctrl, opt);
         match &d.relation {
             EntryRelation::EntriesPreserved { format_change } => {
                 assert_eq!(*format_change, FormatChange::Escaped);
@@ -528,7 +690,7 @@ mod tests {
         // grep -c: lines → count
         let ctrl = "apple\napple\n";
         let opt = "2\n";
-        let d = compute_structured_delta(ctrl, opt);
+        let d = compute_stdout_delta(ctrl, opt);
         assert_eq!(d.relation, EntryRelation::Collapsed);
     }
 
@@ -537,7 +699,7 @@ mod tests {
         // wc -l on multiple files: multi-line → single summary
         let ctrl = " 5 fruits.txt\n 4 mixed.txt\n 8 numbers.txt\n17 total\n";
         let opt = "5\n4\n8\n17\n";
-        let d = compute_structured_delta(ctrl, opt);
+        let d = compute_stdout_delta(ctrl, opt);
         assert_eq!(d.relation, EntryRelation::Collapsed);
     }
 
@@ -546,7 +708,7 @@ mod tests {
         // wc -l: same line count, fewer fields. Token "fruits.txt" preserved.
         let ctrl = " 5  5 31 fruits.txt\n";
         let opt = "5 fruits.txt\n";
-        let d = compute_structured_delta(ctrl, opt);
+        let d = compute_stdout_delta(ctrl, opt);
         // "fruits.txt" appears in both → entries preserved
         match &d.relation {
             EntryRelation::EntriesPreserved { .. } | EntryRelation::Collapsed => {}
@@ -558,7 +720,7 @@ mod tests {
     fn test_disjoint() {
         let ctrl = "foo\nbar\nbaz\n";
         let opt = "completely\ndifferent\noutput\n";
-        let d = compute_structured_delta(ctrl, opt);
+        let d = compute_stdout_delta(ctrl, opt);
         assert_eq!(d.relation, EntryRelation::Disjoint);
     }
 }
