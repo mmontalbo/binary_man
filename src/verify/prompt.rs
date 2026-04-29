@@ -301,6 +301,10 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
                         }
                     } else {
                         prompt.push_str(&format!("    exit_code: {:?}\n", probe.exit_code));
+                        // Show structured delta when available (richer than raw previews)
+                        if let Some(delta) = &probe.delta_relation {
+                            prompt.push_str(&format!("    delta: {}\n", delta));
+                        }
                         if let Some(stdout) = &probe.stdout_preview {
                             prompt.push_str(&format!("    option_stdout: {:?}\n", stdout));
                         }
@@ -348,6 +352,11 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
                         "    outcome: {}\n",
                         format_outcome(&attempt.outcome)
                     ));
+
+                    // Show structured delta classification
+                    if let Some(delta) = &attempt.delta_relation {
+                        prompt.push_str(&format!("    delta: {}\n", delta));
+                    }
 
                     // Show outputs for OutputsEqual failures - this is key diagnostic info
                     if matches!(attempt.outcome, Outcome::OutputsEqual) {
@@ -581,6 +590,9 @@ pub(super) fn build_incremental_prompt(
                                         surface_id,
                                         format_outcome(&attempt.outcome)
                                     ));
+                                    if let Some(delta) = &attempt.delta_relation {
+                                        prompt.push_str(&format!("    delta: {}\n", delta));
+                                    }
                                     // Include evidence on OutputsEqual so the LM can diagnose WHY
                                     if matches!(attempt.outcome, Outcome::OutputsEqual) {
                                         let both_empty = attempt.stdout_preview.as_ref().is_none_or(|s| s.is_empty())
@@ -662,6 +674,9 @@ pub(super) fn build_incremental_prompt(
                                 super::types::MAX_PROBES_PER_SURFACE
                                     .saturating_sub(entry.probes.len())
                             ));
+                            if let Some(delta) = &probe.delta_relation {
+                                prompt.push_str(&format!("    delta: {}\n", delta));
+                            }
                             if let Some(stdout) = &probe.stdout_preview {
                                 prompt.push_str(&format!("    stdout: {:?}\n", stdout));
                             }
