@@ -1,0 +1,509 @@
+//! Parser for the test script language.
+//!
+//! Format:
+//!   file "path" "line1" "line2" ...
+//!   file "path" size <n>
+//!   file "path" empty
+//!   dir "path"
+//!   link "name" -> "target"
+//!   props "path" executable | mtime old
+//!   env VAR "value"
+//!
+//!   test args "arg1" "arg2" ...
+//!     expect stdout <predicate>
+//!     expect stderr <predicate>
+//!     expect exit <predicate>
+
+use anyhow::{bail, Context, Result};
+
+/// A parsed test script.
+#[derive(Debug)]
+pub struct Script {
+    pub setup: Vec<SetupCommand>,
+    pub tests: Vec<Test>,
+}
+
+/// A setup command that modifies sandbox state.
+#[derive(Debug, Clone)]
+pub enum SetupCommand {
+    CreateFile {
+        path: String,
+        content: FileContent,
+    },
+    CreateDir {
+        path: String,
+    },
+    CreateLink {
+        path: String,
+        target: String,
+    },
+    SetProps {
+        path: String,
+        props: Vec<Property>,
+    },
+    SetEnv {
+        var: String,
+        value: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum FileContent {
+    Lines(Vec<String>),
+    Size(usize),
+    Empty,
+}
+
+#[derive(Debug, Clone)]
+pub enum Property {
+    Executable,
+    MtimeOld,
+    MtimeRecent,
+    ReadOnly,
+}
+
+/// A test invocation with predictions.
+#[derive(Debug)]
+pub struct Test {
+    pub args: Vec<String>,
+    pub expectations: Vec<Expectation>,
+}
+
+/// A single prediction about an output dimension.
+#[derive(Debug, Clone)]
+pub struct Expectation {
+    pub dimension: OutputDimension,
+    pub predicate: Predicate,
+}
+
+#[derive(Debug, Clone)]
+pub enum OutputDimension {
+    Stdout,
+    Stderr,
+    Exit,
+    Fs,
+}
+
+#[derive(Debug, Clone)]
+pub enum Predicate {
+    // Stdout structural
+    Empty,
+    NotEmpty,
+    Identical { vs_args: Vec<String> },
+    Reordered { vs_args: Vec<String> },
+    Superset { vs_args: Vec<String> },
+    Subset { vs_args: Vec<String> },
+    Complement { vs_args: Vec<String> },
+    Collapsed { vs_args: Vec<String> },
+    Preserved { vs_args: Vec<String> },
+    PreservedPrefixAdded { vs_args: Vec<String> },
+    PreservedFieldsExpanded { vs_args: Vec<String> },
+    PreservedWrapped { vs_args: Vec<String> },
+
+    // Stdout quantitative
+    LinesSame { vs_args: Vec<String> },
+    LinesMore { vs_args: Vec<String> },
+    LinesFewer { vs_args: Vec<String> },
+    LinesExactly(usize),
+
+    // Content
+    Contains(String),
+    NotContains(String),
+    EveryLineMatches(String),
+
+    // Stderr
+    Unchanged { vs_args: Vec<String> },
+    StderrEmpty,
+    StderrNotEmpty,
+    StderrContains(String),
+
+    // Exit code
+    ExitCode(i32),
+    ExitUnchanged { vs_args: Vec<String> },
+    ExitChanged { vs_args: Vec<String> },
+
+    // Filesystem
+    FsUnchanged,
+    FsCreated(#[allow(dead_code)] String),
+    FsModified(#[allow(dead_code)] String),
+    FsDeleted(#[allow(dead_code)] String),
+}
+
+/// Parse a test script from source text.
+pub fn parse_script(source: &str) -> Result<Script> {
+    let mut setup = Vec::new();
+    let mut tests = Vec::new();
+    let mut current_test: Option<Test> = None;
+
+    for (line_num, raw_line) in source.lines().enumerate() {
+        let line = raw_line.trim();
+        let line_num = line_num + 1;
+
+        // Skip empty lines and comments
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        if let Some(rest) = line.strip_prefix("expect ") {
+            // Expectation line — must be inside a test
+            let test = current_test.as_mut().ok_or_else(|| {
+                anyhow::anyhow!("line {}: 'expect' outside of a test block", line_num)
+            })?;
+            let exp = parse_expectation(rest, line_num)?;
+            test.expectations.push(exp);
+        } else if let Some(rest) = line.strip_prefix("test ") {
+            // Start a new test — flush previous
+            if let Some(t) = current_test.take() {
+                tests.push(t);
+            }
+            let args = parse_test_line(rest, line_num)?;
+            current_test = Some(Test {
+                args,
+                expectations: Vec::new(),
+            });
+        } else {
+            // Setup command — flush any open test first
+            if let Some(t) = current_test.take() {
+                tests.push(t);
+            }
+            let cmd = parse_setup_line(line, line_num)?;
+            setup.push(cmd);
+        }
+    }
+
+    // Flush final test
+    if let Some(t) = current_test.take() {
+        tests.push(t);
+    }
+
+    Ok(Script { setup, tests })
+}
+
+fn parse_test_line(rest: &str, line_num: usize) -> Result<Vec<String>> {
+    let rest = rest.trim();
+    if !rest.starts_with("args") {
+        bail!("line {}: test line must start with 'args'", line_num);
+    }
+    let args_str = rest[4..].trim();
+    parse_quoted_strings(args_str, line_num)
+}
+
+fn parse_setup_line(line: &str, line_num: usize) -> Result<SetupCommand> {
+    let tokens = tokenize(line, line_num)?;
+    if tokens.is_empty() {
+        bail!("line {}: empty setup command", line_num);
+    }
+
+    match tokens[0].as_str() {
+        "file" => {
+            if tokens.len() < 2 {
+                bail!("line {}: file command requires a path", line_num);
+            }
+            let path = tokens[1].clone();
+            if tokens.len() == 2 || (tokens.len() == 3 && tokens[2] == "empty") {
+                Ok(SetupCommand::CreateFile {
+                    path,
+                    content: FileContent::Empty,
+                })
+            } else if tokens.len() == 4 && tokens[2] == "size" {
+                let size: usize = tokens[3]
+                    .parse()
+                    .with_context(|| format!("line {}: invalid size", line_num))?;
+                Ok(SetupCommand::CreateFile {
+                    path,
+                    content: FileContent::Size(size),
+                })
+            } else {
+                let lines = tokens[2..].to_vec();
+                Ok(SetupCommand::CreateFile {
+                    path,
+                    content: FileContent::Lines(lines),
+                })
+            }
+        }
+        "dir" => {
+            if tokens.len() < 2 {
+                bail!("line {}: dir command requires a path", line_num);
+            }
+            Ok(SetupCommand::CreateDir {
+                path: tokens[1].clone(),
+            })
+        }
+        "link" => {
+            // link "name" -> "target"
+            if tokens.len() < 4 || tokens[2] != "->" {
+                bail!(
+                    "line {}: link syntax: link \"name\" -> \"target\"",
+                    line_num
+                );
+            }
+            Ok(SetupCommand::CreateLink {
+                path: tokens[1].clone(),
+                target: tokens[3].clone(),
+            })
+        }
+        "props" => {
+            if tokens.len() < 3 {
+                bail!("line {}: props command requires path and property", line_num);
+            }
+            let path = tokens[1].clone();
+            let mut props = Vec::new();
+            for tok in &tokens[2..] {
+                match tok.as_str() {
+                    "executable" => props.push(Property::Executable),
+                    "readonly" => props.push(Property::ReadOnly),
+                    "mtime" => {} // consumed by next token
+                    "old" => props.push(Property::MtimeOld),
+                    "recent" => props.push(Property::MtimeRecent),
+                    _ => bail!("line {}: unknown property '{}'", line_num, tok),
+                }
+            }
+            Ok(SetupCommand::SetProps { path, props })
+        }
+        "env" => {
+            if tokens.len() < 3 {
+                bail!("line {}: env command requires VAR and value", line_num);
+            }
+            Ok(SetupCommand::SetEnv {
+                var: tokens[1].clone(),
+                value: tokens[2].clone(),
+            })
+        }
+        _ => bail!("line {}: unknown command '{}'", line_num, tokens[0]),
+    }
+}
+
+fn parse_expectation(rest: &str, line_num: usize) -> Result<Expectation> {
+    let rest = rest.trim();
+    let (dimension, predicate_str) = if let Some(r) = rest.strip_prefix("stdout ") {
+        (OutputDimension::Stdout, r.trim())
+    } else if let Some(r) = rest.strip_prefix("stderr ") {
+        (OutputDimension::Stderr, r.trim())
+    } else if let Some(r) = rest.strip_prefix("exit ") {
+        (OutputDimension::Exit, r.trim())
+    } else if let Some(r) = rest.strip_prefix("fs ") {
+        (OutputDimension::Fs, r.trim())
+    } else {
+        bail!("line {}: expect requires stdout|stderr|exit|fs", line_num);
+    };
+
+    let predicate = parse_predicate(&dimension, predicate_str, line_num)?;
+    Ok(Expectation {
+        dimension,
+        predicate,
+    })
+}
+
+fn parse_predicate(dim: &OutputDimension, s: &str, line_num: usize) -> Result<Predicate> {
+    match dim {
+        OutputDimension::Stdout => parse_stdout_predicate(s, line_num),
+        OutputDimension::Stderr => parse_stderr_predicate(s, line_num),
+        OutputDimension::Exit => parse_exit_predicate(s, line_num),
+        OutputDimension::Fs => parse_fs_predicate(s, line_num),
+    }
+}
+
+fn parse_stdout_predicate(s: &str, line_num: usize) -> Result<Predicate> {
+    if s == "empty" {
+        return Ok(Predicate::Empty);
+    }
+    if s == "not-empty" {
+        return Ok(Predicate::NotEmpty);
+    }
+    if let Some(rest) = s.strip_prefix("contains ") {
+        let text = parse_single_quoted(rest.trim(), line_num)?;
+        return Ok(Predicate::Contains(text));
+    }
+    if let Some(rest) = s.strip_prefix("not-contains ") {
+        let text = parse_single_quoted(rest.trim(), line_num)?;
+        return Ok(Predicate::NotContains(text));
+    }
+    if let Some(rest) = s.strip_prefix("every-line-matches ") {
+        let pat = parse_single_quoted(rest.trim(), line_num)?;
+        return Ok(Predicate::EveryLineMatches(pat));
+    }
+    if let Some(rest) = s.strip_prefix("lines exactly ") {
+        let n: usize = rest
+            .trim()
+            .parse()
+            .with_context(|| format!("line {}: invalid line count", line_num))?;
+        return Ok(Predicate::LinesExactly(n));
+    }
+
+    // Relational predicates: "reordered vs ..."
+    // Relational predicates: "<relation> vs <args>"
+    #[allow(clippy::type_complexity)]
+    let relational: &[(&str, fn(Vec<String>) -> Predicate)] = &[
+        ("preserved prefix-added vs ", |a| Predicate::PreservedPrefixAdded { vs_args: a }),
+        ("preserved fields-expanded vs ", |a| Predicate::PreservedFieldsExpanded { vs_args: a }),
+        ("preserved wrapped vs ", |a| Predicate::PreservedWrapped { vs_args: a }),
+        ("preserved vs ", |a| Predicate::Preserved { vs_args: a }),
+        ("reordered vs ", |a| Predicate::Reordered { vs_args: a }),
+        ("superset vs ", |a| Predicate::Superset { vs_args: a }),
+        ("subset vs ", |a| Predicate::Subset { vs_args: a }),
+        ("complement vs ", |a| Predicate::Complement { vs_args: a }),
+        ("collapsed vs ", |a| Predicate::Collapsed { vs_args: a }),
+        ("identical vs ", |a| Predicate::Identical { vs_args: a }),
+        ("lines same as ", |a| Predicate::LinesSame { vs_args: a }),
+        ("lines more than ", |a| Predicate::LinesMore { vs_args: a }),
+        ("lines fewer than ", |a| Predicate::LinesFewer { vs_args: a }),
+    ];
+
+    for (prefix, constructor) in relational {
+        if let Some(rest) = s.strip_prefix(prefix) {
+            let vs_args = parse_quoted_strings(rest.trim(), line_num)?;
+            return Ok(constructor(vs_args));
+        }
+    }
+
+    bail!("line {}: unknown stdout predicate: '{}'", line_num, s)
+}
+
+fn parse_stderr_predicate(s: &str, line_num: usize) -> Result<Predicate> {
+    if s == "empty" {
+        return Ok(Predicate::StderrEmpty);
+    }
+    if s == "not-empty" {
+        return Ok(Predicate::StderrNotEmpty);
+    }
+    if let Some(rest) = s.strip_prefix("unchanged vs ") {
+        let vs_args = parse_quoted_strings(rest.trim(), line_num)?;
+        return Ok(Predicate::Unchanged { vs_args });
+    }
+    if let Some(rest) = s.strip_prefix("contains ") {
+        let text = parse_single_quoted(rest.trim(), line_num)?;
+        return Ok(Predicate::StderrContains(text));
+    }
+    bail!("line {}: unknown stderr predicate: '{}'", line_num, s)
+}
+
+fn parse_exit_predicate(s: &str, line_num: usize) -> Result<Predicate> {
+    if let Some(rest) = s.strip_prefix("unchanged vs ") {
+        let vs_args = parse_quoted_strings(rest.trim(), line_num)?;
+        return Ok(Predicate::ExitUnchanged { vs_args });
+    }
+    if let Some(rest) = s.strip_prefix("changed vs ") {
+        let vs_args = parse_quoted_strings(rest.trim(), line_num)?;
+        return Ok(Predicate::ExitChanged { vs_args });
+    }
+    let code: i32 = s
+        .trim()
+        .parse()
+        .with_context(|| format!("line {}: invalid exit code", line_num))?;
+    Ok(Predicate::ExitCode(code))
+}
+
+fn parse_fs_predicate(s: &str, line_num: usize) -> Result<Predicate> {
+    if s == "unchanged" {
+        return Ok(Predicate::FsUnchanged);
+    }
+    if let Some(rest) = s.strip_prefix("created ") {
+        let path = parse_single_quoted(rest.trim(), line_num)?;
+        return Ok(Predicate::FsCreated(path));
+    }
+    if let Some(rest) = s.strip_prefix("modified ") {
+        let path = parse_single_quoted(rest.trim(), line_num)?;
+        return Ok(Predicate::FsModified(path));
+    }
+    if let Some(rest) = s.strip_prefix("deleted ") {
+        let path = parse_single_quoted(rest.trim(), line_num)?;
+        return Ok(Predicate::FsDeleted(path));
+    }
+    bail!("line {}: unknown fs predicate: '{}'", line_num, s)
+}
+
+/// Tokenize a line, respecting quoted strings.
+fn tokenize(line: &str, _line_num: usize) -> Result<Vec<String>> {
+    let mut tokens = Vec::new();
+    let mut chars = line.chars().peekable();
+
+    while let Some(&c) = chars.peek() {
+        if c.is_whitespace() {
+            chars.next();
+            continue;
+        }
+        if c == '"' {
+            chars.next(); // consume opening quote
+            let mut s = String::new();
+            loop {
+                match chars.next() {
+                    Some('"') => break,
+                    Some('\\') => {
+                        if let Some(next) = chars.next() {
+                            match next {
+                                'n' => s.push('\n'),
+                                't' => s.push('\t'),
+                                '\\' => s.push('\\'),
+                                '"' => s.push('"'),
+                                other => {
+                                    s.push('\\');
+                                    s.push(other);
+                                }
+                            }
+                        }
+                    }
+                    Some(c) => s.push(c),
+                    None => break,
+                }
+            }
+            tokens.push(s);
+        } else {
+            let mut s = String::new();
+            while let Some(&c) = chars.peek() {
+                if c.is_whitespace() {
+                    break;
+                }
+                s.push(c);
+                chars.next();
+            }
+            tokens.push(s);
+        }
+    }
+
+    Ok(tokens)
+}
+
+fn parse_quoted_strings(s: &str, line_num: usize) -> Result<Vec<String>> {
+    tokenize(s, line_num)
+}
+
+fn parse_single_quoted(s: &str, line_num: usize) -> Result<String> {
+    let tokens = tokenize(s, line_num)?;
+    if tokens.len() != 1 {
+        bail!(
+            "line {}: expected single quoted string, got {} tokens",
+            line_num,
+            tokens.len()
+        );
+    }
+    Ok(tokens[0].clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_simple_script() {
+        let source = r#"
+# Setup
+file "data.txt" "hello" "world"
+dir "subdir"
+
+# Tests
+test args "."
+  expect stdout not-empty
+  expect exit 0
+
+test args "." "-a"
+  expect stdout lines more than "."
+  expect exit 0
+"#;
+        let script = parse_script(source).unwrap();
+        assert_eq!(script.setup.len(), 2);
+        assert_eq!(script.tests.len(), 2);
+        assert_eq!(script.tests[0].args, vec!["."]);
+        assert_eq!(script.tests[0].expectations.len(), 2);
+        assert_eq!(script.tests[1].args, vec![".", "-a"]);
+    }
+}

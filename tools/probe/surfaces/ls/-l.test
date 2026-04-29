@@ -1,0 +1,14 @@
+# ls -l: long listing format (permissions, owner, size, date, name)
+
+file "file1.txt" "hello"
+file "file2.txt" "world"
+dir "subdir"
+
+test args "."
+  expect stdout not-empty
+  expect exit 0
+
+test args "." "-l"
+  expect stdout preserved vs "."
+  expect stdout lines more than "."
+  expect exit 0

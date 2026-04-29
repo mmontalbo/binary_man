@@ -1,0 +1,15 @@
+# ls -r: reverse sort order
+
+file "alpha.txt" "a"
+file "beta.txt" "b"
+file "gamma.txt" "c"
+file "delta.txt" "d"
+
+test args "."
+  expect stdout not-empty
+  expect exit 0
+
+test args "." "-r"
+  expect stdout reordered vs "."
+  expect stdout lines same as "."
+  expect exit 0

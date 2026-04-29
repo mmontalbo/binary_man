@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "tools/eval", "tools/inspect"]
+members = [".", "tools/eval", "tools/inspect", "tools/probe"]
 resolver = "2"
 
 [package]
