@@ -24,6 +24,9 @@ pub(super) struct ScenarioContext<'a> {
     pub context_argv: &'a [String],
     pub cycle: u32,
     pub with_pty: bool,
+    /// Required positional args from invocation hint (e.g., ["pattern", "file"] for grep).
+    /// Appended to both control and option argv when non-empty.
+    pub invocation_args: &'a [String],
 }
 
 /// Join a surface option with its value argument.
@@ -211,8 +214,12 @@ pub(super) fn run_test_scenario(
     // Construct args: join option + value when needed (e.g. -U1, --unified=1)
     let args = join_option_value(surface_id, extra_args, value_hint);
 
-    let control_argv: Vec<String> = sc.context_argv.to_vec();
-    let full_argv: Vec<String> = control_argv.iter().chain(args.iter()).cloned().collect();
+    // Augment both control and option with required positional args
+    // (e.g., grep needs "pattern file" to produce any output)
+    let mut control_argv: Vec<String> = sc.context_argv.to_vec();
+    control_argv.extend_from_slice(sc.invocation_args);
+    let mut full_argv = control_argv.clone();
+    full_argv.extend(args.iter().cloned());
 
     // Run both control and option in the SAME sandbox
     // This ensures they see identical filesystem state (same git commit hashes, etc.)
@@ -362,8 +369,10 @@ pub(super) fn run_probe_scenario(
     // Construct args: join option + value when needed
     let args = join_option_value(surface_id, extra_args.clone(), value_hint);
 
-    let control_argv: Vec<String> = sc.context_argv.to_vec();
-    let full_argv: Vec<String> = control_argv.iter().chain(args.iter()).cloned().collect();
+    let mut control_argv: Vec<String> = sc.context_argv.to_vec();
+    control_argv.extend_from_slice(sc.invocation_args);
+    let mut full_argv = control_argv.clone();
+    full_argv.extend(args);
 
     // Run both control and option in the same sandbox (bilateral)
     let (control_evidence, option_evidence) = run_scenario_pair(
@@ -459,6 +468,11 @@ pub(super) fn merge_probe_result(state: &mut State, result: ProbeRunResult) {
 /// This runs scenarios as needed and updates the state with results.
 /// After applying, the caller should save the state.
 pub(super) fn apply_action(state: &mut State, pack_path: &Path, action: LmAction) -> Result<()> {
+    let invocation_args: Vec<String> = state
+        .invocation_hint
+        .as_ref()
+        .map(|h| h.required_args.clone())
+        .unwrap_or_default();
     match action {
         LmAction::SetBaseline { seed } => {
             // Full argv = context_argv (no extra args for baseline)
@@ -488,6 +502,7 @@ pub(super) fn apply_action(state: &mut State, pack_path: &Path, action: LmAction
                 context_argv: &state.context_argv,
                 cycle: state.cycle,
                 with_pty: false,
+                invocation_args: &invocation_args,
             };
             let vh = state
                 .find_entry(&surface_id)
@@ -508,6 +523,7 @@ pub(super) fn apply_action(state: &mut State, pack_path: &Path, action: LmAction
                 context_argv: &state.context_argv,
                 cycle: state.cycle,
                 with_pty: false,
+                invocation_args: &invocation_args,
             };
             let vh = state
                 .find_entry(&surface_id)
@@ -619,6 +635,7 @@ mod tests {
             help_preamble: String::new(),
             examples_section: String::new(),
             experiment_params: None,
+            invocation_hint: None,
         };
 
         let action = LmAction::SetBaseline {
@@ -666,6 +683,7 @@ mod tests {
             help_preamble: String::new(),
             examples_section: String::new(),
             experiment_params: None,
+            invocation_hint: None,
         };
 
         // Test -n flag
@@ -828,6 +846,7 @@ mod tests {
             help_preamble: String::new(),
             examples_section: String::new(),
             experiment_params: None,
+            invocation_hint: None,
         };
 
         use crate::verify::types::FileEntry;

@@ -139,6 +139,16 @@ pub(super) fn build_prompt(state: &State, target_ids: &[String]) -> String {
         base_command
     ));
 
+    // Show invocation hint if present (command needs positional args)
+    if let Some(hint) = &state.invocation_hint {
+        prompt.push_str(&format!(
+            "**Required positional args**: This command needs: {}\n\
+             These are automatically included in both control and option runs.\n\
+             Your seed files MUST contain a file matching the filename argument.\n\n",
+            hint.required_args.join(", ")
+        ));
+    }
+
     // Instructions front-loaded for salience
     prompt.push_str(INSTRUCTIONS);
 
@@ -823,6 +833,7 @@ mod tests {
             help_preamble: String::new(),
             examples_section: String::new(),
             experiment_params: None,
+            invocation_hint: None,
         };
 
         let prompt = build_prompt(&state, &["--stat".to_string()]);
@@ -870,6 +881,7 @@ mod tests {
             help_preamble: String::new(),
             examples_section: String::new(),
             experiment_params: None,
+            invocation_hint: None,
         };
 
         let prompt = build_prompt(&state, &["--stat".to_string()]);
@@ -929,6 +941,7 @@ mod tests {
             help_preamble: String::new(),
             examples_section: String::new(),
             experiment_params: None,
+            invocation_hint: None,
         };
 
         let prompt = build_prompt(&state, &["--verbose".to_string()]);
@@ -983,6 +996,7 @@ mod tests {
             help_preamble: String::new(),
             examples_section: String::new(),
             experiment_params: None,
+            invocation_hint: None,
         };
 
         let prompt = build_prompt(&state, &["--dereference".to_string()]);
@@ -1040,6 +1054,7 @@ mod tests {
             help_preamble: String::new(),
             examples_section: String::new(),
             experiment_params: None,
+            invocation_hint: None,
         };
 
         let prompt = build_prompt(&state, &["--all".to_string()]);
@@ -1117,6 +1132,7 @@ mod tests {
             help_preamble: String::new(),
             examples_section: String::new(),
             experiment_params: None,
+            invocation_hint: None,
         };
 
         let prompt = build_prompt(&state, &["--opt".to_string()]);
@@ -1251,6 +1267,7 @@ stderr: error: pathspec 'main' did not match"#
             help_preamble: String::new(),
             examples_section: String::new(),
             experiment_params: None,
+            invocation_hint: None,
         };
 
         let issues = crate::verify::types::extract_known_issues(&state);
@@ -1307,6 +1324,7 @@ stderr: error: already a git repo"#
             help_preamble: String::new(),
             examples_section: String::new(),
             experiment_params: None,
+            invocation_hint: None,
         };
 
         let issues = crate::verify::types::extract_known_issues(&state);
@@ -1326,6 +1344,7 @@ stderr: error: already a git repo"#
             help_preamble: String::new(),
             examples_section: String::new(),
             experiment_params: None,
+            invocation_hint: None,
         };
 
         let issues = crate::verify::types::extract_known_issues(&state);
@@ -1396,6 +1415,7 @@ stderr: pathspec 'main' did not match"#
             help_preamble: String::new(),
             examples_section: String::new(),
             experiment_params: None,
+            invocation_hint: None,
         };
 
         let prompt = build_prompt(&state, &["--stat".to_string()]);
@@ -1432,6 +1452,7 @@ stderr: pathspec 'main' did not match"#
             help_preamble: String::new(),
             examples_section: String::new(),
             experiment_params: None,
+            invocation_hint: None,
         };
 
         let prompt = build_prompt(&state, &["--all".to_string()]);
@@ -1479,6 +1500,7 @@ stderr: pathspec 'main' did not match"#
             help_preamble: String::new(),
             examples_section: String::new(),
             experiment_params: None,
+            invocation_hint: None,
         };
 
         let prompt = build_prompt(&state, &["--all".to_string()]);
@@ -1644,6 +1666,7 @@ stderr: pathspec 'main' did not match"#
             help_preamble: String::new(),
             examples_section: String::new(),
             experiment_params: None,
+            invocation_hint: None,
         };
 
         // Prior attempts from before the retry
@@ -1738,6 +1761,7 @@ stderr: pathspec 'main' did not match"#
             help_preamble: String::new(),
             examples_section: String::new(),
             experiment_params: None,
+            invocation_hint: None,
         };
 
         // No prior attempts for this surface
@@ -1786,6 +1810,7 @@ stderr: pathspec 'main' did not match"#
             help_preamble: String::new(),
             examples_section: String::new(),
             experiment_params: None,
+            invocation_hint: None,
         };
 
         let prompt = build_prompt(&state, &["--patience".to_string()]);
@@ -1850,6 +1875,7 @@ stderr: pathspec 'main' did not match"#
             help_preamble: String::new(),
             examples_section: String::new(),
             experiment_params: None,
+            invocation_hint: None,
         };
 
         let prompt = build_prompt(&state, &["--patience".to_string()]);

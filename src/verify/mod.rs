@@ -22,6 +22,7 @@ mod bootstrap;
 mod characterize;
 pub(super) mod config;
 mod critique;
+pub(crate) mod delta;
 mod evidence;
 mod lm;
 mod prompt;

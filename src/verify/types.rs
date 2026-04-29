@@ -22,7 +22,8 @@ use super::config::STAGNATION_THRESHOLD;
 /// - v5: Added probe results for evidence gathering before test commitment
 /// - v6: Added characterization for reasoning-first seed generation
 /// - v7: Added per-channel probe comparison and setup failure detail
-pub const STATE_SCHEMA_VERSION: u32 = 7;
+/// - v8: Added invocation_hint for command-level positional argument requirements
+pub const STATE_SCHEMA_VERSION: u32 = 8;
 
 pub use super::config::MAX_PROBES_PER_SURFACE;
 
@@ -73,6 +74,22 @@ pub struct State {
     /// Snapshot of experimental parameters active for this run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub experiment_params: Option<serde_json::Value>,
+    /// Command-level invocation hint: required positional arguments.
+    /// Populated during characterization when context_argv is empty.
+    /// e.g., grep needs ["pattern", "file"] to produce any output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invocation_hint: Option<InvocationHint>,
+}
+
+/// Command-level positional argument requirements.
+///
+/// Captures what positional arguments the bare command needs to produce
+/// meaningful output. Derived by the LM from the help text synopsis.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InvocationHint {
+    /// Concrete default positional arguments for the command.
+    /// e.g., ["pattern", "file"] for grep, ["expression"] for awk.
+    pub required_args: Vec<String>,
 }
 
 impl State {
@@ -773,6 +790,7 @@ mod tests {
             help_preamble: String::new(),
             examples_section: String::new(),
             experiment_params: None,
+            invocation_hint: None,
         };
 
         let json = serde_json::to_string_pretty(&state).unwrap();

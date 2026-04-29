@@ -68,6 +68,7 @@ pub(super) fn build_state_from_surfaces(
         help_preamble: preamble,
         examples_section: examples,
         experiment_params: None,
+        invocation_hint: None,
     })
 }
 
@@ -1501,8 +1502,14 @@ pub(super) fn batch_probe_surfaces(
         return Vec::new();
     }
 
+    // Build base argv: context_argv + invocation args (required positional args)
+    let mut base_argv = state.context_argv.clone();
+    if let Some(hint) = &state.invocation_hint {
+        base_argv.extend(hint.required_args.iter().cloned());
+    }
+
     // Run a single shared control
-    let control = match run_in_sandbox(&sandbox, &state.binary, &state.context_argv, false) {
+    let control = match run_in_sandbox(&sandbox, &state.binary, &base_argv, false) {
         Ok(e) => e,
         Err(e) => {
             if verbose {
@@ -1516,8 +1523,8 @@ pub(super) fn batch_probe_surfaces(
 
     // Probe each surface
     for (surface_id, extra_args) in &candidates {
-        // Option argv: context_argv + surface_id + extra_args
-        let mut argv = state.context_argv.clone();
+        // Option argv: base_argv + surface_id + extra_args
+        let mut argv = base_argv.clone();
         argv.push(surface_id.clone());
         argv.extend(extra_args.iter().cloned());
 

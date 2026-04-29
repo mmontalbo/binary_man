@@ -44,6 +44,18 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).context("create terminal")?;
 
+    // Restore terminal on panic so keyboard input isn't swallowed
+    let panic_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = disable_raw_mode();
+        let _ = execute!(
+            io::stdout(),
+            LeaveAlternateScreen,
+            crossterm::event::DisableMouseCapture
+        );
+        panic_hook(info);
+    }));
+
     let mut app = app::App::new(experiments);
     let result = run_app(&mut terminal, &mut app);
 

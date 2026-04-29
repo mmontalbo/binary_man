@@ -1460,6 +1460,11 @@ fn execute_probes(
     ctx: &VerifyContext<'_>,
     timing: &mut CycleTiming,
 ) -> Vec<String> {
+    let invocation_args: Vec<String> = state
+        .invocation_hint
+        .as_ref()
+        .map(|h| h.required_args.clone())
+        .unwrap_or_default();
     let mut newly_verified = Vec::new();
     if probes.is_empty() {
         return newly_verified;
@@ -1495,6 +1500,7 @@ fn execute_probes(
             context_argv: &state.context_argv,
             cycle: state.cycle,
             with_pty: ctx.with_pty,
+            invocation_args: &invocation_args,
         };
         run_scenarios_parallel(
             probe_params,
@@ -1550,6 +1556,7 @@ fn execute_probes(
                 context_argv: &state.context_argv,
                 cycle: state.cycle,
                 with_pty: ctx.with_pty,
+                invocation_args: &invocation_args,
             };
             run_scenarios_parallel(
                 auto_promote,
@@ -1600,6 +1607,11 @@ fn execute_tests(
     ctx: &VerifyContext<'_>,
     timing: &mut CycleTiming,
 ) -> (Vec<String>, Vec<String>) {
+    let invocation_args: Vec<String> = state
+        .invocation_hint
+        .as_ref()
+        .map(|h| h.required_args.clone())
+        .unwrap_or_default();
     if ctx.verbose {
         eprintln!("  Running {} test(s) in parallel...", tests.len());
     }
@@ -1637,6 +1649,7 @@ fn execute_tests(
             context_argv: &state.context_argv,
             cycle: state.cycle,
             with_pty: ctx.with_pty,
+            invocation_args: &invocation_args,
         };
         run_scenarios_parallel(
             test_params,
@@ -2044,6 +2057,7 @@ mod tests {
             help_preamble: String::new(),
             examples_section: String::new(),
             experiment_params: None,
+            invocation_hint: None,
         };
 
         let summary = get_summary(&state);

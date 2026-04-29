@@ -200,6 +200,7 @@ mod tests {
             help_preamble: String::new(),
             examples_section: String::new(),
             experiment_params: None,
+            invocation_hint: None,
         }
     }
 
