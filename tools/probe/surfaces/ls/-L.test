@@ -1,7 +1,9 @@
 # ls -L: dereference symlinks (show target info, not link info)
 
 file "target.txt" "hello"
+dir "realdir"
 link "mylink" -> "target.txt"
+link "dirlink" -> "realdir"
 
 test args "." "-l"
   expect stdout not-empty
@@ -9,13 +11,13 @@ test args "." "-l"
   expect exit 0
 
 test args "." "-lL"
-  # FAILED: expected preserved, got Complement
-  #   -L replaces the symlink line (lrwxrwxrwx ... mylink -> target.txt)
-  #   with the dereferenced file line (-rw-r--r-- ... mylink).
-  #   The arrow notation disappears, permissions change → Complement.
+  # FAILED: expected preserved, got Complement — dereferencing changes link lines
   # expect stdout preserved vs "." "-l"
   expect stdout lines same as "." "-l"
   expect stdout not-contains "->"
   expect stdout contains "mylink"
-  expect stdout contains "target.txt"
+  # Dereferenced link shows regular file permissions, not lrwxrwxrwx
+  expect stdout not-contains "lrwx"
+  # Output is still long-listing format (distinguishes from -s which has "size filename")
+  expect stdout every-line-matches "^(total \d+|[^ ]+ +\d+ +\S+ +\S+ +\d)"
   expect exit 0

@@ -9,6 +9,6 @@ test args "."
   expect exit 0
 
 test args "." "-i"
-  expect stdout preserved prefix-added vs "."
+  expect stdout preserved vs "."
   expect stdout lines same as "."
   expect exit 0

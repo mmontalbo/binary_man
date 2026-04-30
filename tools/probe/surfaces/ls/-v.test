@@ -12,8 +12,9 @@ test args "."
 test args "." "-v"
   expect stdout reordered vs "."
   expect stdout lines same as "."
-  # Default alpha sorts: file1, file10, file2, file20
-  # Version sort: file1, file2, file10, file20
-  # So file2 comes before file10 in version sort (after in alpha)
+  # Alpha order: file1, file10, file2, file20 (lexicographic)
+  # Version sort: file1, file2, file10, file20 (numeric)
+  # file1 before file2 is true in version sort but false in alpha and reverse-alpha
+  expect stdout "file1.txt" before "file2.txt"
   expect stdout "file2.txt" before "file10.txt"
   expect exit 0

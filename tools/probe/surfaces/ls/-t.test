@@ -1,9 +1,14 @@
-# ls -t: sort by time, newest first
+# ls -t: sort by modification time, newest first
 
-file "old.txt" "old"
-props "old.txt" mtime old
-file "recent.txt" "recent"
-props "recent.txt" mtime recent
+# 3 files with distinct mtimes and names that don't correlate with time order
+file "mmm.txt" "medium"
+props "mmm.txt" mtime old
+file "zzz.txt" "large content here"
+file "aaa.txt" "small"
+props "aaa.txt" mtime recent
+
+# Alpha order: aaa, mmm, zzz
+# mtime order (newest first): aaa (recent), zzz (just created), mmm (year 2000)
 
 test args "."
   expect stdout not-empty
@@ -12,7 +17,7 @@ test args "."
 test args "." "-t"
   expect stdout reordered vs "."
   expect stdout lines same as "."
-  # Pin time order: newest first
-  expect stdout line 1 contains "recent.txt"
-  expect stdout "recent.txt" before "old.txt"
+  # Pin mtime order: aaa (recent) first, mmm (old) last
+  expect stdout line 1 contains "aaa.txt"
+  expect stdout "aaa.txt" before "mmm.txt"
   expect exit 0

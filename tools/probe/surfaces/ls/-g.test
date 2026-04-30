@@ -8,10 +8,11 @@ test args "." "-l"
   expect exit 0
 
 test args "." "-g"
-  # FAILED: expected preserved, got Disjoint — owner column removed.
-  # expect stdout preserved vs "." "-l"
+  # -g omits owner, keeps group → 3 fields before size
   expect stdout lines same as "." "-l"
   expect stdout contains "alpha.txt"
-  # -g omits owner: perms links group size (3 fields before size, not 4)
   expect stdout every-line-matches "^(total \d+|[^ ]+ +\d+ +\S+ +\d)"
+  # NOTE: -g/-o/-G all produce 3 fields before size → same regex.
+  # Distinguishing requires system-specific field-value checks.
+  # Remaining confusion with -o and -G is a measurement ceiling.
   expect exit 0

@@ -90,39 +90,22 @@ fn check_one(
                 },
             }
         }
-
         (OutputDimension::Stdout, Predicate::LineContains { line, text }) => {
             let lines: Vec<&str> = obs.stdout.lines().filter(|l| !l.is_empty()).collect();
             if *line == 0 || *line > lines.len() {
-                check(
-                    false,
-                    &format!("line {} out of range (have {} lines)", line, lines.len()),
-                    "",
-                )
+                check(false, &format!("line {} out of range (have {} lines)", line, lines.len()), "")
             } else {
                 let actual = lines[*line - 1];
-                check(
-                    actual.contains(text.as_str()),
-                    &format!("expected line {} contains {:?}", line, text),
-                    actual,
-                )
+                check(actual.contains(text.as_str()), &format!("expected line {} contains {:?}", line, text), actual)
             }
         }
         (OutputDimension::Stdout, Predicate::LineNotContains { line, text }) => {
             let lines: Vec<&str> = obs.stdout.lines().filter(|l| !l.is_empty()).collect();
             if *line == 0 || *line > lines.len() {
-                check(
-                    false,
-                    &format!("line {} out of range (have {} lines)", line, lines.len()),
-                    "",
-                )
+                check(false, &format!("line {} out of range (have {} lines)", line, lines.len()), "")
             } else {
                 let actual = lines[*line - 1];
-                check(
-                    !actual.contains(text.as_str()),
-                    &format!("expected line {} not-contains {:?}", line, text),
-                    actual,
-                )
+                check(!actual.contains(text.as_str()), &format!("expected line {} not-contains {:?}", line, text), actual)
             }
         }
         (OutputDimension::Stdout, Predicate::Before { first, second }) => {
@@ -187,10 +170,7 @@ fn check_one(
             if let Some(other) = all_obs.get(vs_args) {
                 check(
                     obs.exit_code == other.exit_code,
-                    &format!(
-                        "expected exit unchanged vs {:?}, got {:?} vs {:?}",
-                        vs_args, obs.exit_code, other.exit_code
-                    ),
+                    &format!("expected exit unchanged vs {:?}, got {:?} vs {:?}", vs_args, obs.exit_code, other.exit_code),
                     "",
                 )
             } else {
@@ -206,10 +186,7 @@ fn check_one(
             if let Some(other) = all_obs.get(vs_args) {
                 check(
                     obs.exit_code != other.exit_code,
-                    &format!(
-                        "expected exit changed vs {:?}, both are {:?}",
-                        vs_args, obs.exit_code
-                    ),
+                    &format!("expected exit changed vs {:?}, both are {:?}", vs_args, obs.exit_code),
                     "",
                 )
             } else {
@@ -221,23 +198,6 @@ fn check_one(
                 }
             }
         }
-
-        // === FILESYSTEM ===
-        (OutputDimension::Fs, Predicate::FsUnchanged) => {
-            // TODO: implement fs snapshot comparison
-            CheckResult {
-                passed: true,
-                detail: "fs unchanged (not yet implemented)".to_string(),
-                context: vec![],
-                discriminates: None,
-            }
-        }
-        (OutputDimension::Fs, _) => CheckResult {
-            passed: false,
-            detail: "fs predicates not yet implemented".to_string(),
-            context: vec![],
-            discriminates: None,
-        },
 
         // Catch-all
         _ => CheckResult {
@@ -259,13 +219,7 @@ fn check_relational_stdout(
         Predicate::Reordered { vs_args }
         | Predicate::Superset { vs_args }
         | Predicate::Subset { vs_args }
-        | Predicate::Complement { vs_args }
-        | Predicate::Collapsed { vs_args }
         | Predicate::Preserved { vs_args }
-        | Predicate::PreservedPrefixAdded { vs_args }
-        | Predicate::PreservedFieldsExpanded { vs_args }
-        | Predicate::PreservedWrapped { vs_args }
-        | Predicate::Identical { vs_args }
         | Predicate::LinesSame { vs_args }
         | Predicate::LinesMore { vs_args }
         | Predicate::LinesFewer { vs_args } => vs_args,
@@ -324,22 +278,6 @@ fn check_relational_stdout(
                 &stdout_context,
             )
         }
-        Predicate::Complement { .. } => {
-            let rel = delta::classify_stdout(&other.stdout, &obs.stdout);
-            check(
-                rel == delta::EntryRelation::Complement,
-                &format!("expected complement, got {:?}", rel),
-                &stdout_context,
-            )
-        }
-        Predicate::Collapsed { .. } => {
-            let rel = delta::classify_stdout(&other.stdout, &obs.stdout);
-            check(
-                rel == delta::EntryRelation::Collapsed,
-                &format!("expected collapsed, got {:?}", rel),
-                &stdout_context,
-            )
-        }
         Predicate::Preserved { .. } => {
             let rel = delta::classify_stdout(&other.stdout, &obs.stdout);
             check(
@@ -354,64 +292,20 @@ fn check_relational_stdout(
                 &stdout_context,
             )
         }
-        Predicate::PreservedPrefixAdded { .. } => {
-            let rel = delta::classify_stdout(&other.stdout, &obs.stdout);
-            check(
-                rel == delta::EntryRelation::PreservedPrefixAdded,
-                &format!("expected preserved prefix-added, got {:?}", rel),
-                &stdout_context,
-            )
-        }
-        Predicate::PreservedFieldsExpanded { .. } => {
-            let rel = delta::classify_stdout(&other.stdout, &obs.stdout);
-            check(
-                rel == delta::EntryRelation::PreservedFieldsExpanded,
-                &format!("expected preserved fields-expanded, got {:?}", rel),
-                &stdout_context,
-            )
-        }
-        Predicate::PreservedWrapped { .. } => {
-            let rel = delta::classify_stdout(&other.stdout, &obs.stdout);
-            check(
-                rel == delta::EntryRelation::PreservedWrapped,
-                &format!("expected preserved wrapped, got {:?}", rel),
-                &stdout_context,
-            )
-        }
-        Predicate::Identical { .. } => {
-            let rel = delta::classify_stdout(&other.stdout, &obs.stdout);
-            check(
-                rel == delta::EntryRelation::Identical,
-                &format!("expected identical, got {:?}", rel),
-                &stdout_context,
-            )
-        }
         Predicate::LinesSame { .. } => {
             let mine = obs.stdout.lines().filter(|l| !l.is_empty()).count();
             let theirs = other.stdout.lines().filter(|l| !l.is_empty()).count();
-            check(
-                mine == theirs,
-                &format!("expected same line count, got {} vs {}", mine, theirs),
-                &stdout_context,
-            )
+            check(mine == theirs, &format!("expected same line count, got {} vs {}", mine, theirs), &stdout_context)
         }
         Predicate::LinesMore { .. } => {
             let mine = obs.stdout.lines().filter(|l| !l.is_empty()).count();
             let theirs = other.stdout.lines().filter(|l| !l.is_empty()).count();
-            check(
-                mine > theirs,
-                &format!("expected more lines, got {} vs {}", mine, theirs),
-                &stdout_context,
-            )
+            check(mine > theirs, &format!("expected more lines, got {} vs {}", mine, theirs), &stdout_context)
         }
         Predicate::LinesFewer { .. } => {
             let mine = obs.stdout.lines().filter(|l| !l.is_empty()).count();
             let theirs = other.stdout.lines().filter(|l| !l.is_empty()).count();
-            check(
-                mine < theirs,
-                &format!("expected fewer lines, got {} vs {}", mine, theirs),
-                &stdout_context,
-            )
+            check(mine < theirs, &format!("expected fewer lines, got {} vs {}", mine, theirs), &stdout_context)
         }
         _ => CheckResult {
             passed: false,

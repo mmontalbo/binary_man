@@ -81,37 +81,30 @@ pub enum OutputDimension {
     Stdout,
     Stderr,
     Exit,
-    Fs,
 }
 
 #[derive(Debug, Clone)]
 pub enum Predicate {
-    // Stdout structural
+    // Stdout structural (vs another invocation)
     Empty,
     NotEmpty,
-    Identical { vs_args: Vec<String> },
     Reordered { vs_args: Vec<String> },
     Superset { vs_args: Vec<String> },
     Subset { vs_args: Vec<String> },
-    Complement { vs_args: Vec<String> },
-    Collapsed { vs_args: Vec<String> },
     Preserved { vs_args: Vec<String> },
-    PreservedPrefixAdded { vs_args: Vec<String> },
-    PreservedFieldsExpanded { vs_args: Vec<String> },
-    PreservedWrapped { vs_args: Vec<String> },
 
-    // Stdout quantitative
+    // Stdout quantitative (vs another invocation)
     LinesSame { vs_args: Vec<String> },
     LinesMore { vs_args: Vec<String> },
     LinesFewer { vs_args: Vec<String> },
     LinesExactly(usize),
 
-    // Content
+    // Stdout content
     Contains(String),
     NotContains(String),
     EveryLineMatches(String),
 
-    // Positional
+    // Stdout positional
     LineContains { line: usize, text: String },
     LineNotContains { line: usize, text: String },
     Before { first: String, second: String },
@@ -126,12 +119,6 @@ pub enum Predicate {
     ExitCode(i32),
     ExitUnchanged { vs_args: Vec<String> },
     ExitChanged { vs_args: Vec<String> },
-
-    // Filesystem
-    FsUnchanged,
-    FsCreated(#[allow(dead_code)] String),
-    FsModified(#[allow(dead_code)] String),
-    FsDeleted(#[allow(dead_code)] String),
 }
 
 /// Parse a test script from source text.
@@ -286,10 +273,8 @@ fn parse_expectation(rest: &str, line_num: usize) -> Result<Expectation> {
         (OutputDimension::Stderr, r.trim())
     } else if let Some(r) = rest.strip_prefix("exit ") {
         (OutputDimension::Exit, r.trim())
-    } else if let Some(r) = rest.strip_prefix("fs ") {
-        (OutputDimension::Fs, r.trim())
     } else {
-        bail!("line {}: expect requires stdout|stderr|exit|fs", line_num);
+        bail!("line {}: expect requires stdout|stderr|exit", line_num);
     };
 
     let predicate = parse_predicate(&dimension, predicate_str, line_num)?;
@@ -304,7 +289,6 @@ fn parse_predicate(dim: &OutputDimension, s: &str, line_num: usize) -> Result<Pr
         OutputDimension::Stdout => parse_stdout_predicate(s, line_num),
         OutputDimension::Stderr => parse_stderr_predicate(s, line_num),
         OutputDimension::Exit => parse_exit_predicate(s, line_num),
-        OutputDimension::Fs => parse_fs_predicate(s, line_num),
     }
 }
 
@@ -369,16 +353,10 @@ fn parse_stdout_predicate(s: &str, line_num: usize) -> Result<Predicate> {
     // Relational predicates: "<relation> vs <args>"
     #[allow(clippy::type_complexity)]
     let relational: &[(&str, fn(Vec<String>) -> Predicate)] = &[
-        ("preserved prefix-added vs ", |a| Predicate::PreservedPrefixAdded { vs_args: a }),
-        ("preserved fields-expanded vs ", |a| Predicate::PreservedFieldsExpanded { vs_args: a }),
-        ("preserved wrapped vs ", |a| Predicate::PreservedWrapped { vs_args: a }),
         ("preserved vs ", |a| Predicate::Preserved { vs_args: a }),
         ("reordered vs ", |a| Predicate::Reordered { vs_args: a }),
         ("superset vs ", |a| Predicate::Superset { vs_args: a }),
         ("subset vs ", |a| Predicate::Subset { vs_args: a }),
-        ("complement vs ", |a| Predicate::Complement { vs_args: a }),
-        ("collapsed vs ", |a| Predicate::Collapsed { vs_args: a }),
-        ("identical vs ", |a| Predicate::Identical { vs_args: a }),
         ("lines same as ", |a| Predicate::LinesSame { vs_args: a }),
         ("lines more than ", |a| Predicate::LinesMore { vs_args: a }),
         ("lines fewer than ", |a| Predicate::LinesFewer { vs_args: a }),
@@ -426,25 +404,6 @@ fn parse_exit_predicate(s: &str, line_num: usize) -> Result<Predicate> {
         .parse()
         .with_context(|| format!("line {}: invalid exit code", line_num))?;
     Ok(Predicate::ExitCode(code))
-}
-
-fn parse_fs_predicate(s: &str, line_num: usize) -> Result<Predicate> {
-    if s == "unchanged" {
-        return Ok(Predicate::FsUnchanged);
-    }
-    if let Some(rest) = s.strip_prefix("created ") {
-        let path = parse_single_quoted(rest.trim(), line_num)?;
-        return Ok(Predicate::FsCreated(path));
-    }
-    if let Some(rest) = s.strip_prefix("modified ") {
-        let path = parse_single_quoted(rest.trim(), line_num)?;
-        return Ok(Predicate::FsModified(path));
-    }
-    if let Some(rest) = s.strip_prefix("deleted ") {
-        let path = parse_single_quoted(rest.trim(), line_num)?;
-        return Ok(Predicate::FsDeleted(path));
-    }
-    bail!("line {}: unknown fs predicate: '{}'", line_num, s)
 }
 
 /// Tokenize a line, respecting quoted strings.

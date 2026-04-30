@@ -1,21 +1,24 @@
-# ls -c: sort by ctime (status change time)
+# ls -c: sort by ctime (status change time), newest first
 
-file "old.txt" "old"
-props "old.txt" mtime old
-file "recent.txt" "recent"
-props "recent.txt" mtime recent
+# Setup order matters for ctime:
+# 1. Create mmm.txt, then set mtime old (utimensat updates ctime)
+# 2. Create zzz.txt (ctime = creation time, no props)
+# 3. Create aaa.txt, then set mtime recent (rewrite updates ctime)
+# So ctime newest→oldest: aaa (T4), zzz (T2), mmm (T1)
+file "mmm.txt" "medium"
+props "mmm.txt" mtime old
+file "zzz.txt" "large content here"
+file "aaa.txt" "small"
+props "aaa.txt" mtime recent
 
 test args "."
   expect stdout not-empty
   expect exit 0
 
 test args "." "-c"
-  # FAILED: expected lines same, 0/2 discriminating
-  #   [stdout same lines, different order] — -c sorts by ctime which
-  #   differs from alphabetical order for these files.
-  # expect stdout lines same as "."
   expect stdout reordered vs "."
-  # Pin ctime order: most recently changed first
-  expect stdout line 1 contains "recent.txt"
-  expect stdout "recent.txt" before "old.txt"
+  expect stdout lines same as "."
+  # ctime order: aaa (latest metadata change), zzz (creation only), mmm (utimensat before zzz created)
+  expect stdout line 1 contains "aaa.txt"
+  expect stdout "zzz.txt" before "mmm.txt"
   expect exit 0

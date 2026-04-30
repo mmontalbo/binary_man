@@ -11,7 +11,8 @@ test args "."
 test args "." "-l"
   expect stdout preserved vs "."
   expect stdout lines more than "."
-  # Full long listing: perms links owner group size (4 fields before size)
-  # First line is "total N" header
-  expect stdout every-line-matches "^(total \d+|[^ ]+ +\d+ +\S+ +\S+ +\d)"
+  # Full long listing: perms links owner group size (4+ fields before size)
+  # Uses \S+ \S+ for owner and group — distinguishes from -n (which uses \d+ \d+)
+  # and from -g/-o/-G (which have only 3 fields before size)
+  expect stdout every-line-matches "^(total \d+|[^ ]+ +\d+ +[a-zA-Z]\S* +[a-zA-Z]\S* +\d)"
   expect exit 0

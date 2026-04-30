@@ -8,10 +8,8 @@ test args "." "-l"
   expect exit 0
 
 test args "." "-lG"
-  # FAILED: expected preserved, got Disjoint — group column removed.
-  # expect stdout preserved vs "." "-l"
+  # -lG is equivalent to -o (omit group from long listing)
   expect stdout lines same as "." "-l"
   expect stdout contains "alpha.txt"
-  # -lG omits group: perms links owner size (3 fields before size)
   expect stdout every-line-matches "^(total \d+|[^ ]+ +\d+ +\S+ +\d)"
   expect exit 0

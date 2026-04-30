@@ -36,7 +36,6 @@ fn main() -> Result<()> {
     let mut total_discriminating = 0;
     let mut total_non_disc = 0;
 
-    // Build observations map for diff display
     let control_obs = results.first().map(|r| &r.observation);
 
     for result in &results {
@@ -89,7 +88,7 @@ fn main() -> Result<()> {
     let disc_total = total_discriminating + total_non_disc;
     eprintln!(
         "\nResult: {}/{} predictions passed, {}/{} discriminating",
-        total_passed, total_predictions, total_discriminating, disc_total
+        total_passed, total_predictions, total_discriminating, disc_total,
     );
 
     if total_passed < total_predictions {
@@ -104,7 +103,6 @@ fn show_diff(control: &execute::Observation, option: &execute::Observation) {
     let ctrl_lines: Vec<&str> = control.stdout.lines().collect();
     let opt_lines: Vec<&str> = option.stdout.lines().collect();
 
-    // Find lines unique to each
     let ctrl_set: std::collections::HashSet<&str> = ctrl_lines.iter().copied().collect();
     let opt_set: std::collections::HashSet<&str> = opt_lines.iter().copied().collect();
 
@@ -138,12 +136,10 @@ fn show_diff(control: &execute::Observation, option: &execute::Observation) {
         }
     }
 
-    // Stderr diff
     if control.stderr != option.stderr {
         eprintln!("    [stderr differs]");
     }
 
-    // Exit code diff
     if control.exit_code != option.exit_code {
         eprintln!(
             "    [exit: {} → {}]",

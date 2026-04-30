@@ -9,14 +9,11 @@ test args "."
   expect exit 0
 
 test args "." "-x"
-  # FAILED (1): expected lines same, got 1 vs 3
-  #   Piped ls defaults to one-per-line. -x reformats entries
-  #   horizontally, fitting all 3 on one line.
-  # expect stdout lines same as "."
-  # FAILED (2): expected collapsed, got Preserved
-  #   All 3 filenames appear as substrings in the single output line,
-  #   so classifier sees entries Preserved, not Collapsed.
+  # FAILED (1): lines same → 1 vs 3 (piped ls is one-per-line, -x joins them)
+  # FAILED (2): collapsed → Preserved (filenames still appear in single line)
   # expect stdout collapsed vs "."
   expect stdout preserved vs "."
   expect stdout lines fewer than "."
+  # Distinguish from -m: -x uses spaces, -m uses commas
+  expect stdout not-contains ","
   expect exit 0

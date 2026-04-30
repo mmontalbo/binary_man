@@ -13,7 +13,9 @@ test args "."
 test args "." "-X"
   expect stdout reordered vs "."
   expect stdout lines same as "."
-  # Extension sort: noext_dir (no ext), file.a, file.b, file.c, file.z
+  # Extension sort: noext_dir (no ext first), file.a, file.b, file.c, file.z
   expect stdout line 1 contains "noext_dir"
   expect stdout "file.a" before "file.c"
+  # Distinguish from -S: extension sort puts file.z last, size sort puts it second
+  expect stdout "file.c" before "file.z"
   expect exit 0
