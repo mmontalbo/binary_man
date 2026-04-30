@@ -36,7 +36,11 @@ fn main() -> Result<()> {
     let mut total_discriminating = 0;
     let mut total_non_disc = 0;
 
-    let control_obs = results.first().map(|r| &r.observation);
+    // For diff display: use the simplest invocation (fewest args) as baseline
+    let baseline_obs = results
+        .iter()
+        .min_by_key(|r| r.args.len())
+        .map(|r| &r.observation);
 
     for result in &results {
         let passed = result.checks.iter().filter(|c| c.passed).count();
@@ -71,8 +75,10 @@ fn main() -> Result<()> {
 
         // Show actual diff when there are non-discriminating checks
         if non_disc > 0 {
-            if let Some(ctrl) = control_obs {
-                show_diff(ctrl, &result.observation);
+            if let Some(baseline) = baseline_obs {
+                if !std::ptr::eq(baseline, &result.observation) {
+                    show_diff(baseline, &result.observation);
+                }
             }
         }
 

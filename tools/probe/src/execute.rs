@@ -32,8 +32,8 @@ pub struct CheckResult {
     pub detail: String,
     /// Additional context lines shown on failure (observed values, diffs, etc.)
     pub context: Vec<String>,
-    /// Whether this check discriminates the option from control.
-    /// None for the control test block itself.
+    /// Whether this check discriminates this invocation from at least one
+    /// other invocation in the script.
     pub discriminates: Option<bool>,
 }
 
@@ -79,47 +79,54 @@ pub fn run_script(binary: &str, script: &Script) -> Result<Vec<TestResult>> {
     }
 
     // Second pass: validate predictions + discrimination + specificity
-    let control_obs = script
-        .tests
-        .first()
-        .and_then(|t| observations.get(&t.args))
-        .cloned();
-
     for (i, test) in script.tests.iter().enumerate() {
         let obs = observations.get(&test.args).unwrap().clone();
         let mut checks = validate::check_expectations(test, &obs, &observations);
 
-        let mut confused_with = Vec::new();
-
-        if i == 0 {
-            for check in &mut checks {
-                check.discriminates = None;
+        // Discrimination: check against all OTHER invocations in the script.
+        // A check discriminates if it fails for at least one other invocation.
+        let mut disc = vec![false; checks.len()];
+        for (j, other_test) in script.tests.iter().enumerate() {
+            if j == i {
+                continue;
             }
-        } else {
-            if let Some(ref ctrl) = control_obs {
-                let ctrl_checks = validate::check_expectations(test, ctrl, &observations);
-                for (check, ctrl_check) in checks.iter_mut().zip(ctrl_checks.iter()) {
-                    check.discriminates = Some(!ctrl_check.passed);
+            if let Some(other_obs) = observations.get(&other_test.args) {
+                let other_checks =
+                    validate::check_expectations(test, other_obs, &observations);
+                for (ci, oc) in other_checks.iter().enumerate() {
+                    if !oc.passed {
+                        disc[ci] = true;
+                    }
                 }
             }
-
-            // Cross-flag specificity: which other flags pass all expectations?
-            let tested_flags: Vec<&str> = test.args.iter()
-                .filter(|a| a.starts_with('-'))
-                .map(|a| a.as_str())
-                .collect();
-
-            for (flag, flag_obs) in &flag_observations {
-                if tested_flags.contains(&flag.as_str()) {
-                    continue;
-                }
-                let xcheck = validate::check_expectations(test, flag_obs, &observations);
-                if xcheck.iter().all(|c| c.passed) {
-                    confused_with.push(flag.clone());
-                }
-            }
-            confused_with.sort();
         }
+        for (ci, check) in checks.iter_mut().enumerate() {
+            check.discriminates = if script.tests.len() > 1 {
+                Some(disc[ci])
+            } else {
+                None // Single test block — discrimination not applicable
+            };
+        }
+
+        // Cross-flag specificity: which other flags pass all expectations?
+        let mut confused_with = Vec::new();
+        let tested_flags: Vec<&str> = test
+            .args
+            .iter()
+            .filter(|a| a.starts_with('-'))
+            .map(|a| a.as_str())
+            .collect();
+
+        for (flag, flag_obs) in &flag_observations {
+            if tested_flags.contains(&flag.as_str()) {
+                continue;
+            }
+            let xcheck = validate::check_expectations(test, flag_obs, &observations);
+            if xcheck.iter().all(|c| c.passed) {
+                confused_with.push(flag.clone());
+            }
+        }
+        confused_with.sort();
 
         results.push(TestResult {
             args: test.args.clone(),
