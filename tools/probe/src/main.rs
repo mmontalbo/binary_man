@@ -10,13 +10,16 @@ mod validate;
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
-    if args.len() >= 2 && args[1] == "init" {
-        return cmd_init(&args[2..]);
+    match args.get(1).map(|s| s.as_str()) {
+        Some("init") => return cmd_init(&args[2..]),
+        Some("discover") => return cmd_discover(&args[2..]),
+        _ => {}
     }
 
     if args.len() < 3 {
         eprintln!("Usage: bman-probe <binary> <test-file>");
         eprintln!("       bman-probe init <binary> <surface-dir>");
+        eprintln!("       bman-probe discover <binary> <surface-dir>");
         std::process::exit(1);
     }
 
@@ -387,6 +390,319 @@ fn cmd_run(binary: &str, test_path: &PathBuf) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Discover a binary's surface area by probing, then create stubs organized by clusters.
+fn cmd_discover(args: &[String]) -> Result<()> {
+    if args.len() < 2 {
+        eprintln!("Usage: bman-probe discover <binary> <surface-dir>");
+        std::process::exit(1);
+    }
+
+    let binary = &args[0];
+    let dir = PathBuf::from(&args[1]);
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("create {}", dir.display()))?;
+
+    // Create a basic sandbox for probing
+    let sandbox_dir = tempfile::Builder::new()
+        .prefix("probe_discover_")
+        .tempdir()
+        .context("create sandbox")?;
+    let work_dir = sandbox_dir.path();
+
+    // Populate sandbox with a variety of files to make deltas visible
+    let setup_cmds = vec![
+        parse::SetupCommand::CreateFile {
+            path: "visible.txt".into(),
+            content: parse::FileContent::Lines(vec!["hello".into()]),
+        },
+        parse::SetupCommand::CreateFile {
+            path: "another.txt".into(),
+            content: parse::FileContent::Lines(vec!["world".into()]),
+        },
+        parse::SetupCommand::CreateFile {
+            path: ".hidden".into(),
+            content: parse::FileContent::Lines(vec!["secret".into()]),
+        },
+        parse::SetupCommand::CreateDir {
+            path: "subdir".into(),
+        },
+        parse::SetupCommand::CreateFile {
+            path: "subdir/nested.txt".into(),
+            content: parse::FileContent::Lines(vec!["deep".into()]),
+        },
+        parse::SetupCommand::CreateFile {
+            path: "backup~".into(),
+            content: parse::FileContent::Lines(vec!["old".into()]),
+        },
+    ];
+    sandbox::apply_setup(work_dir, &setup_cmds)?;
+
+    // Phase 1: baseline
+    eprintln!("Probing {}...", binary);
+    let baseline = run_probe(binary, &["."], work_dir)?;
+    let baseline_lines: Vec<&str> = baseline.stdout.lines().collect();
+    let baseline_set: std::collections::HashSet<&str> =
+        baseline_lines.iter().copied().collect();
+    eprintln!("  baseline: {} stdout lines, exit {}", baseline_lines.len(), baseline.exit_code.unwrap_or(-1));
+
+    // Phase 2: sweep all single-char flags
+    eprintln!("  sweeping -a through -z, -A through -Z, -0 through -9");
+    let mut probe_flags: Vec<String> = Vec::new();
+    for c in 'a'..='z' {
+        probe_flags.push(format!("-{}", c));
+    }
+    for c in 'A'..='Z' {
+        probe_flags.push(format!("-{}", c));
+    }
+    for c in '0'..='9' {
+        probe_flags.push(format!("-{}", c));
+    }
+    probe_flags.push("-1".into());
+
+    struct FlagProbe {
+        flag: String,
+        description: String,
+        #[allow(dead_code)]
+        observation: execute::Observation,
+        delta_type: String,
+        added_lines: Vec<String>,
+        removed_lines: Vec<String>,
+    }
+
+    let mut valid_probes: Vec<FlagProbe> = Vec::new();
+    let mut invalid_flags: Vec<String> = Vec::new();
+
+    for flag in &probe_flags {
+        let obs = match run_probe(binary, &[".", flag], work_dir) {
+            Ok(o) => o,
+            Err(_) => continue,
+        };
+
+        // Check if the flag errored (invalid option)
+        let is_error = obs.exit_code.unwrap_or(0) == 2
+            && obs.stderr.contains("invalid option")
+            || obs.stderr.contains("unrecognized option");
+
+        if is_error {
+            invalid_flags.push(flag.clone());
+            continue;
+        }
+
+        // Classify delta
+        let rel = delta::classify_stdout(&baseline.stdout, &obs.stdout);
+        let delta_type = format!("{:?}", rel);
+
+        let obs_lines: Vec<&str> = obs.stdout.lines().collect();
+        let obs_set: std::collections::HashSet<&str> =
+            obs_lines.iter().copied().collect();
+
+        let added: Vec<String> = obs_lines
+            .iter()
+            .filter(|l| !l.is_empty() && !baseline_set.contains(**l))
+            .map(|l| l.to_string())
+            .collect();
+        let removed: Vec<String> = baseline_lines
+            .iter()
+            .filter(|l| !l.is_empty() && !obs_set.contains(**l))
+            .map(|l| l.to_string())
+            .collect();
+
+        let desc = String::new();
+
+        eprintln!(
+            "  {}: {} (added {}, removed {})",
+            flag,
+            delta_type,
+            added.len(),
+            removed.len()
+        );
+
+        valid_probes.push(FlagProbe {
+            flag: flag.clone(),
+            description: desc,
+            observation: obs,
+            delta_type,
+            added_lines: added,
+            removed_lines: removed,
+        });
+    }
+
+    // Phase 4: cluster by delta type + set overlap
+    let mut clusters: std::collections::HashMap<String, Vec<usize>> =
+        std::collections::HashMap::new();
+    for (i, probe) in valid_probes.iter().enumerate() {
+        clusters
+            .entry(probe.delta_type.clone())
+            .or_default()
+            .push(i);
+    }
+
+    // Write setup.test
+    let mut setup = format!("# {}: shared contexts\n\n", binary);
+    setup.push_str("context \"base\"\n");
+    setup.push_str("  file \"visible.txt\" \"hello\"\n");
+    setup.push_str("  file \"another.txt\" \"world\"\n");
+    setup.push_str("  file \".hidden\" \"secret\"\n");
+    setup.push_str("  dir \"subdir\"\n");
+    setup.push_str("  file \"subdir/nested.txt\" \"deep\"\n");
+    setup.push_str("  file \"backup~\" \"old\"\n\n");
+    setup.push_str("context \"empty\"\n\n");
+    setup.push_str("test args \".\"\n");
+    setup.push_str("  expect exit 0\n");
+    std::fs::write(dir.join("setup.test"), &setup)?;
+
+    // Write bootstrap
+    let mut bootstrap = format!("# {}: discovery observations\n\n", binary);
+    bootstrap.push_str(&format!(
+        "# baseline: {} stdout lines, exit {}\n",
+        baseline_lines.len(),
+        baseline.exit_code.unwrap_or(-1)
+    ));
+    std::fs::write(dir.join("_bootstrap.test"), &bootstrap)?;
+
+    // Write stubs per flag
+    for probe in &valid_probes {
+        let filename = format!("{}.test", probe.flag);
+        let stub_path = dir.join(&filename);
+
+        let mut stub = format!("# {} {}", binary, probe.flag);
+        if !probe.description.is_empty() {
+            stub.push_str(&format!(": {}", probe.description));
+        }
+        stub.push('\n');
+        stub.push_str(&format!("# delta: {}\n", probe.delta_type));
+        if !probe.added_lines.is_empty() {
+            let preview: Vec<&str> = probe.added_lines.iter().take(3).map(|s| s.as_str()).collect();
+            stub.push_str(&format!("# added: {}\n", preview.join(", ")));
+        }
+        if !probe.removed_lines.is_empty() {
+            let preview: Vec<&str> = probe.removed_lines.iter().take(3).map(|s| s.as_str()).collect();
+            stub.push_str(&format!("# removed: {}\n", preview.join(", ")));
+        }
+        stub.push('\n');
+        stub.push_str(&format!("test args \".\" \"{}\"\n", probe.flag));
+
+        std::fs::write(&stub_path, &stub)?;
+    }
+
+    // Write clustering summary
+    let mut summary = format!("# {}: behavioral surface clusters\n", binary);
+    summary.push_str(&format!(
+        "# discovered from probing ({} valid flags, {} invalid)\n\n",
+        valid_probes.len(),
+        invalid_flags.len()
+    ));
+
+    let cluster_names = [
+        ("Identical", "no visible effect"),
+        ("Superset", "adds entries"),
+        ("Subset", "removes entries"),
+        ("Reordered", "reorders entries"),
+        ("Preserved", "reformats entries"),
+        ("PreservedPrefixAdded", "reformats entries (prefix)"),
+        ("PreservedFieldsExpanded", "reformats entries (fields)"),
+        ("PreservedWrapped", "reformats entries (wrapped)"),
+        ("Disjoint", "completely different output"),
+    ];
+
+    for (delta, label) in &cluster_names {
+        if let Some(indices) = clusters.get(*delta) {
+            let flags: Vec<&str> = indices
+                .iter()
+                .map(|&i| valid_probes[i].flag.as_str())
+                .collect();
+            summary.push_str(&format!(
+                "# {} ({}): {}\n",
+                label,
+                delta,
+                flags.join(", ")
+            ));
+
+            // Within superset/subset clusters, show set overlap
+            if *delta == "Superset" && indices.len() > 1 {
+                for &i in indices {
+                    let added: Vec<&str> = valid_probes[i]
+                        .added_lines
+                        .iter()
+                        .take(3)
+                        .map(|s| s.as_str())
+                        .collect();
+                    if !added.is_empty() {
+                        summary.push_str(&format!(
+                            "#   {} adds: {}\n",
+                            valid_probes[i].flag,
+                            added.join(", ")
+                        ));
+                    }
+                }
+            }
+            if *delta == "Subset" && indices.len() > 1 {
+                for &i in indices {
+                    let removed: Vec<&str> = valid_probes[i]
+                        .removed_lines
+                        .iter()
+                        .take(3)
+                        .map(|s| s.as_str())
+                        .collect();
+                    if !removed.is_empty() {
+                        summary.push_str(&format!(
+                            "#   {} removes: {}\n",
+                            valid_probes[i].flag,
+                            removed.join(", ")
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    std::fs::write(dir.join("_clusters.md"), &summary)?;
+
+    // Report
+    eprintln!("\nClusters:");
+    for (delta, label) in &cluster_names {
+        if let Some(indices) = clusters.get(*delta) {
+            let flags: Vec<&str> = indices
+                .iter()
+                .map(|&i| valid_probes[i].flag.as_str())
+                .collect();
+            eprintln!("  {} ({}): {}", label, flags.len(), flags.join(", "));
+        }
+    }
+    eprintln!(
+        "\nDiscovered {} surfaces in {}",
+        valid_probes.len(),
+        dir.display()
+    );
+
+    Ok(())
+}
+
+fn run_probe(
+    binary: &str,
+    args: &[&str],
+    work_dir: &std::path::Path,
+) -> Result<execute::Observation> {
+    let mut cmd = std::process::Command::new(binary);
+    cmd.args(args);
+    cmd.current_dir(work_dir);
+    cmd.stdin(std::process::Stdio::null());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    cmd.env_clear();
+    cmd.env("PATH", std::env::var("PATH").unwrap_or_default());
+    cmd.env("HOME", work_dir);
+    cmd.env("LANG", "C");
+    cmd.env("LC_ALL", "C");
+
+    let output = cmd.output().with_context(|| format!("run {} {:?}", binary, args))?;
+    Ok(execute::Observation {
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        exit_code: output.status.code(),
+    })
 }
 
 /// Strip the #> results block from the end of a file.
