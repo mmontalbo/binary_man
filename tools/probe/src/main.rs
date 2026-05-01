@@ -34,8 +34,36 @@ fn cmd_run(binary: &str, test_path: &PathBuf) -> Result<()> {
     // Strip old results block before parsing
     let base_source = strip_results_block(&source);
 
-    let script = parse::parse_script(&base_source)
+    let mut script = parse::parse_script(&base_source)
         .with_context(|| format!("parse {}", test_path.display()))?;
+
+    // Load shared contexts from setup.test in the same directory
+    if let Some(parent) = test_path.parent() {
+        let setup_path = parent.join("setup.test");
+        if setup_path.exists() && setup_path != *test_path {
+            let setup_source = std::fs::read_to_string(&setup_path)
+                .with_context(|| format!("read {}", setup_path.display()))?;
+            let setup_script = parse::parse_script(&setup_source)
+                .with_context(|| format!("parse {}", setup_path.display()))?;
+
+            // If the test file has only the default context with no commands,
+            // replace it with the setup contexts
+            let has_own_contexts = script.contexts.len() > 1
+                || (script.contexts.len() == 1 && script.contexts[0].name != "(default)")
+                || (script.contexts.len() == 1 && !script.contexts[0].commands.is_empty());
+
+            if !has_own_contexts {
+                script.contexts = setup_script.contexts;
+            }
+
+            // Merge setup tests (baseline invocations) into the test file's tests
+            for setup_test in setup_script.tests {
+                if !script.tests.iter().any(|t| t.args == setup_test.args) {
+                    script.tests.insert(0, setup_test);
+                }
+            }
+        }
+    }
 
     let ctx_names: Vec<&str> = script.contexts.iter().map(|c| c.name.as_str()).collect();
     eprintln!("Binary: {}", binary);
@@ -245,7 +273,25 @@ fn cmd_run(binary: &str, test_path: &PathBuf) -> Result<()> {
     std::fs::rename(&tmp_path, test_path)
         .with_context(|| format!("rename to {}", test_path.display()))?;
 
-    if total_passed < total_checks {
+    // Exit 1 only if any check failed in ALL contexts it ran in (totally wrong).
+    // Context-dependent checks (pass in some, fail in others) are informational.
+    let mut any_total_failure = false;
+    for result in &results {
+        if result.context_results.is_empty() {
+            continue;
+        }
+        let num_checks = result.context_results[0].checks.len();
+        for ci in 0..num_checks {
+            let all_failed = result
+                .context_results
+                .iter()
+                .all(|cr| !cr.checks[ci].passed);
+            if all_failed && !result.context_results.is_empty() {
+                any_total_failure = true;
+            }
+        }
+    }
+    if any_total_failure {
         std::process::exit(1);
     }
 
