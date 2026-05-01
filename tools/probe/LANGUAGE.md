@@ -1,82 +1,105 @@
 # Probe Test Script Language
 
-A `.test` file describes a sandbox, a set of invocations, and predictions about their output. The tool builds the sandbox, runs each invocation, checks every prediction, and reports quality metrics (discrimination, cross-flag specificity).
+A `.test` file describes execution contexts, invocations of a binary, and predictions about its output. The tool runs the tests, annotates the file with observations and outcomes, and reports quality metrics.
 
 ## Structure
 
 ```
 # Comments start with #
+# Tool annotations start with #> (stripped and regenerated each run)
 
-<setup commands>
+context "name"
+  <setup commands>
 
-test args "arg1" "arg2" ...
+context "other" extends "name"
+  <additional setup>
+
+test args "arg1" "arg2"
   expect <dimension> <predicate>
   expect <dimension> <predicate>
 
-test args "arg1" "arg2" "arg3" ...
+test args "arg1" "arg2" "arg3" in "name" "other"
   expect <dimension> <predicate>
 ```
 
-Setup commands come first. Then one or more test blocks, each starting with `test args` followed by indented `expect` lines. The first test block is treated as the control for discrimination analysis.
+Contexts come first, then test blocks. Test blocks run in all contexts by default, or in specific contexts with the `in` clause. Each invocation gets a fresh context instance.
 
-## Setup Commands
+## Contexts
 
-### file
-
-Create a file in the sandbox.
+A named execution context declares the input state the binary will see.
 
 ```
-file "path" "line1" "line2"       # File with content (lines joined with \n)
-file "path" size 1000             # File filled to N bytes
-file "path" empty                 # Empty file (0 bytes)
-file "path"                       # Also empty file
+context "base"
+  file "visible.txt" "hello"
+  file ".hidden" "secret"
+  dir "subdir"
+  env LANG "C"
+
+context "with backups" extends "base"
+  file "backup.txt~" "old"
+
+context "minimal"
+  file "only.txt" "alone"
 ```
 
-Parent directories are created automatically. Content strings support escape sequences: `\n`, `\t`, `\\`, `\"`.
+`extends` inherits all setup from another context, then applies additional commands. Contexts in `setup.test` are shared across all surface files in the same directory.
 
-### dir
+### Setup commands
 
-Create a directory.
+**file** — create a file:
+```
+file "path" "line1" "line2"       # content lines joined with \n
+file "path" size 1000             # filled to N bytes
+file "path" empty                 # empty file
+file "path"                       # also empty
+file "path" from "fixtures/data"  # copy from external path
+```
 
+**dir** — create a directory:
 ```
 dir "subdir"
-dir "path/to/nested"              # Parent dirs created automatically
+dir "path/to/nested"
 ```
 
-### link
-
-Create a symbolic link.
-
+**link** — create a symbolic link:
 ```
-link "name" -> "target"
+link "name" -> "target"           # target need not exist
 ```
 
-The target does not need to exist (creates a broken symlink).
-
-### props
-
-Set properties on an existing file or directory.
-
+**props** — set properties on an existing path:
 ```
 props "path" executable           # chmod +x
 props "path" readonly             # chmod -w
-props "path" mtime old            # Set mtime to year 2000
-props "path" mtime recent         # Touch file (update mtime to now)
+props "path" mtime old            # set mtime to year 2000
+props "path" mtime recent         # touch (update mtime to now)
 ```
 
-Multiple properties can be set in one line: `props "path" executable mtime old`.
-
-### env
-
-Set an environment variable for all invocations.
-
+**env** — set an environment variable:
 ```
-env LANG "en_US.UTF-8"
+env LANG "C"
+env HOME "."
 ```
 
-## Test Blocks
+**remove** — remove a path inherited from `extends`:
+```
+context "no hidden" extends "base"
+  remove ".hidden"
+```
 
-Each test block declares an invocation and its expected behavior.
+**invoke** — run the binary under test during context setup:
+```
+context "repo"
+  invoke "init"
+  file "readme.md" "hello"
+  invoke "add" "."
+  invoke "commit" "-m" "initial"
+```
+
+`invoke` runs the same binary being probed — not arbitrary commands. Used to bootstrap complex state (git repos, databases) from the binary's own verified operations.
+
+## Test blocks
+
+Each test block declares an invocation and predictions about its behavior.
 
 ```
 test args "." "-a"
@@ -85,13 +108,39 @@ test args "." "-a"
   expect exit 0
 ```
 
-The `args` are passed directly to the binary. Multiple test blocks can reference each other via `vs` clauses — the args identify the invocation.
+Arguments are passed directly to the binary. Multiple test blocks can reference each other via `vs` clauses — the args identify the invocation.
 
-## Expect Predicates
+**Context scoping** — limit a test block to specific contexts:
+```
+test args "." "-B" in "with backups"
+  expect stdout not-contains "backup.txt~"
+```
+
+Without `in`, the test runs in all contexts.
+
+**Stdin** — provide input on stdin:
+```
+test args "-i" "pattern"
+  stdin "Hello World" "foo bar" "hello again"
+  expect stdout contains "Hello"
+
+test args
+  stdin from "data.txt"
+  expect stdout not-empty
+```
+
+**Per-invocation environment:**
+```
+test args "."
+  env LANG "en_US.UTF-8"
+  expect stdout not-empty
+```
+
+## Expect predicates
 
 ### stdout
 
-**Content checks:**
+**Content:**
 
 | Syntax | Meaning |
 |---|---|
@@ -101,7 +150,7 @@ The `args` are passed directly to the binary. Multiple test blocks can reference
 | `not-contains "text"` | stdout does not contain the substring |
 | `every-line-matches "regex"` | every non-empty line matches the regex |
 
-**Positional checks:**
+**Positional:**
 
 | Syntax | Meaning |
 |---|---|
@@ -109,24 +158,22 @@ The `args` are passed directly to the binary. Multiple test blocks can reference
 | `line N not-contains "text"` | line N does not contain substring |
 | `"X" before "Y"` | line containing X appears before line containing Y |
 
-**Quantitative checks (vs another invocation):**
+**Quantitative (vs another invocation):**
 
 | Syntax | Meaning |
 |---|---|
 | `lines exactly N` | exactly N non-empty lines |
-| `lines same as "arg1" "arg2"` | same non-empty line count as reference |
-| `lines more than "arg1" "arg2"` | more non-empty lines than reference |
-| `lines fewer than "arg1" "arg2"` | fewer non-empty lines than reference |
+| `lines same as "args"` | same non-empty line count as reference |
+| `lines more than "args"` | more non-empty lines than reference |
+| `lines fewer than "args"` | fewer non-empty lines than reference |
 
-**Structural checks (vs another invocation):**
-
-These use the delta classifier to compare output structure against a reference invocation.
+**Structural (vs another invocation):**
 
 | Syntax | Meaning |
 |---|---|
 | `reordered vs "args"` | same lines, different order |
-| `superset vs "args"` | contains all lines from reference plus more |
-| `subset vs "args"` | contains only a subset of reference lines |
+| `superset vs "args"` | all reference lines present, plus more |
+| `subset vs "args"` | only a subset of reference lines |
 | `preserved vs "args"` | all entry names present, format may differ |
 
 ### stderr
@@ -136,46 +183,93 @@ These use the delta classifier to compare output structure against a reference i
 | `empty` | stderr is empty |
 | `not-empty` | stderr has content |
 | `contains "text"` | stderr contains substring |
-| `unchanged vs "arg1" "arg2"` | stderr identical to reference invocation |
+| `unchanged vs "args"` | stderr identical to reference invocation |
 
 ### exit
 
 | Syntax | Meaning |
 |---|---|
-| `N` | exit code equals N (e.g., `expect exit 0`) |
-| `unchanged vs "arg1" "arg2"` | same exit code as reference |
-| `changed vs "arg1" "arg2"` | different exit code from reference |
+| `N` | exit code equals N |
+| `unchanged vs "args"` | same exit code as reference |
+| `changed vs "args"` | different exit code from reference |
 
-## Output
+### file (post-execution)
 
-The tool reports per-test results with quality metrics:
+| Syntax | Meaning |
+|---|---|
+| `file "path" exists` | file exists after invocation |
+| `file "path" not-exists` | file does not exist after invocation |
+| `file "path" contains "text"` | file content contains substring |
+
+## Annotations
+
+Tool-generated lines use the `#>` prefix. They are stripped and regenerated on each run.
+
+**Observations** — what the binary produced:
+```
+test args "." "-a"
+  #> stdout (base):
+  #>   .
+  #>   ..
+  #>   .hidden
+  #>   visible.txt
+  #> stdout (no hidden): 4 lines
+  #> stdout (empty): 2 lines
+  #> exit: 0 in all contexts
+```
+
+**Check results** — whether predictions matched:
+```
+  expect stdout superset vs "."
+  #> passed in all 3 contexts
+  expect stdout contains ".hidden"
+  #> passed in: base (failed in: no hidden, empty)
+```
+
+**Per-file summary:**
+```
+#> 8/10 passed
+#> properties: superset vs ".", contains ".", contains "..", exit 0
+#> context-dependent: contains ".hidden" (needs hidden files in context)
+#> failed: lines exactly 7 (context-specific count)
+#> confused with: -f
+```
+
+**Categories:**
+- **Properties** — passed in all contexts tested. General truths about the behavior.
+- **Context-dependent** — passed in some contexts. Reveals preconditions.
+- **Failed** — wrong predictions. The revision history.
+
+## Directory structure
 
 ```
-Binary: ls
-Setup: 5 commands
-Tests: 2
-  ✓ test args ["."]: 4/4 predictions
-  ✓ test args [".", "-a"]: 6/6 predictions (1 non-discriminating)
-    ~ expected exit 0, got 0
-    [confused with: -f]
+surfaces/<binary>/
+  _status.md              # generated: corpus summary
+  _bootstrap.test         # help text, default output, errors
+  setup.test              # shared contexts
+  <surface>.test           # one file per behavioral surface
 ```
 
-- `✓` — check passed
-- `✗` — check failed (with context showing observed output)
-- `~` — check passed but is non-discriminating (also passes on control)
-- `[confused with: ...]` — other flags whose output also passes all checks
-- `[only in control]` / `[only in option]` — diff shown for non-discriminating checks
-- `[stdout identical]` — flag has no visible effect in pipe mode
+The tool operates on the whole directory:
+```
+bman-probe <binary> surfaces/<binary>/
+```
+
+`setup.test` contexts are available to all surface files. `_status.md` summarizes the corpus — what's tested, what's stubbed, what's untested, what needs work. It is regenerated each run.
 
 ## Example
 
 ```
 # ls -r: reverse sort order
 
-file "alpha.txt" "a"
-file "beta.txt" "b"
-file "gamma.txt" "c"
-file "delta.txt" "d"
+context "base"
+  file "alpha.txt" "a"
+  file "beta.txt" "b"
+  file "gamma.txt" "c"
+
+context "more files" extends "base"
+  file "delta.txt" "d"
+  file "epsilon.txt" "e"
 
 test args "."
   expect stdout not-empty
@@ -184,7 +278,6 @@ test args "."
 test args "." "-r"
   expect stdout reordered vs "."
   expect stdout lines same as "."
-  expect stdout line 1 contains "gamma.txt"
-  expect stdout "gamma.txt" before "alpha.txt"
+  expect stdout line 1 contains "gamma.txt" in "base"
   expect exit 0
 ```
