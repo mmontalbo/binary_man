@@ -144,9 +144,8 @@ fn cmd_run(binary: &str, test_path: &PathBuf) -> Result<()> {
             }
         }
 
-        // For observation-only blocks, suggest expectations
+        // For observation-only blocks, suggest expectations and validate across contexts
         if num_checks == 0 {
-            // Find baseline: the test block with shortest args
             let baseline_args: Option<&Vec<String>> = results
                 .iter()
                 .filter(|r| r.args != result.args && !r.context_results.is_empty())
@@ -154,43 +153,84 @@ fn cmd_run(binary: &str, test_path: &PathBuf) -> Result<()> {
                 .map(|r| &r.args);
 
             if let Some(base_args) = baseline_args {
-                // Find first context where both have non-empty stdout
-                let mut suggested = false;
+                // Generate suggestions from first non-empty context
+                let mut suggestions = Vec::new();
+                let mut source_ctx = "";
+
                 for cr in &result.context_results {
                     if cr.observation.stdout.trim().is_empty() {
                         continue;
                     }
-                    // Find the baseline observation in this context
-                    let base_result = results
-                        .iter()
-                        .find(|r| r.args == *base_args);
+                    let base_result = results.iter().find(|r| r.args == *base_args);
                     let base_obs = base_result.and_then(|r| {
                         r.context_results
                             .iter()
                             .find(|bcr| bcr.context_name == cr.context_name)
                             .map(|bcr| &bcr.observation)
                     });
-
                     if let Some(base) = base_obs {
                         if !base.stdout.trim().is_empty() {
-                            let suggestions =
+                            suggestions =
                                 suggest_expectations(base, &cr.observation, base_args);
-                            if !suggestions.is_empty() {
-                                results_lines.push(format!(
-                                    "#> suggested (from {} context):",
-                                    cr.context_name
-                                ));
-                                for s in &suggestions {
-                                    results_lines.push(format!("#>   {}", s));
-                                }
-                                suggested = true;
-                                break;
-                            }
+                            source_ctx = &cr.context_name;
+                            break;
                         }
                     }
                 }
-                if !suggested {
-                    results_lines.push("#> no suggestions (no comparable baseline)".to_string());
+
+                if !suggestions.is_empty() {
+                    // Validate each suggestion across all contexts
+                    results_lines.push(format!(
+                        "#> suggested (from {}):",
+                        source_ctx
+                    ));
+
+                    let base_result = results.iter().find(|r| r.args == *base_args);
+
+                    for sugg in &suggestions {
+                        // Try to parse and validate the suggestion across contexts
+                        let mut holds_in = Vec::new();
+                        let mut fails_in = Vec::new();
+
+                        for cr in &result.context_results {
+                            let base_obs = base_result.and_then(|r| {
+                                r.context_results
+                                    .iter()
+                                    .find(|bcr| bcr.context_name == cr.context_name)
+                                    .map(|bcr| &bcr.observation)
+                            });
+
+                            if let Some(base) = base_obs {
+                                let holds = check_suggestion(sugg, base, &cr.observation);
+                                if holds {
+                                    holds_in.push(cr.context_name.as_str());
+                                } else {
+                                    fails_in.push(cr.context_name.as_str());
+                                }
+                            }
+                        }
+
+                        let total_ctx = holds_in.len() + fails_in.len();
+                        if holds_in.len() == total_ctx {
+                            results_lines.push(format!(
+                                "#>   {} — all {} contexts",
+                                sugg, total_ctx
+                            ));
+                        } else if !holds_in.is_empty() {
+                            results_lines.push(format!(
+                                "#>   {} — holds in: {} (fails in: {})",
+                                sugg,
+                                holds_in.join(", "),
+                                fails_in.join(", ")
+                            ));
+                        } else {
+                            // Fails everywhere — still show but mark
+                            results_lines.push(format!(
+                                "#>   {} — fails in all contexts",
+                                sugg
+                            ));
+                        }
+                    }
                 }
             }
         }
@@ -508,12 +548,18 @@ fn suggest_expectations(
     let base_set: std::collections::HashSet<&str> = base_lines.iter().copied().collect();
     let opt_set: std::collections::HashSet<&str> = opt_lines.iter().copied().collect();
 
-    // Structural suggestion via delta classifier
     let rel = delta::classify_stdout(&baseline.stdout, &option.stdout);
+    let is_preserved = matches!(
+        rel,
+        delta::EntryRelation::Preserved
+            | delta::EntryRelation::PreservedPrefixAdded
+            | delta::EntryRelation::PreservedFieldsExpanded
+            | delta::EntryRelation::PreservedWrapped
+    );
+
+    // Structural suggestion
     match rel {
-        delta::EntryRelation::Identical => {
-            // No structural difference — nothing useful to suggest
-        }
+        delta::EntryRelation::Identical => {}
         delta::EntryRelation::Superset => {
             suggestions.push(format!("expect stdout superset vs {}", vs_str));
         }
@@ -522,19 +568,23 @@ fn suggest_expectations(
         }
         delta::EntryRelation::Reordered => {
             suggestions.push(format!("expect stdout reordered vs {}", vs_str));
-        }
-        _ => {
-            // Preserved, Disjoint, etc. — suggest preserved as a broad match
-            if matches!(
-                rel,
-                delta::EntryRelation::Preserved
-                    | delta::EntryRelation::PreservedPrefixAdded
-                    | delta::EntryRelation::PreservedFieldsExpanded
-                    | delta::EntryRelation::PreservedWrapped
-            ) {
-                suggestions.push(format!("expect stdout preserved vs {}", vs_str));
+            // For reordered: suggest line 1 contains (pins the sort order)
+            let non_empty: Vec<&str> = opt_lines
+                .iter()
+                .filter(|l| !l.is_empty())
+                .copied()
+                .collect();
+            if !non_empty.is_empty() {
+                suggestions.push(format!(
+                    "expect stdout line 1 contains \"{}\"",
+                    non_empty[0]
+                ));
             }
         }
+        _ if is_preserved => {
+            suggestions.push(format!("expect stdout preserved vs {}", vs_str));
+        }
+        _ => {}
     }
 
     // Line count comparison
@@ -555,17 +605,27 @@ fn suggest_expectations(
         .iter()
         .filter(|l| !l.is_empty() && !base_set.contains(**l))
         .collect();
-    for line in only_in_option.iter().take(5) {
-        suggestions.push(format!("expect stdout contains \"{}\"", line));
+    // For superset/subset: suggest contains for added entries
+    // For preserved: skip — the entries are reformatted, not new
+    if !is_preserved {
+        for line in only_in_option.iter().take(5) {
+            suggestions.push(format!("expect stdout contains \"{}\"", line));
+        }
     }
 
-    // Content suggestions: lines only in baseline (removed entries)
-    let only_in_baseline: Vec<&&str> = base_lines
-        .iter()
-        .filter(|l| !l.is_empty() && !opt_set.contains(**l))
-        .collect();
-    for line in only_in_baseline.iter().take(3) {
-        suggestions.push(format!("expect stdout not-contains \"{}\"", line));
+    // Not-contains for removed entries — only for subset (entries actually removed)
+    // Skip for preserved (entries are still there, just reformatted)
+    if matches!(rel, delta::EntryRelation::Subset) {
+        let only_in_baseline: Vec<&&str> = base_lines
+            .iter()
+            .filter(|l| !l.is_empty() && !opt_set.contains(**l))
+            .collect();
+        for line in only_in_baseline.iter().take(3) {
+            // Only suggest if the text is truly absent from option output
+            if !option.stdout.contains(**line) {
+                suggestions.push(format!("expect stdout not-contains \"{}\"", line));
+            }
+        }
     }
 
     // Exit code
@@ -578,6 +638,88 @@ fn suggest_expectations(
     }
 
     suggestions
+}
+
+/// Check if a suggestion string holds for a given baseline/option pair.
+/// Quick-and-dirty: parse the suggestion and evaluate it.
+fn check_suggestion(
+    suggestion: &str,
+    baseline: &execute::Observation,
+    option: &execute::Observation,
+) -> bool {
+    let s = suggestion.trim();
+
+    if let Some(rest) = s.strip_prefix("expect stdout superset vs ") {
+        let _ = rest;
+        let rel = delta::classify_stdout(&baseline.stdout, &option.stdout);
+        return rel == delta::EntryRelation::Superset;
+    }
+    if let Some(rest) = s.strip_prefix("expect stdout subset vs ") {
+        let _ = rest;
+        let rel = delta::classify_stdout(&baseline.stdout, &option.stdout);
+        return rel == delta::EntryRelation::Subset;
+    }
+    if let Some(rest) = s.strip_prefix("expect stdout reordered vs ") {
+        let _ = rest;
+        let rel = delta::classify_stdout(&baseline.stdout, &option.stdout);
+        return rel == delta::EntryRelation::Reordered;
+    }
+    if let Some(rest) = s.strip_prefix("expect stdout preserved vs ") {
+        let _ = rest;
+        let rel = delta::classify_stdout(&baseline.stdout, &option.stdout);
+        return matches!(
+            rel,
+            delta::EntryRelation::Preserved
+                | delta::EntryRelation::PreservedPrefixAdded
+                | delta::EntryRelation::PreservedFieldsExpanded
+                | delta::EntryRelation::PreservedWrapped
+        );
+    }
+    if let Some(rest) = s.strip_prefix("expect stdout lines more than ") {
+        let _ = rest;
+        let opt_c = option.stdout.lines().filter(|l| !l.is_empty()).count();
+        let base_c = baseline.stdout.lines().filter(|l| !l.is_empty()).count();
+        return opt_c > base_c;
+    }
+    if let Some(rest) = s.strip_prefix("expect stdout lines fewer than ") {
+        let _ = rest;
+        let opt_c = option.stdout.lines().filter(|l| !l.is_empty()).count();
+        let base_c = baseline.stdout.lines().filter(|l| !l.is_empty()).count();
+        return opt_c < base_c;
+    }
+    if let Some(rest) = s.strip_prefix("expect stdout lines same as ") {
+        let _ = rest;
+        let opt_c = option.stdout.lines().filter(|l| !l.is_empty()).count();
+        let base_c = baseline.stdout.lines().filter(|l| !l.is_empty()).count();
+        return opt_c == base_c;
+    }
+    if let Some(rest) = s.strip_prefix("expect stdout contains \"") {
+        if let Some(text) = rest.strip_suffix('"') {
+            return option.stdout.contains(text);
+        }
+    }
+    if let Some(rest) = s.strip_prefix("expect stdout not-contains \"") {
+        if let Some(text) = rest.strip_suffix('"') {
+            return !option.stdout.contains(text);
+        }
+    }
+    if let Some(rest) = s.strip_prefix("expect stdout line 1 contains \"") {
+        if let Some(text) = rest.strip_suffix('"') {
+            let first = option.stdout.lines().find(|l| !l.is_empty());
+            return first.is_some_and(|f| f.contains(text));
+        }
+    }
+    if let Some(rest) = s.strip_prefix("expect exit ") {
+        if let Ok(code) = rest.trim().parse::<i32>() {
+            return option.exit_code == Some(code);
+        }
+    }
+    if s == "expect stderr not-empty" {
+        return !option.stderr.trim().is_empty();
+    }
+
+    // Unknown suggestion format — assume it holds
+    true
 }
 
 #[cfg(test)]
