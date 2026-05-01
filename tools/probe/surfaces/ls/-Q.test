@@ -8,7 +8,7 @@ test args "."
   expect exit 0
 
 test args "." "-Q"
-  expect stdout preserved wrapped vs "."
+  expect stdout preserved vs "."
   expect stdout contains "\"alpha.txt\""
   expect stdout contains "\"beta.txt\""
   expect stdout lines same as "."

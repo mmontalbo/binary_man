@@ -103,6 +103,14 @@ pub fn apply_setup(work_dir: &Path, commands: &[SetupCommand]) -> Result<()> {
             SetupCommand::SetEnv { var, value } => {
                 std::env::set_var(var, value);
             }
+            SetupCommand::Remove { path } => {
+                let full = work_dir.join(path);
+                if full.is_dir() {
+                    let _ = fs::remove_dir_all(&full);
+                } else {
+                    let _ = fs::remove_file(&full);
+                }
+            }
         }
     }
     Ok(())

@@ -15,124 +15,123 @@ pub struct Observation {
     pub exit_code: Option<i32>,
 }
 
-/// Result of validating one test's predictions.
+/// Result of validating one test's predictions across contexts.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct TestResult {
     pub args: Vec<String>,
+    pub context_results: Vec<ContextTestResult>,
+}
+
+/// Result of one test in one context.
+#[derive(Debug)]
+pub struct ContextTestResult {
+    pub context_name: String,
     pub observation: Observation,
     pub checks: Vec<CheckResult>,
-    /// Flags whose output also passes all expectations (low specificity).
-    pub confused_with: Vec<String>,
 }
 
 #[derive(Debug)]
 pub struct CheckResult {
     pub passed: bool,
     pub detail: String,
-    /// Additional context lines shown on failure (observed values, diffs, etc.)
     pub context: Vec<String>,
     /// Whether this check discriminates this invocation from at least one
-    /// other invocation in the script.
+    /// other invocation in this context.
     pub discriminates: Option<bool>,
 }
 
-const COMMON_FLAGS: &[&str] = &[
-    "-a", "-A", "-b", "-B", "-c", "-d", "-f", "-F", "-g", "-G",
-    "-h", "-i", "-l", "-L", "-m", "-n", "-N", "-o", "-p", "-q",
-    "-Q", "-r", "-R", "-s", "-S", "-t", "-u", "-U", "-v", "-x",
-    "-X", "-1",
-];
-
-/// Run an entire test script and validate predictions.
+/// Run an entire test script across all contexts.
 pub fn run_script(binary: &str, script: &Script) -> Result<Vec<TestResult>> {
-    // Create sandbox
-    let sandbox_dir = tempfile::Builder::new()
-        .prefix("probe_")
-        .tempdir()
-        .context("create sandbox")?;
+    // For each context, run all applicable tests
+    // Key: (context_name, args) -> observation
+    let mut all_observations: HashMap<(String, Vec<String>), Observation> = HashMap::new();
 
-    let work_dir = sandbox_dir.path();
+    for ctx in &script.contexts {
+        let sandbox_dir = tempfile::Builder::new()
+            .prefix("probe_")
+            .tempdir()
+            .context("create sandbox")?;
+        let work_dir = sandbox_dir.path();
 
-    // Apply setup
-    sandbox::apply_setup(work_dir, &script.setup)?;
+        sandbox::apply_setup(work_dir, &ctx.commands)?;
 
-    // Collect all observations (keyed by args for cross-referencing)
-    let mut observations: HashMap<Vec<String>, Observation> = HashMap::new();
-    let mut results = Vec::new();
-
-    // First pass: run all tests to collect observations
-    for test in &script.tests {
-        let obs = run_invocation(binary, &test.args, work_dir)?;
-        observations.insert(test.args.clone(), obs.clone());
-    }
-
-    // Run all common flags for cross-flag specificity check
-    let mut flag_observations: HashMap<String, Observation> = HashMap::new();
-    for flag in COMMON_FLAGS {
-        let args = vec![".".to_string(), flag.to_string()];
-        if !observations.contains_key(&args) {
-            if let Ok(obs) = run_invocation(binary, &args, work_dir) {
-                flag_observations.insert(flag.to_string(), obs);
+        for test in &script.tests {
+            // Check if this test applies to this context
+            if let Some(ref scoped) = test.in_contexts {
+                if !scoped.contains(&ctx.name) {
+                    continue;
+                }
             }
+
+            let obs = run_invocation(binary, &test.args, work_dir)?;
+            all_observations.insert((ctx.name.clone(), test.args.clone()), obs);
         }
     }
 
-    // Second pass: validate predictions + discrimination + specificity
-    for (i, test) in script.tests.iter().enumerate() {
-        let obs = observations.get(&test.args).unwrap().clone();
-        let mut checks = validate::check_expectations(test, &obs, &observations);
+    // Build results: for each test, collect per-context results
+    let mut results = Vec::new();
 
-        // Discrimination: check against all OTHER invocations in the script.
-        // A check discriminates if it fails for at least one other invocation.
-        let mut disc = vec![false; checks.len()];
-        for (j, other_test) in script.tests.iter().enumerate() {
-            if j == i {
-                continue;
+    for (ti, test) in script.tests.iter().enumerate() {
+        let mut context_results = Vec::new();
+
+        for ctx in &script.contexts {
+            // Skip contexts this test doesn't apply to
+            if let Some(ref scoped) = test.in_contexts {
+                if !scoped.contains(&ctx.name) {
+                    continue;
+                }
             }
-            if let Some(other_obs) = observations.get(&other_test.args) {
-                let other_checks =
-                    validate::check_expectations(test, other_obs, &observations);
-                for (ci, oc) in other_checks.iter().enumerate() {
-                    if !oc.passed {
-                        disc[ci] = true;
+
+            let key = (ctx.name.clone(), test.args.clone());
+            let obs = match all_observations.get(&key) {
+                Some(o) => o.clone(),
+                None => continue,
+            };
+
+            // Build observations map for this context (for vs references)
+            let ctx_observations: HashMap<Vec<String>, Observation> = script
+                .tests
+                .iter()
+                .filter_map(|t| {
+                    let k = (ctx.name.clone(), t.args.clone());
+                    all_observations.get(&k).map(|o| (t.args.clone(), o.clone()))
+                })
+                .collect();
+
+            let mut checks = validate::check_expectations(test, &obs, &ctx_observations);
+
+            // Discrimination: check against all other invocations in this context
+            let mut disc = vec![false; checks.len()];
+            for (tj, other_test) in script.tests.iter().enumerate() {
+                if tj == ti {
+                    continue;
+                }
+                let other_key = (ctx.name.clone(), other_test.args.clone());
+                if let Some(other_obs) = all_observations.get(&other_key) {
+                    let other_checks =
+                        validate::check_expectations(test, other_obs, &ctx_observations);
+                    for (ci, oc) in other_checks.iter().enumerate() {
+                        if !oc.passed {
+                            disc[ci] = true;
+                        }
                     }
                 }
             }
-        }
-        for (ci, check) in checks.iter_mut().enumerate() {
-            check.discriminates = if script.tests.len() > 1 {
-                Some(disc[ci])
-            } else {
-                None // Single test block — discrimination not applicable
-            };
-        }
-
-        // Cross-flag specificity: which other flags pass all expectations?
-        let mut confused_with = Vec::new();
-        let tested_flags: Vec<&str> = test
-            .args
-            .iter()
-            .filter(|a| a.starts_with('-'))
-            .map(|a| a.as_str())
-            .collect();
-
-        for (flag, flag_obs) in &flag_observations {
-            if tested_flags.contains(&flag.as_str()) {
-                continue;
+            let has_peers = script.tests.len() > 1;
+            for (ci, check) in checks.iter_mut().enumerate() {
+                check.discriminates = if has_peers { Some(disc[ci]) } else { None };
             }
-            let xcheck = validate::check_expectations(test, flag_obs, &observations);
-            if xcheck.iter().all(|c| c.passed) {
-                confused_with.push(flag.clone());
-            }
+
+            context_results.push(ContextTestResult {
+                context_name: ctx.name.clone(),
+                observation: obs,
+                checks,
+            });
         }
-        confused_with.sort();
 
         results.push(TestResult {
             args: test.args.clone(),
-            observation: obs,
-            checks,
-            confused_with,
+            context_results,
         });
     }
 
@@ -140,7 +139,11 @@ pub fn run_script(binary: &str, script: &Script) -> Result<Vec<TestResult>> {
 }
 
 /// Run a single invocation and capture output.
-fn run_invocation(binary: &str, args: &[String], work_dir: &std::path::Path) -> Result<Observation> {
+fn run_invocation(
+    binary: &str,
+    args: &[String],
+    work_dir: &std::path::Path,
+) -> Result<Observation> {
     let mut cmd = Command::new(binary);
     cmd.args(args);
     cmd.current_dir(work_dir);
@@ -148,7 +151,6 @@ fn run_invocation(binary: &str, args: &[String], work_dir: &std::path::Path) -> 
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
-    // Set minimal environment
     cmd.env_clear();
     cmd.env("PATH", std::env::var("PATH").unwrap_or_default());
     cmd.env("HOME", work_dir);

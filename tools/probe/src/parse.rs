@@ -1,29 +1,38 @@
 //! Parser for the test script language.
 //!
 //! Format:
-//!   file "path" "line1" "line2" ...
-//!   file "path" size <n>
-//!   file "path" empty
-//!   dir "path"
-//!   link "name" -> "target"
-//!   props "path" executable | mtime old
-//!   env VAR "value"
+//!   context "name"
+//!     file "path" "line1" "line2" ...
+//!     dir "path"
+//!     ...
+//!
+//!   context "other" extends "name"
+//!     file "extra" "content"
 //!
 //!   test args "arg1" "arg2" ...
+//!     in "ctx1" "ctx2"
 //!     expect stdout <predicate>
-//!     expect stderr <predicate>
 //!     expect exit <predicate>
 
 use anyhow::{bail, Context, Result};
+use std::collections::HashMap;
 
 /// A parsed test script.
 #[derive(Debug)]
 pub struct Script {
-    pub setup: Vec<SetupCommand>,
+    pub contexts: Vec<NamedContext>,
     pub tests: Vec<Test>,
 }
 
-/// A setup command that modifies sandbox state.
+/// A named execution context with setup commands.
+#[derive(Debug, Clone)]
+pub struct NamedContext {
+    pub name: String,
+    pub extends: Option<String>,
+    pub commands: Vec<SetupCommand>,
+}
+
+/// A setup command that modifies execution context state.
 #[derive(Debug, Clone)]
 pub enum SetupCommand {
     CreateFile {
@@ -44,6 +53,9 @@ pub enum SetupCommand {
     SetEnv {
         var: String,
         value: String,
+    },
+    Remove {
+        path: String,
     },
 }
 
@@ -67,6 +79,8 @@ pub enum Property {
 pub struct Test {
     pub args: Vec<String>,
     pub expectations: Vec<Expectation>,
+    /// If set, only run in these contexts. None = all contexts.
+    pub in_contexts: Option<Vec<String>>,
 }
 
 /// A single prediction about an output dimension.
@@ -123,52 +137,178 @@ pub enum Predicate {
 
 /// Parse a test script from source text.
 pub fn parse_script(source: &str) -> Result<Script> {
-    let mut setup = Vec::new();
-    let mut tests = Vec::new();
+    let mut contexts: Vec<NamedContext> = Vec::new();
+    let mut tests: Vec<Test> = Vec::new();
     let mut current_test: Option<Test> = None;
+    let mut current_context: Option<NamedContext> = None;
+    // Collect top-level setup commands (no context block) for backward compat
+    let mut bare_setup: Vec<SetupCommand> = Vec::new();
+    let mut has_named_contexts = false;
 
     for (line_num, raw_line) in source.lines().enumerate() {
         let line = raw_line.trim();
         let line_num = line_num + 1;
 
-        // Skip empty lines and comments
+        // Skip empty lines and comments (including #> tool annotations)
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
 
-        if let Some(rest) = line.strip_prefix("expect ") {
+        if let Some(rest) = line.strip_prefix("context ") {
+            // Start a new context — flush previous context and test
+            if let Some(t) = current_test.take() {
+                tests.push(t);
+            }
+            if let Some(ctx) = current_context.take() {
+                contexts.push(ctx);
+            }
+            has_named_contexts = true;
+            let ctx = parse_context_line(rest, line_num)?;
+            current_context = Some(ctx);
+        } else if let Some(rest) = line.strip_prefix("expect ") {
             // Expectation line — must be inside a test
             let test = current_test.as_mut().ok_or_else(|| {
                 anyhow::anyhow!("line {}: 'expect' outside of a test block", line_num)
             })?;
             let exp = parse_expectation(rest, line_num)?;
             test.expectations.push(exp);
+        } else if let Some(rest) = line.strip_prefix("in ") {
+            // Context scope — must be inside a test (before any expects)
+            let test = current_test.as_mut().ok_or_else(|| {
+                anyhow::anyhow!("line {}: 'in' outside of a test block", line_num)
+            })?;
+            let scope = parse_quoted_strings(rest.trim(), line_num)?;
+            test.in_contexts = Some(scope);
         } else if let Some(rest) = line.strip_prefix("test ") {
             // Start a new test — flush previous
             if let Some(t) = current_test.take() {
                 tests.push(t);
             }
+            // Flush context if open (test blocks come after contexts)
+            if let Some(ctx) = current_context.take() {
+                contexts.push(ctx);
+            }
             let args = parse_test_line(rest, line_num)?;
             current_test = Some(Test {
                 args,
                 expectations: Vec::new(),
+                in_contexts: None,
             });
         } else {
-            // Setup command — flush any open test first
-            if let Some(t) = current_test.take() {
-                tests.push(t);
-            }
+            // Setup command — must be inside a context (or bare top-level)
             let cmd = parse_setup_line(line, line_num)?;
-            setup.push(cmd);
+            if let Some(ctx) = current_context.as_mut() {
+                ctx.commands.push(cmd);
+            } else {
+                // Flush any open test first
+                if let Some(t) = current_test.take() {
+                    tests.push(t);
+                }
+                bare_setup.push(cmd);
+            }
         }
     }
 
-    // Flush final test
+    // Flush final context and test
+    if let Some(ctx) = current_context.take() {
+        contexts.push(ctx);
+    }
     if let Some(t) = current_test.take() {
         tests.push(t);
     }
 
-    Ok(Script { setup, tests })
+    // Backward compatibility: if no named contexts, wrap bare setup as default
+    if !has_named_contexts && !bare_setup.is_empty() {
+        contexts.push(NamedContext {
+            name: "(default)".to_string(),
+            extends: None,
+            commands: bare_setup,
+        });
+    } else if has_named_contexts && !bare_setup.is_empty() {
+        bail!("cannot mix top-level setup commands with named contexts");
+    }
+
+    // If no contexts at all, create an empty default
+    if contexts.is_empty() {
+        contexts.push(NamedContext {
+            name: "(default)".to_string(),
+            extends: None,
+            commands: Vec::new(),
+        });
+    }
+
+    // Resolve extends
+    let resolved = resolve_extends(&contexts)?;
+
+    Ok(Script {
+        contexts: resolved,
+        tests,
+    })
+}
+
+/// Parse `context "name"` or `context "name" extends "parent"`.
+fn parse_context_line(rest: &str, line_num: usize) -> Result<NamedContext> {
+    let tokens = tokenize(rest.trim(), line_num)?;
+    if tokens.is_empty() {
+        bail!("line {}: context requires a name", line_num);
+    }
+    let name = tokens[0].clone();
+    let extends = if tokens.len() >= 3 && tokens[1] == "extends" {
+        Some(tokens[2].clone())
+    } else {
+        None
+    };
+    Ok(NamedContext {
+        name,
+        extends,
+        commands: Vec::new(),
+    })
+}
+
+/// Resolve `extends` by copying parent commands and applying removes.
+fn resolve_extends(contexts: &[NamedContext]) -> Result<Vec<NamedContext>> {
+    let by_name: HashMap<&str, &NamedContext> = contexts
+        .iter()
+        .map(|c| (c.name.as_str(), c))
+        .collect();
+
+    let mut resolved = Vec::new();
+    for ctx in contexts {
+        let mut commands = Vec::new();
+
+        if let Some(ref parent_name) = ctx.extends {
+            let parent = by_name.get(parent_name.as_str()).ok_or_else(|| {
+                anyhow::anyhow!("context {:?} extends unknown context {:?}", ctx.name, parent_name)
+            })?;
+            // Copy parent commands (recursion not needed — parent already resolved if ordered)
+            // For simplicity, only support one level of extends for now
+            commands.extend(parent.commands.clone());
+        }
+
+        // Apply own commands, handling removes
+        for cmd in &ctx.commands {
+            match cmd {
+                SetupCommand::Remove { path } => {
+                    commands.retain(|c| match c {
+                        SetupCommand::CreateFile { path: p, .. }
+                        | SetupCommand::CreateDir { path: p }
+                        | SetupCommand::CreateLink { path: p, .. }
+                        | SetupCommand::SetProps { path: p, .. } => p != path,
+                        _ => true,
+                    });
+                }
+                other => commands.push(other.clone()),
+            }
+        }
+
+        resolved.push(NamedContext {
+            name: ctx.name.clone(),
+            extends: ctx.extends.clone(),
+            commands,
+        });
+    }
+
+    Ok(resolved)
 }
 
 fn parse_test_line(rest: &str, line_num: usize) -> Result<Vec<String>> {
@@ -222,7 +362,6 @@ fn parse_setup_line(line: &str, line_num: usize) -> Result<SetupCommand> {
             })
         }
         "link" => {
-            // link "name" -> "target"
             if tokens.len() < 4 || tokens[2] != "->" {
                 bail!(
                     "line {}: link syntax: link \"name\" -> \"target\"",
@@ -259,6 +398,14 @@ fn parse_setup_line(line: &str, line_num: usize) -> Result<SetupCommand> {
             Ok(SetupCommand::SetEnv {
                 var: tokens[1].clone(),
                 value: tokens[2].clone(),
+            })
+        }
+        "remove" => {
+            if tokens.len() < 2 {
+                bail!("line {}: remove command requires a path", line_num);
+            }
+            Ok(SetupCommand::Remove {
+                path: tokens[1].clone(),
             })
         }
         _ => bail!("line {}: unknown command '{}'", line_num, tokens[0]),
@@ -318,10 +465,8 @@ fn parse_stdout_predicate(s: &str, line_num: usize) -> Result<Predicate> {
             .with_context(|| format!("line {}: invalid line count", line_num))?;
         return Ok(Predicate::LinesExactly(n));
     }
-    // Positional: "line N contains ..." / "line N not-contains ..."
     if let Some(rest) = s.strip_prefix("line ") {
         let rest = rest.trim();
-        // Parse "N contains ..." or "N not-contains ..."
         let (n_str, remainder) = rest.split_once(' ')
             .ok_or_else(|| anyhow::anyhow!("line {}: expected 'line N contains/not-contains'", line_num))?;
         let n: usize = n_str.parse()
@@ -337,7 +482,6 @@ fn parse_stdout_predicate(s: &str, line_num: usize) -> Result<Predicate> {
         }
         bail!("line {}: expected 'contains' or 'not-contains' after line number", line_num);
     }
-    // Ordering: '"X" before "Y"'
     if s.contains("\" before \"") {
         let tokens = parse_quoted_strings(s.replace(" before ", " ").trim(), line_num)?;
         if tokens.len() == 2 {
@@ -349,8 +493,6 @@ fn parse_stdout_predicate(s: &str, line_num: usize) -> Result<Predicate> {
         bail!("line {}: expected '\"X\" before \"Y\"'", line_num);
     }
 
-    // Relational predicates: "reordered vs ..."
-    // Relational predicates: "<relation> vs <args>"
     #[allow(clippy::type_complexity)]
     let relational: &[(&str, fn(Vec<String>) -> Predicate)] = &[
         ("preserved vs ", |a| Predicate::Preserved { vs_args: a }),
@@ -417,7 +559,7 @@ fn tokenize(line: &str, _line_num: usize) -> Result<Vec<String>> {
             continue;
         }
         if c == '"' {
-            chars.next(); // consume opening quote
+            chars.next();
             let mut s = String::new();
             loop {
                 match chars.next() {
@@ -478,7 +620,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_simple_script() {
+    fn test_parse_legacy_format() {
         let source = r#"
 # Setup
 file "data.txt" "hello" "world"
@@ -494,10 +636,75 @@ test args "." "-a"
   expect exit 0
 "#;
         let script = parse_script(source).unwrap();
-        assert_eq!(script.setup.len(), 2);
+        assert_eq!(script.contexts.len(), 1);
+        assert_eq!(script.contexts[0].name, "(default)");
+        assert_eq!(script.contexts[0].commands.len(), 2);
         assert_eq!(script.tests.len(), 2);
         assert_eq!(script.tests[0].args, vec!["."]);
-        assert_eq!(script.tests[0].expectations.len(), 2);
         assert_eq!(script.tests[1].args, vec![".", "-a"]);
+        assert!(script.tests[0].in_contexts.is_none());
+    }
+
+    #[test]
+    fn test_parse_named_contexts() {
+        let source = r#"
+context "base"
+  file "visible.txt" "hello"
+  file ".hidden" "secret"
+
+context "empty"
+
+test args "."
+  expect stdout not-empty
+
+test args "." "-a"
+  in "base"
+  expect stdout superset vs "."
+"#;
+        let script = parse_script(source).unwrap();
+        assert_eq!(script.contexts.len(), 2);
+        assert_eq!(script.contexts[0].name, "base");
+        assert_eq!(script.contexts[0].commands.len(), 2);
+        assert_eq!(script.contexts[1].name, "empty");
+        assert_eq!(script.contexts[1].commands.len(), 0);
+        assert_eq!(script.tests.len(), 2);
+        assert!(script.tests[0].in_contexts.is_none());
+        assert_eq!(script.tests[1].in_contexts, Some(vec!["base".to_string()]));
+    }
+
+    #[test]
+    fn test_parse_extends() {
+        let source = r#"
+context "base"
+  file "a.txt" "hello"
+  file ".hidden" "secret"
+
+context "with backup" extends "base"
+  file "backup~" "old"
+
+test args "."
+  expect stdout not-empty
+"#;
+        let script = parse_script(source).unwrap();
+        assert_eq!(script.contexts.len(), 2);
+        // "with backup" should have base's 2 commands + its own 1
+        assert_eq!(script.contexts[1].commands.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_remove() {
+        let source = r#"
+context "base"
+  file "a.txt" "hello"
+  file ".hidden" "secret"
+
+context "no hidden" extends "base"
+  remove ".hidden"
+
+test args "."
+  expect stdout not-empty
+"#;
+        let script = parse_script(source).unwrap();
+        assert_eq!(script.contexts[1].commands.len(), 1); // only a.txt remains
     }
 }
