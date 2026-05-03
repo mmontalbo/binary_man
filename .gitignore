@@ -1,9 +1,4 @@
 /target/
 /.direnv/
-/out/*
-!/out/.gitkeep
-.mock_cycle
-tools/eval_data/
-__pycache__/
-tools/eval/configs/scratch.toml
 .claude/
+*.results
