@@ -12,18 +12,210 @@ fn main() -> Result<()> {
     let dry_run = args.iter().any(|a| a == "--dry-run");
     let positional: Vec<&String> = args.iter().skip(1).filter(|a| !a.starts_with("--")).collect();
 
-    if positional.len() < 2 {
-        eprintln!("Usage: bman [--dry-run] <binary> <test-file>");
+    if positional.is_empty() {
+        eprintln!("Usage: bman [--dry-run] <binary> [<probe-file>]");
+        eprintln!("       bman <binary>              discover flags from --help");
+        eprintln!("       bman <binary> <file.probe>  run observation grid");
         std::process::exit(1);
     }
 
-    let binary = positional[0];
-    let test_path = PathBuf::from(positional[1]);
-
-    if dry_run {
-        cmd_dry_run(binary, &test_path)
+    // If last arg ends in .probe, it's run mode. Otherwise, discovery.
+    let last = positional.last().unwrap();
+    if last.ends_with(".probe") {
+        let binary = positional[0];
+        let test_path = PathBuf::from(last.as_str());
+        if dry_run {
+            cmd_dry_run(binary, &test_path)
+        } else {
+            cmd_run(binary, &test_path)
+        }
     } else {
-        cmd_run(binary, &test_path)
+        cmd_discover(&positional)
+    }
+}
+
+fn cmd_discover(command: &[&String]) -> Result<()> {
+    use regex::Regex;
+
+    let binary = command[0].as_str();
+    let sub_args: Vec<&str> = command[1..].iter().map(|s| s.as_str()).collect();
+
+    // Try --help, then -h, then no args
+    let help_text = try_help(binary, &sub_args)?;
+
+    // Extract flags
+    let short_re = Regex::new(r"(?:^|\s)-([a-zA-Z0-9])\b").unwrap();
+    let long_re = Regex::new(r"--([a-zA-Z][a-zA-Z0-9-]*)(?:[=\s]([A-Z][A-Z_]*))?").unwrap();
+
+    let mut short_flags: Vec<String> = Vec::new();
+    let mut long_flags: Vec<(String, Option<String>)> = Vec::new(); // (flag, value_hint)
+    let mut seen = HashSet::new();
+
+    for line in help_text.lines() {
+        for cap in short_re.captures_iter(line) {
+            let flag = format!("-{}", &cap[1]);
+            if seen.insert(flag.clone()) {
+                short_flags.push(flag);
+            }
+        }
+        for cap in long_re.captures_iter(line) {
+            let name = format!("--{}", &cap[1]);
+            if name == "--help" || name == "--version" { continue; }
+            let hint = cap.get(2).map(|m| m.as_str().to_string());
+            if seen.insert(name.clone()) {
+                long_flags.push((name, hint));
+            }
+        }
+    }
+
+    // Infer base invocation from usage line
+    let base_arg = infer_base_arg(&help_text);
+    let takes_stdin = help_text.contains("[FILE]...") || help_text.contains("[file ...]");
+
+    // Build the command label for comments
+    let cmd_label = if sub_args.is_empty() {
+        binary.to_string()
+    } else {
+        format!("{} {}", binary, sub_args.join(" "))
+    };
+
+    // Output skeleton
+    println!("# Discovered from: {} --help", cmd_label);
+    println!("# {} short flags, {} long flags found", short_flags.len(), long_flags.len());
+    println!("# Customize contexts and add vary blocks for sensitivity testing.");
+    println!();
+    println!("context \"base\"");
+    println!("  file \"input.txt\" \"alpha\" \"beta\" \"gamma\" \"delta\"");
+    println!("  file \"empty.txt\" empty");
+    println!("  dir \"subdir\"");
+    println!("  file \"subdir/nested.txt\" \"nested content\"");
+    println!();
+    println!("# vary from \"base\"");
+    println!("#   file \"input.txt\" \"single line\"");
+    println!("#   file \"input.txt\" empty");
+    println!("#   file \"input.txt\" size 10000");
+    println!("#   remove \"subdir\"");
+    println!();
+
+    // Base invocation + from block
+    if let Some(ref base) = base_arg {
+        // Prefix with subcommand args if any
+        let run_prefix: Vec<&str> = sub_args.to_vec();
+        let base_run_args = if run_prefix.is_empty() {
+            format!("\"{}\"", base)
+        } else {
+            let mut parts: Vec<String> = run_prefix.iter().map(|a| format!("\"{}\"", a)).collect();
+            parts.push(format!("\"{}\"", base));
+            parts.join(" ")
+        };
+
+        println!("run {}", base_run_args);
+        println!();
+        println!("from {}", base_run_args);
+
+        for flag in &short_flags {
+            let mut parts: Vec<String> = run_prefix.iter().map(|a| format!("\"{}\"", a)).collect();
+            parts.push(format!("\"{}\"", flag));
+            if !base.is_empty() {
+                parts.push(format!("\"{}\"", base));
+            }
+            println!("  run {}", parts.join(" "));
+        }
+        for (flag, hint) in &long_flags {
+            let mut parts: Vec<String> = run_prefix.iter().map(|a| format!("\"{}\"", a)).collect();
+            if let Some(h) = hint {
+                parts.push(format!("\"{}={}\"", flag, default_value(h)));
+            } else {
+                parts.push(format!("\"{}\"", flag));
+            }
+            if !base.is_empty() {
+                parts.push(format!("\"{}\"", base));
+            }
+            println!("  run {}", parts.join(" "));
+        }
+    } else {
+        // No base invocation — flat run list
+        let run_prefix: Vec<&str> = sub_args.to_vec();
+
+        for flag in &short_flags {
+            let mut parts: Vec<String> = run_prefix.iter().map(|a| format!("\"{}\"", a)).collect();
+            parts.push(format!("\"{}\"", flag));
+            println!("run {}", parts.join(" "));
+        }
+        for (flag, hint) in &long_flags {
+            let mut parts: Vec<String> = run_prefix.iter().map(|a| format!("\"{}\"", a)).collect();
+            if let Some(h) = hint {
+                parts.push(format!("\"{}={}\"", flag, default_value(h)));
+            } else {
+                parts.push(format!("\"{}\"", flag));
+            }
+            println!("run {}", parts.join(" "));
+        }
+    }
+
+    // Stdin hint
+    if takes_stdin {
+        println!();
+        println!("# This binary may read stdin:");
+        let prefix = if sub_args.is_empty() { String::new() } else {
+            sub_args.iter().map(|a| format!("\"{}\" ", a)).collect()
+        };
+        println!("# run {}\"-n\"", prefix);
+        println!("#   stdin \"line one\" \"line two\" \"line three\"");
+    }
+
+    eprintln!();
+    eprintln!("# Pipe to a file, then run:");
+    eprintln!("#   bman {} > probes.probe", cmd_label);
+    eprintln!("#   bman {} probes.probe", cmd_label);
+
+    Ok(())
+}
+
+fn try_help(binary: &str, sub_args: &[&str]) -> Result<String> {
+    for help_flag in &["--help", "-h"] {
+        let mut args: Vec<&str> = sub_args.to_vec();
+        args.push(help_flag);
+        let output = std::process::Command::new(binary)
+            .args(&args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output();
+
+        if let Ok(out) = output {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let text = if stdout.len() > stderr.len() { stdout } else { stderr };
+            if text.contains('-') && text.len() > 20 {
+                return Ok(text.to_string());
+            }
+        }
+    }
+    anyhow::bail!("could not get help text from {} (tried --help and -h)", binary)
+}
+
+fn infer_base_arg(help_text: &str) -> Option<String> {
+    // Look for usage patterns like [FILE]..., [DIR]..., <file>
+    for line in help_text.lines().take(10) {
+        let lower = line.to_lowercase();
+        if lower.contains("[file]") || lower.contains("<file>") || lower.contains("[file ...]") {
+            return Some("input.txt".into());
+        }
+        if lower.contains("[dir]") || lower.contains("[directory]") || lower.contains("<dir>") {
+            return Some(".".into());
+        }
+    }
+    None
+}
+
+fn default_value(hint: &str) -> String {
+    match hint.to_uppercase().as_str() {
+        "NUM" | "NUMBER" | "N" | "SIZE" | "COLS" | "WIDTH" => "10".into(),
+        "FILE" | "PATH" | "FILENAME" => "input.txt".into(),
+        "DIR" | "DIRECTORY" => ".".into(),
+        "PATTERN" | "PAT" | "REGEX" => ".*".into(),
+        _ => hint.to_lowercase(),
     }
 }
 

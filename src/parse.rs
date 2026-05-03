@@ -85,7 +85,7 @@ pub fn parse_script(source: &str) -> Result<Script> {
     let mut current_in: Option<Vec<String>> = None; // block-level in scope
 
     for (line_num, raw_line) in source.lines().enumerate() {
-        let line = raw_line.trim();
+        let line = strip_comment(raw_line.trim());
         let line_num = line_num + 1;
 
         if line.is_empty() || line.starts_with('#') {
@@ -414,6 +414,16 @@ pub fn tokenize(line: &str, _line_num: usize) -> Result<Vec<String>> {
 
 fn parse_quoted_strings(s: &str, line_num: usize) -> Result<Vec<String>> {
     tokenize(s, line_num)
+}
+
+/// Strip inline comments: everything after an unquoted `#` is removed.
+fn strip_comment(line: &str) -> &str {
+    let mut in_quote = false;
+    for (i, c) in line.char_indices() {
+        if c == '"' { in_quote = !in_quote; }
+        if c == '#' && !in_quote { return line[..i].trim_end(); }
+    }
+    line
 }
 
 #[cfg(test)]
