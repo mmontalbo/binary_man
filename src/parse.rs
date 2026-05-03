@@ -298,21 +298,53 @@ fn parse_setup_line(line: &str, line_num: usize) -> Result<SetupCommand> {
 }
 
 fn resolve_extends(contexts: &mut [NamedContext]) -> Result<()> {
-    let by_name: HashMap<String, Vec<SetupCommand>> = contexts
+    // Store original (pre-resolution) commands per context.
+    let own_cmds: HashMap<String, Vec<SetupCommand>> = contexts
         .iter()
         .map(|c| (c.name.clone(), c.commands.clone()))
         .collect();
 
+    // Resolve each context, recursing into parents first.
+    let mut resolved: HashMap<String, Vec<SetupCommand>> = HashMap::new();
+    let names: Vec<String> = contexts.iter().map(|c| c.name.clone()).collect();
+    let extends: HashMap<String, Option<String>> = contexts
+        .iter()
+        .map(|c| (c.name.clone(), c.extends.clone()))
+        .collect();
+
+    fn resolve_one(
+        name: &str,
+        own_cmds: &HashMap<String, Vec<SetupCommand>>,
+        extends: &HashMap<String, Option<String>>,
+        resolved: &mut HashMap<String, Vec<SetupCommand>>,
+        depth: usize,
+    ) -> Result<Vec<SetupCommand>> {
+        if let Some(cmds) = resolved.get(name) {
+            return Ok(cmds.clone());
+        }
+        if depth > 20 {
+            anyhow::bail!("extends cycle detected at {:?}", name);
+        }
+        let my_cmds = own_cmds.get(name).cloned().unwrap_or_default();
+        let result = if let Some(Some(parent)) = extends.get(name) {
+            let parent_cmds = resolve_one(parent, own_cmds, extends, resolved, depth + 1)?;
+            let mut merged = parent_cmds;
+            merged.extend(my_cmds);
+            merged
+        } else {
+            my_cmds
+        };
+        resolved.insert(name.to_string(), result.clone());
+        Ok(result)
+    }
+
+    for name in &names {
+        resolve_one(name, &own_cmds, &extends, &mut resolved, 0)?;
+    }
+
     for ctx in contexts.iter_mut() {
-        if let Some(ref parent_name) = ctx.extends {
-            let parent_cmds = by_name.get(parent_name).ok_or_else(|| {
-                anyhow::anyhow!("context {:?} extends unknown {:?}", ctx.name, parent_name)
-            })?;
-            let mut merged = parent_cmds.clone();
-            for cmd in &ctx.commands {
-                merged.push(cmd.clone());
-            }
-            ctx.commands = merged;
+        if let Some(cmds) = resolved.remove(&ctx.name) {
+            ctx.commands = cmds;
         }
     }
     Ok(())
