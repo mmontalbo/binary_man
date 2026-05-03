@@ -90,11 +90,11 @@ fn cmd_discover(command: &[&String]) -> Result<()> {
     println!("  dir \"subdir\"");
     println!("  file \"subdir/nested.txt\" \"nested content\"");
     println!();
-    println!("# vary from \"base\"");
-    println!("#   file \"input.txt\" \"single line\"");
-    println!("#   file \"input.txt\" empty");
-    println!("#   file \"input.txt\" size 10000");
-    println!("#   remove \"subdir\"");
+    println!("vary from \"base\"");
+    println!("  file \"input.txt\" \"single line\"");
+    println!("  file \"input.txt\" empty");
+    println!("  file \"input.txt\" size 10000");
+    println!("  remove \"subdir\"");
     println!();
 
     // Base invocation + from block
