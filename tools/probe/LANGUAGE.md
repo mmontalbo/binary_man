@@ -1,32 +1,24 @@
-# Probe Test Script Language
+# Probe Language
 
-A `.test` file describes execution contexts, invocations of a binary, and predictions about its output. The tool runs the tests, annotates the file with observations and outcomes, and reports quality metrics.
+## Model
 
-## Structure
+A `.probe` file describes a grid of **input states × invocations**. The tool
+executes every cell and writes observations to a `.results` file.
+
+The user writes `.probe` files. The tool generates `.results` files. One
+command runs everything:
 
 ```
-# Comments start with #
-# Tool annotations start with #> (stripped and regenerated each run)
-
-context "name"
-  <setup commands>
-
-context "other" extends "name"
-  <additional setup>
-
-test args "arg1" "arg2"
-  expect <dimension> <predicate>
-  expect <dimension> <predicate>
-
-test args "arg1" "arg2" "arg3" in "name" "other"
-  expect <dimension> <predicate>
+bman-probe <binary> <file-or-directory>
 ```
 
-Contexts come first, then test blocks. Test blocks run in all contexts by default, or in specific contexts with the `in` clause. Each invocation gets a fresh context instance.
+## Concepts
 
-## Contexts
+Five keywords: **context**, **vary**, **invoke**, **run**, **from**, **in**.
 
-A named execution context declares the input state the binary will see.
+### context
+
+Declares a named input state — everything the binary will see.
 
 ```
 context "base"
@@ -35,249 +27,328 @@ context "base"
   dir "subdir"
   env LANG "C"
 
-context "with backups" extends "base"
+context "empty"
+```
+
+**extends** inherits and modifies:
+
+```
+context "with backup" extends "base"
   file "backup.txt~" "old"
 
-context "minimal"
-  file "only.txt" "alone"
-```
-
-`extends` inherits all setup from another context, then applies additional commands. Contexts in `setup.test` are shared across all surface files in the same directory.
-
-### Setup commands
-
-**file** — create a file:
-```
-file "path" "line1" "line2"       # content lines joined with \n
-file "path" size 1000             # filled to N bytes
-file "path" empty                 # empty file
-file "path"                       # also empty
-file "path" from "fixtures/data"  # copy from external path
-```
-
-**dir** — create a directory:
-```
-dir "subdir"
-dir "path/to/nested"
-```
-
-**link** — create a symbolic link:
-```
-link "name" -> "target"           # target need not exist
-```
-
-**props** — set properties on an existing path:
-```
-props "path" executable           # chmod +x
-props "path" readonly             # chmod -w
-props "path" mtime old            # set mtime to year 2000
-props "path" mtime recent         # touch (update mtime to now)
-```
-
-**env** — set an environment variable:
-```
-env LANG "C"
-env HOME "."
-```
-
-**remove** — remove a path inherited from `extends`:
-```
 context "no hidden" extends "base"
   remove ".hidden"
 ```
 
-**invoke** — run the binary under test during context setup:
+### vary
+
+Generates perturbation variants of a context. Each line produces one variant.
+
+```
+vary from "base"
+  remove ".hidden"
+  remove "subdir"
+  file "visible.txt" size 1000
+  props "visible.txt" mtime old
+```
+
+5 lines = 5 variants + the base = 6 states.
+
+### invoke
+
+Runs the binary during context setup. Output is discarded. Used to build
+complex state (git repos, databases). Only valid inside context blocks.
+
 ```
 context "repo"
   invoke "init"
+  invoke "config" "user.email" "test@test.com"
   file "readme.md" "hello"
   invoke "add" "."
   invoke "commit" "-m" "initial"
 ```
 
-`invoke` runs the same binary being probed — not arbitrary commands. Used to bootstrap complex state (git repos, databases) from the binary's own verified operations.
+If invoke exits non-zero, the context setup fails and is reported.
 
-## Test blocks
+### run
 
-Each test block declares an invocation and predictions about its behavior.
+Declares an invocation to observe. Only valid outside context blocks.
 
 ```
-test args "." "-a"
-  expect stdout superset vs "."
-  expect stdout contains ".hidden"
-  expect exit 0
+run "."
+run "." "-a"
+run "." "-l"
+run "nonexistent"
 ```
 
-Arguments are passed directly to the binary. Multiple test blocks can reference each other via `vs` clauses — the args identify the invocation.
+Each run executes in every context. The tool records stdout, stderr, exit
+code, and filesystem changes.
 
-**Context scoping** — limit a test block to specific contexts:
+### from
+
+Groups runs for diff comparison against a reference invocation. The
+reference must also be declared as a run.
+
 ```
-test args "." "-B" in "with backups"
-  expect stdout not-contains "backup.txt~"
-```
+run "."
 
-Without `in`, the test runs in all contexts.
-
-**Stdin** — provide input on stdin:
-```
-test args "-i" "pattern"
-  stdin "Hello World" "foo bar" "hello again"
-  expect stdout contains "Hello"
-
-test args
-  stdin from "data.txt"
-  expect stdout not-empty
+from "."
+  run "." "-a"
+  run "." "-B"
+  run "." "-l"
 ```
 
-**Per-invocation environment:**
+Runs inside a `from` block get an additional diff section in the results
+showing what's only in this run vs the reference, per context.
+
+Runs outside any `from` block are standalone — observed but not diffed.
+
+### in
+
+Scopes runs to specific contexts. Can be used as a block (grouping
+multiple runs) or as a modifier on a single run.
+
+**Block-level** (scopes all contained runs and from blocks):
+
 ```
-test args "."
-  env LANG "en_US.UTF-8"
-  expect stdout not-empty
+in "sort_sensitive"
+  run "."
+
+  from "."
+    run "." "-r"
+    run "." "-S"
+    run "." "-t"
 ```
 
-## Expect predicates
+**Nesting** (in + from compose naturally):
 
-### stdout
+```
+in "with_symlinks"
+  from "." "-l"
+    run "." "-lL"
+    run "." "-lH"
+```
 
-**Content:**
+**Per-run modifier** (single run):
 
-| Syntax | Meaning |
+```
+run "." "-v"
+  in "versions"
+```
+
+Without `in`, a run executes in all contexts.
+
+## Setup commands
+
+Used inside `context`, `extends`, and `vary` blocks:
+
+| Command | Effect |
 |---|---|
-| `empty` | stdout is empty (whitespace-only) |
-| `not-empty` | stdout has content |
-| `contains "text"` | stdout contains the substring |
-| `not-contains "text"` | stdout does not contain the substring |
-| `every-line-matches "regex"` | every non-empty line matches the regex |
+| `file "path" "l1" "l2"` | Create file (content lines joined with \n) |
+| `file "path" size N` | Create file of N bytes |
+| `file "path" empty` | Create empty file |
+| `file "path" from "rel/path"` | Copy from external path |
+| `dir "path"` | Create directory |
+| `link "name" -> "target"` | Create symlink (target need not exist) |
+| `props "path" executable` | chmod +x |
+| `props "path" readonly` | chmod -w |
+| `props "path" mtime old` | Set mtime to year 2000 |
+| `props "path" mtime recent` | Touch file |
+| `env VAR "value"` | Set environment variable |
+| `remove "path"` | Remove a file/dir/link |
+| `remove env VAR` | Remove an environment variable |
+| `invoke "args"` | Run the binary under test |
 
-**Positional:**
+Content strings support escape sequences: `\n`, `\t`, `\\`, `\"`.
+Parent directories are created automatically.
+`from` paths are relative to the probe file's directory.
 
-| Syntax | Meaning |
+## Run modifiers
+
+| Modifier | Effect |
 |---|---|
-| `line N contains "text"` | line N (1-indexed, non-empty lines) contains substring |
-| `line N not-contains "text"` | line N does not contain substring |
-| `"X" before "Y"` | line containing X appears before line containing Y |
+| `in "context"` | Scope to specific context(s) |
+| `stdin "l1" "l2"` | Pipe content to stdin |
+| `stdin from "file"` | Pipe file content to stdin |
 
-**Quantitative (vs another invocation):**
+## Results file
 
-| Syntax | Meaning |
-|---|---|
-| `lines exactly N` | exactly N non-empty lines |
-| `lines same as "args"` | same non-empty line count as reference |
-| `lines more than "args"` | more non-empty lines than reference |
-| `lines fewer than "args"` | fewer non-empty lines than reference |
+The tool writes a `.results` file for each `.probe` file. Contains:
 
-**Structural (vs another invocation):**
+**Observations** — what the binary produced per (context × run) cell.
+Identical observations across contexts are collapsed.
 
-| Syntax | Meaning |
-|---|---|
-| `reordered vs "args"` | same lines, different order |
-| `superset vs "args"` | all reference lines present, plus more |
-| `subset vs "args"` | only a subset of reference lines |
-| `preserved vs "args"` | all entry names present, format may differ |
+**Sensitivity** — which vary perturbations changed the output.
 
-### stderr
+**Universals** — properties consistent across all contexts (exit code,
+stdout empty/not-empty).
 
-| Syntax | Meaning |
-|---|---|
-| `empty` | stderr is empty |
-| `not-empty` | stderr has content |
-| `contains "text"` | stderr contains substring |
-| `unchanged vs "args"` | stderr identical to reference invocation |
+**Diffs** — for runs inside `from` blocks, line-level comparison showing
+what's only in this run vs the reference.
 
-### exit
+Example results:
 
-| Syntax | Meaning |
-|---|---|
-| `N` | exit code equals N |
-| `unchanged vs "args"` | same exit code as reference |
-| `changed vs "args"` | different exit code from reference |
-
-### file (post-execution)
-
-| Syntax | Meaning |
-|---|---|
-| `file "path" exists` | file exists after invocation |
-| `file "path" not-exists` | file does not exist after invocation |
-| `file "path" contains "text"` | file content contains substring |
-
-## Annotations
-
-Tool-generated lines use the `#>` prefix. They are stripped and regenerated on each run.
-
-**Observations** — what the binary produced:
 ```
-test args "." "-a"
-  #> stdout (base):
-  #>   .
-  #>   ..
-  #>   .hidden
-  #>   visible.txt
-  #> stdout (no hidden): 4 lines
-  #> stdout (empty): 2 lines
-  #> exit: 0 in all contexts
+run "." "-a":
+  3 contexts (base, base / remove backup.txt~, base / size=1000):
+    stdout (7 lines):
+      .
+      ..
+      .hidden
+      backup.txt~
+      subdir
+      visible.txt
+    exit: 0
+  differs in base / remove .hidden:
+    stdout (6 lines):
+      .
+      ..
+      backup.txt~
+      subdir
+      visible.txt
+    exit: 0
+  differs in empty:
+    stdout (2 lines):
+      .
+      ..
+    exit: 0
+  sensitive to: remove .hidden
+  always: exit 0, stdout not empty
+  from ".":
+    3 only in this: . .. .hidden
+    0 only in ref
+    3 shared
 ```
-
-**Check results** — whether predictions matched:
-```
-  expect stdout superset vs "."
-  #> passed in all 3 contexts
-  expect stdout contains ".hidden"
-  #> passed in: base (failed in: no hidden, empty)
-```
-
-**Per-file summary:**
-```
-#> 8/10 passed
-#> properties: superset vs ".", contains ".", contains "..", exit 0
-#> context-dependent: contains ".hidden" (needs hidden files in context)
-#> failed: lines exactly 7 (context-specific count)
-#> confused with: -f
-```
-
-**Categories:**
-- **Properties** — passed in all contexts tested. General truths about the behavior.
-- **Context-dependent** — passed in some contexts. Reveals preconditions.
-- **Failed** — wrong predictions. The revision history.
 
 ## Directory structure
 
 ```
 surfaces/<binary>/
-  _status.md              # generated: corpus summary
-  _bootstrap.test         # help text, default output, errors
-  setup.test              # shared contexts
-  <surface>.test           # one file per behavioral surface
+  contexts.probe          # shared contexts + vary (loaded by sibling files)
+  filtering.probe         # filter flag runs
+  sorting.probe           # sort flag runs
+  formatting.probe        # format flag runs
+  errors.probe            # error cases
+  filtering.results       # generated
+  sorting.results         # generated
+  ...
 ```
 
-The tool operates on the whole directory:
+`contexts.probe` (or `setup.probe`) is loaded automatically by all sibling
+`.probe` files in the same directory.
+
+## Examples
+
+### ls
+
+contexts.probe:
 ```
-bman-probe <binary> surfaces/<binary>/
-```
-
-`setup.test` contexts are available to all surface files. `_status.md` summarizes the corpus — what's tested, what's stubbed, what's untested, what needs work. It is regenerated each run.
-
-## Example
-
-```
-# ls -r: reverse sort order
-
 context "base"
-  file "alpha.txt" "a"
-  file "beta.txt" "b"
-  file "gamma.txt" "c"
+  file "visible.txt" "hello"
+  file ".hidden" "secret"
+  dir "subdir"
+  file "subdir/nested.txt" "deep"
+  link "mylink" -> "visible.txt"
+  file "script.sh" "#!/bin/sh"
+  props "script.sh" executable
+  file "backup.txt~" "old"
 
-context "more files" extends "base"
-  file "delta.txt" "d"
-  file "epsilon.txt" "e"
+vary from "base"
+  remove ".hidden"
+  remove "backup.txt~"
+  remove "mylink"
+  file "visible.txt" size 1000
+  props "visible.txt" mtime old
 
-test args "."
-  expect stdout not-empty
-  expect exit 0
+context "empty"
 
-test args "." "-r"
-  expect stdout reordered vs "."
-  expect stdout lines same as "."
-  expect stdout line 1 contains "gamma.txt" in "base"
-  expect exit 0
+context "sorts"
+  file "nnn.txt" "ab"
+  props "nnn.txt" mtime old
+  file "bbb.txt" size 1000
+  file "hhh.txt" "abcdefghij"
+  props "hhh.txt" mtime recent
+```
+
+filtering.probe:
+```
+run "."
+
+from "."
+  run "." "-a"
+  run "." "-A"
+  run "." "-B"
+  run "." "-d"
+  run "." "-R"
+
+run "nonexistent"
+```
+
+sorting.probe:
+```
+in "sorts"
+  run "."
+
+  from "."
+    run "." "-r"
+    run "." "-S"
+    run "." "-t"
+```
+
+### grep
+
+```
+context "base"
+  file "log.txt" "error: disk full" "warning: low" "ERROR: timeout" "info: ok"
+
+run "error" "log.txt"
+
+from "error" "log.txt"
+  run "-i" "error" "log.txt"
+  run "-v" "error" "log.txt"
+  run "-c" "error" "log.txt"
+  run "-n" "error" "log.txt"
+
+run "error"
+  stdin "Error: piped" "no match" "error: found"
+
+run "nomatch" "log.txt"
+```
+
+### git
+
+```
+context "clean"
+  invoke "init"
+  invoke "config" "user.email" "test@test.com"
+  invoke "config" "user.name" "Test"
+  file "readme.md" "hello"
+  invoke "add" "."
+  invoke "commit" "-m" "initial"
+
+context "dirty" extends "clean"
+  file "untracked.txt" "new"
+
+run "status"
+
+from "status"
+  run "status" "--short"
+
+run "diff"
+
+from "diff"
+  run "diff" "--stat"
+  run "diff" "--cached"
+```
+
+### cp
+
+```
+context "base"
+  file "source.txt" "hello world"
+  dir "destdir"
+
+run "source.txt" "copy.txt"
+run "source.txt" "destdir/"
+run "missing.txt" "copy.txt"
 ```

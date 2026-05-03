@@ -2,101 +2,84 @@
 
 ## Purpose
 
-Describe an execution context, invoke a binary, predict what happens, record what actually happens. One file is both the test and the report. A directory of files is a corpus of behavioral knowledge about one binary.
+Observe CLI binary behavior by running invocations across varied input states.
+One user-edited file (`.probe`) declares what to run. One tool-generated file
+(`.results`) records what happened.
 
-## Core concepts
+## Three layers
 
-**Execution context.** The complete input environment a binary sees: filesystem state, environment variables, stdin content. Described declaratively — what should exist, not how to create it. Multiple named contexts per file enable testing the same behavior across different configurations.
+**Layer 1 — Execution context.** What the binary receives: filesystem state,
+environment, arguments, stdin. Declared in `.probe` files. User-written.
 
-**Invocations.** Arguments passed to the binary in a given context. Every invocation is a peer — no privileged "control." Multiple invocations enable bilateral comparison via `vs` references.
+**Layer 2 — Observations.** What the binary produced: stdout, stderr, exit
+code, filesystem changes. Recorded in `.results` files. Tool-generated.
 
-**Expectations.** Predictions about output: stdout, stderr, exit code, filesystem post-state. Either standalone (`contains "text"`, `exit 0`) or relational (`superset vs "."` — comparing this invocation's output to another's).
+**Layer 2.5 — Computed summaries.** Derived from observations: diffs between
+invocations, sensitivity to perturbations, universal properties. Auto-computed
+by the tool, included in `.results`.
 
-**Observations.** Tool-generated annotations recording what the binary actually produced. Interleaved with expectations as `#>` lines. Stripped and regenerated on each run. The annotated file is the complete record.
+**Layer 3 — Analysis.** Interpretation of observations: documentation
+generation, regression detection, behavioral clustering. Performed by external
+consumers (humans, LMs, scripts) reading the data.
 
-**Surfaces.** A behavioral surface is the unit of testing — one file per surface, grouped in a directory per binary. The tool operates on the whole directory, annotating files and generating a status summary.
+## Language
 
-## What the language does
+Five keywords build the probe file:
 
-- Declares execution contexts (filesystem, environment, stdin)
-- Declares invocations (arguments, context scope)
-- Expresses predictions as structural properties of output
-- Records observations alongside predictions
-- Supports context composition (`extends`, `remove`)
-- Supports context bootstrapping via `invoke` (using the binary under test to set up its own state)
+- **context** — declares input state (extends, remove for derivation)
+- **vary** — generates perturbation variants of a context
+- **invoke** — runs the binary during context setup (output discarded)
+- **run** — declares an invocation to observe (output recorded)
+- **from** — groups runs for diff comparison against a reference
+- **in** — scopes runs to specific contexts (block or modifier)
 
-## What the language does not do
-
-**No binary-specific knowledge.** No hardcoded flag lists, no command-specific predicates. The tool derives the flag list from sibling test files in the surface directory.
-
-**No arbitrary shell commands.** No `run` escape hatch. Context setup uses declarative primitives (`file`, `dir`, `link`, `props`, `env`) and `invoke` (which runs the binary under test, not arbitrary commands). Pre-built state can be referenced with `from`.
-
-**No control flow.** No conditionals, loops, or branching. A test file is a flat structure: contexts, then test blocks with expectations.
-
-**No expected output literals.** Predictions describe properties (`superset`, `reordered`, `contains`), not exact output strings. The tool captures actual output as observations.
-
-**No implementation access.** The binary is a black box. Only observable inputs and outputs.
+`invoke` and `run` both execute the binary. `invoke` builds state (inside
+context blocks). `run` observes behavior (outside context blocks). Different
+keywords because different semantics.
 
 ## Design constraints
 
-**Readable without documentation.** `expect stdout contains ".hidden"` and `context "base" extends "repo"` should be understandable to anyone.
+**Binary-agnostic.** The language knows nothing about any binary. No flag
+lists, no command-specific predicates. The same language tests ls, grep, sort,
+cp, git, ffmpeg.
 
-**Binary-agnostic.** The same language tests ls, grep, sort, cp, git, sqlite3. Input primitives cover the common channels (filesystem, stdin, environment). Output predicates cover the common channels (stdout, stderr, exit code, filesystem post-state). The binary determines which channels matter.
+**Two files.** The user edits `.probe`. The tool generates `.results`. No tool
+output in the user's file. No user content in the tool's file. Clean separation.
 
-**Predictions are relationships, not values.** `superset vs "."` holds regardless of filenames or file count. Instance-level predicates (`contains ".hidden"`, `line 1 contains "gamma.txt"`) are supported but are context-specific by nature. The tool's cross-context reporting distinguishes properties (hold everywhere) from context-specific observations (hold in some contexts).
+**The grid is the model.** Input states × invocations = cells. Each cell
+produces an observation. Contexts define the rows. Runs define the columns. The
+tool fills in every cell.
 
-**One file = one behavioral surface.** A surface groups invocations that share contexts and compare against each other. A directory of surface files covers one binary.
+**From blocks declare comparison relationships.** Diffs are computed between
+runs that the user explicitly groups, not between arbitrary pairs. No assumed
+baseline. No heuristic about which runs to compare.
 
-**The tool owns the directory.** It reads all files, runs all tests, annotates every file, and generates a `_status.md` summarizing the corpus state — what's tested, what's stubbed, what's untested, what's confused, and what to work on next.
+**In blocks scope without repetition.** When multiple runs share a context
+scope, `in` groups them — no per-run repetition. `in` and `from` compose by
+nesting.
 
-## Execution model
+**Collapsing reveals sensitivity.** When multiple contexts produce identical
+observations, they collapse into one group. The contexts that DON'T collapse
+are the sensitive ones. Sensitivity is auto-computed from the collapsing
+pattern.
 
-**Contexts reset per invocation.** Each test block gets a fresh instance of its context. Earlier invocations don't affect later ones. This is essential for filesystem-modifying binaries — `cp` creating a file in one test block doesn't affect the next.
+## What the tool computes
 
-**All test blocks run in all contexts by default.** An expectation that passes across all contexts is a property. One that fails in some contexts reveals a precondition. The `in` clause scopes a test block to specific contexts when it only makes sense there.
+For each run across all applicable contexts:
 
-**Cross-file confusion checking.** The tool scans sibling test files to discover what other flags/invocations exist. For each test block, it checks whether substitute invocations (from other surface files) also pass all expectations. The confusion list reveals which surfaces the test can't distinguish.
+1. **Observations** — stdout, stderr, exit code, filesystem changes
+2. **Collapsing** — group contexts with identical observations
+3. **Sensitivity** — which vary perturbations changed the output
+4. **Universals** — properties consistent across all contexts
+5. **Diffs** �� for from-block members, line-level comparison vs reference
 
-## Directory structure
+All of this is written to the `.results` file. The tool adds no other analysis.
+Further interpretation is the reader's job.
 
-```
-surfaces/<binary>/
-  _status.md              # generated: corpus summary, gaps, suggestions
-  _bootstrap.test         # help text, default output, error cases
-  setup.test              # shared contexts (loaded automatically)
-  <surface>.test           # one file per behavioral surface
-```
+## What the tool does NOT do
 
-The tool operates on the directory: `bman-probe <binary> surfaces/<binary>/`
-
-`_status.md` is regenerated each run. `_bootstrap.test` captures discovery observations. `setup.test` provides shared contexts that all surface files inherit. Surface files contain invocations and expectations for one behavioral unit.
-
-## Bootstrapping
-
-1. Run `--help` and default invocation. Record observations in `_bootstrap.test`.
-2. Parse help text to discover flags/subcommands. List untested ones in `_status.md`.
-3. For each surface, write a test file — either manually, by LM, or as a stub with observations only.
-4. Run the directory. Observations are annotated, status is updated.
-5. Revise expectations based on observations. Add contexts to test generality.
-6. Repeat until properties stabilize and confusion is resolved.
-
-For binaries that need complex state (git repos, databases), use `invoke` to bootstrap context from the binary's own verified operations.
-
-## Input channels
-
-| Channel | Syntax | Scope |
-|---|---|---|
-| Filesystem | `file`, `dir`, `link`, `props`, `from` | context |
-| Environment | `env VAR "value"` | context or per-invocation |
-| Stdin | `stdin "line1" "line2"` or `stdin from "file"` | per-invocation |
-| Arguments | `test args "arg1" "arg2"` | per-invocation |
-| Self-setup | `invoke "arg1" "arg2"` | context (runs binary under test) |
-
-## Output channels
-
-| Channel | Predicate examples |
-|---|---|
-| Stdout | `contains`, `superset vs`, `reordered vs`, `line N contains`, `before` |
-| Stderr | `empty`, `not-empty`, `contains`, `unchanged vs` |
-| Exit code | `N`, `unchanged vs`, `changed vs` |
-| Filesystem | `file "path" exists`, `file "path" contains "text"` |
+- No expectations or assertions (layer 3 is external)
+- No binary-specific knowledge
+- No query language
+- No network support
+- No subcommands — one invocation reads and runs everything
