@@ -38,25 +38,15 @@ fn cmd_run(binary: &str, test_path: &PathBuf) -> Result<()> {
             let setup_script = parse::parse_script(&setup_source)
                 .with_context(|| format!("parse {}", setup_path.display()))?;
 
-            // Merge setup contexts (prepend, so surface file contexts can extend them)
+            // Merge setup contexts into the surface file
             let has_own = script.contexts.iter().any(|c| c.name != "(default)")
                 || (script.contexts.len() == 1 && !script.contexts[0].commands.is_empty());
             if !has_own {
                 script.contexts = setup_script.contexts;
             } else {
-                // Prepend setup contexts so they're available for extends
                 let mut merged = setup_script.contexts;
                 merged.extend(script.contexts);
                 script.contexts = merged;
-                // Re-resolve extends with the merged set
-                // (already resolved individually, but cross-file extends need re-resolution)
-            }
-
-            // Merge setup tests (baseline invocations)
-            for setup_test in setup_script.tests {
-                if !script.tests.iter().any(|t| t.args == setup_test.args) {
-                    script.tests.insert(0, setup_test);
-                }
             }
         }
     }
