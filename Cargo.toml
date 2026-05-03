@@ -1,35 +1,19 @@
-[workspace]
-members = [".", "tools/eval", "tools/inspect", "tools/probe"]
-resolver = "2"
-
 [package]
-name = "binary-man"
+name = "bman"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "LM-driven binary documentation generator"
+description = "Observation-driven behavioral specification for CLI binaries"
 
 [dependencies]
 anyhow = "1.0"
 libc = "0.2"
-clap = { version = "4.5", features = ["derive"] }
-dirs = "5.0"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
 regex = "1.10"
-shell-words = "1.1"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tempfile = "3.10"
-which = "6.0"
-ureq = { version = "3.0", features = ["json"] }
+tempfile = "3.14"
 
 [[bin]]
 name = "bman"
 path = "src/main.rs"
 
-[dev-dependencies]
-
 [lints.clippy]
-# Deny all clippy warnings - fail the build on any warning
 all = "deny"

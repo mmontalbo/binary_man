@@ -82,6 +82,7 @@ pub fn parse_script(source: &str) -> Result<Script> {
     let mut current_vary: Option<VaryBlock> = None;
     let mut current_run: Option<Run> = None;
     let mut current_from: Option<Vec<String>> = None; // args of the from-reference
+    let mut current_in: Option<Vec<String>> = None; // block-level in scope
 
     for (line_num, raw_line) in source.lines().enumerate() {
         let line = raw_line.trim();
@@ -100,12 +101,14 @@ pub fn parse_script(source: &str) -> Result<Script> {
             flush_context(&mut current_context, &mut contexts);
             flush_vary(&mut current_vary, &mut vary_blocks);
             current_from = None;
+            current_in = None;
             current_context = Some(parse_context_line(rest, line_num)?);
         } else if let Some(rest) = line.strip_prefix("vary from ") {
             flush_run(&mut current_run, &mut runs);
             flush_context(&mut current_context, &mut contexts);
             flush_vary(&mut current_vary, &mut vary_blocks);
             current_from = None;
+            current_in = None;
             let tokens = tokenize(rest, line_num)?;
             if tokens.is_empty() {
                 bail!("line {}: vary requires a base context name", line_num);
@@ -133,15 +136,17 @@ pub fn parse_script(source: &str) -> Result<Script> {
             let args = parse_quoted_strings(rest.trim(), line_num)?;
             current_run = Some(Run {
                 args,
-                in_contexts: None,
+                in_contexts: current_in.clone(),
                 stdin: None,
                 diff_from: current_from.clone(),
             });
         } else if let Some(rest) = line.strip_prefix("in ") {
-            let run = current_run.as_mut().ok_or_else(|| {
-                anyhow::anyhow!("line {}: 'in' outside of a run block", line_num)
-            })?;
-            run.in_contexts = Some(parse_quoted_strings(rest.trim(), line_num)?);
+            // Always block-level: flush current run, scope subsequent runs
+            flush_run(&mut current_run, &mut runs);
+            flush_context(&mut current_context, &mut contexts);
+            flush_vary(&mut current_vary, &mut vary_blocks);
+            current_from = None;
+            current_in = Some(parse_quoted_strings(rest.trim(), line_num)?);
         } else if let Some(rest) = line.strip_prefix("stdin ") {
             let run = current_run.as_mut().ok_or_else(|| {
                 anyhow::anyhow!("line {}: 'stdin' outside of a run block", line_num)
@@ -232,7 +237,9 @@ fn parse_setup_line(line: &str, line_num: usize) -> Result<SetupCommand> {
                 bail!("line {}: file requires a path", line_num);
             }
             let path = tokens[1].clone();
-            if tokens.len() == 2 || (tokens.len() == 3 && tokens[2] == "empty") {
+            if tokens.len() >= 4 && tokens[2] == "->" {
+                Ok(SetupCommand::CreateLink { path, target: tokens[3].clone() })
+            } else if tokens.len() == 2 || (tokens.len() == 3 && tokens[2] == "empty") {
                 Ok(SetupCommand::CreateFile { path, content: FileContent::Empty })
             } else if tokens.len() >= 3 && tokens[2] == "size" {
                 if tokens.len() < 4 {
@@ -253,12 +260,6 @@ fn parse_setup_line(line: &str, line_num: usize) -> Result<SetupCommand> {
         "dir" => {
             if tokens.len() < 2 { bail!("line {}: dir requires a path", line_num); }
             Ok(SetupCommand::CreateDir { path: tokens[1].clone() })
-        }
-        "link" => {
-            if tokens.len() < 4 || tokens[2] != "->" {
-                bail!("line {}: link syntax: link \"name\" -> \"target\"", line_num);
-            }
-            Ok(SetupCommand::CreateLink { path: tokens[1].clone(), target: tokens[3].clone() })
         }
         "props" => {
             if tokens.len() < 3 { bail!("line {}: props requires path and property", line_num); }
@@ -309,15 +310,7 @@ fn resolve_extends(contexts: &mut [NamedContext]) -> Result<()> {
             })?;
             let mut merged = parent_cmds.clone();
             for cmd in &ctx.commands {
-                match cmd {
-                    SetupCommand::Remove { path } => {
-                        merged.retain(|c| !matches_path(c, path));
-                    }
-                    SetupCommand::RemoveEnv { var } => {
-                        merged.retain(|c| !matches!(c, SetupCommand::SetEnv { var: v, .. } if v == var));
-                    }
-                    other => merged.push(other.clone()),
-                }
+                merged.push(cmd.clone());
             }
             ctx.commands = merged;
         }
@@ -336,47 +329,12 @@ fn resolve_vary(contexts: &mut Vec<NamedContext>, vary_blocks: &[VaryBlock]) -> 
             let variant_name = format!("{} / {}", vary.base, describe_perturbation(perturbation));
             let mut cmds = base_cmds.clone();
 
-            match perturbation {
-                SetupCommand::Remove { path } => {
-                    cmds.retain(|c| !matches_path(c, path));
-                }
-                SetupCommand::RemoveEnv { var } => {
-                    cmds.retain(|c| !matches!(c, SetupCommand::SetEnv { var: v, .. } if v == var));
-                }
-                other => {
-                    if let Some(path) = get_path(other) {
-                        cmds.retain(|c| {
-                            if let Some(p) = get_path(c) { p != path } else { true }
-                        });
-                    }
-                    cmds.push(other.clone());
-                }
-            }
+            cmds.push(perturbation.clone());
 
             contexts.push(NamedContext { name: variant_name, extends: None, commands: cmds });
         }
     }
     Ok(())
-}
-
-fn matches_path(cmd: &SetupCommand, path: &str) -> bool {
-    match cmd {
-        SetupCommand::CreateFile { path: p, .. }
-        | SetupCommand::CreateDir { path: p }
-        | SetupCommand::CreateLink { path: p, .. }
-        | SetupCommand::SetProps { path: p, .. } => p == path,
-        _ => false,
-    }
-}
-
-fn get_path(cmd: &SetupCommand) -> Option<&str> {
-    match cmd {
-        SetupCommand::CreateFile { path, .. }
-        | SetupCommand::CreateDir { path }
-        | SetupCommand::CreateLink { path, .. }
-        | SetupCommand::SetProps { path, .. } => Some(path),
-        _ => None,
-    }
 }
 
 fn describe_perturbation(cmd: &SetupCommand) -> String {
@@ -529,6 +487,76 @@ run "."
 "#;
         let script = parse_script(source).unwrap();
         assert_eq!(script.contexts.len(), 3); // base + 2 variants
+    }
+
+    #[test]
+    fn test_parse_in_block() {
+        let source = r#"
+context "base"
+  file "a.txt" "hello"
+
+context "other"
+  file "b.txt" "world"
+
+in "base"
+  run "."
+
+  from "."
+    run "." "-a"
+    run "." "-l"
+"#;
+        let script = parse_script(source).unwrap();
+        assert_eq!(script.runs.len(), 3);
+        // All runs scoped to "base"
+        for run in &script.runs {
+            assert_eq!(run.in_contexts, Some(vec!["base".to_string()]));
+        }
+        // from-block runs have diff_from
+        assert!(script.runs[0].diff_from.is_none());
+        assert_eq!(script.runs[1].diff_from, Some(vec![".".to_string()]));
+        assert_eq!(script.runs[2].diff_from, Some(vec![".".to_string()]));
+    }
+
+    #[test]
+    fn test_parse_in_block_multiple() {
+        let source = r#"
+context "base"
+  file "a.txt" "hello"
+
+context "other"
+
+in "base"
+  run "."
+
+in "other"
+  run "." "-v"
+"#;
+        let script = parse_script(source).unwrap();
+        assert_eq!(script.runs.len(), 2);
+        assert_eq!(script.runs[0].in_contexts, Some(vec!["base".to_string()]));
+        // Second in-block scopes to "other"
+        assert_eq!(script.runs[1].in_contexts, Some(vec!["other".to_string()]));
+    }
+
+    #[test]
+    fn test_parse_in_block_cleared_by_context() {
+        let source = r#"
+context "base"
+  file "a.txt" "hello"
+
+in "base"
+  run "." "-a"
+
+context "fresh"
+  file "b.txt" "world"
+
+run "."
+"#;
+        let script = parse_script(source).unwrap();
+        assert_eq!(script.runs.len(), 2);
+        assert_eq!(script.runs[0].in_contexts, Some(vec!["base".to_string()]));
+        // After new context, in-scope is cleared
+        assert!(script.runs[1].in_contexts.is_none());
     }
 
     #[test]

@@ -168,22 +168,25 @@ pub fn run_grid(binary: &str, script: &Script) -> Result<GridResult> {
             .context("create sandbox")?;
         let work_dir = sandbox_dir.path();
 
-        match sandbox::apply_setup(work_dir, binary, &ctx.commands) {
-            Ok(()) => {}
+        let env_vars = match sandbox::apply_setup(work_dir, binary, &ctx.commands) {
+            Ok(env) => env,
             Err(e) => {
                 setup_failures.insert(ctx.name.clone(), format!("{}", e));
                 continue;
             }
-        }
+        };
 
         for (ti, test) in script.runs.iter().enumerate() {
             if let Some(ref scoped) = test.in_contexts {
-                if !scoped.contains(&ctx.name) {
-                    continue;
-                }
+                let matches = scoped.iter().any(|s| {
+                    *s == ctx.name
+                    || ctx.name.starts_with(&format!("{} / ", s))
+                    || ctx.extends.as_deref() == Some(s.as_str())
+                });
+                if !matches { continue; }
             }
 
-            let obs = run_invocation(binary, test, work_dir)?;
+            let obs = run_invocation(binary, test, work_dir, &env_vars)?;
             cells.insert((ctx.name.clone(), ti), obs);
         }
     }
@@ -199,6 +202,7 @@ fn run_invocation(
     binary: &str,
     test: &Run,
     work_dir: &Path,
+    env_vars: &std::collections::HashMap<String, String>,
 ) -> Result<Observation> {
     // Snapshot before
     let before = snapshot_fs(work_dir);
@@ -225,11 +229,7 @@ fn run_invocation(
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
-    cmd.env_clear();
-    cmd.env("PATH", std::env::var("PATH").unwrap_or_default());
-    cmd.env("HOME", work_dir);
-    cmd.env("LANG", "C");
-    cmd.env("LC_ALL", "C");
+    sandbox::apply_base_env(&mut cmd, work_dir, env_vars);
 
     let mut child = cmd.spawn()
         .with_context(|| format!("spawn {} {:?}", binary, test.args))?;

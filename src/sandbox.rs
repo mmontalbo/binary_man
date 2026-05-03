@@ -2,12 +2,27 @@
 
 use crate::parse::{FileContent, Property, SetupCommand};
 use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+/// Apply base env vars shared by invoke and run commands.
+pub fn apply_base_env(cmd: &mut std::process::Command, work_dir: &Path, env_vars: &HashMap<String, String>) {
+    cmd.env_clear();
+    cmd.env("PATH", std::env::var("PATH").unwrap_or_default());
+    cmd.env("HOME", work_dir);
+    cmd.env("LANG", "C");
+    cmd.env("LC_ALL", "C");
+    for (k, v) in env_vars {
+        cmd.env(k, v);
+    }
+}
+
 /// Build sandbox state from setup commands.
-/// `binary` is needed for invoke commands.
-pub fn apply_setup(work_dir: &Path, binary: &str, commands: &[SetupCommand]) -> Result<()> {
+/// Returns accumulated env vars for use by run invocations.
+pub fn apply_setup(work_dir: &Path, binary: &str, commands: &[SetupCommand]) -> Result<HashMap<String, String>> {
+    let mut env_vars: HashMap<String, String> = HashMap::new();
+
     for cmd in commands {
         match cmd {
             SetupCommand::CreateFile { path, content } => {
@@ -47,6 +62,7 @@ pub fn apply_setup(work_dir: &Path, binary: &str, commands: &[SetupCommand]) -> 
                 if let Some(parent) = full.parent() {
                     fs::create_dir_all(parent)?;
                 }
+                let _ = fs::remove_file(&full); // idempotent: allow overwrite by vary
                 #[cfg(unix)]
                 std::os::unix::fs::symlink(target, &full)
                     .with_context(|| format!("symlink {} -> {}", path, target))?;
@@ -103,7 +119,7 @@ pub fn apply_setup(work_dir: &Path, binary: &str, commands: &[SetupCommand]) -> 
                 }
             }
             SetupCommand::SetEnv { var, value } => {
-                std::env::set_var(var, value);
+                env_vars.insert(var.clone(), value.clone());
             }
             SetupCommand::Remove { path } => {
                 let full = work_dir.join(path);
@@ -114,21 +130,18 @@ pub fn apply_setup(work_dir: &Path, binary: &str, commands: &[SetupCommand]) -> 
                 }
             }
             SetupCommand::RemoveEnv { var } => {
-                std::env::remove_var(var);
+                env_vars.remove(var.as_str());
             }
             SetupCommand::Invoke { args } => {
-                let output = std::process::Command::new(binary)
-                    .args(args)
+                let mut invoke = std::process::Command::new(binary);
+                invoke.args(args)
                     .current_dir(work_dir)
                     .stdin(std::process::Stdio::null())
                     .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::piped())
-                    .env_clear()
-                    .env("PATH", std::env::var("PATH").unwrap_or_default())
-                    .env("HOME", work_dir)
-                    .env("LANG", "C")
-                    .env("LC_ALL", "C")
-                    .output()
+                    .stderr(std::process::Stdio::piped());
+                apply_base_env(&mut invoke, work_dir, &env_vars);
+
+                let output = invoke.output()
                     .with_context(|| format!("invoke {:?}", args))?;
 
                 if !output.status.success() {
@@ -143,5 +156,5 @@ pub fn apply_setup(work_dir: &Path, binary: &str, commands: &[SetupCommand]) -> 
             }
         }
     }
-    Ok(())
+    Ok(env_vars)
 }
