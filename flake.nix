@@ -1,5 +1,5 @@
 {
-  description = "Binary-Validated Man Pages dev environment";
+  description = "bman — observation-driven behavioral specification for CLI binaries";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.05";
@@ -30,16 +30,10 @@
             rustPkgs.rust-analyzer
             ripgrep
             jq
-            file
-            binutils
-            man-db
-            groff
             coreutils
           ]) ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
             pkgs.libiconv
             pkgs.darwin.apple_sdk.frameworks.Security
-          ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-            pkgs.bubblewrap
           ];
           shellHook = ''
             export RUST_BACKTRACE=1
