@@ -1,6 +1,6 @@
 //! Execute the grid: states × invocations → observations.
 
-use crate::parse::{Script, StdinSource, Test};
+use crate::parse::{Script, StdinSource, Run};
 use crate::sandbox;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
@@ -16,7 +16,7 @@ pub struct Observation {
     pub fs_changes: Vec<FsChange>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FsChange {
     Created { path: String, size: u64 },
     Deleted { path: String },
@@ -29,7 +29,6 @@ pub struct GridResult {
     pub cells: HashMap<(String, usize), Observation>,
     pub setup_failures: HashMap<String, String>,
     pub context_count: usize,
-    pub test_count: usize,
 }
 
 /// Snapshot entry: size, mode, and content hash for change detection.
@@ -177,7 +176,7 @@ pub fn run_grid(binary: &str, script: &Script) -> Result<GridResult> {
             }
         }
 
-        for (ti, test) in script.tests.iter().enumerate() {
+        for (ti, test) in script.runs.iter().enumerate() {
             if let Some(ref scoped) = test.in_contexts {
                 if !scoped.contains(&ctx.name) {
                     continue;
@@ -193,13 +192,12 @@ pub fn run_grid(binary: &str, script: &Script) -> Result<GridResult> {
         cells,
         setup_failures,
         context_count: script.contexts.len(),
-        test_count: script.tests.len(),
     })
 }
 
 fn run_invocation(
     binary: &str,
-    test: &Test,
+    test: &Run,
     work_dir: &Path,
 ) -> Result<Observation> {
     // Snapshot before

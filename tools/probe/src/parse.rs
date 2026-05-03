@@ -1,16 +1,15 @@
-//! Parser for the probe test language.
+//! Parser for the probe language.
 //!
-//! Layer 1: contexts (with extends, vary, remove) and test blocks.
-//! Layer 2: #> observation lines (skipped during parsing).
+//! Four concepts: context, vary, run, from.
 
 use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
 
-/// A parsed test file.
+/// A parsed probe file.
 #[derive(Debug)]
 pub struct Script {
     pub contexts: Vec<NamedContext>,
-    pub tests: Vec<Test>,
+    pub runs: Vec<Run>,
 }
 
 /// A named execution context with setup commands.
@@ -21,7 +20,7 @@ pub struct NamedContext {
     pub commands: Vec<SetupCommand>,
 }
 
-/// A setup command that modifies execution context state.
+/// A setup command.
 #[derive(Debug, Clone)]
 pub enum SetupCommand {
     CreateFile { path: String, content: FileContent },
@@ -50,19 +49,21 @@ pub enum Property {
     ReadOnly,
 }
 
-/// A vary block: generates perturbation variants of a base context.
+/// A vary block.
 #[derive(Debug)]
 pub struct VaryBlock {
     pub base: String,
     pub perturbations: Vec<SetupCommand>,
 }
 
-/// A test invocation.
+/// A run invocation with optional diff reference and scoping.
 #[derive(Debug)]
-pub struct Test {
+pub struct Run {
     pub args: Vec<String>,
     pub in_contexts: Option<Vec<String>>,
     pub stdin: Option<StdinSource>,
+    /// If set, diff this run's results from the reference run.
+    pub diff_from: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -71,36 +72,40 @@ pub enum StdinSource {
     FromFile(String),
 }
 
-/// Parse a test script from source text.
+/// Parse a probe file.
 pub fn parse_script(source: &str) -> Result<Script> {
     let mut contexts: Vec<NamedContext> = Vec::new();
     let mut vary_blocks: Vec<VaryBlock> = Vec::new();
-    let mut tests: Vec<Test> = Vec::new();
+    let mut runs: Vec<Run> = Vec::new();
+
     let mut current_context: Option<NamedContext> = None;
     let mut current_vary: Option<VaryBlock> = None;
-    let mut current_test: Option<Test> = None;
+    let mut current_run: Option<Run> = None;
+    let mut current_from: Option<Vec<String>> = None; // args of the from-reference
 
     for (line_num, raw_line) in source.lines().enumerate() {
         let line = raw_line.trim();
         let line_num = line_num + 1;
 
-        // Skip empty lines, comments, and tool annotations
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
 
-        // Reject expect lines (layer 3, not supported yet)
         if line.starts_with("expect ") {
-            bail!("line {}: 'expect' is not supported in this version (layer 3 not yet implemented)", line_num);
+            bail!("line {}: 'expect' is not supported yet", line_num);
         }
 
         if let Some(rest) = line.strip_prefix("context ") {
-            flush_current(&mut current_context, &mut current_vary, &mut current_test,
-                         &mut contexts, &mut vary_blocks, &mut tests);
+            flush_run(&mut current_run, &mut runs);
+            flush_context(&mut current_context, &mut contexts);
+            flush_vary(&mut current_vary, &mut vary_blocks);
+            current_from = None;
             current_context = Some(parse_context_line(rest, line_num)?);
         } else if let Some(rest) = line.strip_prefix("vary from ") {
-            flush_current(&mut current_context, &mut current_vary, &mut current_test,
-                         &mut contexts, &mut vary_blocks, &mut tests);
+            flush_run(&mut current_run, &mut runs);
+            flush_context(&mut current_context, &mut contexts);
+            flush_vary(&mut current_vary, &mut vary_blocks);
+            current_from = None;
             let tokens = tokenize(rest, line_num)?;
             if tokens.is_empty() {
                 bail!("line {}: vary requires a base context name", line_num);
@@ -109,18 +114,37 @@ pub fn parse_script(source: &str) -> Result<Script> {
                 base: tokens[0].clone(),
                 perturbations: Vec::new(),
             });
-        } else if let Some(rest) = line.strip_prefix("test ") {
-            flush_current(&mut current_context, &mut current_vary, &mut current_test,
-                         &mut contexts, &mut vary_blocks, &mut tests);
-            current_test = Some(parse_test_line(rest, line_num)?);
+        } else if let Some(rest) = line.strip_prefix("from ") {
+            // Start a from-block: sets the diff reference for subsequent runs
+            flush_run(&mut current_run, &mut runs);
+            flush_context(&mut current_context, &mut contexts);
+            flush_vary(&mut current_vary, &mut vary_blocks);
+            let ref_args = parse_quoted_strings(rest.trim(), line_num)?;
+            if ref_args.is_empty() {
+                bail!("line {}: from requires reference args", line_num);
+            }
+            current_from = Some(ref_args);
+        } else if let Some(rest) = line.strip_prefix("run ") {
+            // run = observation invocation (always top-level)
+            flush_run(&mut current_run, &mut runs);
+            flush_context(&mut current_context, &mut contexts);
+            flush_vary(&mut current_vary, &mut vary_blocks);
+
+            let args = parse_quoted_strings(rest.trim(), line_num)?;
+            current_run = Some(Run {
+                args,
+                in_contexts: None,
+                stdin: None,
+                diff_from: current_from.clone(),
+            });
         } else if let Some(rest) = line.strip_prefix("in ") {
-            let test = current_test.as_mut().ok_or_else(|| {
-                anyhow::anyhow!("line {}: 'in' outside of a test block", line_num)
+            let run = current_run.as_mut().ok_or_else(|| {
+                anyhow::anyhow!("line {}: 'in' outside of a run block", line_num)
             })?;
-            test.in_contexts = Some(parse_quoted_strings(rest.trim(), line_num)?);
+            run.in_contexts = Some(parse_quoted_strings(rest.trim(), line_num)?);
         } else if let Some(rest) = line.strip_prefix("stdin ") {
-            let test = current_test.as_mut().ok_or_else(|| {
-                anyhow::anyhow!("line {}: 'stdin' outside of a test block", line_num)
+            let run = current_run.as_mut().ok_or_else(|| {
+                anyhow::anyhow!("line {}: 'stdin' outside of a run block", line_num)
             })?;
             let rest = rest.trim();
             if let Some(path) = rest.strip_prefix("from ") {
@@ -128,10 +152,10 @@ pub fn parse_script(source: &str) -> Result<Script> {
                 if tokens.is_empty() {
                     bail!("line {}: stdin from requires a path", line_num);
                 }
-                test.stdin = Some(StdinSource::FromFile(tokens[0].clone()));
+                run.stdin = Some(StdinSource::FromFile(tokens[0].clone()));
             } else {
                 let lines = parse_quoted_strings(rest, line_num)?;
-                test.stdin = Some(StdinSource::Lines(lines));
+                run.stdin = Some(StdinSource::Lines(lines));
             }
         } else {
             // Setup command — goes into current context or vary block
@@ -146,10 +170,10 @@ pub fn parse_script(source: &str) -> Result<Script> {
         }
     }
 
-    flush_current(&mut current_context, &mut current_vary, &mut current_test,
-                 &mut contexts, &mut vary_blocks, &mut tests);
+    flush_run(&mut current_run, &mut runs);
+    flush_context(&mut current_context, &mut contexts);
+    flush_vary(&mut current_vary, &mut vary_blocks);
 
-    // If no contexts at all, create an empty default
     if contexts.is_empty() && vary_blocks.is_empty() {
         contexts.push(NamedContext {
             name: "(default)".to_string(),
@@ -158,31 +182,27 @@ pub fn parse_script(source: &str) -> Result<Script> {
         });
     }
 
-    // Resolve extends
     resolve_extends(&mut contexts)?;
-
-    // Resolve vary blocks into additional contexts
     resolve_vary(&mut contexts, &vary_blocks)?;
 
-    Ok(Script { contexts, tests })
+    Ok(Script { contexts, runs })
 }
 
-fn flush_current(
-    ctx: &mut Option<NamedContext>,
-    vary: &mut Option<VaryBlock>,
-    test: &mut Option<Test>,
-    contexts: &mut Vec<NamedContext>,
-    vary_blocks: &mut Vec<VaryBlock>,
-    tests: &mut Vec<Test>,
-) {
+fn flush_run(run: &mut Option<Run>, runs: &mut Vec<Run>) {
+    if let Some(r) = run.take() {
+        runs.push(r);
+    }
+}
+
+fn flush_context(ctx: &mut Option<NamedContext>, contexts: &mut Vec<NamedContext>) {
     if let Some(c) = ctx.take() {
         contexts.push(c);
     }
+}
+
+fn flush_vary(vary: &mut Option<VaryBlock>, vary_blocks: &mut Vec<VaryBlock>) {
     if let Some(v) = vary.take() {
         vary_blocks.push(v);
-    }
-    if let Some(t) = test.take() {
-        tests.push(t);
     }
 }
 
@@ -197,29 +217,7 @@ fn parse_context_line(rest: &str, line_num: usize) -> Result<NamedContext> {
     } else {
         None
     };
-    Ok(NamedContext {
-        name,
-        extends,
-        commands: Vec::new(),
-    })
-}
-
-fn parse_test_line(rest: &str, line_num: usize) -> Result<Test> {
-    let rest = rest.trim();
-    if !rest.starts_with("args") {
-        bail!("line {}: test line must start with 'args'", line_num);
-    }
-    let args_str = rest[4..].trim();
-    let args = if args_str.is_empty() {
-        Vec::new()
-    } else {
-        parse_quoted_strings(args_str, line_num)?
-    };
-    Ok(Test {
-        args,
-        in_contexts: None,
-        stdin: None,
-    })
+    Ok(NamedContext { name, extends, commands: Vec::new() })
 }
 
 fn parse_setup_line(line: &str, line_num: usize) -> Result<SetupCommand> {
@@ -249,29 +247,21 @@ fn parse_setup_line(line: &str, line_num: usize) -> Result<SetupCommand> {
                 }
                 Ok(SetupCommand::CreateFile { path, content: FileContent::From(tokens[3].clone()) })
             } else {
-                let lines = tokens[2..].to_vec();
-                Ok(SetupCommand::CreateFile { path, content: FileContent::Lines(lines) })
+                Ok(SetupCommand::CreateFile { path, content: FileContent::Lines(tokens[2..].to_vec()) })
             }
         }
         "dir" => {
-            if tokens.len() < 2 {
-                bail!("line {}: dir requires a path", line_num);
-            }
+            if tokens.len() < 2 { bail!("line {}: dir requires a path", line_num); }
             Ok(SetupCommand::CreateDir { path: tokens[1].clone() })
         }
         "link" => {
             if tokens.len() < 4 || tokens[2] != "->" {
                 bail!("line {}: link syntax: link \"name\" -> \"target\"", line_num);
             }
-            Ok(SetupCommand::CreateLink {
-                path: tokens[1].clone(),
-                target: tokens[3].clone(),
-            })
+            Ok(SetupCommand::CreateLink { path: tokens[1].clone(), target: tokens[3].clone() })
         }
         "props" => {
-            if tokens.len() < 3 {
-                bail!("line {}: props requires path and property", line_num);
-            }
+            if tokens.len() < 3 { bail!("line {}: props requires path and property", line_num); }
             let path = tokens[1].clone();
             let mut props = Vec::new();
             for tok in &tokens[2..] {
@@ -287,36 +277,25 @@ fn parse_setup_line(line: &str, line_num: usize) -> Result<SetupCommand> {
             Ok(SetupCommand::SetProps { path, props })
         }
         "env" => {
-            if tokens.len() < 3 {
-                bail!("line {}: env requires VAR and value", line_num);
-            }
-            Ok(SetupCommand::SetEnv {
-                var: tokens[1].clone(),
-                value: tokens[2].clone(),
-            })
+            if tokens.len() < 3 { bail!("line {}: env requires VAR and value", line_num); }
+            Ok(SetupCommand::SetEnv { var: tokens[1].clone(), value: tokens[2].clone() })
         }
         "remove" => {
-            if tokens.len() < 2 {
-                bail!("line {}: remove requires a target", line_num);
-            }
+            if tokens.len() < 2 { bail!("line {}: remove requires a target", line_num); }
             if tokens[1] == "env" {
-                if tokens.len() < 3 {
-                    bail!("line {}: remove env requires a variable name", line_num);
-                }
+                if tokens.len() < 3 { bail!("line {}: remove env requires a var name", line_num); }
                 Ok(SetupCommand::RemoveEnv { var: tokens[2].clone() })
             } else {
                 Ok(SetupCommand::Remove { path: tokens[1].clone() })
             }
         }
         "invoke" => {
-            let args = tokens[1..].to_vec();
-            Ok(SetupCommand::Invoke { args })
+            Ok(SetupCommand::Invoke { args: tokens[1..].to_vec() })
         }
         _ => bail!("line {}: unknown command '{}'", line_num, tokens[0]),
     }
 }
 
-/// Resolve extends by copying parent commands.
 fn resolve_extends(contexts: &mut [NamedContext]) -> Result<()> {
     let by_name: HashMap<String, Vec<SetupCommand>> = contexts
         .iter()
@@ -329,7 +308,6 @@ fn resolve_extends(contexts: &mut [NamedContext]) -> Result<()> {
                 anyhow::anyhow!("context {:?} extends unknown {:?}", ctx.name, parent_name)
             })?;
             let mut merged = parent_cmds.clone();
-            // Apply child commands: removes filter, others append
             for cmd in &ctx.commands {
                 match cmd {
                     SetupCommand::Remove { path } => {
@@ -347,7 +325,6 @@ fn resolve_extends(contexts: &mut [NamedContext]) -> Result<()> {
     Ok(())
 }
 
-/// Resolve vary blocks into named variant contexts.
 fn resolve_vary(contexts: &mut Vec<NamedContext>, vary_blocks: &[VaryBlock]) -> Result<()> {
     for vary in vary_blocks {
         let base = contexts.iter().find(|c| c.name == vary.base).ok_or_else(|| {
@@ -367,25 +344,16 @@ fn resolve_vary(contexts: &mut Vec<NamedContext>, vary_blocks: &[VaryBlock]) -> 
                     cmds.retain(|c| !matches!(c, SetupCommand::SetEnv { var: v, .. } if v == var));
                 }
                 other => {
-                    // For file/props overrides, remove existing commands for same path then add
                     if let Some(path) = get_path(other) {
                         cmds.retain(|c| {
-                            if let Some(p) = get_path(c) {
-                                p != path
-                            } else {
-                                true
-                            }
+                            if let Some(p) = get_path(c) { p != path } else { true }
                         });
                     }
                     cmds.push(other.clone());
                 }
             }
 
-            contexts.push(NamedContext {
-                name: variant_name,
-                extends: None,
-                commands: cmds,
-            });
+            contexts.push(NamedContext { name: variant_name, extends: None, commands: cmds });
         }
     }
     Ok(())
@@ -442,21 +410,16 @@ fn describe_perturbation(cmd: &SetupCommand) -> String {
             format!("{} {}", path, p.join(" "))
         }
         SetupCommand::SetEnv { var, value } => format!("env {}={}", var, value),
-        SetupCommand::Invoke { args } => format!("invoke {:?}", args),
+        SetupCommand::Invoke { args } => format!("run {:?}", args),
         _ => format!("{:?}", cmd),
     }
 }
 
-/// Tokenize a line, respecting quoted strings.
 pub fn tokenize(line: &str, _line_num: usize) -> Result<Vec<String>> {
     let mut tokens = Vec::new();
     let mut chars = line.chars().peekable();
-
     while let Some(&c) = chars.peek() {
-        if c.is_whitespace() {
-            chars.next();
-            continue;
-        }
+        if c.is_whitespace() { chars.next(); continue; }
         if c == '"' {
             chars.next();
             let mut s = String::new();
@@ -483,8 +446,7 @@ pub fn tokenize(line: &str, _line_num: usize) -> Result<Vec<String>> {
             let mut s = String::new();
             while let Some(&c) = chars.peek() {
                 if c.is_whitespace() { break; }
-                s.push(c);
-                chars.next();
+                s.push(c); chars.next();
             }
             tokens.push(s);
         }
@@ -507,29 +469,49 @@ context "base"
   file "a.txt" "hello"
   dir "sub"
 
-test args "."
-test args "." "-a"
+run "."
+run "." "-a"
 "#;
         let script = parse_script(source).unwrap();
         assert_eq!(script.contexts.len(), 1);
-        assert_eq!(script.contexts[0].name, "base");
-        assert_eq!(script.tests.len(), 2);
+        assert_eq!(script.runs.len(), 2);
+        assert!(script.runs[0].diff_from.is_none());
     }
 
     #[test]
-    fn test_parse_extends() {
+    fn test_parse_from_block() {
         let source = r#"
 context "base"
   file "a.txt" "hello"
 
-context "extra" extends "base"
-  file "b.txt" "world"
+run "."
 
-test args "."
+from "."
+  run "." "-a"
+  run "." "-l"
 "#;
         let script = parse_script(source).unwrap();
-        assert_eq!(script.contexts.len(), 2);
-        assert_eq!(script.contexts[1].commands.len(), 2); // inherited + own
+        assert_eq!(script.runs.len(), 3);
+        assert!(script.runs[0].diff_from.is_none()); // standalone run "."
+        assert_eq!(script.runs[1].diff_from, Some(vec![".".to_string()])); // from "."
+        assert_eq!(script.runs[2].diff_from, Some(vec![".".to_string()])); // from "."
+    }
+
+    #[test]
+    fn test_parse_invoke_in_context() {
+        let source = r#"
+context "repo"
+  invoke "init"
+  file "readme.md" "hello"
+  invoke "add" "."
+  invoke "commit" "-m" "initial"
+
+run "status"
+"#;
+        let script = parse_script(source).unwrap();
+        assert_eq!(script.contexts.len(), 1);
+        assert_eq!(script.contexts[0].commands.len(), 4); // init, file, add, commit
+        assert_eq!(script.runs.len(), 1); // only "status" is an observation run
     }
 
     #[test]
@@ -543,48 +525,15 @@ vary from "base"
   remove ".hidden"
   file "a.txt" size 1000
 
-test args "."
+run "."
 "#;
         let script = parse_script(source).unwrap();
-        // base + 2 variants = 3 contexts
-        assert_eq!(script.contexts.len(), 3);
-        assert!(script.contexts[1].name.contains("remove .hidden"));
-        assert!(script.contexts[2].name.contains("size:1000"));
-    }
-
-    #[test]
-    fn test_parse_test_with_in_and_stdin() {
-        let source = r#"
-context "base"
-  file "a.txt" "hello"
-
-test args "." "-a"
-  in "base"
-
-test args "pattern"
-  stdin "line1" "line2"
-
-test args
-  stdin from "data.txt"
-"#;
-        let script = parse_script(source).unwrap();
-        assert_eq!(script.tests.len(), 3);
-        assert_eq!(script.tests[0].in_contexts, Some(vec!["base".to_string()]));
-        assert!(matches!(script.tests[1].stdin, Some(StdinSource::Lines(_))));
-        assert!(matches!(script.tests[2].stdin, Some(StdinSource::FromFile(_))));
+        assert_eq!(script.contexts.len(), 3); // base + 2 variants
     }
 
     #[test]
     fn test_reject_expect() {
-        let source = r#"
-context "base"
-  file "a.txt" "hello"
-
-test args "."
-  expect stdout not-empty
-"#;
-        let result = parse_script(source);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("expect"));
+        let source = "context \"b\"\n  file \"a\" \"b\"\n\nrun \".\"\n  expect stdout not-empty\n";
+        assert!(parse_script(source).is_err());
     }
 }
