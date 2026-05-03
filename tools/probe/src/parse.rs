@@ -1,23 +1,12 @@
-//! Parser for the test script language.
+//! Parser for the probe test language.
 //!
-//! Format:
-//!   context "name"
-//!     file "path" "line1" "line2" ...
-//!     dir "path"
-//!     ...
-//!
-//!   context "other" extends "name"
-//!     file "extra" "content"
-//!
-//!   test args "arg1" "arg2" ...
-//!     in "ctx1" "ctx2"
-//!     expect stdout <predicate>
-//!     expect exit <predicate>
+//! Layer 1: contexts (with extends, vary, remove) and test blocks.
+//! Layer 2: #> observation lines (skipped during parsing).
 
 use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
 
-/// A parsed test script.
+/// A parsed test file.
 #[derive(Debug)]
 pub struct Script {
     pub contexts: Vec<NamedContext>,
@@ -35,28 +24,14 @@ pub struct NamedContext {
 /// A setup command that modifies execution context state.
 #[derive(Debug, Clone)]
 pub enum SetupCommand {
-    CreateFile {
-        path: String,
-        content: FileContent,
-    },
-    CreateDir {
-        path: String,
-    },
-    CreateLink {
-        path: String,
-        target: String,
-    },
-    SetProps {
-        path: String,
-        props: Vec<Property>,
-    },
-    SetEnv {
-        var: String,
-        value: String,
-    },
-    Remove {
-        path: String,
-    },
+    CreateFile { path: String, content: FileContent },
+    CreateDir { path: String },
+    CreateLink { path: String, target: String },
+    SetProps { path: String, props: Vec<Property> },
+    SetEnv { var: String, value: String },
+    Remove { path: String },
+    RemoveEnv { var: String },
+    Invoke { args: Vec<String> },
 }
 
 #[derive(Debug, Clone)]
@@ -64,6 +39,7 @@ pub enum FileContent {
     Lines(Vec<String>),
     Size(usize),
     Empty,
+    From(String),
 }
 
 #[derive(Debug, Clone)]
@@ -74,162 +50,107 @@ pub enum Property {
     ReadOnly,
 }
 
-/// A test invocation with predictions.
+/// A vary block: generates perturbation variants of a base context.
+#[derive(Debug)]
+pub struct VaryBlock {
+    pub base: String,
+    pub perturbations: Vec<SetupCommand>,
+}
+
+/// A test invocation.
 #[derive(Debug)]
 pub struct Test {
     pub args: Vec<String>,
-    pub expectations: Vec<Expectation>,
-    /// If set, only run in these contexts. None = all contexts.
     pub in_contexts: Option<Vec<String>>,
-}
-
-/// A single prediction about an output dimension.
-#[derive(Debug, Clone)]
-pub struct Expectation {
-    pub dimension: OutputDimension,
-    pub predicate: Predicate,
+    pub stdin: Option<StdinSource>,
 }
 
 #[derive(Debug, Clone)]
-pub enum OutputDimension {
-    Stdout,
-    Stderr,
-    Exit,
-}
-
-#[derive(Debug, Clone)]
-pub enum Predicate {
-    // Stdout structural (vs another invocation)
-    Empty,
-    NotEmpty,
-    Reordered { vs_args: Vec<String> },
-    Superset { vs_args: Vec<String> },
-    Subset { vs_args: Vec<String> },
-    Preserved { vs_args: Vec<String> },
-
-    // Stdout quantitative (vs another invocation)
-    LinesSame { vs_args: Vec<String> },
-    LinesMore { vs_args: Vec<String> },
-    LinesFewer { vs_args: Vec<String> },
-    LinesExactly(usize),
-
-    // Stdout content
-    Contains(String),
-    NotContains(String),
-    EveryLineMatches(String),
-
-    // Stdout positional
-    LineContains { line: usize, text: String },
-    LineNotContains { line: usize, text: String },
-    Before { first: String, second: String },
-
-    // Stderr
-    Unchanged { vs_args: Vec<String> },
-    StderrEmpty,
-    StderrNotEmpty,
-    StderrContains(String),
-
-    // Exit code
-    ExitCode(i32),
-    ExitUnchanged { vs_args: Vec<String> },
-    ExitChanged { vs_args: Vec<String> },
+pub enum StdinSource {
+    Lines(Vec<String>),
+    FromFile(String),
 }
 
 /// Parse a test script from source text.
 pub fn parse_script(source: &str) -> Result<Script> {
     let mut contexts: Vec<NamedContext> = Vec::new();
+    let mut vary_blocks: Vec<VaryBlock> = Vec::new();
     let mut tests: Vec<Test> = Vec::new();
-    let mut current_test: Option<Test> = None;
     let mut current_context: Option<NamedContext> = None;
-    // Collect top-level setup commands (no context block) for backward compat
-    let mut bare_setup: Vec<SetupCommand> = Vec::new();
-    let mut has_named_contexts = false;
+    let mut current_vary: Option<VaryBlock> = None;
+    let mut current_test: Option<Test> = None;
 
     for (line_num, raw_line) in source.lines().enumerate() {
         let line = raw_line.trim();
         let line_num = line_num + 1;
 
-        // Skip empty lines and comments (including #> tool annotations)
+        // Skip empty lines, comments, and tool annotations
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
 
+        // Reject expect lines (layer 3, not supported yet)
+        if line.starts_with("expect ") {
+            bail!("line {}: 'expect' is not supported in this version (layer 3 not yet implemented)", line_num);
+        }
+
         if let Some(rest) = line.strip_prefix("context ") {
-            // Start a new context — flush previous context and test
-            if let Some(t) = current_test.take() {
-                tests.push(t);
+            flush_current(&mut current_context, &mut current_vary, &mut current_test,
+                         &mut contexts, &mut vary_blocks, &mut tests);
+            current_context = Some(parse_context_line(rest, line_num)?);
+        } else if let Some(rest) = line.strip_prefix("vary from ") {
+            flush_current(&mut current_context, &mut current_vary, &mut current_test,
+                         &mut contexts, &mut vary_blocks, &mut tests);
+            let tokens = tokenize(rest, line_num)?;
+            if tokens.is_empty() {
+                bail!("line {}: vary requires a base context name", line_num);
             }
-            if let Some(ctx) = current_context.take() {
-                contexts.push(ctx);
-            }
-            has_named_contexts = true;
-            let ctx = parse_context_line(rest, line_num)?;
-            current_context = Some(ctx);
-        } else if let Some(rest) = line.strip_prefix("expect ") {
-            // Expectation line — must be inside a test
-            let test = current_test.as_mut().ok_or_else(|| {
-                anyhow::anyhow!("line {}: 'expect' outside of a test block", line_num)
-            })?;
-            let exp = parse_expectation(rest, line_num)?;
-            test.expectations.push(exp);
+            current_vary = Some(VaryBlock {
+                base: tokens[0].clone(),
+                perturbations: Vec::new(),
+            });
+        } else if let Some(rest) = line.strip_prefix("test ") {
+            flush_current(&mut current_context, &mut current_vary, &mut current_test,
+                         &mut contexts, &mut vary_blocks, &mut tests);
+            current_test = Some(parse_test_line(rest, line_num)?);
         } else if let Some(rest) = line.strip_prefix("in ") {
-            // Context scope — must be inside a test (before any expects)
             let test = current_test.as_mut().ok_or_else(|| {
                 anyhow::anyhow!("line {}: 'in' outside of a test block", line_num)
             })?;
-            let scope = parse_quoted_strings(rest.trim(), line_num)?;
-            test.in_contexts = Some(scope);
-        } else if let Some(rest) = line.strip_prefix("test ") {
-            // Start a new test — flush previous
-            if let Some(t) = current_test.take() {
-                tests.push(t);
+            test.in_contexts = Some(parse_quoted_strings(rest.trim(), line_num)?);
+        } else if let Some(rest) = line.strip_prefix("stdin ") {
+            let test = current_test.as_mut().ok_or_else(|| {
+                anyhow::anyhow!("line {}: 'stdin' outside of a test block", line_num)
+            })?;
+            let rest = rest.trim();
+            if let Some(path) = rest.strip_prefix("from ") {
+                let tokens = tokenize(path, line_num)?;
+                if tokens.is_empty() {
+                    bail!("line {}: stdin from requires a path", line_num);
+                }
+                test.stdin = Some(StdinSource::FromFile(tokens[0].clone()));
+            } else {
+                let lines = parse_quoted_strings(rest, line_num)?;
+                test.stdin = Some(StdinSource::Lines(lines));
             }
-            // Flush context if open (test blocks come after contexts)
-            if let Some(ctx) = current_context.take() {
-                contexts.push(ctx);
-            }
-            let args = parse_test_line(rest, line_num)?;
-            current_test = Some(Test {
-                args,
-                expectations: Vec::new(),
-                in_contexts: None,
-            });
         } else {
-            // Setup command — must be inside a context (or bare top-level)
+            // Setup command — goes into current context or vary block
             let cmd = parse_setup_line(line, line_num)?;
-            if let Some(ctx) = current_context.as_mut() {
+            if let Some(ref mut vary) = current_vary {
+                vary.perturbations.push(cmd);
+            } else if let Some(ref mut ctx) = current_context {
                 ctx.commands.push(cmd);
             } else {
-                // Flush any open test first
-                if let Some(t) = current_test.take() {
-                    tests.push(t);
-                }
-                bare_setup.push(cmd);
+                bail!("line {}: setup command outside of context or vary block", line_num);
             }
         }
     }
 
-    // Flush final context and test
-    if let Some(ctx) = current_context.take() {
-        contexts.push(ctx);
-    }
-    if let Some(t) = current_test.take() {
-        tests.push(t);
-    }
-
-    // Backward compatibility: if no named contexts, wrap bare setup as default
-    if !has_named_contexts && !bare_setup.is_empty() {
-        contexts.push(NamedContext {
-            name: "(default)".to_string(),
-            extends: None,
-            commands: bare_setup,
-        });
-    } else if has_named_contexts && !bare_setup.is_empty() {
-        bail!("cannot mix top-level setup commands with named contexts");
-    }
+    flush_current(&mut current_context, &mut current_vary, &mut current_test,
+                 &mut contexts, &mut vary_blocks, &mut tests);
 
     // If no contexts at all, create an empty default
-    if contexts.is_empty() {
+    if contexts.is_empty() && vary_blocks.is_empty() {
         contexts.push(NamedContext {
             name: "(default)".to_string(),
             extends: None,
@@ -238,15 +159,33 @@ pub fn parse_script(source: &str) -> Result<Script> {
     }
 
     // Resolve extends
-    let resolved = resolve_extends(&contexts)?;
+    resolve_extends(&mut contexts)?;
 
-    Ok(Script {
-        contexts: resolved,
-        tests,
-    })
+    // Resolve vary blocks into additional contexts
+    resolve_vary(&mut contexts, &vary_blocks)?;
+
+    Ok(Script { contexts, tests })
 }
 
-/// Parse `context "name"` or `context "name" extends "parent"`.
+fn flush_current(
+    ctx: &mut Option<NamedContext>,
+    vary: &mut Option<VaryBlock>,
+    test: &mut Option<Test>,
+    contexts: &mut Vec<NamedContext>,
+    vary_blocks: &mut Vec<VaryBlock>,
+    tests: &mut Vec<Test>,
+) {
+    if let Some(c) = ctx.take() {
+        contexts.push(c);
+    }
+    if let Some(v) = vary.take() {
+        vary_blocks.push(v);
+    }
+    if let Some(t) = test.take() {
+        tests.push(t);
+    }
+}
+
 fn parse_context_line(rest: &str, line_num: usize) -> Result<NamedContext> {
     let tokens = tokenize(rest.trim(), line_num)?;
     if tokens.is_empty() {
@@ -265,59 +204,22 @@ fn parse_context_line(rest: &str, line_num: usize) -> Result<NamedContext> {
     })
 }
 
-/// Resolve `extends` by copying parent commands and applying removes.
-fn resolve_extends(contexts: &[NamedContext]) -> Result<Vec<NamedContext>> {
-    let by_name: HashMap<&str, &NamedContext> = contexts
-        .iter()
-        .map(|c| (c.name.as_str(), c))
-        .collect();
-
-    let mut resolved = Vec::new();
-    for ctx in contexts {
-        let mut commands = Vec::new();
-
-        if let Some(ref parent_name) = ctx.extends {
-            let parent = by_name.get(parent_name.as_str()).ok_or_else(|| {
-                anyhow::anyhow!("context {:?} extends unknown context {:?}", ctx.name, parent_name)
-            })?;
-            // Copy parent commands (recursion not needed — parent already resolved if ordered)
-            // For simplicity, only support one level of extends for now
-            commands.extend(parent.commands.clone());
-        }
-
-        // Apply own commands, handling removes
-        for cmd in &ctx.commands {
-            match cmd {
-                SetupCommand::Remove { path } => {
-                    commands.retain(|c| match c {
-                        SetupCommand::CreateFile { path: p, .. }
-                        | SetupCommand::CreateDir { path: p }
-                        | SetupCommand::CreateLink { path: p, .. }
-                        | SetupCommand::SetProps { path: p, .. } => p != path,
-                        _ => true,
-                    });
-                }
-                other => commands.push(other.clone()),
-            }
-        }
-
-        resolved.push(NamedContext {
-            name: ctx.name.clone(),
-            extends: ctx.extends.clone(),
-            commands,
-        });
-    }
-
-    Ok(resolved)
-}
-
-fn parse_test_line(rest: &str, line_num: usize) -> Result<Vec<String>> {
+fn parse_test_line(rest: &str, line_num: usize) -> Result<Test> {
     let rest = rest.trim();
     if !rest.starts_with("args") {
         bail!("line {}: test line must start with 'args'", line_num);
     }
     let args_str = rest[4..].trim();
-    parse_quoted_strings(args_str, line_num)
+    let args = if args_str.is_empty() {
+        Vec::new()
+    } else {
+        parse_quoted_strings(args_str, line_num)?
+    };
+    Ok(Test {
+        args,
+        in_contexts: None,
+        stdin: None,
+    })
 }
 
 fn parse_setup_line(line: &str, line_num: usize) -> Result<SetupCommand> {
@@ -329,44 +231,37 @@ fn parse_setup_line(line: &str, line_num: usize) -> Result<SetupCommand> {
     match tokens[0].as_str() {
         "file" => {
             if tokens.len() < 2 {
-                bail!("line {}: file command requires a path", line_num);
+                bail!("line {}: file requires a path", line_num);
             }
             let path = tokens[1].clone();
             if tokens.len() == 2 || (tokens.len() == 3 && tokens[2] == "empty") {
-                Ok(SetupCommand::CreateFile {
-                    path,
-                    content: FileContent::Empty,
-                })
-            } else if tokens.len() == 4 && tokens[2] == "size" {
-                let size: usize = tokens[3]
-                    .parse()
+                Ok(SetupCommand::CreateFile { path, content: FileContent::Empty })
+            } else if tokens.len() >= 3 && tokens[2] == "size" {
+                if tokens.len() < 4 {
+                    bail!("line {}: file size requires a number", line_num);
+                }
+                let size: usize = tokens[3].parse()
                     .with_context(|| format!("line {}: invalid size", line_num))?;
-                Ok(SetupCommand::CreateFile {
-                    path,
-                    content: FileContent::Size(size),
-                })
+                Ok(SetupCommand::CreateFile { path, content: FileContent::Size(size) })
+            } else if tokens.len() >= 3 && tokens[2] == "from" {
+                if tokens.len() < 4 {
+                    bail!("line {}: file from requires a path", line_num);
+                }
+                Ok(SetupCommand::CreateFile { path, content: FileContent::From(tokens[3].clone()) })
             } else {
                 let lines = tokens[2..].to_vec();
-                Ok(SetupCommand::CreateFile {
-                    path,
-                    content: FileContent::Lines(lines),
-                })
+                Ok(SetupCommand::CreateFile { path, content: FileContent::Lines(lines) })
             }
         }
         "dir" => {
             if tokens.len() < 2 {
-                bail!("line {}: dir command requires a path", line_num);
+                bail!("line {}: dir requires a path", line_num);
             }
-            Ok(SetupCommand::CreateDir {
-                path: tokens[1].clone(),
-            })
+            Ok(SetupCommand::CreateDir { path: tokens[1].clone() })
         }
         "link" => {
             if tokens.len() < 4 || tokens[2] != "->" {
-                bail!(
-                    "line {}: link syntax: link \"name\" -> \"target\"",
-                    line_num
-                );
+                bail!("line {}: link syntax: link \"name\" -> \"target\"", line_num);
             }
             Ok(SetupCommand::CreateLink {
                 path: tokens[1].clone(),
@@ -375,7 +270,7 @@ fn parse_setup_line(line: &str, line_num: usize) -> Result<SetupCommand> {
         }
         "props" => {
             if tokens.len() < 3 {
-                bail!("line {}: props command requires path and property", line_num);
+                bail!("line {}: props requires path and property", line_num);
             }
             let path = tokens[1].clone();
             let mut props = Vec::new();
@@ -383,7 +278,7 @@ fn parse_setup_line(line: &str, line_num: usize) -> Result<SetupCommand> {
                 match tok.as_str() {
                     "executable" => props.push(Property::Executable),
                     "readonly" => props.push(Property::ReadOnly),
-                    "mtime" => {} // consumed by next token
+                    "mtime" => {}
                     "old" => props.push(Property::MtimeOld),
                     "recent" => props.push(Property::MtimeRecent),
                     _ => bail!("line {}: unknown property '{}'", line_num, tok),
@@ -393,7 +288,7 @@ fn parse_setup_line(line: &str, line_num: usize) -> Result<SetupCommand> {
         }
         "env" => {
             if tokens.len() < 3 {
-                bail!("line {}: env command requires VAR and value", line_num);
+                bail!("line {}: env requires VAR and value", line_num);
             }
             Ok(SetupCommand::SetEnv {
                 var: tokens[1].clone(),
@@ -402,154 +297,150 @@ fn parse_setup_line(line: &str, line_num: usize) -> Result<SetupCommand> {
         }
         "remove" => {
             if tokens.len() < 2 {
-                bail!("line {}: remove command requires a path", line_num);
+                bail!("line {}: remove requires a target", line_num);
             }
-            Ok(SetupCommand::Remove {
-                path: tokens[1].clone(),
-            })
+            if tokens[1] == "env" {
+                if tokens.len() < 3 {
+                    bail!("line {}: remove env requires a variable name", line_num);
+                }
+                Ok(SetupCommand::RemoveEnv { var: tokens[2].clone() })
+            } else {
+                Ok(SetupCommand::Remove { path: tokens[1].clone() })
+            }
+        }
+        "invoke" => {
+            let args = tokens[1..].to_vec();
+            Ok(SetupCommand::Invoke { args })
         }
         _ => bail!("line {}: unknown command '{}'", line_num, tokens[0]),
     }
 }
 
-fn parse_expectation(rest: &str, line_num: usize) -> Result<Expectation> {
-    let rest = rest.trim();
-    let (dimension, predicate_str) = if let Some(r) = rest.strip_prefix("stdout ") {
-        (OutputDimension::Stdout, r.trim())
-    } else if let Some(r) = rest.strip_prefix("stderr ") {
-        (OutputDimension::Stderr, r.trim())
-    } else if let Some(r) = rest.strip_prefix("exit ") {
-        (OutputDimension::Exit, r.trim())
-    } else {
-        bail!("line {}: expect requires stdout|stderr|exit", line_num);
-    };
+/// Resolve extends by copying parent commands.
+fn resolve_extends(contexts: &mut [NamedContext]) -> Result<()> {
+    let by_name: HashMap<String, Vec<SetupCommand>> = contexts
+        .iter()
+        .map(|c| (c.name.clone(), c.commands.clone()))
+        .collect();
 
-    let predicate = parse_predicate(&dimension, predicate_str, line_num)?;
-    Ok(Expectation {
-        dimension,
-        predicate,
-    })
+    for ctx in contexts.iter_mut() {
+        if let Some(ref parent_name) = ctx.extends {
+            let parent_cmds = by_name.get(parent_name).ok_or_else(|| {
+                anyhow::anyhow!("context {:?} extends unknown {:?}", ctx.name, parent_name)
+            })?;
+            let mut merged = parent_cmds.clone();
+            // Apply child commands: removes filter, others append
+            for cmd in &ctx.commands {
+                match cmd {
+                    SetupCommand::Remove { path } => {
+                        merged.retain(|c| !matches_path(c, path));
+                    }
+                    SetupCommand::RemoveEnv { var } => {
+                        merged.retain(|c| !matches!(c, SetupCommand::SetEnv { var: v, .. } if v == var));
+                    }
+                    other => merged.push(other.clone()),
+                }
+            }
+            ctx.commands = merged;
+        }
+    }
+    Ok(())
 }
 
-fn parse_predicate(dim: &OutputDimension, s: &str, line_num: usize) -> Result<Predicate> {
-    match dim {
-        OutputDimension::Stdout => parse_stdout_predicate(s, line_num),
-        OutputDimension::Stderr => parse_stderr_predicate(s, line_num),
-        OutputDimension::Exit => parse_exit_predicate(s, line_num),
-    }
-}
+/// Resolve vary blocks into named variant contexts.
+fn resolve_vary(contexts: &mut Vec<NamedContext>, vary_blocks: &[VaryBlock]) -> Result<()> {
+    for vary in vary_blocks {
+        let base = contexts.iter().find(|c| c.name == vary.base).ok_or_else(|| {
+            anyhow::anyhow!("vary references unknown context {:?}", vary.base)
+        })?;
+        let base_cmds = base.commands.clone();
 
-fn parse_stdout_predicate(s: &str, line_num: usize) -> Result<Predicate> {
-    if s == "empty" {
-        return Ok(Predicate::Empty);
-    }
-    if s == "not-empty" {
-        return Ok(Predicate::NotEmpty);
-    }
-    if let Some(rest) = s.strip_prefix("contains ") {
-        let text = parse_single_quoted(rest.trim(), line_num)?;
-        return Ok(Predicate::Contains(text));
-    }
-    if let Some(rest) = s.strip_prefix("not-contains ") {
-        let text = parse_single_quoted(rest.trim(), line_num)?;
-        return Ok(Predicate::NotContains(text));
-    }
-    if let Some(rest) = s.strip_prefix("every-line-matches ") {
-        let pat = parse_single_quoted(rest.trim(), line_num)?;
-        return Ok(Predicate::EveryLineMatches(pat));
-    }
-    if let Some(rest) = s.strip_prefix("lines exactly ") {
-        let n: usize = rest
-            .trim()
-            .parse()
-            .with_context(|| format!("line {}: invalid line count", line_num))?;
-        return Ok(Predicate::LinesExactly(n));
-    }
-    if let Some(rest) = s.strip_prefix("line ") {
-        let rest = rest.trim();
-        let (n_str, remainder) = rest.split_once(' ')
-            .ok_or_else(|| anyhow::anyhow!("line {}: expected 'line N contains/not-contains'", line_num))?;
-        let n: usize = n_str.parse()
-            .with_context(|| format!("line {}: invalid line number", line_num))?;
-        let remainder = remainder.trim();
-        if let Some(rest) = remainder.strip_prefix("contains ") {
-            let text = parse_single_quoted(rest.trim(), line_num)?;
-            return Ok(Predicate::LineContains { line: n, text });
-        }
-        if let Some(rest) = remainder.strip_prefix("not-contains ") {
-            let text = parse_single_quoted(rest.trim(), line_num)?;
-            return Ok(Predicate::LineNotContains { line: n, text });
-        }
-        bail!("line {}: expected 'contains' or 'not-contains' after line number", line_num);
-    }
-    if s.contains("\" before \"") {
-        let tokens = parse_quoted_strings(s.replace(" before ", " ").trim(), line_num)?;
-        if tokens.len() == 2 {
-            return Ok(Predicate::Before {
-                first: tokens[0].clone(),
-                second: tokens[1].clone(),
+        for perturbation in &vary.perturbations {
+            let variant_name = format!("{} / {}", vary.base, describe_perturbation(perturbation));
+            let mut cmds = base_cmds.clone();
+
+            match perturbation {
+                SetupCommand::Remove { path } => {
+                    cmds.retain(|c| !matches_path(c, path));
+                }
+                SetupCommand::RemoveEnv { var } => {
+                    cmds.retain(|c| !matches!(c, SetupCommand::SetEnv { var: v, .. } if v == var));
+                }
+                other => {
+                    // For file/props overrides, remove existing commands for same path then add
+                    if let Some(path) = get_path(other) {
+                        cmds.retain(|c| {
+                            if let Some(p) = get_path(c) {
+                                p != path
+                            } else {
+                                true
+                            }
+                        });
+                    }
+                    cmds.push(other.clone());
+                }
+            }
+
+            contexts.push(NamedContext {
+                name: variant_name,
+                extends: None,
+                commands: cmds,
             });
         }
-        bail!("line {}: expected '\"X\" before \"Y\"'", line_num);
     }
+    Ok(())
+}
 
-    #[allow(clippy::type_complexity)]
-    let relational: &[(&str, fn(Vec<String>) -> Predicate)] = &[
-        ("preserved vs ", |a| Predicate::Preserved { vs_args: a }),
-        ("reordered vs ", |a| Predicate::Reordered { vs_args: a }),
-        ("superset vs ", |a| Predicate::Superset { vs_args: a }),
-        ("subset vs ", |a| Predicate::Subset { vs_args: a }),
-        ("lines same as ", |a| Predicate::LinesSame { vs_args: a }),
-        ("lines more than ", |a| Predicate::LinesMore { vs_args: a }),
-        ("lines fewer than ", |a| Predicate::LinesFewer { vs_args: a }),
-    ];
+fn matches_path(cmd: &SetupCommand, path: &str) -> bool {
+    match cmd {
+        SetupCommand::CreateFile { path: p, .. }
+        | SetupCommand::CreateDir { path: p }
+        | SetupCommand::CreateLink { path: p, .. }
+        | SetupCommand::SetProps { path: p, .. } => p == path,
+        _ => false,
+    }
+}
 
-    for (prefix, constructor) in relational {
-        if let Some(rest) = s.strip_prefix(prefix) {
-            let vs_args = parse_quoted_strings(rest.trim(), line_num)?;
-            return Ok(constructor(vs_args));
+fn get_path(cmd: &SetupCommand) -> Option<&str> {
+    match cmd {
+        SetupCommand::CreateFile { path, .. }
+        | SetupCommand::CreateDir { path }
+        | SetupCommand::CreateLink { path, .. }
+        | SetupCommand::SetProps { path, .. } => Some(path),
+        _ => None,
+    }
+}
+
+fn describe_perturbation(cmd: &SetupCommand) -> String {
+    match cmd {
+        SetupCommand::Remove { path } => format!("remove {}", path),
+        SetupCommand::RemoveEnv { var } => format!("remove env {}", var),
+        SetupCommand::CreateFile { path, content } => {
+            match content {
+                FileContent::Size(n) => format!("{}=size:{}", path, n),
+                FileContent::Lines(l) if l.len() == 1 => format!("{}={:?}", path, l[0]),
+                FileContent::Lines(l) => format!("{}={}lines", path, l.len()),
+                FileContent::Empty => format!("{}=empty", path),
+                FileContent::From(src) => format!("{}=from:{}", path, src),
+            }
         }
+        SetupCommand::SetProps { path, props } => {
+            let p: Vec<&str> = props.iter().map(|p| match p {
+                Property::Executable => "executable",
+                Property::MtimeOld => "mtime=old",
+                Property::MtimeRecent => "mtime=recent",
+                Property::ReadOnly => "readonly",
+            }).collect();
+            format!("{} {}", path, p.join(" "))
+        }
+        SetupCommand::SetEnv { var, value } => format!("env {}={}", var, value),
+        SetupCommand::Invoke { args } => format!("invoke {:?}", args),
+        _ => format!("{:?}", cmd),
     }
-
-    bail!("line {}: unknown stdout predicate: '{}'", line_num, s)
-}
-
-fn parse_stderr_predicate(s: &str, line_num: usize) -> Result<Predicate> {
-    if s == "empty" {
-        return Ok(Predicate::StderrEmpty);
-    }
-    if s == "not-empty" {
-        return Ok(Predicate::StderrNotEmpty);
-    }
-    if let Some(rest) = s.strip_prefix("unchanged vs ") {
-        let vs_args = parse_quoted_strings(rest.trim(), line_num)?;
-        return Ok(Predicate::Unchanged { vs_args });
-    }
-    if let Some(rest) = s.strip_prefix("contains ") {
-        let text = parse_single_quoted(rest.trim(), line_num)?;
-        return Ok(Predicate::StderrContains(text));
-    }
-    bail!("line {}: unknown stderr predicate: '{}'", line_num, s)
-}
-
-fn parse_exit_predicate(s: &str, line_num: usize) -> Result<Predicate> {
-    if let Some(rest) = s.strip_prefix("unchanged vs ") {
-        let vs_args = parse_quoted_strings(rest.trim(), line_num)?;
-        return Ok(Predicate::ExitUnchanged { vs_args });
-    }
-    if let Some(rest) = s.strip_prefix("changed vs ") {
-        let vs_args = parse_quoted_strings(rest.trim(), line_num)?;
-        return Ok(Predicate::ExitChanged { vs_args });
-    }
-    let code: i32 = s
-        .trim()
-        .parse()
-        .with_context(|| format!("line {}: invalid exit code", line_num))?;
-    Ok(Predicate::ExitCode(code))
 }
 
 /// Tokenize a line, respecting quoted strings.
-fn tokenize(line: &str, _line_num: usize) -> Result<Vec<String>> {
+pub fn tokenize(line: &str, _line_num: usize) -> Result<Vec<String>> {
     let mut tokens = Vec::new();
     let mut chars = line.chars().peekable();
 
@@ -571,10 +462,7 @@ fn tokenize(line: &str, _line_num: usize) -> Result<Vec<String>> {
                                 't' => s.push('\t'),
                                 '\\' => s.push('\\'),
                                 '"' => s.push('"'),
-                                other => {
-                                    s.push('\\');
-                                    s.push(other);
-                                }
+                                other => { s.push('\\'); s.push(other); }
                             }
                         }
                     }
@@ -586,16 +474,13 @@ fn tokenize(line: &str, _line_num: usize) -> Result<Vec<String>> {
         } else {
             let mut s = String::new();
             while let Some(&c) = chars.peek() {
-                if c.is_whitespace() {
-                    break;
-                }
+                if c.is_whitespace() { break; }
                 s.push(c);
                 chars.next();
             }
             tokens.push(s);
         }
     }
-
     Ok(tokens)
 }
 
@@ -603,73 +488,24 @@ fn parse_quoted_strings(s: &str, line_num: usize) -> Result<Vec<String>> {
     tokenize(s, line_num)
 }
 
-fn parse_single_quoted(s: &str, line_num: usize) -> Result<String> {
-    let tokens = tokenize(s, line_num)?;
-    if tokens.len() != 1 {
-        bail!(
-            "line {}: expected single quoted string, got {} tokens",
-            line_num,
-            tokens.len()
-        );
-    }
-    Ok(tokens[0].clone())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_legacy_format() {
+    fn test_parse_basic() {
         let source = r#"
-# Setup
-file "data.txt" "hello" "world"
-dir "subdir"
+context "base"
+  file "a.txt" "hello"
+  dir "sub"
 
-# Tests
 test args "."
-  expect stdout not-empty
-  expect exit 0
-
 test args "." "-a"
-  expect stdout lines more than "."
-  expect exit 0
 "#;
         let script = parse_script(source).unwrap();
         assert_eq!(script.contexts.len(), 1);
-        assert_eq!(script.contexts[0].name, "(default)");
-        assert_eq!(script.contexts[0].commands.len(), 2);
-        assert_eq!(script.tests.len(), 2);
-        assert_eq!(script.tests[0].args, vec!["."]);
-        assert_eq!(script.tests[1].args, vec![".", "-a"]);
-        assert!(script.tests[0].in_contexts.is_none());
-    }
-
-    #[test]
-    fn test_parse_named_contexts() {
-        let source = r#"
-context "base"
-  file "visible.txt" "hello"
-  file ".hidden" "secret"
-
-context "empty"
-
-test args "."
-  expect stdout not-empty
-
-test args "." "-a"
-  in "base"
-  expect stdout superset vs "."
-"#;
-        let script = parse_script(source).unwrap();
-        assert_eq!(script.contexts.len(), 2);
         assert_eq!(script.contexts[0].name, "base");
-        assert_eq!(script.contexts[0].commands.len(), 2);
-        assert_eq!(script.contexts[1].name, "empty");
-        assert_eq!(script.contexts[1].commands.len(), 0);
         assert_eq!(script.tests.len(), 2);
-        assert!(script.tests[0].in_contexts.is_none());
-        assert_eq!(script.tests[1].in_contexts, Some(vec!["base".to_string()]));
     }
 
     #[test]
@@ -677,34 +513,70 @@ test args "." "-a"
         let source = r#"
 context "base"
   file "a.txt" "hello"
-  file ".hidden" "secret"
 
-context "with backup" extends "base"
-  file "backup~" "old"
+context "extra" extends "base"
+  file "b.txt" "world"
 
 test args "."
-  expect stdout not-empty
 "#;
         let script = parse_script(source).unwrap();
         assert_eq!(script.contexts.len(), 2);
-        // "with backup" should have base's 2 commands + its own 1
-        assert_eq!(script.contexts[1].commands.len(), 3);
+        assert_eq!(script.contexts[1].commands.len(), 2); // inherited + own
     }
 
     #[test]
-    fn test_parse_remove() {
+    fn test_parse_vary() {
         let source = r#"
 context "base"
   file "a.txt" "hello"
   file ".hidden" "secret"
 
-context "no hidden" extends "base"
+vary from "base"
   remove ".hidden"
+  file "a.txt" size 1000
+
+test args "."
+"#;
+        let script = parse_script(source).unwrap();
+        // base + 2 variants = 3 contexts
+        assert_eq!(script.contexts.len(), 3);
+        assert!(script.contexts[1].name.contains("remove .hidden"));
+        assert!(script.contexts[2].name.contains("size:1000"));
+    }
+
+    #[test]
+    fn test_parse_test_with_in_and_stdin() {
+        let source = r#"
+context "base"
+  file "a.txt" "hello"
+
+test args "." "-a"
+  in "base"
+
+test args "pattern"
+  stdin "line1" "line2"
+
+test args
+  stdin from "data.txt"
+"#;
+        let script = parse_script(source).unwrap();
+        assert_eq!(script.tests.len(), 3);
+        assert_eq!(script.tests[0].in_contexts, Some(vec!["base".to_string()]));
+        assert!(matches!(script.tests[1].stdin, Some(StdinSource::Lines(_))));
+        assert!(matches!(script.tests[2].stdin, Some(StdinSource::FromFile(_))));
+    }
+
+    #[test]
+    fn test_reject_expect() {
+        let source = r#"
+context "base"
+  file "a.txt" "hello"
 
 test args "."
   expect stdout not-empty
 "#;
-        let script = parse_script(source).unwrap();
-        assert_eq!(script.contexts[1].commands.len(), 1); // only a.txt remains
+        let result = parse_script(source);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("expect"));
     }
 }

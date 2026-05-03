@@ -6,7 +6,8 @@ use std::fs;
 use std::path::Path;
 
 /// Build sandbox state from setup commands.
-pub fn apply_setup(work_dir: &Path, commands: &[SetupCommand]) -> Result<()> {
+/// `binary` is needed for invoke commands.
+pub fn apply_setup(work_dir: &Path, binary: &str, commands: &[SetupCommand]) -> Result<()> {
     for cmd in commands {
         match cmd {
             SetupCommand::CreateFile { path, content } => {
@@ -29,6 +30,10 @@ pub fn apply_setup(work_dir: &Path, commands: &[SetupCommand]) -> Result<()> {
                     FileContent::Empty => {
                         fs::write(&full, "")
                             .with_context(|| format!("write empty {}", path))?;
+                    }
+                    FileContent::From(src) => {
+                        fs::copy(src, &full)
+                            .with_context(|| format!("copy {} -> {}", src, path))?;
                     }
                 }
             }
@@ -70,16 +75,14 @@ pub fn apply_setup(work_dir: &Path, commands: &[SetupCommand]) -> Result<()> {
                         Property::MtimeOld => {
                             #[cfg(unix)]
                             {
-                                // Set mtime to year 2000
-                                let old_time = 946684800; // 2000-01-01 00:00:00 UTC
+                                let old_time = 946684800; // 2000-01-01
                                 let times = [
                                     libc::timespec { tv_sec: old_time, tv_nsec: 0 },
                                     libc::timespec { tv_sec: old_time, tv_nsec: 0 },
                                 ];
                                 let path_c = std::ffi::CString::new(
                                     full.to_string_lossy().as_bytes(),
-                                )
-                                .unwrap();
+                                ).unwrap();
                                 unsafe {
                                     libc::utimensat(
                                         libc::AT_FDCWD,
@@ -91,7 +94,6 @@ pub fn apply_setup(work_dir: &Path, commands: &[SetupCommand]) -> Result<()> {
                             }
                         }
                         Property::MtimeRecent => {
-                            // Touch — just rewrite the file to update mtime
                             if full.exists() {
                                 let content = fs::read(&full).unwrap_or_default();
                                 fs::write(&full, &content)?;
@@ -109,6 +111,34 @@ pub fn apply_setup(work_dir: &Path, commands: &[SetupCommand]) -> Result<()> {
                     let _ = fs::remove_dir_all(&full);
                 } else {
                     let _ = fs::remove_file(&full);
+                }
+            }
+            SetupCommand::RemoveEnv { var } => {
+                std::env::remove_var(var);
+            }
+            SetupCommand::Invoke { args } => {
+                let output = std::process::Command::new(binary)
+                    .args(args)
+                    .current_dir(work_dir)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::piped())
+                    .env_clear()
+                    .env("PATH", std::env::var("PATH").unwrap_or_default())
+                    .env("HOME", work_dir)
+                    .env("LANG", "C")
+                    .env("LC_ALL", "C")
+                    .output()
+                    .with_context(|| format!("invoke {:?}", args))?;
+
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    anyhow::bail!(
+                        "invoke {:?} failed (exit {}): {}",
+                        args,
+                        output.status.code().unwrap_or(-1),
+                        stderr.trim()
+                    );
                 }
             }
         }

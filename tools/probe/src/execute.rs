@@ -1,13 +1,12 @@
-//! Execute test scripts and collect observations.
+//! Execute the grid: states × invocations → observations.
 
-use crate::parse::Script;
+use crate::parse::{Script, StdinSource, Test};
 use crate::sandbox;
-use crate::validate;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::process::{Command, Stdio};
 
-/// Captured output from a single invocation.
+/// Observation from a single execution.
 #[derive(Debug, Clone)]
 pub struct Observation {
     pub stdout: String,
@@ -15,158 +14,115 @@ pub struct Observation {
     pub exit_code: Option<i32>,
 }
 
-/// Result of validating one test's predictions across contexts.
+/// The full grid result.
 #[derive(Debug)]
-pub struct TestResult {
-    pub args: Vec<String>,
-    pub context_results: Vec<ContextTestResult>,
+pub struct GridResult {
+    /// (context_name, test_index) → observation
+    pub cells: HashMap<(String, usize), Observation>,
+    /// Context names that failed during setup
+    pub setup_failures: HashMap<String, String>,
+    /// Total contexts
+    pub context_count: usize,
+    /// Total tests
+    pub test_count: usize,
 }
 
-/// Result of one test in one context.
-#[derive(Debug)]
-pub struct ContextTestResult {
-    pub context_name: String,
-    pub observation: Observation,
-    pub checks: Vec<CheckResult>,
-}
-
-#[derive(Debug)]
-pub struct CheckResult {
-    pub passed: bool,
-    pub detail: String,
-    pub context: Vec<String>,
-    /// Whether this check discriminates this invocation from at least one
-    /// other invocation in this context.
-    pub discriminates: Option<bool>,
-}
-
-/// Run an entire test script across all contexts.
-pub fn run_script(binary: &str, script: &Script) -> Result<Vec<TestResult>> {
-    // For each context, run all applicable tests
-    // Key: (context_name, args) -> observation
-    let mut all_observations: HashMap<(String, Vec<String>), Observation> = HashMap::new();
+/// Run the entire grid.
+pub fn run_grid(binary: &str, script: &Script) -> Result<GridResult> {
+    let mut cells: HashMap<(String, usize), Observation> = HashMap::new();
+    let mut setup_failures: HashMap<String, String> = HashMap::new();
 
     for ctx in &script.contexts {
+        // Create fresh sandbox for this context
         let sandbox_dir = tempfile::Builder::new()
             .prefix("probe_")
             .tempdir()
             .context("create sandbox")?;
         let work_dir = sandbox_dir.path();
 
-        sandbox::apply_setup(work_dir, &ctx.commands)?;
+        // Apply setup commands
+        match sandbox::apply_setup(work_dir, binary, &ctx.commands) {
+            Ok(()) => {}
+            Err(e) => {
+                setup_failures.insert(ctx.name.clone(), format!("{}", e));
+                continue;
+            }
+        }
 
-        for test in &script.tests {
-            // Check if this test applies to this context
+        // Run each applicable test
+        for (ti, test) in script.tests.iter().enumerate() {
             if let Some(ref scoped) = test.in_contexts {
                 if !scoped.contains(&ctx.name) {
                     continue;
                 }
             }
 
-            let obs = run_invocation(binary, &test.args, work_dir)?;
-            all_observations.insert((ctx.name.clone(), test.args.clone()), obs);
+            let obs = run_invocation(binary, test, work_dir)?;
+            cells.insert((ctx.name.clone(), ti), obs);
         }
     }
 
-    // Build results: for each test, collect per-context results
-    let mut results = Vec::new();
-
-    for (ti, test) in script.tests.iter().enumerate() {
-        let mut context_results = Vec::new();
-
-        for ctx in &script.contexts {
-            // Skip contexts this test doesn't apply to
-            if let Some(ref scoped) = test.in_contexts {
-                if !scoped.contains(&ctx.name) {
-                    continue;
-                }
-            }
-
-            let key = (ctx.name.clone(), test.args.clone());
-            let obs = match all_observations.get(&key) {
-                Some(o) => o.clone(),
-                None => continue,
-            };
-
-            // Build observations map for this context (for vs references)
-            let ctx_observations: HashMap<Vec<String>, Observation> = script
-                .tests
-                .iter()
-                .filter_map(|t| {
-                    let k = (ctx.name.clone(), t.args.clone());
-                    all_observations.get(&k).map(|o| (t.args.clone(), o.clone()))
-                })
-                .collect();
-
-            let mut checks = validate::check_expectations(test, &obs, &ctx_observations);
-
-            // Discrimination: check against all other invocations in this context
-            let mut disc = vec![false; checks.len()];
-            for (tj, other_test) in script.tests.iter().enumerate() {
-                if tj == ti {
-                    continue;
-                }
-                let other_key = (ctx.name.clone(), other_test.args.clone());
-                if let Some(other_obs) = all_observations.get(&other_key) {
-                    let other_checks =
-                        validate::check_expectations(test, other_obs, &ctx_observations);
-                    for (ci, oc) in other_checks.iter().enumerate() {
-                        if !oc.passed {
-                            disc[ci] = true;
-                        }
-                    }
-                }
-            }
-            let has_peers = script.tests.len() > 1;
-            for (ci, check) in checks.iter_mut().enumerate() {
-                check.discriminates = if has_peers { Some(disc[ci]) } else { None };
-            }
-
-            context_results.push(ContextTestResult {
-                context_name: ctx.name.clone(),
-                observation: obs,
-                checks,
-            });
-        }
-
-        results.push(TestResult {
-            args: test.args.clone(),
-            context_results,
-        });
-    }
-
-    Ok(results)
+    Ok(GridResult {
+        cells,
+        setup_failures,
+        context_count: script.contexts.len(),
+        test_count: script.tests.len(),
+    })
 }
 
-/// Run a single invocation and capture output.
 fn run_invocation(
     binary: &str,
-    args: &[String],
+    test: &Test,
     work_dir: &std::path::Path,
 ) -> Result<Observation> {
     let mut cmd = Command::new(binary);
-    cmd.args(args);
+    cmd.args(&test.args);
     cmd.current_dir(work_dir);
-    cmd.stdin(Stdio::null());
+
+    // Stdin
+    match &test.stdin {
+        Some(StdinSource::Lines(_)) => {
+            cmd.stdin(Stdio::piped());
+        }
+        Some(StdinSource::FromFile(path)) => {
+            let full = work_dir.join(path);
+            let file = std::fs::File::open(&full)
+                .with_context(|| format!("open stdin file {}", path))?;
+            cmd.stdin(Stdio::from(file));
+        }
+        None => {
+            cmd.stdin(Stdio::null());
+        }
+    }
+
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
+    // Minimal environment
     cmd.env_clear();
     cmd.env("PATH", std::env::var("PATH").unwrap_or_default());
     cmd.env("HOME", work_dir);
     cmd.env("LANG", "C");
     cmd.env("LC_ALL", "C");
 
-    let output = cmd
-        .output()
-        .with_context(|| format!("run {} {:?}", binary, args))?;
+    let mut child = cmd.spawn()
+        .with_context(|| format!("spawn {} {:?}", binary, test.args))?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    // Write stdin if piped
+    if let Some(StdinSource::Lines(lines)) = &test.stdin {
+        use std::io::Write;
+        if let Some(mut stdin) = child.stdin.take() {
+            let content = lines.join("\n") + "\n";
+            let _ = stdin.write_all(content.as_bytes());
+        }
+    }
+
+    let output = child.wait_with_output()
+        .with_context(|| format!("wait for {} {:?}", binary, test.args))?;
 
     Ok(Observation {
-        stdout,
-        stderr,
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         exit_code: output.status.code(),
     })
 }
