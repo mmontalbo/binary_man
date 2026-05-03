@@ -7,13 +7,30 @@ what happens — stdout, stderr, exit code, and filesystem changes.
 ## Usage
 
 ```
-bman <binary> <probe-file>
-bman --dry-run <binary> <probe-file>
+bman <binary>                      discover flags from --help
+bman <binary> <probe-file>         run observation grid
+bman --dry-run <binary> <file>     show resolved grid without executing
 ```
 
-Write a `.probe` file describing input states and invocations. The tool
-executes every combination and writes observations to a `.results` file.
+### Discovering a binary
+
+`bman sort` runs `sort --help`, extracts flags, and prints a probe
+skeleton to stdout. Pipe to a file, customize contexts and vary blocks,
+then run:
+
+```
+bman sort > sort.probe       # discover flags, generate skeleton
+# edit sort.probe — add vary blocks, organize runs
+bman sort sort.probe          # run the observation grid
+```
+
+For subcommands: `bman git diff` discovers flags for `git diff`.
+
+### Writing probe files
+
 See [LANGUAGE.md](LANGUAGE.md) for the full language specification.
+Probe files describe input states and invocations. The tool executes
+every combination and writes observations to a `.results` file.
 
 ## How it works
 

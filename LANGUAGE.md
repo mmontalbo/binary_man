@@ -5,11 +5,18 @@
 A `.probe` file describes a grid of **input states × invocations**. The tool
 executes every cell and writes observations to a `.results` file.
 
-The user writes `.probe` files. The tool generates `.results` files. One
-command runs everything:
+```
+bman <binary>              discover flags from --help, print probe skeleton
+bman <binary> <file.probe> run observation grid, write .results file
+bman --dry-run <binary> <file.probe>  show resolved grid without executing
+```
+
+Start with discovery to get a skeleton, then customize it:
 
 ```
-bman-probe <binary> <file-or-directory>
+bman sort > sort.probe       # discover sort's flags
+# edit sort.probe — add vary blocks for sensitivity testing
+bman sort sort.probe          # run the grid
 ```
 
 The tool is binary-agnostic — it knows nothing about any specific binary.
