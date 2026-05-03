@@ -61,16 +61,24 @@ fn cmd_run(binary: &str, test_path: &PathBuf) -> Result<()> {
         }
     }
 
-    // Report grid size
-    let ctx_names: Vec<&str> = script.contexts.iter().map(|c| c.name.as_str()).collect();
-    let total_runs = script.contexts.len() * script.tests.len();
+    // Report grid size (accounting for scoping)
+    let mut actual_runs = 0;
+    for test in &script.tests {
+        for ctx in &script.contexts {
+            if let Some(ref scoped) = test.in_contexts {
+                if !scoped.contains(&ctx.name) {
+                    continue;
+                }
+            }
+            actual_runs += 1;
+        }
+    }
     eprintln!(
-        "#> {} states x {} invocations = {} runs",
+        "#> {} states, {} invocations, {} runs",
         script.contexts.len(),
         script.tests.len(),
-        total_runs
+        actual_runs
     );
-    eprintln!("States: {}", ctx_names.join(", "));
 
     // Execute the grid
     let grid = execute::run_grid(binary, &script)?;
@@ -79,8 +87,8 @@ fn cmd_run(binary: &str, test_path: &PathBuf) -> Result<()> {
     let mut results_lines: Vec<String> = Vec::new();
     results_lines.push(String::new());
     results_lines.push(format!(
-        "#> {} states x {} invocations = {} runs",
-        grid.context_count, grid.test_count, grid.context_count * grid.test_count
+        "#> {} states, {} invocations, {} actual runs",
+        grid.context_count, grid.test_count, grid.cells.len()
     ));
 
     // Report setup failures
@@ -113,46 +121,73 @@ fn cmd_run(binary: &str, test_path: &PathBuf) -> Result<()> {
         // Collapse identical observations
         let groups = collapse_observations(&obs_by_ctx);
 
-        for (ctx_names, obs) in &groups {
+        // Find the largest group (most common observation)
+        let largest_idx = groups
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, (names, _))| names.len())
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+
+        // Compact mode: show the majority group, then only the differences
+        let (majority_names, majority_obs) = &groups[largest_idx];
+
+        // Show majority group
+        let majority_label = if majority_names.len() == obs_by_ctx.len() {
+            "all contexts".to_string()
+        } else {
+            format!("{} contexts ({})", majority_names.len(), majority_names.join(", "))
+        };
+        results_lines.push(format!("#>   {}:", majority_label));
+        format_observation(&mut results_lines, majority_obs);
+
+        // Show differing groups
+        for (i, (ctx_names, obs)) in groups.iter().enumerate() {
+            if i == largest_idx {
+                continue;
+            }
             let label = ctx_names.join(", ");
-            results_lines.push(format!("#>   {}:", label));
+            results_lines.push(format!("#>   differs in {}:", label));
+            format_observation(&mut results_lines, obs);
+        }
 
-            // Stdout
-            let stdout_lines: Vec<&str> = obs.stdout.lines().collect();
-            if stdout_lines.is_empty() {
-                results_lines.push("#>     stdout: (empty)".to_string());
-            } else {
-                results_lines.push(format!("#>     stdout ({} lines):", stdout_lines.len()));
-                for line in stdout_lines.iter().take(20) {
-                    results_lines.push(format!("#>       {}", line));
-                }
-                if stdout_lines.len() > 20 {
-                    results_lines.push(format!(
-                        "#>       ... ({} more lines)",
-                        stdout_lines.len() - 20
-                    ));
-                }
-            }
+        // Sensitivity summary: which vary-generated contexts differ from majority?
+        let sensitive: Vec<&str> = groups
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != largest_idx)
+            .flat_map(|(_, (names, _))| names.iter().map(|n| n.as_str()))
+            .filter(|n| n.contains(" / "))  // only vary-generated contexts
+            .collect();
 
-            // Stderr (only when non-empty)
-            if !obs.stderr.trim().is_empty() {
-                results_lines.push(format!("#>     stderr: {}", obs.stderr.trim()));
-            }
-
-            // Exit code
+        if !sensitive.is_empty() {
             results_lines.push(format!(
-                "#>     exit: {}",
-                obs.exit_code.unwrap_or(-1)
+                "#>   sensitive to: {}",
+                sensitive
+                    .iter()
+                    .map(|s| s.split(" / ").last().unwrap_or(s))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ));
         }
 
-        // Also report to stderr for live feedback
-        let first_obs = &obs_by_ctx[0].1;
-        let lines = first_obs.stdout.lines().count();
-        let exit = first_obs.exit_code.unwrap_or(-1);
+        // Stderr for live feedback
+        let exit = obs_by_ctx[0].1.exit_code.unwrap_or(-1);
+        let sens_str = if sensitive.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " [sensitive: {}]",
+                sensitive
+                    .iter()
+                    .map(|s| s.split(" / ").last().unwrap_or(s))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
         eprintln!(
-            "  test args {}: {} contexts, {} stdout lines, exit {}",
-            args_str, obs_by_ctx.len(), lines, exit
+            "  test args {}: {} groups{}, exit {}",
+            args_str, groups.len(), sens_str, exit
         );
     }
 
@@ -171,6 +206,28 @@ fn cmd_run(binary: &str, test_path: &PathBuf) -> Result<()> {
         .with_context(|| format!("rename to {}", test_path.display()))?;
 
     Ok(())
+}
+
+fn format_observation(lines: &mut Vec<String>, obs: &execute::Observation) {
+    let stdout_lines: Vec<&str> = obs.stdout.lines().collect();
+    if stdout_lines.is_empty() {
+        lines.push("#>     stdout: (empty)".to_string());
+    } else {
+        lines.push(format!("#>     stdout ({} lines):", stdout_lines.len()));
+        for line in stdout_lines.iter().take(20) {
+            lines.push(format!("#>       {}", line));
+        }
+        if stdout_lines.len() > 20 {
+            lines.push(format!(
+                "#>       ... ({} more lines)",
+                stdout_lines.len() - 20
+            ));
+        }
+    }
+    if !obs.stderr.trim().is_empty() {
+        lines.push(format!("#>     stderr: {}", obs.stderr.trim()));
+    }
+    lines.push(format!("#>     exit: {}", obs.exit_code.unwrap_or(-1)));
 }
 
 /// Group contexts that produced identical observations.
