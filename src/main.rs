@@ -82,19 +82,41 @@ fn cmd_discover(command: &[&String]) -> Result<()> {
     // Output skeleton
     println!("# Discovered from: {} --help", cmd_label);
     println!("# {} short flags, {} long flags found", short_flags.len(), long_flags.len());
-    println!("# Customize contexts and add vary blocks for sensitivity testing.");
     println!();
+
+    // Rich binary-agnostic base context
     println!("context \"base\"");
     println!("  file \"input.txt\" \"alpha\" \"beta\" \"gamma\" \"delta\"");
+    println!("  file \".hidden\" \"secret content\"");
     println!("  file \"empty.txt\" empty");
     println!("  dir \"subdir\"");
     println!("  file \"subdir/nested.txt\" \"nested content\"");
+    println!("  file \"link.txt\" -> \"input.txt\"");
+    println!("  file \"exec.sh\" \"#!/bin/sh\\necho hello\"");
+    println!("  props \"exec.sh\" executable");
     println!();
+
+    // Content perturbations — vary what's inside the files
     println!("vary from \"base\"");
     println!("  file \"input.txt\" \"single line\"");
     println!("  file \"input.txt\" empty");
     println!("  file \"input.txt\" size 10000");
+    println!("  file \"input.txt\" \"10\" \"2\" \"100\" \"20\" \"3\"");
+    println!();
+
+    // Structural perturbations — vary what exists
+    println!("vary from \"base\"");
+    println!("  remove \".hidden\"");
     println!("  remove \"subdir\"");
+    println!("  remove \"link.txt\"");
+    println!("  remove \"exec.sh\"");
+    println!();
+
+    // Property perturbations — vary file attributes
+    println!("vary from \"base\"");
+    println!("  props \"input.txt\" readonly");
+    println!("  props \"input.txt\" mtime old");
+    println!("  file \"input.txt\" size 1");
     println!();
 
     // Base invocation + from block
