@@ -20,7 +20,7 @@ pub struct Observation {
 pub enum FsChange {
     Created { path: String, size: u64 },
     Deleted { path: String },
-    Modified { path: String, old_size: u64, new_size: u64 },
+    Modified { path: String, detail: String },
 }
 
 /// The full grid result.
@@ -32,20 +32,27 @@ pub struct GridResult {
     pub test_count: usize,
 }
 
-/// Snapshot of the sandbox filesystem: path → size.
-type FsSnapshot = HashMap<String, u64>;
+/// Snapshot entry: size, mode, and content hash for change detection.
+#[derive(Clone)]
+struct FileInfo {
+    size: u64,
+    mode: u32,
+    content_hash: u64,
+}
+
+type FsSnapshot = HashMap<String, FileInfo>;
 
 fn snapshot_fs(work_dir: &Path) -> FsSnapshot {
     let mut snap = HashMap::new();
     if let Ok(entries) = walk_dir(work_dir, work_dir) {
-        for (rel_path, size) in entries {
-            snap.insert(rel_path, size);
+        for (rel_path, info) in entries {
+            snap.insert(rel_path, info);
         }
     }
     snap
 }
 
-fn walk_dir(base: &Path, dir: &Path) -> Result<Vec<(String, u64)>> {
+fn walk_dir(base: &Path, dir: &Path) -> Result<Vec<(String, FileInfo)>> {
     let mut entries = Vec::new();
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
@@ -56,32 +63,54 @@ fn walk_dir(base: &Path, dir: &Path) -> Result<Vec<(String, u64)>> {
             .to_string();
 
         if path.is_dir() && !path.is_symlink() {
-            entries.push((rel.clone(), 0));
+            let mode = get_mode(&path);
+            entries.push((rel.clone(), FileInfo { size: 0, mode, content_hash: 0 }));
             if let Ok(sub) = walk_dir(base, &path) {
                 entries.extend(sub);
             }
         } else {
-            let size = path.metadata().map(|m| m.len()).unwrap_or(0);
-            entries.push((rel, size));
+            let meta = path.metadata();
+            let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+            let mode = get_mode(&path);
+            let content_hash = hash_file(&path);
+            entries.push((rel, FileInfo { size, mode, content_hash }));
         }
     }
     Ok(entries)
 }
 
+fn get_mode(path: &Path) -> u32 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        path.metadata().map(|m| m.permissions().mode()).unwrap_or(0)
+    }
+    #[cfg(not(unix))]
+    { 0 }
+}
+
+fn hash_file(path: &Path) -> u64 {
+    use std::hash::{Hash, Hasher};
+    use std::collections::hash_map::DefaultHasher;
+    let mut hasher = DefaultHasher::new();
+    if let Ok(content) = std::fs::read(path) {
+        content.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
 fn diff_snapshots(before: &FsSnapshot, after: &FsSnapshot) -> Vec<FsChange> {
     let mut changes = Vec::new();
 
-    // Created: in after but not in before
-    for (path, &size) in after {
+    for (path, after_info) in after {
         if !before.contains_key(path) {
             changes.push(FsChange::Created {
                 path: path.clone(),
-                size,
+                size: after_info.size,
             });
         }
     }
 
-    // Deleted: in before but not in after
     for path in before.keys() {
         if !after.contains_key(path) {
             changes.push(FsChange::Deleted {
@@ -90,14 +119,22 @@ fn diff_snapshots(before: &FsSnapshot, after: &FsSnapshot) -> Vec<FsChange> {
         }
     }
 
-    // Modified: in both but different size
-    for (path, &old_size) in before {
-        if let Some(&new_size) = after.get(path) {
-            if old_size != new_size {
+    for (path, before_info) in before {
+        if let Some(after_info) = after.get(path) {
+            let mut diffs = Vec::new();
+            if before_info.size != after_info.size {
+                diffs.push(format!("size: {} -> {}", before_info.size, after_info.size));
+            }
+            if before_info.mode != after_info.mode {
+                diffs.push(format!("mode: {:o} -> {:o}", before_info.mode, after_info.mode));
+            }
+            if before_info.content_hash != after_info.content_hash && before_info.size == after_info.size {
+                diffs.push("content changed".to_string());
+            }
+            if !diffs.is_empty() {
                 changes.push(FsChange::Modified {
                     path: path.clone(),
-                    old_size,
-                    new_size,
+                    detail: diffs.join(", "),
                 });
             }
         }

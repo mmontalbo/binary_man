@@ -238,11 +238,8 @@ fn format_observation(lines: &mut Vec<String>, obs: &execute::Observation) {
                 execute::FsChange::Deleted { path } => {
                     lines.push(format!("#>       deleted: {}", path));
                 }
-                execute::FsChange::Modified { path, old_size, new_size } => {
-                    lines.push(format!(
-                        "#>       modified: {} ({} -> {} bytes)",
-                        path, old_size, new_size
-                    ));
+                execute::FsChange::Modified { path, detail } => {
+                    lines.push(format!("#>       modified: {} ({})", path, detail));
                 }
             }
         }
