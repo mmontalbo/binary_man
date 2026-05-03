@@ -228,6 +228,25 @@ fn format_observation(lines: &mut Vec<String>, obs: &execute::Observation) {
         lines.push(format!("#>     stderr: {}", obs.stderr.trim()));
     }
     lines.push(format!("#>     exit: {}", obs.exit_code.unwrap_or(-1)));
+    if !obs.fs_changes.is_empty() {
+        lines.push("#>     fs:".to_string());
+        for change in &obs.fs_changes {
+            match change {
+                execute::FsChange::Created { path, size } => {
+                    lines.push(format!("#>       created: {} ({} bytes)", path, size));
+                }
+                execute::FsChange::Deleted { path } => {
+                    lines.push(format!("#>       deleted: {}", path));
+                }
+                execute::FsChange::Modified { path, old_size, new_size } => {
+                    lines.push(format!(
+                        "#>       modified: {} ({} -> {} bytes)",
+                        path, old_size, new_size
+                    ));
+                }
+            }
+        }
+    }
 }
 
 /// Group contexts that produced identical observations.
@@ -241,6 +260,7 @@ fn collapse_observations<'a>(
             existing.stdout == obs.stdout
                 && existing.stderr == obs.stderr
                 && existing.exit_code == obs.exit_code
+                && existing.fs_changes == obs.fs_changes
         });
         if let Some((names, _)) = found {
             names.push(ctx_name.clone());
