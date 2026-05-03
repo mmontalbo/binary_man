@@ -419,7 +419,15 @@ fn describe_perturbation(cmd: &SetupCommand) -> String {
             match content {
                 FileContent::Size(n) => format!("{}=size:{}", path, n),
                 FileContent::Lines(l) if l.len() == 1 => format!("{}={:?}", path, l[0]),
-                FileContent::Lines(l) => format!("{}={}lines", path, l.len()),
+                FileContent::Lines(l) => {
+                    let preview = &l[0];
+                    let truncated = if preview.len() > 20 {
+                        format!("{}...", &preview[..20])
+                    } else {
+                        preview.clone()
+                    };
+                    format!("{}={:?}+{}lines", path, truncated, l.len())
+                }
                 FileContent::Empty => format!("{}=empty", path),
                 FileContent::From(src) => format!("{}=from:{}", path, src),
             }
