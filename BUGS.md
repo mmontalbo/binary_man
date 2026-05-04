@@ -289,10 +289,12 @@ perturbation (`vary compound`), and adversarial context design.*
 | `--stat --shortstat` duplicate in show, format-patch | pairwise | Low (shared machinery) |
 | `-U-1` corrupt header in show | boundary-value | Medium (shared machinery) |
 | `blame -M101%` accepted | boundary-value | Informational (shared) |
-| `--inter-hunk-context=-100` overlapping hunks | boundary-value | Medium (corrupt diff) |
+| `--inter-hunk-context=-100` overlapping hunks | boundary-value | **Medium** (corrupt diff) |
 | `format-patch -v -1` shows `[PATCH v-1]` | boundary-value | Low (cosmetic) |
 | `log --format=%w(-1,0,0)` fails silently | boundary-value | Low (literal output) |
 | `log --format=%<(-1)%s` partial parse | boundary-value | Low (garbage prefix) |
+| **jq** `1e999` roundtrip inconsistency | boundary-value | **Medium** (data loss) |
+| **jq** `length(null)=0` but `length(bool)=error` | type-coercion | Low (inconsistency) |
 
 ## jq: 1e999 roundtrip inconsistency — output doesn't parse back to same value
 
@@ -330,59 +332,21 @@ Three different strategies for three non-finite cases.
 (true) has no length." Both are scalar types, but null is treated as
 an empty container while booleans are rejected entirely.
 
-## ripgrep: --json silently overridden by -l and -c depending on flag order
+## ripgrep: Behavioral observations (not bugs)
 
-**Severity:** Medium (silent data format change based on flag order)
-**Affected:** ripgrep 14.1.0
-**Found by:** pairwise flag combination testing (755 cells)
+The following were initially reported as bugs but on review are
+defensible design choices that produce valid output.
 
-`--json` is supposed to produce JSON Lines output. But when combined
-with `-l` (files-only) or `-c` (count), the output format depends on
-flag ORDER:
+**--json + -l/-c flag ordering:** `rg --json -l` outputs plain text
+(last flag wins), while `rg -l --json` outputs JSON. This is the
+standard "last flag wins" convention. `--json` + `--stats` composes
+because stats ADD data, while `-l` CHANGES the output mode entirely.
+Different interaction types, not an inconsistency.
 
-```
-$ rg --json -l error    # PLAIN TEXT (--json overridden by -l)
-$ rg -l --json error    # JSON LINES (--json wins, last flag)
-$ rg --json -c error    # PLAIN TEXT (--json overridden by -c)
-$ rg -c --json error    # JSON LINES (--json wins, last flag)
-```
-
-Compare: `--json --stats` COMPOSES correctly (stats included in JSON).
-But `--json -l` OVERRIDES (last flag wins). Scripts that rely on JSON
-output will silently get plain text if -l or -c appears after --json.
-
-The inconsistency: `--json` composes with `--stats` but conflicts with
-`-l` and `-c`. Users expect all output flags to be orthogonal. Flags
-in shell aliases or scripts may appear in unpredictable order, making
-this a real source of silent pipeline failures.
-
-## ripgrep: -F always overrides -P regardless of flag order
-
-**Severity:** Medium (silent wrong behavior — wrong regex mode used)
-**Affected:** ripgrep 14.1.0
-**Found by:** conflicting-flag probing (215 cells)
-
-When `-F` (fixed string) and `-P` (PCRE2) are both specified, `-F`
-always wins regardless of order:
-
-```
-$ rg -F -P '[not-regex' file    # MATCHES (fixed string — -P ignored)
-$ rg -P -F '[not-regex' file    # MATCHES (fixed string — -P STILL ignored)
-$ rg -P '[not-regex' file       # ERROR (PCRE, invalid regex)
-$ rg -F '[not-regex' file       # MATCHES (fixed string, correct)
-```
-
-A user writing `rg -F -P pattern` likely expects PCRE (last flag wins,
-the convention used by git and most tools). Instead they silently get
-fixed string matching.
-
-This is INCONSISTENT with ripgrep's own `--json` + `-l` behavior,
-where last flag wins. Two different precedence rules in the same tool:
-- `--json` + `-l`: LAST WINS (flag order matters)
-- `-F` + `-P`: `-F` ALWAYS WINS (flag order ignored)
-
-Scripts that build command lines dynamically (adding `-P` for PCRE
-features when `-F` was set in an alias) get silently wrong results.
+**-F always overrides -P:** `-F` (fixed string) takes unconditional
+precedence over `-P` (PCRE). This is a safety design — fixed string
+mode prevents accidental regex injection. A user with `-F` in an alias
+who adds `-P` gets the safer behavior.
 
 ## Root Cause: OPT_INTEGER vs OPT_UNSIGNED misuse
 
