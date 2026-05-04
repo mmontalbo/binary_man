@@ -31,18 +31,19 @@ fn main() -> Result<()> {
             cmd_run(binary, &test_path, &sandbox)
         }
     } else {
-        cmd_discover(&positional)
+        let sandbox = sandbox::Sandbox::new()?;
+        cmd_discover(&positional, &sandbox)
     }
 }
 
-fn cmd_discover(command: &[&String]) -> Result<()> {
+fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox) -> Result<()> {
     use regex::Regex;
 
     let binary = command[0].as_str();
     let sub_args: Vec<&str> = command[1..].iter().map(|s| s.as_str()).collect();
 
     // Try --help, then -h, then no args
-    let help_text = try_help(binary, &sub_args)?;
+    let help_text = try_help(binary, &sub_args, sandbox)?;
 
     // Extract flags
     let short_re = Regex::new(r"(?:^|\s)-([a-zA-Z0-9])\b").unwrap();
@@ -195,20 +196,29 @@ fn cmd_discover(command: &[&String]) -> Result<()> {
     Ok(())
 }
 
-fn try_help(binary: &str, sub_args: &[&str]) -> Result<String> {
+fn try_help(binary: &str, sub_args: &[&str], sandbox: &sandbox::Sandbox) -> Result<String> {
+    // Create a minimal tempdir as workspace for the sandboxed --help call
+    let tmp = tempfile::Builder::new().prefix("bman_help_").tempdir()
+        .context("create help sandbox")?;
+
     for help_flag in &["--help", "-h"] {
         let mut args: Vec<&str> = sub_args.to_vec();
         args.push(help_flag);
-        let output = std::process::Command::new(binary)
-            .args(&args)
-            .stdin(std::process::Stdio::null())
+        let env = std::collections::HashMap::new();
+        let mut cmd = sandbox.command(binary, &args, tmp.path(), &env);
+        cmd.stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .output();
+            .stderr(std::process::Stdio::piped());
+
+        let output = cmd.output();
 
         if let Ok(out) = output {
             let stdout = String::from_utf8_lossy(&out.stdout);
             let stderr = String::from_utf8_lossy(&out.stderr);
+            // Skip bwrap's own errors (binary not found, etc.)
+            if stderr.starts_with("bwrap:") && stdout.is_empty() {
+                continue;
+            }
             let text = if stdout.len() > stderr.len() { stdout } else { stderr };
             if text.contains('-') && text.len() > 20 {
                 return Ok(text.to_string());
