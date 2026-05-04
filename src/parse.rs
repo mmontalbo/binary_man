@@ -451,7 +451,12 @@ fn parse_quoted_strings(s: &str, line_num: usize) -> Result<Vec<String>> {
 /// Strip inline comments: everything after an unquoted `#` is removed.
 fn strip_comment(line: &str) -> &str {
     let mut in_quote = false;
-    for (i, c) in line.char_indices() {
+    let mut chars = line.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        if c == '\\' && in_quote {
+            chars.next(); // skip escaped character
+            continue;
+        }
         if c == '"' { in_quote = !in_quote; }
         if c == '#' && !in_quote { return line[..i].trim_end(); }
     }
