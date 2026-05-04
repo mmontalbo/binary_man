@@ -90,7 +90,7 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox) -> Result<()> {
 
     // Rich binary-agnostic base context
     println!("context \"base\"");
-    println!("  file \"input.txt\" \"alpha\" \"beta\" \"gamma\" \"delta\"");
+    println!("  file \"input.txt\" \"alpha\" \"alpha\" \"10\" \"2\" \"BETA\" \"  spaced  \" \"\"");
     println!("  file \".hidden\" \"secret content\"");
     println!("  file \"empty.txt\" empty");
     println!("  dir \"subdir\"");
@@ -105,7 +105,7 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox) -> Result<()> {
     println!("  file \"input.txt\" \"single line\"");
     println!("  file \"input.txt\" empty");
     println!("  file \"input.txt\" size 10000");
-    println!("  file \"input.txt\" \"10\" \"2\" \"100\" \"20\" \"3\"");
+    println!("  file \"input.txt\" \"a:1:x\" \"b:2:y\" \"c:3:z\"  # structured");
     println!();
 
     // Structural perturbations — vary what exists
@@ -177,6 +177,46 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox) -> Result<()> {
             }
             println!("run {}", parts.join(" "));
         }
+    }
+
+    // Zero-boundary runs for numeric flags
+    let numeric_hints = ["NUM", "NUMBER", "N", "SIZE", "COLS", "WIDTH", "COUNT", "LINES", "BYTES"];
+    let zero_flags: Vec<&(String, Option<String>)> = long_flags.iter()
+        .filter(|(_, hint)| hint.as_ref().is_some_and(|h| numeric_hints.contains(&h.to_uppercase().as_str())))
+        .collect();
+    if !zero_flags.is_empty() {
+        println!();
+        println!("# Boundary: zero value for numeric flags");
+        let run_prefix: Vec<&str> = sub_args.to_vec();
+        for (flag, _) in &zero_flags {
+            let mut parts: Vec<String> = run_prefix.iter().map(|a| format!("\"{}\"", a)).collect();
+            parts.push(format!("\"{}=0\"", flag));
+            if let Some(ref base) = base_arg {
+                parts.push(format!("\"{}\"", base));
+            }
+            println!("run {}", parts.join(" "));
+        }
+    }
+
+    // Multi-file run
+    if base_arg.is_some() {
+        println!();
+        println!("# Multi-file: tests header/total behavior");
+        let run_prefix: Vec<&str> = sub_args.to_vec();
+        let mut parts: Vec<String> = run_prefix.iter().map(|a| format!("\"{}\"", a)).collect();
+        parts.push("\"input.txt\"".into());
+        parts.push("\"empty.txt\"".into());
+        println!("run {}", parts.join(" "));
+    }
+
+    // Error provocation: nonexistent file
+    {
+        println!();
+        println!("# Error: nonexistent file");
+        let run_prefix: Vec<&str> = sub_args.to_vec();
+        let mut parts: Vec<String> = run_prefix.iter().map(|a| format!("\"{}\"", a)).collect();
+        parts.push("\"nonexistent-file.txt\"".into());
+        println!("run {}", parts.join(" "));
     }
 
     // Stdin hint
