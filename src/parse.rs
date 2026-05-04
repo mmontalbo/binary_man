@@ -54,6 +54,8 @@ pub enum Property {
 pub struct VaryBlock {
     pub base: String,
     pub perturbations: Vec<SetupCommand>,
+    /// If true, all perturbations are applied together as one compound variant.
+    pub compound: bool,
 }
 
 /// A run invocation with optional diff reference and scoping.
@@ -103,6 +105,21 @@ pub fn parse_script(source: &str) -> Result<Script> {
             current_from = None;
             current_in = None;
             current_context = Some(parse_context_line(rest, line_num)?);
+        } else if let Some(rest) = line.strip_prefix("vary compound from ") {
+            flush_run(&mut current_run, &mut runs);
+            flush_context(&mut current_context, &mut contexts);
+            flush_vary(&mut current_vary, &mut vary_blocks);
+            current_from = None;
+            current_in = None;
+            let tokens = tokenize(rest, line_num)?;
+            if tokens.is_empty() {
+                bail!("line {}: vary compound requires a base context name", line_num);
+            }
+            current_vary = Some(VaryBlock {
+                base: tokens[0].clone(),
+                perturbations: Vec::new(),
+                compound: true,
+            });
         } else if let Some(rest) = line.strip_prefix("vary from ") {
             flush_run(&mut current_run, &mut runs);
             flush_context(&mut current_context, &mut contexts);
@@ -116,6 +133,7 @@ pub fn parse_script(source: &str) -> Result<Script> {
             current_vary = Some(VaryBlock {
                 base: tokens[0].clone(),
                 perturbations: Vec::new(),
+                compound: false,
             });
         } else if let Some(rest) = line.strip_prefix("from ") {
             // Start a from-block: sets the diff reference for subsequent runs
@@ -357,13 +375,25 @@ fn resolve_vary(contexts: &mut Vec<NamedContext>, vary_blocks: &[VaryBlock]) -> 
         })?;
         let base_cmds = base.commands.clone();
 
-        for perturbation in &vary.perturbations {
-            let variant_name = format!("{} / {}", vary.base, describe_perturbation(perturbation));
-            let mut cmds = base_cmds.clone();
-
-            cmds.push(perturbation.clone());
-
+        if vary.compound {
+            // All perturbations applied together as one compound variant
+            let names: Vec<String> = vary.perturbations.iter()
+                .map(describe_perturbation)
+                .collect();
+            let variant_name = format!("{} / {}", vary.base, names.join(" + "));
+            let mut cmds = base_cmds;
+            for p in &vary.perturbations {
+                cmds.push(p.clone());
+            }
             contexts.push(NamedContext { name: variant_name, extends: None, commands: cmds });
+        } else {
+            // Each perturbation is an independent single-factor variant
+            for perturbation in &vary.perturbations {
+                let variant_name = format!("{} / {}", vary.base, describe_perturbation(perturbation));
+                let mut cmds = base_cmds.clone();
+                cmds.push(perturbation.clone());
+                contexts.push(NamedContext { name: variant_name, extends: None, commands: cmds });
+            }
         }
     }
     Ok(())
