@@ -487,38 +487,70 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compac
             .map(|(i, _)| i).unwrap_or(0);
         let (majority_names, majority_obs) = &groups[largest_idx];
 
-        // Compute sensitivity
-        let sensitive: Vec<&str> = groups.iter().enumerate()
-            .filter(|(i, _)| *i != largest_idx)
-            .flat_map(|(_, (names, _))| names.iter().copied())
-            .filter(|n| n.contains(" / "))
-            .collect();
+        // Compute quantified sensitivity — effect size per perturbation
+        let majority_lines: usize = majority_obs.stdout.lines().count();
+        let mut sensitive_parts: Vec<String> = Vec::new();
+        for (i, (names, obs)) in groups.iter().enumerate() {
+            if i == largest_idx { continue; }
+            for name in names {
+                if !name.contains(" / ") { continue; }
+                let label = name.split(" / ").last().unwrap_or(name);
+                let obs_lines = obs.stdout.lines().count();
+                let mut effects = Vec::new();
+                // Line count delta
+                let line_diff = obs_lines as i64 - majority_lines as i64;
+                if line_diff != 0 {
+                    effects.push(format!("{:+} lines", line_diff));
+                } else if obs.stdout != majority_obs.stdout {
+                    effects.push("reordered".into());
+                }
+                // Exit code change
+                if obs.exit_code != majority_obs.exit_code {
+                    effects.push(format!("exit {}→{}",
+                        majority_obs.exit_code.unwrap_or(-1),
+                        obs.exit_code.unwrap_or(-1)));
+                }
+                if effects.is_empty() {
+                    sensitive_parts.push(label.to_string());
+                } else {
+                    sensitive_parts.push(format!("{} ({})", label, effects.join(", ")));
+                }
+            }
+        }
 
-        // Compute universals
-        let all_exit_same = obs_list.iter().all(|(_, o)| o.exit_code == obs_list[0].1.exit_code);
+        // Compute universals — exit code set, stdout, fs
+        let exit_codes: Vec<i32> = obs_list.iter()
+            .map(|(_, o)| o.exit_code.unwrap_or(-1))
+            .collect::<HashSet<_>>().into_iter().collect();
         let all_stdout_nonempty = obs_list.iter().all(|(_, o)| !o.stdout.trim().is_empty());
         let all_stdout_empty = obs_list.iter().all(|(_, o)| o.stdout.trim().is_empty());
         let all_has_fs = obs_list.iter().all(|(_, o)| !o.fs_changes.is_empty());
         let mut universals = Vec::new();
-        if all_exit_same {
-            universals.push(format!("exit {}", obs_list[0].1.exit_code.unwrap_or(-1)));
+        if exit_codes.len() == 1 {
+            universals.push(format!("exit {}", exit_codes[0]));
+        } else {
+            let mut sorted = exit_codes.clone();
+            sorted.sort();
+            universals.push(format!("exit {{{}}}", sorted.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(",")));
         }
         if all_stdout_nonempty { universals.push("stdout not empty".into()); }
         if all_stdout_empty { universals.push("stdout empty".into()); }
         if all_has_fs { universals.push("modifies filesystem".into()); }
 
-        // Summary line
+        // Summary line — group ratio + universals + quantified sensitivity
         let mut summary_parts = Vec::new();
-        summary_parts.push(format!("{} groups", groups.len()));
+        summary_parts.push(format!("{}/{} distinct", groups.len(), obs_list.len()));
         if !universals.is_empty() {
             summary_parts.push(universals.join(", "));
         }
-        if !sensitive.is_empty() {
-            summary_parts.push(format!("sensitive to: {}",
-                sensitive.iter()
-                    .map(|s| s.split(" / ").last().unwrap_or(s))
-                    .collect::<Vec<_>>().join(", ")
-            ));
+        if !sensitive_parts.is_empty() {
+            // Sort by effect size — entries with effects first
+            sensitive_parts.sort_by(|a, b| {
+                let a_has = a.contains('(');
+                let b_has = b.contains('(');
+                b_has.cmp(&a_has)
+            });
+            summary_parts.push(format!("sensitive to: {}", sensitive_parts.join(", ")));
         }
         out.push_str(&format!("  {} | {}\n",
             format_context_group(&obs_list.iter().map(|(n, _)| *n).collect::<Vec<_>>(), obs_list.len()),
@@ -575,12 +607,10 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compac
 
         // Stderr feedback
         let exit = obs_list[0].1.exit_code.unwrap_or(-1);
-        let sens_label = if sensitive.is_empty() { String::new() } else {
-            format!(" [{}]", sensitive.iter()
-                .map(|s| s.split(" / ").last().unwrap_or(s))
-                .collect::<Vec<_>>().join(", "))
+        let sens_label = if sensitive_parts.is_empty() { String::new() } else {
+            format!(" [{}]", sensitive_parts.join(", "))
         };
-        eprintln!("  run {}: {} groups, exit {}{}", args_str, groups.len(), exit, sens_label);
+        eprintln!("  run {}: {}/{} distinct, exit {}{}", args_str, groups.len(), obs_list.len(), exit, sens_label);
     }
 
     // Write results file
