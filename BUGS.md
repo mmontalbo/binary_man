@@ -199,6 +199,60 @@ large unsigned integer, producing context lines from between matches.
 Same class of bug as `git diff -U-1` — negative numeric values accepted
 by some code paths but not others.
 
+## Git: --inter-hunk-context with negative value produces overlapping hunks
+
+**Severity:** Medium (produces structurally invalid diff)
+**Affected:** git diff, git show, git format-patch (shared machinery)
+**Reproduced on:** git 2.50.1
+**Found by:** boundary-value probing (152 cells)
+
+`--inter-hunk-context=-100` produces a diff with overlapping hunks and
+misclassified lines. Normal diff of a file with 3 changed lines in 5
+produces one hunk. With `--inter-hunk-context=-100`, it produces three
+overlapping hunks:
+
+```
+$ git diff --inter-hunk-context=-100
+@@ -1,4 +1,4 @@       ← hunk 1: lines 1-4
+-aaa
++AAA
+ bbb
+ CCC                   ← WRONG: shown as context, actually changed from 'ccc'
+ ddd
+@@ -1,5 +1,5 @@       ← hunk 2: lines 1-5 (OVERLAPS hunk 1!)
+ AAA
+ bbb
+-ccc
++CCC
+ ddd
+ EEE
+@@ -2,4 +2,4 @@ aaa    ← hunk 3: lines 2-5 (OVERLAPS both!)
+ bbb
+ CCC
+ ddd
+-eee
++EEE
+```
+
+Hunks 1, 2, and 3 all cover overlapping line ranges. Changed lines
+appear as context in hunks that already handled them. Applying this
+patch would produce corrupt results. Worse than `-U-1` which only
+corrupts headers — this corrupts the actual diff content.
+
+## Git: format-patch -v -1 produces [PATCH v-1] in subject
+
+**Severity:** Low (cosmetic, nonsensical output)
+**Affected:** git format-patch
+**Reproduced on:** git 2.50.1
+**Found by:** boundary-value probing (152 cells)
+
+Negative version number is accepted and shown literally:
+```
+Subject: [PATCH v-1] initial
+```
+
+Should either reject negative version or clamp to 1.
+
 ## Git: --stat --shortstat duplicate confirmed in show, format-patch
 
 **Severity:** Low (shared diff machinery)
@@ -235,6 +289,10 @@ perturbation (`vary compound`), and adversarial context design.*
 | `--stat --shortstat` duplicate in show, format-patch | pairwise | Low (shared machinery) |
 | `-U-1` corrupt header in show | boundary-value | Medium (shared machinery) |
 | `blame -M101%` accepted | boundary-value | Informational (shared) |
+| `--inter-hunk-context=-100` overlapping hunks | boundary-value | Medium (corrupt diff) |
+| `format-patch -v -1` shows `[PATCH v-1]` | boundary-value | Low (cosmetic) |
+| `log --format=%w(-1,0,0)` fails silently | boundary-value | Low (literal output) |
+| `log --format=%<(-1)%s` partial parse | boundary-value | Low (garbage prefix) |
 
 *All bugs found by bman's systematic pairwise flag combination testing.
 The `combine` keyword generates all single + pair combinations from a
