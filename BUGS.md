@@ -153,7 +153,45 @@ inconsistent. The regex should be validated eagerly.
 this effectively means "never detect renames" — same as omitting -M.
 Should arguably produce a warning.
 
+## Git: --skip=-1 (negative skip) silently ignored
+
+**Severity:** Low (nonsensical input, benign behavior)
+**Affected:** git log
+**Reproduced on:** git 2.50.1
+**Found by:** boundary-value probing (352 cells)
+
+`git log --skip=-1` is accepted without error and behaves as if
+`--skip=0` (shows all commits, skips nothing). Negative skip values
+are silently clamped or ignored.
+
+```
+$ git log --oneline               # 3 commits
+$ git log --oneline --skip=1      # 2 commits (correct)
+$ git log --oneline --skip=-1     # 3 commits (same as no skip)
+```
+
+Similarly, `git log -n -1` shows 1 commit (same as `-n 1`). Negative
+limit values are silently treated as their absolute value.
+
 ---
+
+*All bugs found by bman's systematic behavioral probing across ~2000
+cells. Methods used: pairwise flag combination testing (`combine`),
+boundary-value probing (negative/zero/extreme values), compound input
+perturbation (`vary compound`), and adversarial context design.*
+
+## Summary
+
+| Finding | Method | Severity |
+|---------|--------|----------|
+| `--stat --shortstat` duplicate summary | `combine` pairwise | Low (UI) |
+| `-U` negative corrupt hunk headers | boundary-value | Medium (breaks parsers) |
+| `--raw + --word-diff` asymmetry | flag interaction | Low (inconsistency) |
+| `--author + --author = OR` vs `--author + --grep = AND` | `combine` pairwise | Informational |
+| `--word-diff-regex` lazy validation | boundary-value | Low (inconsistency) |
+| `-M101%` accepted silently | boundary-value | Informational |
+| `--skip=-1` ignored silently | boundary-value | Informational |
+| `--no-merges + --merges` silent empty | `combine` pairwise | Informational |
 
 *All bugs found by bman's systematic pairwise flag combination testing.
 The `combine` keyword generates all single + pair combinations from a
