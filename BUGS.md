@@ -356,6 +356,34 @@ The inconsistency: `--json` composes with `--stats` but conflicts with
 in shell aliases or scripts may appear in unpredictable order, making
 this a real source of silent pipeline failures.
 
+## ripgrep: -F always overrides -P regardless of flag order
+
+**Severity:** Medium (silent wrong behavior — wrong regex mode used)
+**Affected:** ripgrep 14.1.0
+**Found by:** conflicting-flag probing (215 cells)
+
+When `-F` (fixed string) and `-P` (PCRE2) are both specified, `-F`
+always wins regardless of order:
+
+```
+$ rg -F -P '[not-regex' file    # MATCHES (fixed string — -P ignored)
+$ rg -P -F '[not-regex' file    # MATCHES (fixed string — -P STILL ignored)
+$ rg -P '[not-regex' file       # ERROR (PCRE, invalid regex)
+$ rg -F '[not-regex' file       # MATCHES (fixed string, correct)
+```
+
+A user writing `rg -F -P pattern` likely expects PCRE (last flag wins,
+the convention used by git and most tools). Instead they silently get
+fixed string matching.
+
+This is INCONSISTENT with ripgrep's own `--json` + `-l` behavior,
+where last flag wins. Two different precedence rules in the same tool:
+- `--json` + `-l`: LAST WINS (flag order matters)
+- `-F` + `-P`: `-F` ALWAYS WINS (flag order ignored)
+
+Scripts that build command lines dynamically (adding `-P` for PCRE
+features when `-F` was set in an alias) get silently wrong results.
+
 ## Root Cause: OPT_INTEGER vs OPT_UNSIGNED misuse
 
 **Scope:** ~19 of 39 integer flag definitions across git's codebase
