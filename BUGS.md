@@ -110,6 +110,38 @@ Any tool that parses unified diff format (patch, diffstat, code review
 tools, IDE integrations) would fail on the malformed header. Git should
 either reject negative -U values or clamp to 0.
 
+The corruption scales with the magnitude of the negative value:
+
+```
+-U-1:   @@ -2,1- +2,1- @@ line1          (slightly wrong)
+-U-2:   @@ -3 +3 @@ bbb                   (worse offset)
+-U-100: @@ -101,195- +101,195- @@         (wildly corrupt: line 101 of a 5-line file, count "195-")
+```
+
+The negative value appears to be used in arithmetic that wraps or
+overflows, producing progressively more corrupt output.
+
+## Git: --word-diff-regex validation is lazy (only on use)
+
+**Severity:** Low (inconsistent error handling)
+**Affected:** git diff
+**Reproduced on:** git 2.50.1
+**Found by:** boundary-value probing (352 cells)
+
+`--word-diff --word-diff-regex=[invalid` produces exit 128 ("fatal:
+invalid regular expression") — but only for contexts that have diffs.
+Contexts with no changes exit 0 successfully. The regex is not validated
+at parse time; it's only compiled when the diff engine actually needs it.
+
+```
+$ git diff --word-diff --word-diff-regex='[invalid'  # with changes: exit 128
+$ git diff --word-diff --word-diff-regex='[invalid'  # clean repo: exit 0
+```
+
+This means the same command with the same flags succeeds or fails
+depending on whether there are diffs to show — surprising and
+inconsistent. The regex should be validated eagerly.
+
 ## Git: -M101% (over 100% rename threshold) accepted silently
 
 **Severity:** Low (nonsensical input, benign behavior)
