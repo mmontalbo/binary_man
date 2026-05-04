@@ -1,11 +1,11 @@
 //! Execute the grid: states × invocations → observations.
 
 use crate::parse::{Script, StdinSource, Run};
-use crate::sandbox;
+use crate::sandbox::{self, Sandbox};
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 /// Observation from a single execution.
 #[derive(Debug, Clone)]
@@ -157,18 +157,23 @@ fn diff_snapshots(before: &FsSnapshot, after: &FsSnapshot) -> Vec<FsChange> {
 }
 
 /// Run the entire grid.
-pub fn run_grid(binary: &str, script: &Script, probe_dir: &std::path::Path) -> Result<GridResult> {
+pub fn run_grid(
+    binary: &str,
+    script: &Script,
+    probe_dir: &Path,
+    sandbox: &Sandbox,
+) -> Result<GridResult> {
     let mut cells: HashMap<(String, usize), Observation> = HashMap::new();
     let mut setup_failures: HashMap<String, String> = HashMap::new();
 
     for ctx in &script.contexts {
         let sandbox_dir = tempfile::Builder::new()
-            .prefix("probe_")
+            .prefix("bman_")
             .tempdir()
             .context("create sandbox")?;
         let work_dir = sandbox_dir.path();
 
-        let env_vars = match sandbox::apply_setup(work_dir, binary, &ctx.commands, probe_dir) {
+        let env_vars = match sandbox::apply_setup(work_dir, binary, &ctx.commands, probe_dir, sandbox) {
             Ok(env) => env,
             Err(e) => {
                 setup_failures.insert(ctx.name.clone(), format!("{}", e));
@@ -186,7 +191,7 @@ pub fn run_grid(binary: &str, script: &Script, probe_dir: &std::path::Path) -> R
                 if !matches { continue; }
             }
 
-            let obs = run_invocation(binary, test, work_dir, &env_vars)?;
+            let obs = run_invocation(binary, test, work_dir, &env_vars, sandbox)?;
             cells.insert((ctx.name.clone(), ti), obs);
         }
     }
@@ -202,14 +207,14 @@ fn run_invocation(
     binary: &str,
     test: &Run,
     work_dir: &Path,
-    env_vars: &std::collections::HashMap<String, String>,
+    env_vars: &HashMap<String, String>,
+    sandbox: &Sandbox,
 ) -> Result<Observation> {
     // Snapshot before
     let before = snapshot_fs(work_dir);
 
-    let mut cmd = Command::new(binary);
-    cmd.args(&test.args);
-    cmd.current_dir(work_dir);
+    let str_args: Vec<&str> = test.args.iter().map(|s| s.as_str()).collect();
+    let mut cmd = sandbox.command(binary, &str_args, work_dir, env_vars);
 
     match &test.stdin {
         Some(StdinSource::Lines(_)) => {
@@ -228,8 +233,6 @@ fn run_invocation(
 
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
-
-    sandbox::apply_base_env(&mut cmd, work_dir, env_vars);
 
     let mut child = cmd.spawn()
         .with_context(|| format!("spawn {} {:?}", binary, test.args))?;

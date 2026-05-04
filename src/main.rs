@@ -27,7 +27,8 @@ fn main() -> Result<()> {
         if dry_run {
             cmd_dry_run(binary, &test_path)
         } else {
-            cmd_run(binary, &test_path)
+            let sandbox = sandbox::Sandbox::new()?;
+            cmd_run(binary, &test_path, &sandbox)
         }
     } else {
         cmd_discover(&positional)
@@ -352,7 +353,7 @@ fn format_setup_cmd(cmd: &parse::SetupCommand) -> String {
     }
 }
 
-fn cmd_run(binary: &str, test_path: &PathBuf) -> Result<()> {
+fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox) -> Result<()> {
     let script = load_script(test_path)?;
 
     // Validate from-references
@@ -388,7 +389,7 @@ fn cmd_run(binary: &str, test_path: &PathBuf) -> Result<()> {
 
     // Execute
     let probe_dir = test_path.parent().unwrap_or(std::path::Path::new("."));
-    let grid = execute::run_grid(binary, &script, probe_dir)?;
+    let grid = execute::run_grid(binary, &script, probe_dir, sandbox)?;
 
     // Build results
     let mut out = String::new();

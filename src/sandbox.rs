@@ -1,27 +1,84 @@
-//! Sandbox construction from setup commands.
+//! Sandbox construction and execution via bubblewrap.
 
 use crate::parse::{FileContent, Property, SetupCommand};
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
-/// Apply base env vars shared by invoke and run commands.
-pub fn apply_base_env(cmd: &mut std::process::Command, work_dir: &Path, env_vars: &HashMap<String, String>) {
-    cmd.env_clear();
-    cmd.env("PATH", std::env::var("PATH").unwrap_or_default());
-    cmd.env("HOME", work_dir);
-    cmd.env("LANG", "C");
-    cmd.env("LC_ALL", "C");
-    for (k, v) in env_vars {
-        cmd.env(k, v);
+/// Path to the bwrap binary. Found once at startup.
+pub struct Sandbox {
+    bwrap: PathBuf,
+}
+
+impl Sandbox {
+    /// Find bwrap or fail with a clear error.
+    pub fn new() -> Result<Self> {
+        let bwrap = which::which("bwrap")
+            .context("bwrap not found — install bubblewrap for sandbox isolation")?;
+        Ok(Sandbox { bwrap })
+    }
+
+    /// Build a Command that runs `binary args...` inside the bwrap sandbox.
+    /// The workspace is bind-mounted read-write at /workspace.
+    pub fn command(
+        &self,
+        binary: &str,
+        args: &[&str],
+        work_dir: &Path,
+        env_vars: &HashMap<String, String>,
+    ) -> Command {
+        let mut cmd = Command::new(&self.bwrap);
+
+        // Namespace isolation
+        cmd.arg("--unshare-net");
+        cmd.arg("--die-with-parent");
+
+        // Read-only system paths (only bind what exists)
+        for path in &["/nix", "/usr", "/bin", "/lib", "/lib64", "/etc", "/run"] {
+            if Path::new(path).exists() {
+                cmd.arg("--ro-bind").arg(path).arg(path);
+            }
+        }
+
+        // Proc and dev
+        cmd.arg("--proc").arg("/proc");
+        cmd.arg("--dev").arg("/dev");
+        cmd.arg("--tmpfs").arg("/tmp");
+
+        // Read-write workspace
+        cmd.arg("--bind").arg(work_dir).arg("/workspace");
+        cmd.arg("--chdir").arg("/workspace");
+
+        // Environment
+        cmd.arg("--setenv").arg("HOME").arg("/workspace");
+        cmd.arg("--setenv").arg("PATH").arg(std::env::var("PATH").unwrap_or_default());
+        cmd.arg("--setenv").arg("LANG").arg("C");
+        cmd.arg("--setenv").arg("LC_ALL").arg("C");
+        for (k, v) in env_vars {
+            cmd.arg("--setenv").arg(k).arg(v);
+        }
+
+        // The actual command
+        cmd.arg("--").arg(binary);
+        for arg in args {
+            cmd.arg(arg);
+        }
+
+        cmd
     }
 }
 
 /// Build sandbox state from setup commands.
 /// Returns accumulated env vars for use by run invocations.
-/// `probe_dir` is the directory containing the probe file, for resolving `from` paths.
-pub fn apply_setup(work_dir: &Path, binary: &str, commands: &[SetupCommand], probe_dir: &Path) -> Result<HashMap<String, String>> {
+pub fn apply_setup(
+    work_dir: &Path,
+    binary: &str,
+    commands: &[SetupCommand],
+    probe_dir: &Path,
+    sandbox: &Sandbox,
+) -> Result<HashMap<String, String>> {
     let mut env_vars: HashMap<String, String> = HashMap::new();
 
     for cmd in commands {
@@ -139,13 +196,12 @@ pub fn apply_setup(work_dir: &Path, binary: &str, commands: &[SetupCommand], pro
                 env_vars.remove(var.as_str());
             }
             SetupCommand::Invoke { args } => {
-                let mut invoke = std::process::Command::new(binary);
-                invoke.args(args)
-                    .current_dir(work_dir)
-                    .stdin(std::process::Stdio::null())
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::piped());
-                apply_base_env(&mut invoke, work_dir, &env_vars);
+                let str_args: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+                let mut invoke = sandbox.command(binary, &str_args, work_dir, &env_vars);
+                invoke
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::piped());
 
                 let output = invoke.output()
                     .with_context(|| format!("invoke {:?}", args))?;
