@@ -175,7 +175,46 @@ limit values are silently treated as their absolute value.
 
 ---
 
-*All bugs found by bman's systematic behavioral probing across ~2000
+## Git: grep -C -1 accepts negative but -A -1 and -B -1 reject
+
+**Severity:** Medium (inconsistent input validation, wrong output)
+**Affected:** git grep
+**Reproduced on:** git 2.50.1
+**Found by:** boundary-value probing across git blame, show, format-patch, grep
+
+`-A -1` and `-B -1` correctly error with "expects a non-negative integer
+value." But `-C -1` is silently accepted and produces output with extra
+context lines that shouldn't be there.
+
+```
+$ git grep -A -1 error    # error: expects non-negative (exit 129)
+$ git grep -B -1 error    # error: expects non-negative (exit 129)
+$ git grep -C -1 error    # SUCCESS: shows matches + mystery context (exit 0)
+```
+
+`-C N` is documented as equivalent to `-A N -B N`. If `-A` and `-B`
+reject -1, `-C` should too. The negative value is likely wrapping to a
+large unsigned integer, producing context lines from between matches.
+
+Same class of bug as `git diff -U-1` — negative numeric values accepted
+by some code paths but not others.
+
+## Git: --stat --shortstat duplicate confirmed in show, format-patch
+
+**Severity:** Low (shared diff machinery)
+**Affected:** git show, git format-patch (in addition to diff, log)
+**Reproduced on:** git 2.50.1
+
+The `--stat --shortstat` duplicate summary line bug exists in every git
+command that uses the diff output machinery. Confirmed in:
+- `git diff --stat --shortstat`
+- `git log --stat --shortstat`
+- `git show --stat --shortstat`
+- `git format-patch --stat --shortstat --stdout`
+
+---
+
+*All bugs found by bman's systematic behavioral probing across ~3000+
 cells. Methods used: pairwise flag combination testing (`combine`),
 boundary-value probing (negative/zero/extreme values), compound input
 perturbation (`vary compound`), and adversarial context design.*
@@ -192,6 +231,10 @@ perturbation (`vary compound`), and adversarial context design.*
 | `-M101%` accepted silently | boundary-value | Informational |
 | `--skip=-1` ignored silently | boundary-value | Informational |
 | `--no-merges + --merges` silent empty | `combine` pairwise | Informational |
+| `grep -C -1` accepts negative, `-A`/`-B` reject | boundary-value | Medium (inconsistent validation) |
+| `--stat --shortstat` duplicate in show, format-patch | pairwise | Low (shared machinery) |
+| `-U-1` corrupt header in show | boundary-value | Medium (shared machinery) |
+| `blame -M101%` accepted | boundary-value | Informational (shared) |
 
 *All bugs found by bman's systematic pairwise flag combination testing.
 The `combine` keyword generates all single + pair combinations from a
