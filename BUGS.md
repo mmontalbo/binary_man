@@ -294,6 +294,42 @@ perturbation (`vary compound`), and adversarial context design.*
 | `log --format=%w(-1,0,0)` fails silently | boundary-value | Low (literal output) |
 | `log --format=%<(-1)%s` partial parse | boundary-value | Low (garbage prefix) |
 
+## jq: 1e999 roundtrip inconsistency — output doesn't parse back to same value
+
+**Severity:** Medium (data loss in pipelines)
+**Affected:** jq 1.7.1
+**Found by:** boundary-value probing (595 cells)
+
+`1e999` as a jq filter literal outputs `1E+999`. But when jq parses
+`1E+999` as input, it becomes `1.7976931348623157e+308` (DBL_MAX).
+jq's output doesn't survive a roundtrip through itself.
+
+```
+$ jq -n '1e999'                     # outputs: 1E+999
+$ echo '1E+999' | jq '. + 1'        # outputs: 1.7976931348623157e+308
+```
+
+The filter literal preserves the string representation, but the
+parser clamps to DBL_MAX. Additionally, `1E+999` is not valid JSON
+per RFC 8259 (numbers must be finite), though some parsers accept it.
+
+Related non-finite number handling inconsistencies:
+- `nan` → `null` (mapped to JSON null)
+- `infinite` → `1.7976931348623157e+308` (clamped to DBL_MAX)
+- `1e999` → `1E+999` (preserved as invalid literal)
+
+Three different strategies for three non-finite cases.
+
+## jq: length(null) = 0 but length(bool) = error
+
+**Severity:** Low (inconsistent type handling)
+**Affected:** jq 1.7.1
+**Found by:** type-coercion probing (595 cells)
+
+`null | length` returns 0, but `true | length` errors with "boolean
+(true) has no length." Both are scalar types, but null is treated as
+an empty container while booleans are rejected entirely.
+
 ## Root Cause: OPT_INTEGER vs OPT_UNSIGNED misuse
 
 **Scope:** ~19 of 39 integer flag definitions across git's codebase
