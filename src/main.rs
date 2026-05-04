@@ -10,12 +10,14 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
     let dry_run = args.iter().any(|a| a == "--dry-run");
+    let compact = args.iter().any(|a| a == "--compact");
     let positional: Vec<&String> = args.iter().skip(1).filter(|a| !a.starts_with("--")).collect();
 
     if positional.is_empty() {
-        eprintln!("Usage: bman [--dry-run] <binary> [<probe-file>]");
-        eprintln!("       bman <binary>              discover flags from --help");
-        eprintln!("       bman <binary> <file.probe>  run observation grid");
+        eprintln!("Usage: bman [--dry-run] [--compact] <binary> [<probe-file>]");
+        eprintln!("       bman <binary>                        discover flags from --help");
+        eprintln!("       bman <binary> <file.probe>            run observation grid");
+        eprintln!("       bman --compact <binary> <file.probe>  summary-only output");
         std::process::exit(1);
     }
 
@@ -28,7 +30,7 @@ fn main() -> Result<()> {
             cmd_dry_run(binary, &test_path)
         } else {
             let sandbox = sandbox::Sandbox::new()?;
-            cmd_run(binary, &test_path, &sandbox)
+            cmd_run(binary, &test_path, &sandbox, compact)
         }
     } else {
         let sandbox = sandbox::Sandbox::new()?;
@@ -363,7 +365,7 @@ fn format_setup_cmd(cmd: &parse::SetupCommand) -> String {
     }
 }
 
-fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox) -> Result<()> {
+fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compact: bool) -> Result<()> {
     let script = load_script(test_path)?;
 
     // Validate from-references
@@ -483,47 +485,49 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox) -> Res
             summary_parts.join(" | ")
         ));
 
-        // Show majority group
-        out.push_str(&format!("  {}:\n", format_context_group(majority_names, obs_list.len())));
-        format_obs(&mut out, majority_obs, "    ");
+        if !compact {
+            // Show majority group
+            out.push_str(&format!("  {}:\n", format_context_group(majority_names, obs_list.len())));
+            format_obs(&mut out, majority_obs, "    ");
 
-        // Show differing groups with delta vs majority
-        for (i, (names, obs)) in groups.iter().enumerate() {
-            if i == largest_idx { continue; }
-            out.push_str(&format!("  differs in {}:\n", names.join(", ")));
-            format_obs(&mut out, obs, "    ");
-            let delta = compute_diff(majority_obs, obs);
-            if !delta.is_empty() {
-                out.push_str(&format!("    delta: {}\n", delta.join("; ")));
-            }
-        }
-
-        // Diff from reference (if in a from block)
-        if let Some(ref ref_args) = run.diff_from {
-            out.push_str(&format!("  from {}:\n", format_args(ref_args)));
-
-            for (ctx_name, obs) in &obs_list {
-                let ref_obs = obs_by_args.get(&(ref_args.as_slice(), *ctx_name));
-                if let Some(ref_obs) = ref_obs {
-                    let diff = compute_diff(ref_obs, obs);
-                    if diff.is_empty() {
-                        continue; // same as reference in this context, skip
-                    }
-                    out.push_str(&format!("    {}:\n", ctx_name));
-                    for line in &diff {
-                        out.push_str(&format!("      {}\n", line));
-                    }
+            // Show differing groups with delta vs majority
+            for (i, (names, obs)) in groups.iter().enumerate() {
+                if i == largest_idx { continue; }
+                out.push_str(&format!("  differs in {}:\n", names.join(", ")));
+                format_obs(&mut out, obs, "    ");
+                let delta = compute_diff(majority_obs, obs);
+                if !delta.is_empty() {
+                    out.push_str(&format!("    delta: {}\n", delta.join("; ")));
                 }
             }
 
-            // Summarize: show the diff that applies to the majority
-            let majority_ctx = majority_names[0];
-            if let Some(ref_obs) = obs_by_args.get(&(ref_args.as_slice(), majority_ctx)) {
-                let diff = compute_diff(ref_obs, majority_obs);
-                if !diff.is_empty() && majority_names.len() > 1 {
-                    out.push_str(&format!("    ({} contexts):\n", majority_names.len()));
-                    for line in &diff {
-                        out.push_str(&format!("      {}\n", line));
+            // Diff from reference (if in a from block)
+            if let Some(ref ref_args) = run.diff_from {
+                out.push_str(&format!("  from {}:\n", format_args(ref_args)));
+
+                for (ctx_name, obs) in &obs_list {
+                    let ref_obs = obs_by_args.get(&(ref_args.as_slice(), *ctx_name));
+                    if let Some(ref_obs) = ref_obs {
+                        let diff = compute_diff(ref_obs, obs);
+                        if diff.is_empty() {
+                            continue; // same as reference in this context, skip
+                        }
+                        out.push_str(&format!("    {}:\n", ctx_name));
+                        for line in &diff {
+                            out.push_str(&format!("      {}\n", line));
+                        }
+                    }
+                }
+
+                // Summarize: show the diff that applies to the majority
+                let majority_ctx = majority_names[0];
+                if let Some(ref_obs) = obs_by_args.get(&(ref_args.as_slice(), majority_ctx)) {
+                    let diff = compute_diff(ref_obs, majority_obs);
+                    if !diff.is_empty() && majority_names.len() > 1 {
+                        out.push_str(&format!("    ({} contexts):\n", majority_names.len()));
+                        for line in &diff {
+                            out.push_str(&format!("      {}\n", line));
+                        }
                     }
                 }
             }
