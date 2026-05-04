@@ -294,6 +294,43 @@ perturbation (`vary compound`), and adversarial context design.*
 | `log --format=%w(-1,0,0)` fails silently | boundary-value | Low (literal output) |
 | `log --format=%<(-1)%s` partial parse | boundary-value | Low (garbage prefix) |
 
+## Root Cause: OPT_INTEGER vs OPT_UNSIGNED misuse
+
+**Scope:** ~19 of 39 integer flag definitions across git's codebase
+**Source file:** `parse-options.h`, various `builtin/*.c`
+**Found by:** tracing bug class back to option parsing macros
+
+Git's parse-options system has two numeric types:
+- `OPTION_INTEGER` — accepts any integer (positive, negative, zero)
+- `OPTION_UNSIGNED` — validates non-negative (rejects negative)
+
+The bugs we found all trace to flags using `OPT_INTEGER` when they
+should use `OPT_UNSIGNED`:
+
+```
+// parse-options.h — shared diff macros use INTEGER:
+#define OPT_DIFF_UNIFIED(v)             OPT_INTEGER_F(...)   // WRONG
+#define OPT_DIFF_INTERHUNK_CONTEXT(v)   OPT_INTEGER_F(...)   // WRONG
+
+// builtin/grep.c — -A and -B use UNSIGNED, but -C uses CALLBACK:
+OPT_UNSIGNED('B', "before-context", ...)    // CORRECT
+OPT_UNSIGNED('A', "after-context", ...)     // CORRECT
+OPT_CALLBACK('C', "context", ...)           // MISSING validation
+```
+
+Additionally, `PARSE_OPT_NONEG` (used on -U and --inter-hunk-context)
+prevents `--no-unified` (boolean negation) but does NOT prevent `-U-1`
+(negative numeric value). The flag name is misleading — developers
+likely added it thinking it guarded against negative values.
+
+**Proposed fix:** Change ~22 `OPT_INTEGER` declarations to `OPT_UNSIGNED`
+for flags where negative values are nonsensical (max-depth, max-count,
+jobs, timeout, width, padding, depth, etc.). Fix grep's -C callback to
+validate non-negative. This is a mechanical, low-risk change using git's
+existing `OPTION_UNSIGNED` type.
+
+---
+
 *All bugs found by bman's systematic pairwise flag combination testing.
 The `combine` keyword generates all single + pair combinations from a
 list of flags, enabling automated discovery of flag interaction issues
