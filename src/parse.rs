@@ -122,7 +122,7 @@ pub fn parse_script(source: &str) -> Result<Script> {
             flush_run(&mut current_run, &mut runs);
             flush_context(&mut current_context, &mut contexts);
             flush_vary(&mut current_vary, &mut vary_blocks);
-            let ref_args = parse_quoted_strings(rest.trim(), line_num)?;
+            let ref_args = tokenize(rest.trim(), line_num)?;
             if ref_args.is_empty() {
                 bail!("line {}: from requires reference args", line_num);
             }
@@ -133,7 +133,7 @@ pub fn parse_script(source: &str) -> Result<Script> {
             flush_context(&mut current_context, &mut contexts);
             flush_vary(&mut current_vary, &mut vary_blocks);
 
-            let args = parse_quoted_strings(rest.trim(), line_num)?;
+            let args = tokenize(rest.trim(), line_num)?;
             current_run = Some(Run {
                 args,
                 in_contexts: current_in.clone(),
@@ -146,7 +146,7 @@ pub fn parse_script(source: &str) -> Result<Script> {
             flush_context(&mut current_context, &mut contexts);
             flush_vary(&mut current_vary, &mut vary_blocks);
             current_from = None;
-            current_in = Some(parse_quoted_strings(rest.trim(), line_num)?);
+            current_in = Some(tokenize(rest.trim(), line_num)?);
         } else if let Some(rest) = line.strip_prefix("stdin ") {
             let run = current_run.as_mut().ok_or_else(|| {
                 anyhow::anyhow!("line {}: 'stdin' outside of a run block", line_num)
@@ -159,7 +159,7 @@ pub fn parse_script(source: &str) -> Result<Script> {
                 }
                 run.stdin = Some(StdinSource::FromFile(tokens[0].clone()));
             } else {
-                let lines = parse_quoted_strings(rest, line_num)?;
+                let lines = tokenize(rest, line_num)?;
                 run.stdin = Some(StdinSource::Lines(lines));
             }
         } else {
@@ -444,9 +444,6 @@ pub fn tokenize(line: &str, _line_num: usize) -> Result<Vec<String>> {
     Ok(tokens)
 }
 
-fn parse_quoted_strings(s: &str, line_num: usize) -> Result<Vec<String>> {
-    tokenize(s, line_num)
-}
 
 /// Strip inline comments: everything after an unquoted `#` is removed.
 fn strip_comment(line: &str) -> &str {
