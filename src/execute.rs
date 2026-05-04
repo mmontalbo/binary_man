@@ -157,7 +157,7 @@ fn diff_snapshots(before: &FsSnapshot, after: &FsSnapshot) -> Vec<FsChange> {
 }
 
 /// Run the entire grid.
-pub fn run_grid(binary: &str, script: &Script) -> Result<GridResult> {
+pub fn run_grid(binary: &str, script: &Script, probe_dir: &std::path::Path) -> Result<GridResult> {
     let mut cells: HashMap<(String, usize), Observation> = HashMap::new();
     let mut setup_failures: HashMap<String, String> = HashMap::new();
 
@@ -168,7 +168,7 @@ pub fn run_grid(binary: &str, script: &Script) -> Result<GridResult> {
             .context("create sandbox")?;
         let work_dir = sandbox_dir.path();
 
-        let env_vars = match sandbox::apply_setup(work_dir, binary, &ctx.commands) {
+        let env_vars = match sandbox::apply_setup(work_dir, binary, &ctx.commands, probe_dir) {
             Ok(env) => env,
             Err(e) => {
                 setup_failures.insert(ctx.name.clone(), format!("{}", e));

@@ -4,7 +4,7 @@ use crate::parse::{FileContent, Property, SetupCommand};
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Apply base env vars shared by invoke and run commands.
 pub fn apply_base_env(cmd: &mut std::process::Command, work_dir: &Path, env_vars: &HashMap<String, String>) {
@@ -20,7 +20,8 @@ pub fn apply_base_env(cmd: &mut std::process::Command, work_dir: &Path, env_vars
 
 /// Build sandbox state from setup commands.
 /// Returns accumulated env vars for use by run invocations.
-pub fn apply_setup(work_dir: &Path, binary: &str, commands: &[SetupCommand]) -> Result<HashMap<String, String>> {
+/// `probe_dir` is the directory containing the probe file, for resolving `from` paths.
+pub fn apply_setup(work_dir: &Path, binary: &str, commands: &[SetupCommand], probe_dir: &Path) -> Result<HashMap<String, String>> {
     let mut env_vars: HashMap<String, String> = HashMap::new();
 
     for cmd in commands {
@@ -47,8 +48,13 @@ pub fn apply_setup(work_dir: &Path, binary: &str, commands: &[SetupCommand]) -> 
                             .with_context(|| format!("write empty {}", path))?;
                     }
                     FileContent::From(src) => {
-                        fs::copy(src, &full)
-                            .with_context(|| format!("copy {} -> {}", src, path))?;
+                        let resolved = if Path::new(src).is_absolute() {
+                            PathBuf::from(src)
+                        } else {
+                            probe_dir.join(src)
+                        };
+                        fs::copy(&resolved, &full)
+                            .with_context(|| format!("copy {} -> {}", resolved.display(), path))?;
                     }
                 }
             }

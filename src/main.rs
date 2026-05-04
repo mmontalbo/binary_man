@@ -387,7 +387,8 @@ fn cmd_run(binary: &str, test_path: &PathBuf) -> Result<()> {
     );
 
     // Execute
-    let grid = execute::run_grid(binary, &script)?;
+    let probe_dir = test_path.parent().unwrap_or(std::path::Path::new("."));
+    let grid = execute::run_grid(binary, &script, probe_dir)?;
 
     // Build results
     let mut out = String::new();

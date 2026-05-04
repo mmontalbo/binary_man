@@ -472,8 +472,28 @@ vary from "repo"
 The variant has "hello" committed and "changed" in the working tree.
 This is safe — invokes always see the original file.
 
+### Fixture files for structured input
+
+For binaries whose behavior depends on input file content (compilers,
+parsers, linters, formatters), use `file from` to load real fixture
+files instead of embedding escaped content inline:
+
+```
+context "base"
+  file "input.json" from "fixtures/valid.json"
+
+vary from "base"
+  file "input.json" from "fixtures/malformed.json"
+  file "input.json" from "fixtures/empty.json"
+  file "input.json" from "fixtures/huge.json"
+```
+
+`from` paths are relative to the probe file's directory. The fixture
+files are real, editable files — no escaping needed. Collapsing across
+fixture variants reveals which input shapes affect the binary's behavior.
+
 ### Use `--dry-run` to inspect resolved state
 
-`bman-probe --dry-run <binary> <file>` prints resolved contexts (after
+`bman --dry-run <binary> <file>` prints resolved contexts (after
 extends) and the planned run grid without executing. Useful for debugging
 extends resolution and `in`-block scoping.
