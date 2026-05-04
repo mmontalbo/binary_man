@@ -343,7 +343,7 @@ fn format_setup_cmd(cmd: &parse::SetupCommand) -> String {
             }
         }
         parse::SetupCommand::CreateDir { path } => format!("dir {:?}", path),
-        parse::SetupCommand::CreateLink { path, target } => format!("link {:?} -> {:?}", path, target),
+        parse::SetupCommand::CreateLink { path, target } => format!("file {:?} -> {:?}", path, target),
         parse::SetupCommand::SetProps { path, .. } => format!("props {:?} ...", path),
         parse::SetupCommand::SetEnv { var, value } => format!("env {} {:?}", var, value),
         parse::SetupCommand::Remove { path } => format!("remove {:?}", path),
@@ -532,6 +532,13 @@ fn cmd_run(binary: &str, test_path: &PathBuf) -> Result<()> {
     std::fs::write(&results_path, &out)
         .with_context(|| format!("write {}", results_path.display()))?;
     eprintln!("wrote {}", results_path.display());
+
+    if !grid.setup_failures.is_empty() {
+        eprintln!("{} context(s) failed setup", grid.setup_failures.len());
+        if grid.cells.is_empty() {
+            std::process::exit(1);
+        }
+    }
 
     Ok(())
 }
