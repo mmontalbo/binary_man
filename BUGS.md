@@ -330,6 +330,32 @@ Three different strategies for three non-finite cases.
 (true) has no length." Both are scalar types, but null is treated as
 an empty container while booleans are rejected entirely.
 
+## ripgrep: --json silently overridden by -l and -c depending on flag order
+
+**Severity:** Medium (silent data format change based on flag order)
+**Affected:** ripgrep 14.1.0
+**Found by:** pairwise flag combination testing (755 cells)
+
+`--json` is supposed to produce JSON Lines output. But when combined
+with `-l` (files-only) or `-c` (count), the output format depends on
+flag ORDER:
+
+```
+$ rg --json -l error    # PLAIN TEXT (--json overridden by -l)
+$ rg -l --json error    # JSON LINES (--json wins, last flag)
+$ rg --json -c error    # PLAIN TEXT (--json overridden by -c)
+$ rg -c --json error    # JSON LINES (--json wins, last flag)
+```
+
+Compare: `--json --stats` COMPOSES correctly (stats included in JSON).
+But `--json -l` OVERRIDES (last flag wins). Scripts that rely on JSON
+output will silently get plain text if -l or -c appears after --json.
+
+The inconsistency: `--json` composes with `--stats` but conflicts with
+`-l` and `-c`. Users expect all output flags to be orthogonal. Flags
+in shell aliases or scripts may appear in unpredictable order, making
+this a real source of silent pipeline failures.
+
 ## Root Cause: OPT_INTEGER vs OPT_UNSIGNED misuse
 
 **Scope:** ~19 of 39 integer flag definitions across git's codebase
