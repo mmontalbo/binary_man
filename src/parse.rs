@@ -85,6 +85,7 @@ pub fn parse_script(source: &str) -> Result<Script> {
     let mut current_run: Option<Run> = None;
     let mut current_from: Option<Vec<String>> = None; // args of the from-reference
     let mut current_in: Option<Vec<String>> = None; // block-level in scope
+    let mut current_combine: Option<(Vec<String>, Vec<Vec<String>>)> = None; // (base_args, flag_lists)
 
     for (line_num, raw_line) in source.lines().enumerate() {
         let line = strip_comment(raw_line.trim());
@@ -100,6 +101,7 @@ pub fn parse_script(source: &str) -> Result<Script> {
 
         if let Some(rest) = line.strip_prefix("context ") {
             flush_run(&mut current_run, &mut runs);
+            flush_combine(&mut current_combine, &mut runs, &current_in, &current_from);
             flush_context(&mut current_context, &mut contexts);
             flush_vary(&mut current_vary, &mut vary_blocks);
             current_from = None;
@@ -165,6 +167,26 @@ pub fn parse_script(source: &str) -> Result<Script> {
             flush_vary(&mut current_vary, &mut vary_blocks);
             current_from = None;
             current_in = Some(tokenize(rest.trim(), line_num)?);
+        } else if let Some(rest) = line.strip_prefix("combine ") {
+            flush_run(&mut current_run, &mut runs);
+            flush_combine(&mut current_combine, &mut runs, &current_in, &current_from);
+            flush_context(&mut current_context, &mut contexts);
+            flush_vary(&mut current_vary, &mut vary_blocks);
+            let base_args = tokenize(rest.trim(), line_num)?;
+            if base_args.is_empty() {
+                bail!("line {}: combine requires base args", line_num);
+            }
+            current_combine = Some((base_args, Vec::new()));
+        } else if current_combine.is_some() && !line.starts_with("context ")
+            && !line.starts_with("vary ") && !line.starts_with("run ")
+            && !line.starts_with("from ") && !line.starts_with("in ")
+            && !line.starts_with("combine ")
+        {
+            // Flag line inside a combine block
+            let flags = tokenize(line, line_num)?;
+            if let Some((_, ref mut flag_lists)) = current_combine {
+                flag_lists.push(flags);
+            }
         } else if let Some(rest) = line.strip_prefix("stdin ") {
             let run = current_run.as_mut().ok_or_else(|| {
                 anyhow::anyhow!("line {}: 'stdin' outside of a run block", line_num)
@@ -194,6 +216,7 @@ pub fn parse_script(source: &str) -> Result<Script> {
     }
 
     flush_run(&mut current_run, &mut runs);
+    flush_combine(&mut current_combine, &mut runs, &current_in, &current_from);
     flush_context(&mut current_context, &mut contexts);
     flush_vary(&mut current_vary, &mut vary_blocks);
 
@@ -214,6 +237,50 @@ pub fn parse_script(source: &str) -> Result<Script> {
 fn flush_run(run: &mut Option<Run>, runs: &mut Vec<Run>) {
     if let Some(r) = run.take() {
         runs.push(r);
+    }
+}
+
+fn flush_combine(
+    combine: &mut Option<(Vec<String>, Vec<Vec<String>>)>,
+    runs: &mut Vec<Run>,
+    current_in: &Option<Vec<String>>,
+    current_from: &Option<Vec<String>>,
+) {
+    if let Some((base_args, flag_lists)) = combine.take() {
+        if flag_lists.is_empty() { return; }
+
+        // Split base_args: first arg is prefix, rest are trailing
+        let prefix = &base_args[..1];
+        let trailing = &base_args[1..];
+
+        // Singles: each flag group alone
+        for flags in &flag_lists {
+            let mut args: Vec<String> = prefix.to_vec();
+            args.extend(flags.iter().cloned());
+            args.extend(trailing.iter().cloned());
+            runs.push(Run {
+                args,
+                in_contexts: current_in.clone(),
+                stdin: None,
+                diff_from: current_from.clone(),
+            });
+        }
+
+        // Pairs: every combination of two flag groups
+        for i in 0..flag_lists.len() {
+            for j in (i + 1)..flag_lists.len() {
+                let mut args: Vec<String> = prefix.to_vec();
+                args.extend(flag_lists[i].iter().cloned());
+                args.extend(flag_lists[j].iter().cloned());
+                args.extend(trailing.iter().cloned());
+                runs.push(Run {
+                    args,
+                    in_contexts: current_in.clone(),
+                    stdin: None,
+                    diff_from: current_from.clone(),
+                });
+            }
+        }
     }
 }
 
