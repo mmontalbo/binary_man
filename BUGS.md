@@ -1,6 +1,6 @@
-# Bugs and Inconsistencies Found by bman
+# Bugs and Inconsistencies Found by bgrid
 
-All findings are from systematic behavioral observation using bman's
+All findings are from systematic behavioral observation using bgrid's
 grid execution and pairwise flag combination testing.
 
 ## Git: --stat + --shortstat duplicate summary line
@@ -268,7 +268,7 @@ command that uses the diff output machinery. Confirmed in:
 
 ---
 
-*All bugs found by bman's systematic behavioral probing across ~3000+
+*All bugs found by bgrid's systematic behavioral probing across ~3000+
 cells. Methods used: pairwise flag combination testing (`combine`),
 boundary-value probing (negative/zero/extreme values), compound input
 perturbation (`vary compound`), and adversarial context design.*
@@ -385,7 +385,7 @@ existing `OPTION_UNSIGNED` type.
 
 ---
 
-*All bugs found by bman's systematic pairwise flag combination testing.
+*All bugs found by bgrid's systematic pairwise flag combination testing.
 The `combine` keyword generates all single + pair combinations from a
 list of flags, enabling automated discovery of flag interaction issues
 that single-flag testing misses.*

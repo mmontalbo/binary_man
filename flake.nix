@@ -1,5 +1,5 @@
 {
-  description = "bman — observation-driven behavioral specification for CLI binaries";
+  description = "binary-grid — observation-driven behavioral specification for CLI binaries";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.05";

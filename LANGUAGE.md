@@ -6,17 +6,17 @@ A `.probe` file describes a grid of **input states × invocations**. The tool
 executes every cell and writes observations to a `.results` file.
 
 ```
-bman <binary>              discover flags from --help, print probe skeleton
-bman <binary> <file.probe> run observation grid, write .results file
-bman --dry-run <binary> <file.probe>  show resolved grid without executing
+bgrid <binary>              discover flags from --help, print probe skeleton
+bgrid <binary> <file.probe> run observation grid, write .results file
+bgrid --dry-run <binary> <file.probe>  show resolved grid without executing
 ```
 
 Start with discovery to get a skeleton, then customize it:
 
 ```
-bman sort > sort.probe       # discover sort's flags
+bgrid sort > sort.probe       # discover sort's flags
 # edit sort.probe — add vary blocks for sensitivity testing
-bman sort sort.probe          # run the grid
+bgrid sort sort.probe          # run the grid
 ```
 
 The tool is binary-agnostic — it knows nothing about any specific binary.
@@ -29,7 +29,7 @@ humans, LMs, or scripts reading the `.results` files.
 
 ## Concepts
 
-Five keywords: **context**, **vary**, **invoke**, **run**, **from**, **in**.
+Six keywords: **context**, **vary**, **invoke**, **run**, **from**, **in**.
 
 ### context
 
@@ -494,6 +494,6 @@ fixture variants reveals which input shapes affect the binary's behavior.
 
 ### Use `--dry-run` to inspect resolved state
 
-`bman --dry-run <binary> <file>` prints resolved contexts (after
+`bgrid --dry-run <binary> <file>` prints resolved contexts (after
 extends) and the planned run grid without executing. Useful for debugging
 extends resolution and `in`-block scoping.

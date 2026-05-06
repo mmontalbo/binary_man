@@ -2,10 +2,10 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-bin="$root/target/debug/bman"
+bin="$root/target/debug/bgrid"
 
 if [[ ! -x "$bin" ]]; then
-  (cd "$root" && cargo build --bin bman)
+  (cd "$root" && cargo build --bin bgrid)
 fi
 
 exec "$bin" "$@"
