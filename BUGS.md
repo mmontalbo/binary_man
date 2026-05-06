@@ -268,10 +268,72 @@ command that uses the diff output machinery. Confirmed in:
 
 ---
 
-*All bugs found by bgrid's systematic behavioral probing across ~3000+
+## Git: fetch --jobs=2147483647 OOM crash via unchecked calloc
+
+**Severity:** Medium (denial of service, unchecked allocation)
+**Affected:** git fetch
+**Reproduced on:** git 2.50.1
+**Found by:** boundary-value probing of remote operations
+
+`git fetch --jobs=2147483647` crashes with `fatal: Out of memory,
+calloc failed`. Git passes the user-supplied value directly to calloc
+to pre-allocate a job array, without checking whether the value is
+reasonable.
+
+```
+$ git fetch --jobs=2147483647 origin
+fatal: Out of memory, calloc failed
+```
+
+Meanwhile `--jobs=-1` is silently accepted and works (the negative
+value wraps or is treated as "auto"). And `--jobs=0` also works.
+
+The `--jobs` flag controls parallelism for fetching from multiple
+remotes or submodules. The natural upper bound is the number of things
+to fetch (typically 1-100). The fix should allocate based on
+`min(jobs, actual_work_items)` rather than trusting the user value
+for an allocation size.
+
+Same root cause as the OPT_INTEGER class: user input flows into a
+resource allocation without bounds checking.
+
+## Git: rev-list, repack, ls-files accept negative values silently
+
+**Severity:** Low (silent wrap, benign behavior)
+**Affected:** git rev-list, git repack, git ls-files
+**Reproduced on:** git 2.50.1
+**Found by:** boundary-value probing across subcommands
+
+Multiple subcommands accept negative values for flags where only
+non-negative values make sense:
+
+```
+$ git rev-list --max-count=-1 HEAD    # shows all (wraps to unlimited)
+$ git rev-list --skip=-1 HEAD         # no effect (wraps to 0)
+$ git rev-list --min-parents=-1 HEAD  # no filter (wraps)
+$ git rev-list --max-parents=-1 HEAD  # no filter (wraps)
+$ git repack --window=-1              # accepted silently
+$ git repack --depth=-1               # accepted silently
+$ git repack --threads=-1             # accepted silently
+$ git ls-files --abbrev=-1            # shows full hash (wraps to max)
+```
+
+Compare with flags that correctly reject:
+```
+$ git shortlog -w-1,0,0    # exit 129 (rejected)
+$ git tag -l -n -1          # exit 129 (rejected)
+$ git for-each-ref --count=-1  # exit 129 (rejected)
+```
+
+Same inconsistent validation pattern as the diff/grep flags.
+
+---
+
+*All bugs found by bgrid's systematic behavioral probing across ~5000+
 cells. Methods used: pairwise flag combination testing (`combine`),
 boundary-value probing (negative/zero/extreme values), compound input
-perturbation (`vary compound`), and adversarial context design.*
+perturbation (`vary compound`), remote interaction via file:// protocol,
+and adversarial context design.*
 
 ## Summary
 
@@ -293,6 +355,11 @@ perturbation (`vary compound`), and adversarial context design.*
 | `format-patch -v -1` shows `[PATCH v-1]` | boundary-value | Low (cosmetic) |
 | `log --format=%w(-1,0,0)` fails silently | boundary-value | Low (literal output) |
 | `log --format=%<(-1)%s` partial parse | boundary-value | Low (garbage prefix) |
+| `fetch --jobs=2147483647` OOM crash | boundary-value | **Medium** (unchecked calloc) |
+| `fetch --jobs=-1` silently accepted | boundary-value | Low (inconsistent) |
+| `rev-list --max-count/-skip/-parents=-1` wraps | boundary-value | Low (silent wrap) |
+| `repack --window/-depth/-threads=-1` accepted | boundary-value | Low (silent wrap) |
+| `ls-files --abbrev=-1` shows full hash | boundary-value | Low (silent wrap) |
 | **jq** `1e999` roundtrip inconsistency | boundary-value | **Medium** (data loss) |
 | **jq** `length(null)=0` but `length(bool)=error` | type-coercion | Low (inconsistency) |
 
@@ -380,8 +447,10 @@ likely added it thinking it guarded against negative values.
 **Proposed fix:** Change ~22 `OPT_INTEGER` declarations to `OPT_UNSIGNED`
 for flags where negative values are nonsensical (max-depth, max-count,
 jobs, timeout, width, padding, depth, etc.). Fix grep's -C callback to
-validate non-negative. This is a mechanical, low-risk change using git's
-existing `OPTION_UNSIGNED` type.
+validate non-negative. Add upper-bound validation for flags used as
+allocation sizes (`--jobs` should clamp to actual work items, not
+calloc the raw user value). This is a mechanical, low-risk change
+using git's existing `OPTION_UNSIGNED` type.
 
 ---
 
