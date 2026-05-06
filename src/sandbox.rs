@@ -10,24 +10,33 @@ use std::process::{Command, Stdio};
 /// Path to the bwrap binary. Found once at startup.
 pub struct Sandbox {
     bwrap: PathBuf,
+    pub strace: Option<PathBuf>,
 }
 
 impl Sandbox {
     /// Find bwrap or fail with a clear error.
-    pub fn new() -> Result<Self> {
+    pub fn new(trace: bool) -> Result<Self> {
         let bwrap = which::which("bwrap")
             .context("bwrap not found — install bubblewrap for sandbox isolation")?;
-        Ok(Sandbox { bwrap })
+        let strace = if trace {
+            Some(which::which("strace")
+                .context("strace not found — install strace for --trace mode")?)
+        } else {
+            None
+        };
+        Ok(Sandbox { bwrap, strace })
     }
 
     /// Build a Command that runs `binary args...` inside the bwrap sandbox.
     /// The workspace is bind-mounted read-write at /workspace.
+    /// If trace_dir is provided, it's bind-mounted at /trace for strace output.
     pub fn command(
         &self,
         binary: &str,
         args: &[&str],
         work_dir: &Path,
         env_vars: &HashMap<String, String>,
+        trace_dir: Option<&Path>,
     ) -> Command {
         let mut cmd = Command::new(&self.bwrap);
 
@@ -51,6 +60,11 @@ impl Sandbox {
         cmd.arg("--bind").arg(work_dir).arg("/workspace");
         cmd.arg("--chdir").arg("/workspace");
 
+        // Trace output directory (separate from workspace)
+        if let Some(td) = trace_dir {
+            cmd.arg("--bind").arg(td).arg("/trace");
+        }
+
         // Environment
         cmd.arg("--setenv").arg("HOME").arg("/workspace");
         cmd.arg("--setenv").arg("PATH").arg(std::env::var("PATH").unwrap_or_default());
@@ -60,14 +74,74 @@ impl Sandbox {
             cmd.arg("--setenv").arg(k).arg(v);
         }
 
-        // The actual command
-        cmd.arg("--").arg(binary);
+        // The actual command — optionally wrapped in strace
+        cmd.arg("--");
+        if let Some(ref strace) = self.strace {
+            cmd.arg(strace);
+            cmd.arg("-f");
+            cmd.arg("-e").arg("trace=openat");
+            cmd.arg("-o").arg("/trace/.bgrid-trace");
+            cmd.arg("-qq");
+            cmd.arg("--");
+        }
+        cmd.arg(binary);
         for arg in args {
             cmd.arg(arg);
         }
 
         cmd
     }
+}
+
+/// Parse strace output for workspace file access patterns.
+/// Returns (files_read, files_failed) — paths relative to workspace.
+pub fn parse_trace(trace_dir: &Path) -> (Vec<String>, Vec<String>) {
+    let trace_path = trace_dir.join(".bgrid-trace");
+    let mut reads = Vec::new();
+    let mut failed = Vec::new();
+    let mut seen_reads = std::collections::HashSet::new();
+    let mut seen_failed = std::collections::HashSet::new();
+
+    if let Ok(content) = std::fs::read_to_string(&trace_path) {
+        for line in content.lines() {
+            // Match: openat(AT_FDCWD, "path", flags) = result
+            let Some(start) = line.find('"') else { continue };
+            let Some(end) = line[start + 1..].find('"') else { continue };
+            let path = &line[start + 1..start + 1 + end];
+
+            // Skip non-workspace paths
+            if path.starts_with("/nix/") || path.starts_with("/etc/")
+                || path.starts_with("/proc/") || path.starts_with("/dev/")
+                || path.starts_with("/usr/") || path.starts_with("/lib")
+                || path.starts_with("/run/") || path.starts_with("/tmp/")
+                || path == "/workspace/.bgrid-trace"
+            {
+                continue;
+            }
+
+            // Normalize path: strip /workspace/ prefix or ./ prefix
+            let rel = path.strip_prefix("/workspace/")
+                .or_else(|| path.strip_prefix("./"))
+                .unwrap_or(path);
+
+            if rel.is_empty() || rel == "." { continue; }
+
+            if line.contains("ENOENT") || line.contains("EACCES") {
+                if seen_failed.insert(rel.to_string()) {
+                    failed.push(rel.to_string());
+                }
+            } else if line.contains("= ") && !line.contains("= -1")
+                && seen_reads.insert(rel.to_string()) {
+                    reads.push(rel.to_string());
+            }
+        }
+        // Clean up trace file
+        let _ = std::fs::remove_file(&trace_path);
+    }
+
+    reads.sort();
+    failed.sort();
+    (reads, failed)
 }
 
 /// Build sandbox state from setup commands.
@@ -197,7 +271,7 @@ pub fn apply_setup(
             }
             SetupCommand::Invoke { args } => {
                 let str_args: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-                let mut invoke = sandbox.command(binary, &str_args, work_dir, &env_vars);
+                let mut invoke = sandbox.command(binary, &str_args, work_dir, &env_vars, None);
                 invoke
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())

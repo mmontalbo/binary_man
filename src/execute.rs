@@ -14,6 +14,8 @@ pub struct Observation {
     pub stderr: String,
     pub exit_code: Option<i32>,
     pub fs_changes: Vec<FsChange>,
+    pub trace_reads: Vec<String>,   // files opened (--trace mode)
+    pub trace_failed: Vec<String>,  // files that failed to open (--trace mode)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -168,7 +170,7 @@ pub fn run_grid(
 
     for ctx in &script.contexts {
         let sandbox_dir = tempfile::Builder::new()
-            .prefix("bman_")
+            .prefix("bgrid_")
             .tempdir()
             .context("create sandbox")?;
         let work_dir = sandbox_dir.path();
@@ -213,8 +215,17 @@ fn run_invocation(
     // Snapshot before
     let before = snapshot_fs(work_dir);
 
+    // Create a separate trace dir if tracing is enabled
+    let trace_dir = if sandbox.strace.is_some() {
+        Some(tempfile::Builder::new().prefix("bgrid_trace_").tempdir()
+            .context("create trace dir")?)
+    } else {
+        None
+    };
+    let trace_path = trace_dir.as_ref().map(|d| d.path());
+
     let str_args: Vec<&str> = test.args.iter().map(|s| s.as_str()).collect();
-    let mut cmd = sandbox.command(binary, &str_args, work_dir, env_vars);
+    let mut cmd = sandbox.command(binary, &str_args, work_dir, env_vars, trace_path);
 
     match &test.stdin {
         Some(StdinSource::Lines(_)) => {
@@ -252,10 +263,19 @@ fn run_invocation(
     let after = snapshot_fs(work_dir);
     let fs_changes = diff_snapshots(&before, &after);
 
+    // Parse trace if available
+    let (trace_reads, trace_failed) = if let Some(ref td) = trace_dir {
+        sandbox::parse_trace(td.path())
+    } else {
+        (Vec::new(), Vec::new())
+    };
+
     Ok(Observation {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         exit_code: output.status.code(),
         fs_changes,
+        trace_reads,
+        trace_failed,
     })
 }
