@@ -1,5 +1,5 @@
 [package]
-name = "bman"
+name = "binary-grid"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
@@ -13,7 +13,7 @@ tempfile = "3.14"
 which = "7.0"
 
 [[bin]]
-name = "bman"
+name = "bgrid"
 path = "src/main.rs"
 
 [lints.clippy]
