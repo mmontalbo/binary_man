@@ -88,6 +88,7 @@ pub fn parse_script(source: &str) -> Result<Script> {
     let mut current_combine: Option<(Vec<String>, Vec<Vec<String>>)> = None; // (base_args, flag_lists)
 
     for (line_num, raw_line) in source.lines().enumerate() {
+        let is_indented = raw_line.starts_with(' ') || raw_line.starts_with('\t');
         let line = strip_comment(raw_line.trim());
         let line_num = line_num + 1;
 
@@ -152,6 +153,11 @@ pub fn parse_script(source: &str) -> Result<Script> {
             flush_run(&mut current_run, &mut runs);
             flush_context(&mut current_context, &mut contexts);
             flush_vary(&mut current_vary, &mut vary_blocks);
+
+            // Unindented run clears from scope (indentation-based from blocks)
+            if !is_indented {
+                current_from = None;
+            }
 
             let args = tokenize(rest.trim(), line_num)?;
             current_run = Some(Run {
@@ -698,6 +704,35 @@ run "."
         assert_eq!(script.runs[0].in_contexts, Some(vec!["base".to_string()]));
         // After new context, in-scope is cleared
         assert!(script.runs[1].in_contexts.is_none());
+    }
+
+    #[test]
+    fn test_from_scope_cleared_by_unindented_run() {
+        let source = r#"
+context "base"
+  file "a.txt" "hello"
+
+run "."
+
+from "."
+  run "." "-a"
+  run "." "-l"
+
+run "." "-x"
+
+from "."
+  run "." "-R"
+
+run "." "-1"
+"#;
+        let script = parse_script(source).unwrap();
+        assert_eq!(script.runs.len(), 6);
+        assert!(script.runs[0].diff_from.is_none()); // run "." — standalone
+        assert_eq!(script.runs[1].diff_from, Some(vec![".".to_string()])); // from "."
+        assert_eq!(script.runs[2].diff_from, Some(vec![".".to_string()])); // from "."
+        assert!(script.runs[3].diff_from.is_none()); // run "." "-x" — unindented, clears from
+        assert_eq!(script.runs[4].diff_from, Some(vec![".".to_string()])); // from "."
+        assert!(script.runs[5].diff_from.is_none()); // run "." "-1" — unindented, clears from
     }
 
     #[test]
