@@ -119,6 +119,13 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox) -> Result<()> {
     println!("  remove \"exec.sh\"");
     println!();
 
+    // Type/name edge cases — structural equivalence classes
+    println!("vary from \"base\"");
+    println!("  file \"link.txt\" -> \"nonexistent\"  # broken symlink");
+    println!("  file \"-rf\" \"flag-like filename\"");
+    println!("  props \"subdir\" readonly  # unreadable directory");
+    println!();
+
     // Property perturbations — vary file attributes
     println!("vary from \"base\"");
     println!("  props \"input.txt\" readonly");
@@ -186,6 +193,17 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox) -> Result<()> {
         for (flag, _) in &zero_flags {
             println!("run {}", build_run(Some(&format!("{}=0", flag)), None, pat, fil));
         }
+
+        // Negative and overflow boundaries (up to 3 flags)
+        let boundary_flags: Vec<&&(String, Option<String>)> = zero_flags.iter().take(3).collect();
+        if !boundary_flags.is_empty() {
+            println!();
+            println!("# Boundary: negative and overflow values");
+            for (flag, _) in &boundary_flags {
+                println!("run {}", build_run(Some(&format!("{}=-1", flag)), None, pat, fil));
+                println!("run {}", build_run(Some(&format!("{}=2147483647", flag)), None, pat, fil));
+            }
+        }
     }
 
     // Multi-file run
@@ -199,11 +217,14 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox) -> Result<()> {
         println!("run {}", parts.join(" "));
     }
 
-    // Error provocation: nonexistent file
+    // Error provocation: nonexistent file and flag-like filename
     {
         println!();
         println!("# Error: nonexistent file");
         println!("run {}", build_run(None, None, pat, Some("nonexistent-file.txt")));
+        println!();
+        println!("# Edge case: flag-like filename via -- separator");
+        println!("run {}", build_run(Some("--"), None, pat, Some("-rf")));
     }
 
     // Stdin hint
@@ -219,6 +240,23 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox) -> Result<()> {
             };
             println!("# run {}\"-n\"", prefix);
             println!("#   stdin \"line one\" \"line two\" \"line three\"");
+        }
+    }
+
+    // Commented-out pairwise combination hint
+    if short_flags.len() >= 3 {
+        println!();
+        println!("# Uncomment for pairwise flag combination testing:");
+        let combo_flags: Vec<&String> = short_flags.iter().take(8).collect();
+        let combo_base = if let Some(f) = fil { format!("\"{}\"", f) } else { String::new() };
+        let combo_prefix = if pat.is_some() {
+            format!("\"{}\" {}", pat.unwrap(), combo_base)
+        } else {
+            combo_base
+        };
+        println!("# combine {}", combo_prefix);
+        for flag in &combo_flags {
+            println!("#   \"{}\"", flag);
         }
     }
 
