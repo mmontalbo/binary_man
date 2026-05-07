@@ -292,22 +292,57 @@ if [ -n "$UNTESTED" ]; then
     fi
 fi
 
-# --- Phase 6: Re-emit grouped runs ---
+# --- Phase 6: Re-emit grouped runs with smart scoping ---
 
 echo "# Re-test identical groups across all contexts"
 
+# For each group, check if it succeeded or failed, and scope accordingly
 echo "$MULTI_GROUPS" | while IFS= read -r group; do
     [ -z "$group" ] && continue
     runs_str=$(echo "$group" | sed 's/^[^:]*: //')
 
-    echo ""
-    echo "# Group: $runs_str"
+    # Find this group's summary line in results (the line after the ## group header)
+    # Look for exit code and context info
+    group_num=$(echo "$group" | grep -oP 'group \K\d+')
+    summary=$(grep -a -A2 "^## group $group_num " "$RESULTS" | grep -a "exit " | head -1)
 
-    echo "$runs_str" | perl -ne '
-        my @runs = split /,\s+(?=")/, $_;
-        for my $r (@runs) {
-            $r =~ s/^\s+|\s+$//g;
-            print "run $r\n" if $r =~ /^"/;
-        }
-    '
+    # Extract majority exit code
+    majority_exit=$(echo "$summary" | grep -oP 'exit \K\d+' | head -1)
+
+    # Extract majority context names (the line with "N contexts (name, name, ...)")
+    ctx_line=$(grep -a -A3 "^## group $group_num " "$RESULTS" | grep -a "contexts\|^  [a-z]" | head -1)
+    majority_ctx=$(echo "$ctx_line" | grep -oP '\(([^)]+)\)' | head -1 | tr -d '()')
+
+    echo ""
+
+    if [ -n "$majority_exit" ] && [ "$majority_exit" -ne 0 ] 2>/dev/null; then
+        # Group fails in majority of contexts
+        # Check sensitivity for any context where it succeeded (exit N→0)
+        working_ctx=$(echo "$summary" | grep -oP '\w+ \(exit \d+→0\)' | head -1 | sed 's/ (.*//')
+
+        if [ -n "$working_ctx" ]; then
+            echo "# Group (fails in majority, works in $working_ctx)"
+            echo "in \"$working_ctx\""
+            echo "$runs_str" | perl -ne '
+                my @runs = split /,\s+(?=")/, $_;
+                for my $r (@runs) {
+                    $r =~ s/^\s+|\s+$//g;
+                    print "  run $r\n" if $r =~ /^"/;
+                }
+            '
+        else
+            echo "# Group: SKIPPED (exits $majority_exit in all contexts)"
+            echo "# $runs_str"
+        fi
+    else
+        # Group succeeds — re-emit normally
+        echo "# Group: $runs_str"
+        echo "$runs_str" | perl -ne '
+            my @runs = split /,\s+(?=")/, $_;
+            for my $r (@runs) {
+                $r =~ s/^\s+|\s+$//g;
+                print "run $r\n" if $r =~ /^"/;
+            }
+        '
+    fi
 done
