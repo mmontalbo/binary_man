@@ -172,7 +172,7 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox) -> Result<()> {
         .collect();
     if !safe_env_vars.is_empty() {
         println!("# Environment sensitivity (from binary inspection)");
-        println!("vary from \"base\"");
+        println!("vary from \"alpha\"");
         for var in &safe_env_vars {
             println!("  env {} \"test_value\"", var);
         }
