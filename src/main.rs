@@ -4,20 +4,31 @@ use std::path::PathBuf;
 
 use binary_grid::{execute, output, parse, sandbox};
 
+#[derive(Clone, Copy, PartialEq)]
+enum OutputMode {
+    Default,  // summary + detail for anomalies
+    Verbose,  // everything (old full mode)
+    Compact,  // run collapsing for LM consumption
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
     let dry_run = args.iter().any(|a| a == "--dry-run");
     let compact = args.iter().any(|a| a == "--compact");
+    let verbose = args.iter().any(|a| a == "--verbose");
     let trace = args.iter().any(|a| a == "--trace");
     let positional: Vec<&String> = args.iter().skip(1).filter(|a| !a.starts_with("--")).collect();
 
+    let mode = if compact { OutputMode::Compact } else if verbose { OutputMode::Verbose } else { OutputMode::Default };
+
     if positional.is_empty() {
-        eprintln!("Usage: bgrid [--dry-run] [--compact] [--trace] <binary> [<probe-file>]");
-        eprintln!("       bgrid <binary>                        discover flags from --help");
-        eprintln!("       bgrid <binary> <file.probe>            run observation grid");
-        eprintln!("       bgrid --compact <binary> <file.probe>  summary-only output");
-        eprintln!("       bgrid --trace <binary> <file.probe>    include file access traces");
+        eprintln!("Usage: bgrid [--dry-run] [--compact] [--verbose] [--trace] <binary> [<probe-file>]");
+        eprintln!("       bgrid <binary>                          discover flags from --help");
+        eprintln!("       bgrid <binary> <file.probe>              run observation grid");
+        eprintln!("       bgrid --verbose <binary> <file.probe>    full output (all contexts, all traces)");
+        eprintln!("       bgrid --compact <binary> <file.probe>    collapsed output for LM consumption");
+        eprintln!("       bgrid --trace <binary> <file.probe>      include syscall traces");
         std::process::exit(1);
     }
 
@@ -30,7 +41,7 @@ fn main() -> Result<()> {
             cmd_dry_run(&test_path)
         } else {
             let sandbox = sandbox::Sandbox::new(trace)?;
-            cmd_run(binary, &test_path, &sandbox, compact)
+            cmd_run(binary, &test_path, &sandbox, mode)
         }
     } else {
         let sandbox = sandbox::Sandbox::new(false)?;
@@ -452,7 +463,7 @@ fn format_setup_cmd(cmd: &parse::SetupCommand) -> String {
     }
 }
 
-fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compact: bool) -> Result<()> {
+fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, mode: OutputMode) -> Result<()> {
     let script = load_script(test_path)?;
 
     execute::validate_from_references(&script);
@@ -604,9 +615,35 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compac
     }
 
     // --- Output ---
-    if compact {
+    // Helper: compute vs-diff for a run against its from-reference
+    let vs_diff_for = |info: &RunInfo, obs_by_args: &HashMap<(&[String], &str), &execute::Observation>| -> Option<String> {
+        let ref_args = info.from_ref?;
+        let majority_ctx = info.majority_names[0];
+        let ref_obs = obs_by_args.get(&(ref_args.as_slice(), majority_ctx))?;
+        let diff = execute::compute_diff(ref_obs, info.majority_obs);
+        Some(if diff.is_empty() { "identical".into() } else { diff.join("; ") })
+    };
+
+    // Helper: build summary line for a run
+    let summary_line = |info: &RunInfo| -> String {
+        let mut parts = Vec::new();
+        parts.push(format!("{}/{} distinct", info.groups.len(), info.obs_list.len()));
+        if !info.universals.is_empty() {
+            parts.push(info.universals.join(", "));
+        }
+        if !info.sensitive_parts.is_empty() {
+            parts.push(format!("sensitive to: {}", info.sensitive_parts.join(", ")));
+        }
+        let trace_summary = output::format_trace_summary(info.majority_obs);
+        if !trace_summary.is_empty() {
+            parts.push(trace_summary);
+        }
+        parts.join(" | ")
+    };
+
+    match mode {
+    OutputMode::Compact => {
         // Compact mode: group runs by identical majority observation
-        // Only group runs with the same from-reference and in-scope
         struct RunGroup<'a> {
             run_labels: Vec<String>,
             majority_obs: &'a execute::Observation,
@@ -614,14 +651,12 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compac
             universals: Vec<String>,
             sensitive_parts: Vec<String>,
             from_ref: Option<&'a Vec<String>>,
-            // Per-run vs-diffs for runs in from blocks
-            vs_diffs: Vec<(String, String)>, // (args_str, diff_summary)
+            vs_diffs: Vec<(String, String)>,
         }
 
         let mut run_groups: Vec<RunGroup> = Vec::new();
 
         for info in &run_infos {
-            // Find existing group with identical majority obs + same scope
             let found = run_groups.iter_mut().find(|g| {
                 g.majority_obs.stdout == info.majority_obs.stdout
                 && g.majority_obs.stderr == info.majority_obs.stderr
@@ -630,29 +665,13 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compac
                 && g.from_ref == info.from_ref
             });
 
-            // Compute vs-diff for from-block runs
-            let vs_diff = if let Some(ref_args) = info.from_ref {
-                let majority_ctx = info.majority_names[0];
-                if let Some(ref_obs) = obs_by_args.get(&(ref_args.as_slice(), majority_ctx)) {
-                    let diff = execute::compute_diff(ref_obs, info.majority_obs);
-                    if !diff.is_empty() {
-                        Some(diff.join("; "))
-                    } else {
-                        Some("identical".into())
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
+            let vs_diff = vs_diff_for(info, &obs_by_args);
 
             if let Some(group) = found {
                 group.run_labels.push(info.args_str.clone());
                 if let Some(diff) = vs_diff {
                     group.vs_diffs.push((info.args_str.clone(), diff));
                 }
-                // Merge sensitivity — take union
                 for sp in &info.sensitive_parts {
                     if !group.sensitive_parts.contains(sp) {
                         group.sensitive_parts.push(sp.clone());
@@ -675,17 +694,13 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compac
             }
         }
 
-        // Output grouped results
         let total_runs: usize = run_groups.iter().map(|g| g.run_labels.len()).sum();
         out.push_str(&format!("\n# {} runs in {} behavioral groups\n", total_runs, run_groups.len()));
 
         for (gi, group) in run_groups.iter().enumerate() {
             out.push_str(&format!("\n## group {} ({} runs): {}\n",
-                gi + 1,
-                group.run_labels.len(),
-                group.run_labels.join(", ")));
+                gi + 1, group.run_labels.len(), group.run_labels.join(", ")));
 
-            // Summary
             let mut summary = group.universals.clone();
             if !group.sensitive_parts.is_empty() {
                 summary.push(format!("sensitive to: {}", group.sensitive_parts.join(", ")));
@@ -694,14 +709,11 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compac
                 out.push_str(&format!("  {}\n", summary.join(" | ")));
             }
 
-            // Majority output
             out.push_str(&format!("  {}:\n", output::format_context_group(&group.majority_names, grid.context_count)));
             output::format_obs(&mut out, group.majority_obs, "    ");
 
-            // vs-diffs (how each run differs from its from-reference)
             if !group.vs_diffs.is_empty() {
                 let ref_str = group.from_ref.map(|r| output::format_args(r)).unwrap_or_default();
-                // If all vs-diffs are the same, show once
                 let all_same = group.vs_diffs.iter().all(|(_, d)| *d == group.vs_diffs[0].1);
                 if all_same {
                     out.push_str(&format!("  vs {}: {}\n", ref_str, group.vs_diffs[0].1));
@@ -712,32 +724,62 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compac
                 }
             }
         }
-    } else {
-        // Full mode: per-run output (original behavior)
+    }
+
+    OutputMode::Default => {
+        // Default mode: summary per run + detail expansion for anomalies
+        for info in &run_infos {
+            let majority_exit = info.majority_obs.exit_code.unwrap_or(-1);
+            let is_anomalous = info.groups.len() > 1
+                || output::has_anomalies(info.majority_obs, None)
+                || info.obs_list.iter().any(|(_, obs)| output::has_anomalies(obs, Some(majority_exit)));
+
+            // Summary line (always shown)
+            out.push_str(&format!("\nrun {}:\n", info.args_str));
+            out.push_str(&format!("  {}\n", summary_line(info)));
+
+            // vs-diff (always show if in a from block)
+            if let Some(vs) = vs_diff_for(info, &obs_by_args) {
+                let ref_str = output::format_args(info.from_ref.unwrap());
+                out.push_str(&format!("  vs {}: {}\n", ref_str, vs));
+            }
+
+            // Detail expansion for anomalous runs
+            if is_anomalous {
+                // Show majority output
+                out.push_str(&format!("  {}:\n", output::format_context_group(&info.majority_names, info.obs_list.len())));
+                output::format_obs(&mut out, info.majority_obs, "    ");
+
+                // Show differing groups as deltas
+                let largest_idx = info.groups.iter().enumerate()
+                    .max_by_key(|(_, (names, _))| names.len())
+                    .map(|(i, _)| i).unwrap_or(0);
+                for (i, (names, obs)) in info.groups.iter().enumerate() {
+                    if i == largest_idx { continue; }
+                    let delta = execute::compute_diff(info.majority_obs, obs);
+                    if !delta.is_empty() {
+                        out.push_str(&format!("  differs in {}: {}\n", names.join(", "), delta.join("; ")));
+                    }
+                }
+            }
+        }
+    }
+
+    OutputMode::Verbose => {
+        // Verbose mode: everything (old full mode behavior)
         for info in &run_infos {
             out.push_str(&format!("\nrun {}:\n", info.args_str));
-
-            let mut summary_parts = Vec::new();
-            summary_parts.push(format!("{}/{} distinct", info.groups.len(), info.obs_list.len()));
-            if !info.universals.is_empty() {
-                summary_parts.push(info.universals.join(", "));
-            }
-            if !info.sensitive_parts.is_empty() {
-                summary_parts.push(format!("sensitive to: {}", info.sensitive_parts.join(", ")));
-            }
             out.push_str(&format!("  {} | {}\n",
                 output::format_context_group(&info.obs_list.iter().map(|(n, _)| *n).collect::<Vec<_>>(), info.obs_list.len()),
-                summary_parts.join(" | ")
+                summary_line(info)
             ));
 
-            // Majority group
             let largest_idx = info.groups.iter().enumerate()
                 .max_by_key(|(_, (names, _))| names.len())
                 .map(|(i, _)| i).unwrap_or(0);
             out.push_str(&format!("  {}:\n", output::format_context_group(&info.majority_names, info.obs_list.len())));
             output::format_obs(&mut out, info.majority_obs, "    ");
 
-            // Differing groups
             for (i, (names, obs)) in info.groups.iter().enumerate() {
                 if i == largest_idx { continue; }
                 out.push_str(&format!("  differs in {}:\n", names.join(", ")));
@@ -748,7 +790,6 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compac
                 }
             }
 
-            // From-block diffs
             if let Some(ref_args) = info.from_ref {
                 out.push_str(&format!("  from {}:\n", output::format_args(ref_args)));
                 for (ctx_name, obs) in &info.obs_list {
@@ -775,6 +816,7 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compac
             }
         }
     }
+    } // match mode
 
     // Write results file
     let results_path = test_path.with_extension("results");
