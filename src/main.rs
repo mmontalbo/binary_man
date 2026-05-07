@@ -94,9 +94,22 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox) -> Result<()> {
         format!("{} {}", binary, sub_args.join(" "))
     };
 
+    // Inspect the binary for env vars and config paths
+    let hints = inspect_binary(binary);
+
     // Output skeleton
     println!("# Discovered from: {} --help", cmd_label);
     println!("# {} short flags, {} long flags found", short_flags.len(), long_flags.len());
+    if !hints.env_vars.is_empty() || !hints.config_paths.is_empty() {
+        println!("#");
+        println!("# Binary inspection:");
+        if !hints.env_vars.is_empty() {
+            println!("#   env vars: {}", hints.env_vars.join(", "));
+        }
+        if !hints.config_paths.is_empty() {
+            println!("#   config paths: {}", hints.config_paths.join(", "));
+        }
+    }
     println!();
 
     // Rich binary-agnostic base context
@@ -142,6 +155,29 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox) -> Result<()> {
     println!("  props \"input.txt\" mtime old");
     println!("  file \"input.txt\" size 1");
     println!();
+
+    // Environment perturbations — from binary inspection
+    // Only auto-generate for vars with known-safe prefixes
+    let safe_prefixes = ["GIT_", "XDG_", "LC_"];
+    let skip_vars = ["GIT_DIR", "GIT_WORK_TREE", "GIT_EXEC_PATH", "GIT_COMMON_DIR",
+                      "GIT_INDEX_FILE", "GIT_QUARANTINE_PATH", "GIT_TEMPLATE_DIR"];
+    let safe_env_vars: Vec<&str> = hints.env_vars.iter()
+        .filter(|v| {
+            safe_prefixes.iter().any(|p| v.starts_with(p))
+            && !skip_vars.contains(&v.as_str())
+            && !v.contains("HOME") && !v.contains("PATH")
+        })
+        .map(|s| s.as_str())
+        .take(5)
+        .collect();
+    if !safe_env_vars.is_empty() {
+        println!("# Environment sensitivity (from binary inspection)");
+        println!("vary from \"base\"");
+        for var in &safe_env_vars {
+            println!("  env {} \"test_value\"", var);
+        }
+        println!();
+    }
 
     // Helper: build a run arg list with optional pattern and file
     let run_prefix: Vec<&str> = sub_args.to_vec();
@@ -363,6 +399,87 @@ fn infer_base_args(help_text: &str) -> (Option<String>, Option<String>) {
         }
     }
     (None, None)
+}
+
+/// Binary inspection results from scanning printable strings.
+struct BinaryHints {
+    env_vars: Vec<String>,
+    config_paths: Vec<String>,
+}
+
+/// Scan a binary file for environment variable names and config paths.
+fn inspect_binary(binary: &str) -> BinaryHints {
+    let path = which::which(binary).ok();
+    let data = path.and_then(|p| std::fs::read(p).ok()).unwrap_or_default();
+
+    let mut env_vars = HashSet::new();
+    let mut config_paths = HashSet::new();
+
+    // Extract printable strings (runs of >= 4 printable ASCII chars)
+    let mut current = String::new();
+    for &byte in &data {
+        if (0x20..0x7f).contains(&byte) {
+            current.push(byte as char);
+        } else {
+            if current.len() >= 4 {
+                classify_string(&current, &mut env_vars, &mut config_paths);
+            }
+            current.clear();
+        }
+    }
+    if current.len() >= 4 {
+        classify_string(&current, &mut env_vars, &mut config_paths);
+    }
+
+    // Filter env vars to likely-real ones
+    let skip_env = ["DESCRIPTION", "COMMAND", "ERROR", "WARNING", "VERSION",
+                    "OPTIONS", "USAGE", "ARGUMENTS", "SYNOPSIS", "EXAMPLE",
+                    "DEFAULT", "REQUIRED", "OPTIONAL", "INTERNAL", "ENABLED",
+                    "DISABLED", "SUCCESS", "FAILURE", "UNKNOWN", "INVALID",
+                    "TRUE", "FALSE", "NULL", "NONE", "AUTO"];
+
+    let mut sorted_env: Vec<String> = env_vars.into_iter()
+        .filter(|v| !skip_env.contains(&v.as_str()))
+        .filter(|v| v.len() >= 3 && v.len() <= 40)
+        .collect();
+    sorted_env.sort();
+
+    let mut sorted_paths: Vec<String> = config_paths.into_iter().collect();
+    sorted_paths.sort();
+
+    BinaryHints {
+        env_vars: sorted_env,
+        config_paths: sorted_paths,
+    }
+}
+
+fn classify_string(s: &str, env_vars: &mut HashSet<String>, config_paths: &mut HashSet<String>) {
+    // Environment variable pattern: all uppercase with underscores, 3+ chars
+    // Must end with a meaningful suffix or be a known pattern
+    let env_suffixes = ["_DIR", "_PATH", "_HOME", "_FILE", "_CONFIG", "_ROOT",
+                        "_PREFIX", "_EDITOR", "_PAGER", "_AUTHOR", "_EMAIL",
+                        "_NAME", "_ENCODING", "_LANG", "_OPTS", "_FLAGS"];
+    if s.chars().all(|c| c.is_ascii_uppercase() || c == '_') && s.len() >= 3
+        && (env_suffixes.iter().any(|suf| s.ends_with(suf))
+            || s.starts_with("LC_")
+            || s.starts_with("XDG_")) {
+        env_vars.insert(s.to_string());
+    }
+
+    // Config path pattern: contains /etc/, .config/, or ~/
+    if (s.contains("/etc/") || s.contains(".config/") || s.starts_with("~/"))
+        && s.len() >= 6 && s.len() <= 80 && !s.contains(' ') && !s.contains("%s") && !s.contains("..")
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || "/-_.~".contains(c)) {
+        config_paths.insert(s.to_string());
+    }
+    // Dotfile pattern: starts with . and looks like a config file
+    if s.starts_with('.') && !s.starts_with("..") && s.len() >= 3 && s.len() <= 40
+        && !s.contains(' ') && !s.contains('(')
+        && (s.contains("rc") || s.contains("config") || s.contains("ignore")
+            || s.contains("profile") || s.ends_with(".conf")
+            || s.ends_with(".cfg") || s.ends_with(".ini")) {
+        config_paths.insert(s.to_string());
+    }
 }
 
 fn default_value(hint: &str) -> String {
