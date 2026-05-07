@@ -41,7 +41,7 @@ echo "" >&2
 # Round 0: discovery
 echo "[round 0] Discovery..." >&2
 "$BGRID" "${BINARY_ARGS[@]}" > "$WORKDIR/round_0.probe" 2>/dev/null
-"$BGRID" --compact "$BINARY" "$WORKDIR/round_0.probe" 2>/dev/null
+"$BGRID" --compact --trace "$BINARY" "$WORKDIR/round_0.probe" 2>/dev/null
 
 r0_groups=$(grep -ac "^## group" "$WORKDIR/round_0.results" || echo 0)
 r0_multi=$(grep -a "^## group" "$WORKDIR/round_0.results" | grep -cv "(1 runs)" || echo 0)

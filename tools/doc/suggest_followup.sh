@@ -115,6 +115,57 @@ emit_files() {
     done
 }
 
+# --- Phase 2b: Trace-guided context generation ---
+# For runs that fail everywhere, check trace failed: paths for missing files.
+# If multiple failing runs need the same file, generate a context with it.
+
+TRACE_FAILED=$(grep -a "failed:" "$RESULTS" | sed 's/.*failed: //')
+if [ -n "$TRACE_FAILED" ]; then
+    # Collect all failed paths, count frequency
+    required_files=$(echo "$TRACE_FAILED" | tr ',' '\n' | sed 's/^\s*//' | \
+        grep -v '^$' | \
+        grep -v '^\.\.$' | \
+        sort | uniq -c | sort -rn | head -10)
+
+    # Filter to files needed by 3+ runs (likely a real requirement)
+    frequent_files=$(echo "$required_files" | awk '$1 >= 3 {print $2}' | head -5)
+
+    if [ -n "$frequent_files" ]; then
+        echo "# === Trace-guided contexts ==="
+        echo "# Files that multiple failing runs tried to open but didn't find"
+        echo ""
+
+        # Check if it looks like a directory structure (e.g., .git/HEAD, .git/config)
+        common_dir=$(echo "$frequent_files" | grep "/" | sed 's|/.*||' | sort | uniq -c | sort -rn | head -1 | awk '{print $2}')
+
+        if [ -n "$common_dir" ]; then
+            # Multiple files under same directory — create the directory structure
+            echo "context \"with_$common_dir\" extends \"alpha\""
+            echo "  dir \"$common_dir\""
+            echo "$frequent_files" | while read -r fpath; do
+                case "$fpath" in
+                    "$common_dir"/*) echo "  file \"$fpath\" \"placeholder\"" ;;
+                esac
+            done
+            # Also include standalone files
+            echo "$frequent_files" | while read -r fpath; do
+                case "$fpath" in
+                    "$common_dir"/*) ;; # already handled
+                    *) echo "  file \"$fpath\" \"placeholder\"" ;;
+                esac
+            done
+            echo ""
+        else
+            # Individual files — create a context with all of them
+            echo "context \"with_required\" extends \"alpha\""
+            echo "$frequent_files" | while read -r fpath; do
+                echo "  file \"$fpath\" \"placeholder\""
+            done
+            echo ""
+        fi
+    fi
+fi
+
 # --- Emit base context for vary blocks ---
 echo "context \"alpha\""
 emit_files '"cherry" "apple" "banana" "date" "elderberry"'
@@ -315,7 +366,7 @@ echo "$MULTI_GROUPS" | while IFS= read -r group; do
 
     echo ""
 
-    if [ -n "$majority_exit" ] && [ "$majority_exit" -ne 0 ] 2>/dev/null; then
+    if [ -n "$majority_exit" ] && [ "$majority_exit" -ge 2 ] 2>/dev/null; then
         # Group fails in majority of contexts
         # Check sensitivity for any context where it succeeded (exit N→0)
         working_ctx=$(echo "$summary" | grep -oP '\w+ \(exit \d+→0\)' | head -1 | sed 's/ (.*//')
@@ -333,9 +384,24 @@ echo "$MULTI_GROUPS" | while IFS= read -r group; do
         else
             # Extract the stderr message to explain WHY it failed
             stderr_msg=$(grep -a -A20 "^## group $group_num " "$RESULTS" | grep -a "stderr:" | head -1 | sed 's/.*stderr: //')
-            echo "# Group: SKIPPED (exits $majority_exit in all contexts)"
-            [ -n "$stderr_msg" ] && echo "# Reason: $stderr_msg"
-            echo "# $runs_str"
+
+            # If we generated a trace-guided context, try scoping there
+            if [ -n "$common_dir" ]; then
+                echo "# Group (fails everywhere, trying with_$common_dir context)"
+                [ -n "$stderr_msg" ] && echo "# Original error: $stderr_msg"
+                echo "in \"with_$common_dir\""
+                echo "$runs_str" | perl -ne '
+                    my @runs = split /,\s+(?=")/, $_;
+                    for my $r (@runs) {
+                        $r =~ s/^\s+|\s+$//g;
+                        print "  run $r\n" if $r =~ /^"/;
+                    }
+                '
+            else
+                echo "# Group: SKIPPED (exits $majority_exit in all contexts)"
+                [ -n "$stderr_msg" ] && echo "# Reason: $stderr_msg"
+                echo "# $runs_str"
+            fi
         fi
     else
         # Group succeeds — re-emit normally
