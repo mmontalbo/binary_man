@@ -261,12 +261,69 @@ if [ -n "$SENSITIVITIES" ]; then
     fi
 fi
 
-# --- Phase 4: Content variation contexts ---
+# --- Phase 4: Effect decomposition + adaptive content contexts ---
+
+# Aggregate context effectiveness by counting how often each archetype
+# splits from the majority group. Archetypes in the majority didn't
+# differentiate; archetypes outside the majority did.
+CONTEXT_EFFECTS=""
+majority_lines=$(grep -a "contexts (" "$RESULTS" | head -30)
+if [ -n "$majority_lines" ]; then
+    CONTEXT_EFFECTS=$(echo "$majority_lines" | perl -e '
+        my %in_majority;
+        my %total;
+        my @archetypes = qw(alpha numeric fielded duplicated cased structured multiline binary_mixed);
+        while (<STDIN>) {
+            for my $a (@archetypes) {
+                $total{$a}++;
+                if (/\b$a\b/) {
+                    $in_majority{$a}++;
+                }
+            }
+        }
+        for my $a (@archetypes) {
+            my $t = $total{$a} // 0;
+            my $m = $in_majority{$a} // 0;
+            my $split = $t - $m;
+            print "$split $a ($split/$t splits)\n" if $t > 0;
+        }
+    ' | sort -rn)
+fi
+
+# Determine which content archetypes were effective
+effective_contexts=""
+most_effective=""
+most_effective_count=0
+if [ -n "$CONTEXT_EFFECTS" ]; then
+    echo "# === Context effectiveness ==="
+    echo "$CONTEXT_EFFECTS" | while read -r count rest; do
+        echo "#   $rest"
+    done
+    echo ""
+
+    # Contexts with at least 1 split
+    effective_contexts=$(echo "$CONTEXT_EFFECTS" | awk '$1 > 0 {print $2}')
+    # Most effective context (highest split count)
+    most_effective=$(echo "$CONTEXT_EFFECTS" | head -1 | awk '{print $2}')
+    most_effective_count=$(echo "$CONTEXT_EFFECTS" | head -1 | awk '{print $1}')
+fi
 
 echo "# === Content variation ==="
-echo "# Diverse content types to split remaining identical groups"
-echo ""
+
+# For each strategy, only emit if it had effects (or if we have no effect data)
 for strategy in months duplicates case_mixed numeric whitespace special_chars unicode; do
+    # Map strategy name to archetype name for effectiveness lookup
+    archetype=""
+    case "$strategy" in
+        numeric)      archetype="numeric" ;;
+        duplicates)   archetype="duplicated" ;;
+        case_mixed)   archetype="cased" ;;
+        *)            archetype="" ;;
+    esac
+
+    # Note: context pruning based on effectiveness requires verbose output
+    # to see per-context group assignments. For now, keep all contexts.
+
     echo "context \"$strategy\""
     case "$strategy" in
         months)       emit_files '"Jan" "Mar" "Feb" "Dec" "Apr" "Nov"' ;;
@@ -278,7 +335,41 @@ for strategy in months duplicates case_mixed numeric whitespace special_chars un
         unicode)      emit_files '"αβγ" "δεζ" "ηθι" "κλμ"' ;;
     esac
     echo ""
+
+    # Expand archetype if it appears to be effective (heuristic: most runs are distinct)
+    if [ -n "$archetype" ]; then
+        # Placeholder: expansion disabled until verbose output parsing is implemented
+        if false; then
+            case "$strategy" in
+                numeric)
+                    echo "context \"numeric_reversed\""
+                    emit_files '"3" "20" "1" "30" "2" "100"'
+                    echo ""
+                    echo "context \"numeric_negative\""
+                    emit_files '"-5" "0" "3" "-100" "42"'
+                    echo ""
+                    ;;
+                duplicates)
+                    echo "context \"duplicates_all_same\""
+                    emit_files '"aaa" "aaa" "aaa" "aaa" "aaa"'
+                    echo ""
+                    echo "context \"duplicates_alternating\""
+                    emit_files '"aaa" "bbb" "aaa" "bbb" "aaa"'
+                    echo ""
+                    ;;
+                case_mixed)
+                    echo "context \"case_upper\""
+                    emit_files '"AAA" "BBB" "CCC" "DDD"'
+                    echo ""
+                    echo "context \"case_lower\""
+                    emit_files '"aaa" "bbb" "ccc" "ddd"'
+                    echo ""
+                    ;;
+            esac
+        fi
+    fi
 done
+echo ""
 
 # --- Phase 5: Untested flags ---
 
