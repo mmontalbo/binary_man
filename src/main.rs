@@ -482,6 +482,40 @@ fn classify_string(s: &str, env_vars: &mut HashSet<String>, config_paths: &mut H
     }
 }
 
+/// Extract flag descriptions from --help text.
+/// Returns a map from flag name (e.g., "-a", "--all") to its one-line description.
+fn extract_flag_descriptions(help_text: &str) -> HashMap<String, String> {
+    let mut descs: HashMap<String, String> = HashMap::new();
+
+    // Match lines like: "  -a, --all                  do not ignore entries starting with ."
+    //                   "  --block-size=SIZE          scale sizes by SIZE"
+    //                   "  -C                         list entries by columns"
+    let re = regex::Regex::new(
+        r"^\s+(-[a-zA-Z0-9](?:,\s*--[a-zA-Z][-a-zA-Z0-9]*(?:=\S+)?)?|--[a-zA-Z][-a-zA-Z0-9]*(?:=\S+)?)\s{2,}(.+)"
+    ).unwrap();
+
+    for line in help_text.lines() {
+        if let Some(cap) = re.captures(line) {
+            let flags_part = cap[1].trim();
+            let desc = cap[2].trim().to_string();
+            // Parse out individual flags from "  -a, --all" or "  --block-size=SIZE"
+            for flag in flags_part.split(',') {
+                let flag = flag.trim();
+                // Strip =VALUE suffix for matching
+                let name = if let Some(eq) = flag.find('=') {
+                    &flag[..eq]
+                } else {
+                    flag
+                };
+                if name.starts_with('-') {
+                    descs.insert(name.to_string(), desc.clone());
+                }
+            }
+        }
+    }
+    descs
+}
+
 fn default_value(hint: &str) -> String {
     match hint.to_uppercase().as_str() {
         "NUM" | "NUMBER" | "N" | "SIZE" | "COLS" | "WIDTH" => "10".into(),
@@ -595,6 +629,24 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, mode: 
     let probe_dir = test_path.parent().unwrap_or(std::path::Path::new("."));
     let grid = execute::run_grid(binary, &script, probe_dir, sandbox)?;
 
+    // Extract flag descriptions from --help for annotating results
+    let flag_descs = try_help(binary, &[], sandbox)
+        .map(|text| extract_flag_descriptions(&text))
+        .unwrap_or_default();
+
+    // Look up a description for a run's args
+    let describe_run = |args: &[String]| -> String {
+        for arg in args {
+            if arg.starts_with('-') {
+                let key = if let Some(eq) = arg.find('=') { &arg[..eq] } else { arg.as_str() };
+                if let Some(desc) = flag_descs.get(key) {
+                    return format!("  # {}", desc);
+                }
+            }
+        }
+        String::new()
+    };
+
     // Build results
     let mut out = String::new();
     out.push_str(&format!(
@@ -617,6 +669,7 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, mode: 
 
     // Per-run analysis: collect majority observation and metadata for each run
     struct RunInfo<'a> {
+        args: &'a [String],
         args_str: String,
         majority_obs: &'a execute::Observation,
         majority_names: Vec<&'a str>,
@@ -720,6 +773,7 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, mode: 
         eprintln!("  run {}: {}/{} distinct, exit {}{}", args_str, groups.len(), obs_list.len(), output::format_exit(exit), sens_label);
 
         run_infos.push(RunInfo {
+            args: &run.args,
             args_str,
             majority_obs,
             majority_names: majority_names.clone(),
@@ -858,7 +912,8 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, mode: 
                 || info.obs_list.iter().any(|(_, obs)| output::has_anomalies(obs, Some(majority_exit)));
 
             // Summary line (always shown)
-            out.push_str(&format!("\nrun {}:\n", info.args_str));
+            let desc = describe_run(info.args);
+            out.push_str(&format!("\nrun {}:{}\n", info.args_str, desc));
             out.push_str(&format!("  {}\n", summary_line(info)));
 
             // vs-diff (always show if in a from block)
@@ -892,7 +947,8 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, mode: 
     OutputMode::Verbose => {
         // Verbose mode: everything (old full mode behavior)
         for info in &run_infos {
-            out.push_str(&format!("\nrun {}:\n", info.args_str));
+            let desc = describe_run(info.args);
+            out.push_str(&format!("\nrun {}:{}\n", info.args_str, desc));
             out.push_str(&format!("  {} | {}\n",
                 output::format_context_group(&info.obs_list.iter().map(|(n, _)| *n).collect::<Vec<_>>(), info.obs_list.len()),
                 summary_line(info)
