@@ -229,7 +229,70 @@ for strategy in months duplicates case_mixed numeric whitespace special_chars un
     echo ""
 done
 
-# --- Phase 5: Re-emit grouped runs ---
+# --- Phase 5: Untested flags ---
+
+# Parse "# Not tested" and "# Aliases" lines from results
+UNTESTED=$(grep -a "^# Not tested" "$RESULTS" | sed 's/^# Not tested ([^)]*): //')
+ALIAS_LINE=$(grep -a "^# Aliases:" "$RESULTS" | sed 's/^# Aliases: //')
+
+if [ -n "$UNTESTED" ]; then
+    # Parse alias map into a lookup
+    # Format: -a = --all, -r = --reverse, ...
+    alias_tested=""
+    if [ -n "$ALIAS_LINE" ]; then
+        # For each untested flag, check if its alias was tested
+        # (tested = appears in a run in the results but NOT in the untested list)
+        alias_tested=$(printf '%s\n%s' "$ALIAS_LINE" "$UNTESTED" | perl -e '
+            my $aliases = <STDIN>;
+            chomp $aliases;
+            my $untested = <STDIN>;
+            chomp $untested;
+            my %map;
+            while ($aliases =~ /(-\S+)\s*=\s*(--?\S+)/g) {
+                $map{$1} = $2;
+                $map{$2} = $1;
+            }
+            my %unt = map { s/^\s+|\s+$//gr => 1 } split /,\s*/, $untested;
+            # Print only flags where neither form was tested
+            for my $f (sort keys %unt) {
+                my $alias = $map{$f} // "";
+                # Skip if alias exists and alias is NOT in untested (meaning alias was tested)
+                next if $alias && !$unt{$alias};
+                # Skip --help and --version
+                next if $f eq "--help" || $f eq "--version";
+                # For alias pairs where both are untested, only print the short form
+                next if $f =~ /^--/ && $alias && $unt{$alias};
+                print "$f\n";
+            }
+        ')
+    else
+        alias_tested=$(echo "$UNTESTED" | tr ',' '\n' | sed 's/^\s*//')
+    fi
+
+    # Determine base args for the runs
+    first_file=$(echo "$FILES" | head -1)
+
+    if [ -n "$alias_tested" ]; then
+        truly_untested=$(echo "$alias_tested" | grep -c . 2>/dev/null || echo 0)
+        if [ "$truly_untested" -gt 0 ]; then
+            echo ""
+            echo "# === Untested flags ==="
+            echo "# $truly_untested flags discovered but not tested in any form"
+            echo ""
+            echo "$alias_tested" | head -20 | while IFS= read -r flag; do
+                [ -z "$flag" ] && continue
+                if [ -n "$first_file" ]; then
+                    echo "run \"$flag\" \"$first_file\""
+                else
+                    echo "run \"$flag\""
+                fi
+            done
+            echo ""
+        fi
+    fi
+fi
+
+# --- Phase 6: Re-emit grouped runs ---
 
 echo "# Re-test identical groups across all contexts"
 
