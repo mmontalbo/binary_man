@@ -133,6 +133,7 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox) -> Result<()> {
     scaffold("fielded", "\"bob:30:sales\" \"alice:25:eng\" \"charlie:35:sales\" \"alice:40:mgmt\"");
     scaffold("duplicated", "\"aaa\" \"aaa\" \"bbb\" \"bbb\" \"bbb\" \"ccc\" \"aaa\"");
     scaffold("cased", "\"Apple\" \"BANANA\" \"cherry\" \"apple\" \"Cherry\" \"APPLE\"");
+    scaffold("structured", "\"func setup() {\" \"  init()\" \"  configure()\" \"}\" \"\" \"func process() {\" \"  validate()\" \"  transform()\" \"}\" \"\" \"func main() {\" \"  setup()\" \"  process()\" \"}\"");
 
     // Structural perturbations — vary what exists (applied to alpha only)
     println!("vary from \"alpha\"");
