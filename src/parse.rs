@@ -58,6 +58,13 @@ pub struct VaryBlock {
     pub compound: bool,
 }
 
+/// A stress test block — generates adversarial mutations of a file.
+#[derive(Debug)]
+pub struct StressBlock {
+    pub base: String,
+    pub file: String,
+}
+
 /// A run invocation with optional diff reference and scoping.
 #[derive(Debug)]
 pub struct Run {
@@ -78,6 +85,7 @@ pub enum StdinSource {
 pub fn parse_script(source: &str) -> Result<Script> {
     let mut contexts: Vec<NamedContext> = Vec::new();
     let mut vary_blocks: Vec<VaryBlock> = Vec::new();
+    let mut stress_blocks: Vec<StressBlock> = Vec::new();
     let mut runs: Vec<Run> = Vec::new();
 
     let mut current_context: Option<NamedContext> = None;
@@ -108,6 +116,22 @@ pub fn parse_script(source: &str) -> Result<Script> {
             current_from = None;
             current_in = None;
             current_context = Some(parse_context_line(rest, line_num)?);
+        } else if let Some(rest) = line.strip_prefix("vary stress from ") {
+            // vary stress from "base" "input.txt"
+            // Generates 8 adversarial mutations of the named file
+            flush_run(&mut current_run, &mut runs);
+            flush_context(&mut current_context, &mut contexts);
+            flush_vary(&mut current_vary, &mut vary_blocks);
+            current_from = None;
+            current_in = None;
+            let tokens = tokenize(rest, line_num)?;
+            if tokens.len() < 2 {
+                bail!("line {}: vary stress requires context name and file path", line_num);
+            }
+            stress_blocks.push(StressBlock {
+                base: tokens[0].clone(),
+                file: tokens[1].clone(),
+            });
         } else if let Some(rest) = line.strip_prefix("vary compound from ") {
             flush_run(&mut current_run, &mut runs);
             flush_context(&mut current_context, &mut contexts);
@@ -236,6 +260,7 @@ pub fn parse_script(source: &str) -> Result<Script> {
 
     resolve_extends(&mut contexts)?;
     resolve_vary(&mut contexts, &vary_blocks)?;
+    resolve_stress(&mut contexts, &stress_blocks)?;
 
     Ok(Script { contexts, runs })
 }
@@ -506,6 +531,96 @@ fn describe_perturbation(cmd: &SetupCommand) -> String {
         SetupCommand::Invoke { args } => format!("run {:?}", args),
         _ => format!("{:?}", cmd),
     }
+}
+
+/// Generate adversarial stress-test contexts from stress blocks.
+fn resolve_stress(contexts: &mut Vec<NamedContext>, stress_blocks: &[StressBlock]) -> Result<()> {
+    for block in stress_blocks {
+        let base = contexts.iter().find(|c| c.name == block.base)
+            .ok_or_else(|| anyhow::anyhow!("vary stress references unknown context {:?}", block.base))?
+            .clone();
+
+        // Find the target file's content in the base context
+        let base_content = base.commands.iter().find_map(|cmd| {
+            if let SetupCommand::CreateFile { path, content } = cmd {
+                if *path == block.file { Some(content.clone()) } else { None }
+            } else {
+                None
+            }
+        }).unwrap_or(FileContent::Lines(vec!["test content".into()]));
+
+        let base_bytes: Vec<u8> = match &base_content {
+            FileContent::Lines(lines) => (lines.join("\n") + "\n").into_bytes(),
+            FileContent::Size(n) => vec![b'x'; *n],
+            FileContent::Empty => Vec::new(),
+            FileContent::From(_) => b"test content\n".to_vec(),
+        };
+
+        // 8 adversarial mutation strategies
+        let mutations: Vec<(&str, FileContent)> = vec![
+            // 1. Null injection — insert \0 at multiple positions
+            ("null_inject", {
+                let mut data = base_bytes.clone();
+                let positions: Vec<usize> = (0..data.len()).step_by(data.len().max(1) / 5 + 1).collect();
+                for pos in positions.into_iter().rev() {
+                    if pos < data.len() { data.insert(pos, 0); }
+                }
+                FileContent::Lines(vec![String::from_utf8_lossy(&data).into_owned()])
+            }),
+            // 2. Huge single line — 1MB with no newline
+            ("huge_line", FileContent::Size(1_000_000)),
+            // 3. Truncation — first half of the file
+            ("truncated", {
+                let half = base_bytes.len() / 2;
+                let data = base_bytes[..half].to_vec();
+                FileContent::Lines(vec![String::from_utf8_lossy(&data).into_owned()])
+            }),
+            // 4. Repetition — repeat content 1000x
+            ("repeated", {
+                let mut data = Vec::new();
+                for _ in 0..1000 {
+                    data.extend_from_slice(&base_bytes);
+                }
+                FileContent::Size(data.len())
+            }),
+            // 5. Empty — zero bytes
+            ("empty", FileContent::Empty),
+            // 6. Invalid UTF-8 — bytes that aren't valid UTF-8
+            ("invalid_utf8", {
+                let mut data = base_bytes.clone();
+                // Insert invalid UTF-8 sequences
+                data.extend_from_slice(&[0xFF, 0xFE, 0x80, 0xC0, 0xAF]);
+                FileContent::Lines(vec![String::from_utf8_lossy(&data).into_owned()])
+            }),
+            // 7. Line explosion — 100000 single-char lines
+            ("line_explosion", {
+                let lines: Vec<String> = (0..100_000).map(|i| format!("{}", (b'a' + (i % 26) as u8) as char)).collect();
+                FileContent::Lines(lines)
+            }),
+            // 8. Delimiter flooding — one line with 100000 delimiters
+            ("delimiter_flood", {
+                FileContent::Lines(vec![":".repeat(100_000)])
+            }),
+        ];
+
+        for (name, content) in mutations {
+            let mut cmds = base.commands.clone();
+            // Replace the target file's content with the mutation
+            for cmd in &mut cmds {
+                if let SetupCommand::CreateFile { path, content: ref mut c } = cmd {
+                    if *path == block.file {
+                        *c = content.clone();
+                    }
+                }
+            }
+            contexts.push(NamedContext {
+                name: format!("{} / stress_{}", block.base, name),
+                extends: None,
+                commands: cmds,
+            });
+        }
+    }
+    Ok(())
 }
 
 pub fn tokenize(line: &str, _line_num: usize) -> Result<Vec<String>> {
