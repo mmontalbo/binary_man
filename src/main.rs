@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use binary_grid::{execute, parse, sandbox};
+use binary_grid::{execute, output, parse, sandbox};
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -74,7 +74,6 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox) -> Result<()> {
 
     // Infer positional arguments from usage line
     let (pattern_arg, file_arg) = infer_base_args(&help_text);
-    let _base_arg = file_arg.clone(); // kept for reference
     let takes_stdin = help_text.contains("[FILE]...") || help_text.contains("[file ...]");
 
     // Build the command label for comments
@@ -412,45 +411,22 @@ fn cmd_dry_run(_binary: &str, test_path: &PathBuf) -> Result<()> {
 
     println!("\nruns:");
     for (i, run) in script.runs.iter().enumerate() {
-        let args = format_args(&run.args);
+        let args = output::format_args(&run.args);
         let scope = match &run.in_contexts {
             Some(ctxs) => format!(" in {}", ctxs.iter().map(|c| format!("{:?}", c)).collect::<Vec<_>>().join(", ")),
             None => String::new(),
         };
         let from = match &run.diff_from {
-            Some(ref_args) => format!(" from {}", format_args(ref_args)),
+            Some(ref_args) => format!(" from {}", output::format_args(ref_args)),
             None => String::new(),
         };
         println!("  [{}] {}{}{}", i, args, from, scope);
     }
 
-    // Count cells
-    let mut cells = 0;
-    for run in &script.runs {
-        for ctx in &script.contexts {
-            if let Some(ref scoped) = run.in_contexts {
-                let matches = scoped.iter().any(|s| {
-                    *s == ctx.name
-                    || ctx.name.starts_with(&format!("{} / ", s))
-                    || ctx.extends.as_deref() == Some(s.as_str())
-                });
-                if !matches { continue; }
-            }
-            cells += 1;
-        }
-    }
+    let cells = execute::count_cells(&script);
     println!("\ngrid: {} contexts x {} runs = {} cells", script.contexts.len(), script.runs.len(), cells);
 
-    // Validate from-references
-    for run in &script.runs {
-        if let Some(ref ref_args) = run.diff_from {
-            let has_match = script.runs.iter().any(|r| r.args == *ref_args && r.diff_from.is_none());
-            if !has_match {
-                let args_str = format_args(ref_args);
-                eprintln!("warning: from {} has no matching standalone run (add `run {}` outside any from block)", args_str, args_str);
-            }
-        }
-    }
+    execute::validate_from_references(&script);
 
     Ok(())
 }
@@ -479,32 +455,9 @@ fn format_setup_cmd(cmd: &parse::SetupCommand) -> String {
 fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compact: bool) -> Result<()> {
     let script = load_script(test_path)?;
 
-    // Validate from-references
-    for run in &script.runs {
-        if let Some(ref ref_args) = run.diff_from {
-            let has_match = script.runs.iter().any(|r| r.args == *ref_args && r.diff_from.is_none());
-            if !has_match {
-                let args_str = format_args(ref_args);
-                eprintln!("warning: from {} has no matching standalone run (add `run {}` outside any from block)", args_str, args_str);
-            }
-        }
-    }
+    execute::validate_from_references(&script);
 
-    // Count actual runs
-    let mut actual_runs = 0;
-    for run in &script.runs {
-        for ctx in &script.contexts {
-            if let Some(ref scoped) = run.in_contexts {
-                let matches = scoped.iter().any(|s| {
-                    *s == ctx.name
-                    || ctx.name.starts_with(&format!("{} / ", s))
-                    || ctx.extends.as_deref() == Some(s.as_str())
-                });
-                if !matches { continue; }
-            }
-            actual_runs += 1;
-        }
-    }
+    let actual_runs = execute::count_cells(&script);
     eprintln!(
         "{} contexts, {} runs, {} cells",
         script.contexts.len(), script.runs.len(), actual_runs
@@ -549,7 +502,7 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compac
     let mut run_infos: Vec<RunInfo> = Vec::new();
 
     for (ri, run) in script.runs.iter().enumerate() {
-        let args_str = format_args(&run.args);
+        let args_str = output::format_args(&run.args);
 
         // Collect observations across contexts
         let mut obs_list: Vec<(&str, &execute::Observation)> = Vec::new();
@@ -565,7 +518,7 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compac
         }
 
         // Collapse identical observations
-        let groups = collapse(&obs_list);
+        let groups = execute::collapse(&obs_list);
         let largest_idx = groups.iter().enumerate()
             .max_by_key(|(_, (names, _))| names.len())
             .map(|(i, _)| i).unwrap_or(0);
@@ -610,11 +563,11 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compac
         let mut universals = Vec::new();
         let has_signal = exit_codes.iter().any(|c| *c > 128);
         if exit_codes.len() == 1 {
-            universals.push(format!("exit {}", format_exit(exit_codes[0])));
+            universals.push(format!("exit {}", output::format_exit(exit_codes[0])));
         } else {
             let mut sorted = exit_codes.clone();
             sorted.sort();
-            universals.push(format!("exit {{{}}}", sorted.iter().map(|c| format_exit(*c)).collect::<Vec<_>>().join(",")));
+            universals.push(format!("exit {{{}}}", sorted.iter().map(|c| output::format_exit(*c)).collect::<Vec<_>>().join(",")));
         }
         if has_signal {
             universals.push("SIGNAL".into());
@@ -636,7 +589,7 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compac
         let sens_label = if sensitive_parts.is_empty() { String::new() } else {
             format!(" [{}]", sensitive_parts.join(", "))
         };
-        eprintln!("  run {}: {}/{} distinct, exit {}{}", args_str, groups.len(), obs_list.len(), format_exit(exit), sens_label);
+        eprintln!("  run {}: {}/{} distinct, exit {}{}", args_str, groups.len(), obs_list.len(), output::format_exit(exit), sens_label);
 
         run_infos.push(RunInfo {
             args_str,
@@ -681,7 +634,7 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compac
             let vs_diff = if let Some(ref_args) = info.from_ref {
                 let majority_ctx = info.majority_names[0];
                 if let Some(ref_obs) = obs_by_args.get(&(ref_args.as_slice(), majority_ctx)) {
-                    let diff = compute_diff(ref_obs, info.majority_obs);
+                    let diff = execute::compute_diff(ref_obs, info.majority_obs);
                     if !diff.is_empty() {
                         Some(diff.join("; "))
                     } else {
@@ -742,12 +695,12 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compac
             }
 
             // Majority output
-            out.push_str(&format!("  {}:\n", format_context_group(&group.majority_names, grid.context_count)));
-            format_obs(&mut out, group.majority_obs, "    ");
+            out.push_str(&format!("  {}:\n", output::format_context_group(&group.majority_names, grid.context_count)));
+            output::format_obs(&mut out, group.majority_obs, "    ");
 
             // vs-diffs (how each run differs from its from-reference)
             if !group.vs_diffs.is_empty() {
-                let ref_str = group.from_ref.map(|r| format_args(r)).unwrap_or_default();
+                let ref_str = group.from_ref.map(|r| output::format_args(r)).unwrap_or_default();
                 // If all vs-diffs are the same, show once
                 let all_same = group.vs_diffs.iter().all(|(_, d)| *d == group.vs_diffs[0].1);
                 if all_same {
@@ -773,7 +726,7 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compac
                 summary_parts.push(format!("sensitive to: {}", info.sensitive_parts.join(", ")));
             }
             out.push_str(&format!("  {} | {}\n",
-                format_context_group(&info.obs_list.iter().map(|(n, _)| *n).collect::<Vec<_>>(), info.obs_list.len()),
+                output::format_context_group(&info.obs_list.iter().map(|(n, _)| *n).collect::<Vec<_>>(), info.obs_list.len()),
                 summary_parts.join(" | ")
             ));
 
@@ -781,15 +734,15 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compac
             let largest_idx = info.groups.iter().enumerate()
                 .max_by_key(|(_, (names, _))| names.len())
                 .map(|(i, _)| i).unwrap_or(0);
-            out.push_str(&format!("  {}:\n", format_context_group(&info.majority_names, info.obs_list.len())));
-            format_obs(&mut out, info.majority_obs, "    ");
+            out.push_str(&format!("  {}:\n", output::format_context_group(&info.majority_names, info.obs_list.len())));
+            output::format_obs(&mut out, info.majority_obs, "    ");
 
             // Differing groups
             for (i, (names, obs)) in info.groups.iter().enumerate() {
                 if i == largest_idx { continue; }
                 out.push_str(&format!("  differs in {}:\n", names.join(", ")));
-                format_obs(&mut out, obs, "    ");
-                let delta = compute_diff(info.majority_obs, obs);
+                output::format_obs(&mut out, obs, "    ");
+                let delta = execute::compute_diff(info.majority_obs, obs);
                 if !delta.is_empty() {
                     out.push_str(&format!("    delta: {}\n", delta.join("; ")));
                 }
@@ -797,11 +750,11 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compac
 
             // From-block diffs
             if let Some(ref_args) = info.from_ref {
-                out.push_str(&format!("  from {}:\n", format_args(ref_args)));
+                out.push_str(&format!("  from {}:\n", output::format_args(ref_args)));
                 for (ctx_name, obs) in &info.obs_list {
                     let ref_obs = obs_by_args.get(&(ref_args.as_slice(), *ctx_name));
                     if let Some(ref_obs) = ref_obs {
-                        let diff = compute_diff(ref_obs, obs);
+                        let diff = execute::compute_diff(ref_obs, obs);
                         if diff.is_empty() { continue; }
                         out.push_str(&format!("    {}:\n", ctx_name));
                         for line in &diff {
@@ -811,7 +764,7 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compac
                 }
                 let majority_ctx = info.majority_names[0];
                 if let Some(ref_obs) = obs_by_args.get(&(ref_args.as_slice(), majority_ctx)) {
-                    let diff = compute_diff(ref_obs, info.majority_obs);
+                    let diff = execute::compute_diff(ref_obs, info.majority_obs);
                     if !diff.is_empty() && info.majority_names.len() > 1 {
                         out.push_str(&format!("    ({} contexts):\n", info.majority_names.len()));
                         for line in &diff {
@@ -837,175 +790,4 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compac
     }
 
     Ok(())
-}
-
-fn format_args(args: &[String]) -> String {
-    if args.is_empty() {
-        "(no args)".into()
-    } else {
-        args.iter().map(|a| format!("\"{}\"", a)).collect::<Vec<_>>().join(" ")
-    }
-}
-
-fn format_exit(code: i32) -> String {
-    if code > 128 {
-        let sig = code - 128;
-        let name = match sig {
-            2 => "SIGINT",
-            6 => "SIGABRT",
-            9 => "SIGKILL",
-            11 => "SIGSEGV",
-            13 => "SIGPIPE",
-            14 => "SIGALRM",
-            15 => "SIGTERM",
-            _ => "",
-        };
-        if name.is_empty() {
-            format!("{} (signal {})", code, sig)
-        } else {
-            format!("{} ({})", code, name)
-        }
-    } else {
-        code.to_string()
-    }
-}
-
-fn format_context_group(names: &[&str], total: usize) -> String {
-    if names.len() == 1 {
-        names[0].to_string()
-    } else if names.len() == total {
-        "all contexts".into()
-    } else {
-        format!("{} contexts ({})", names.len(), names.join(", "))
-    }
-}
-
-fn format_obs(out: &mut String, obs: &execute::Observation, indent: &str) {
-    let stdout_lines: Vec<&str> = obs.stdout.lines().collect();
-    if stdout_lines.is_empty() {
-        out.push_str(&format!("{}stdout: (empty)\n", indent));
-    } else {
-        out.push_str(&format!("{}stdout ({} lines):\n", indent, stdout_lines.len()));
-        for line in stdout_lines.iter().take(20) {
-            out.push_str(&format!("{}  {}\n", indent, line));
-        }
-        if stdout_lines.len() > 20 {
-            out.push_str(&format!("{}  ... ({} more)\n", indent, stdout_lines.len() - 20));
-        }
-    }
-    if !obs.stderr.trim().is_empty() {
-        out.push_str(&format!("{}stderr: {}\n", indent, obs.stderr.trim()));
-    }
-    let exit = obs.exit_code.unwrap_or(-1);
-    let exit_str = format_exit(exit);
-    out.push_str(&format!("{}exit: {}\n", indent, exit_str));
-    if !obs.fs_changes.is_empty() {
-        out.push_str(&format!("{}fs:\n", indent));
-        for change in &obs.fs_changes {
-            match change {
-                execute::FsChange::Created { path, size } => {
-                    out.push_str(&format!("{}  created: {} ({} bytes)\n", indent, path, size));
-                }
-                execute::FsChange::Deleted { path } => {
-                    out.push_str(&format!("{}  deleted: {}\n", indent, path));
-                }
-                execute::FsChange::Modified { path, detail } => {
-                    out.push_str(&format!("{}  modified: {} ({})\n", indent, path, detail));
-                }
-            }
-        }
-    }
-    if !obs.trace_reads.is_empty() || !obs.trace_failed.is_empty() {
-        out.push_str(&format!("{}trace:\n", indent));
-        if !obs.trace_reads.is_empty() {
-            out.push_str(&format!("{}  reads: {}\n", indent, obs.trace_reads.join(", ")));
-        }
-        if !obs.trace_failed.is_empty() {
-            out.push_str(&format!("{}  failed: {}\n", indent, obs.trace_failed.join(", ")));
-        }
-    }
-}
-
-fn compute_diff(reference: &execute::Observation, option: &execute::Observation) -> Vec<String> {
-    let mut lines = Vec::new();
-
-    // Stdout diff
-    let ref_lines: HashSet<&str> = reference.stdout.lines().collect();
-    let opt_lines: HashSet<&str> = option.stdout.lines().collect();
-    let ref_vec: Vec<&str> = reference.stdout.lines().collect();
-    let opt_vec: Vec<&str> = option.stdout.lines().collect();
-
-    let only_in_ref: Vec<&&str> = ref_vec.iter().filter(|l| !opt_lines.contains(**l)).collect();
-    let only_in_opt: Vec<&&str> = opt_vec.iter().filter(|l| !ref_lines.contains(**l)).collect();
-    let shared: Vec<&&str> = ref_vec.iter().filter(|l| opt_lines.contains(**l)).collect();
-
-    if ref_vec == opt_vec {
-        // stdout identical — check other dimensions
-    } else if only_in_opt.is_empty() && only_in_ref.is_empty() && ref_vec != opt_vec {
-        lines.push("stdout: same lines, different order".into());
-    } else {
-        if !only_in_opt.is_empty() {
-            let preview: Vec<&str> = only_in_opt.iter().take(5).map(|l| **l).collect();
-            lines.push(format!("{} only in this: {}", only_in_opt.len(), preview.join(", ")));
-        }
-        if !only_in_ref.is_empty() {
-            let preview: Vec<&str> = only_in_ref.iter().take(5).map(|l| **l).collect();
-            lines.push(format!("{} only in ref: {}", only_in_ref.len(), preview.join(", ")));
-        }
-        if !shared.is_empty() {
-            lines.push(format!("{} shared", shared.len()));
-        }
-    }
-
-    // Exit diff
-    if reference.exit_code != option.exit_code {
-        lines.push(format!("exit: {} → {}",
-            reference.exit_code.unwrap_or(-1),
-            option.exit_code.unwrap_or(-1)));
-    }
-
-    // Stderr diff
-    if reference.stderr != option.stderr {
-        if reference.stderr.is_empty() && !option.stderr.is_empty() {
-            lines.push(format!("stderr added: {}", option.stderr.trim()));
-        } else if !reference.stderr.is_empty() && option.stderr.is_empty() {
-            lines.push("stderr removed".into());
-        } else {
-            lines.push("stderr changed".into());
-        }
-    }
-
-    // Fs diff
-    let ref_fs: HashSet<&execute::FsChange> = reference.fs_changes.iter().collect();
-    let opt_fs: HashSet<&execute::FsChange> = option.fs_changes.iter().collect();
-    let new_fs: Vec<_> = option.fs_changes.iter().filter(|c| !ref_fs.contains(c)).collect();
-    let gone_fs: Vec<_> = reference.fs_changes.iter().filter(|c| !opt_fs.contains(c)).collect();
-    for c in &new_fs {
-        lines.push(format!("fs additional: {:?}", c));
-    }
-    for c in &gone_fs {
-        lines.push(format!("fs missing: {:?}", c));
-    }
-
-    lines
-}
-
-fn collapse<'a>(
-    obs_list: &[(&'a str, &'a execute::Observation)],
-) -> Vec<(Vec<&'a str>, &'a execute::Observation)> {
-    let mut groups: Vec<(Vec<&'a str>, &'a execute::Observation)> = Vec::new();
-    for (ctx, obs) in obs_list {
-        let found = groups.iter_mut().find(|(_, existing)| {
-            existing.stdout == obs.stdout
-                && existing.stderr == obs.stderr
-                && existing.exit_code == obs.exit_code
-                && existing.fs_changes == obs.fs_changes
-        });
-        if let Some((names, _)) = found {
-            names.push(ctx);
-        } else {
-            groups.push((vec![ctx], obs));
-        }
-    }
-    groups
 }

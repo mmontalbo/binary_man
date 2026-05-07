@@ -3,7 +3,7 @@
 use crate::parse::{Script, StdinSource, Run};
 use crate::sandbox::{self, Sandbox};
 use anyhow::{Context, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Stdio;
 
@@ -278,4 +278,123 @@ fn run_invocation(
         trace_reads,
         trace_failed,
     })
+}
+
+/// Group observations by identical output. Returns (context_names, representative_obs) groups.
+pub fn collapse<'a>(
+    obs_list: &[(&'a str, &'a Observation)],
+) -> Vec<(Vec<&'a str>, &'a Observation)> {
+    let mut groups: Vec<(Vec<&'a str>, &'a Observation)> = Vec::new();
+    for (ctx, obs) in obs_list {
+        let found = groups.iter_mut().find(|(_, existing)| {
+            existing.stdout == obs.stdout
+                && existing.stderr == obs.stderr
+                && existing.exit_code == obs.exit_code
+                && existing.fs_changes == obs.fs_changes
+        });
+        if let Some((names, _)) = found {
+            names.push(ctx);
+        } else {
+            groups.push((vec![ctx], obs));
+        }
+    }
+    groups
+}
+
+/// Compute line-level diff between two observations.
+pub fn compute_diff(reference: &Observation, option: &Observation) -> Vec<String> {
+    let mut lines = Vec::new();
+
+    let ref_lines: HashSet<&str> = reference.stdout.lines().collect();
+    let opt_lines: HashSet<&str> = option.stdout.lines().collect();
+    let ref_vec: Vec<&str> = reference.stdout.lines().collect();
+    let opt_vec: Vec<&str> = option.stdout.lines().collect();
+
+    let only_in_ref: Vec<&&str> = ref_vec.iter().filter(|l| !opt_lines.contains(**l)).collect();
+    let only_in_opt: Vec<&&str> = opt_vec.iter().filter(|l| !ref_lines.contains(**l)).collect();
+    let shared: Vec<&&str> = ref_vec.iter().filter(|l| opt_lines.contains(**l)).collect();
+
+    if ref_vec == opt_vec {
+        // stdout identical
+    } else if only_in_opt.is_empty() && only_in_ref.is_empty() {
+        lines.push("stdout: same lines, different order".into());
+    } else {
+        if !only_in_opt.is_empty() {
+            let preview: Vec<&str> = only_in_opt.iter().take(5).map(|l| **l).collect();
+            lines.push(format!("{} only in this: {}", only_in_opt.len(), preview.join(", ")));
+        }
+        if !only_in_ref.is_empty() {
+            let preview: Vec<&str> = only_in_ref.iter().take(5).map(|l| **l).collect();
+            lines.push(format!("{} only in ref: {}", only_in_ref.len(), preview.join(", ")));
+        }
+        if !shared.is_empty() {
+            lines.push(format!("{} shared", shared.len()));
+        }
+    }
+
+    if reference.exit_code != option.exit_code {
+        lines.push(format!("exit: {} → {}",
+            reference.exit_code.unwrap_or(-1),
+            option.exit_code.unwrap_or(-1)));
+    }
+
+    if reference.stderr != option.stderr {
+        if reference.stderr.is_empty() && !option.stderr.is_empty() {
+            lines.push(format!("stderr added: {}", option.stderr.trim()));
+        } else if !reference.stderr.is_empty() && option.stderr.is_empty() {
+            lines.push("stderr removed".into());
+        } else {
+            lines.push("stderr changed".into());
+        }
+    }
+
+    let ref_fs: HashSet<&FsChange> = reference.fs_changes.iter().collect();
+    let opt_fs: HashSet<&FsChange> = option.fs_changes.iter().collect();
+    for c in option.fs_changes.iter().filter(|c| !ref_fs.contains(c)) {
+        lines.push(format!("fs additional: {:?}", c));
+    }
+    for c in reference.fs_changes.iter().filter(|c| !opt_fs.contains(c)) {
+        lines.push(format!("fs missing: {:?}", c));
+    }
+
+    lines
+}
+
+/// Count cells in the execution grid (contexts × applicable runs).
+pub fn count_cells(script: &Script) -> usize {
+    let mut count = 0;
+    for run in &script.runs {
+        for ctx in &script.contexts {
+            if run_matches_context(run, ctx) {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+/// Check if a run should execute in a given context.
+pub fn run_matches_context(run: &Run, ctx: &crate::parse::NamedContext) -> bool {
+    if let Some(ref scoped) = run.in_contexts {
+        scoped.iter().any(|s| {
+            *s == ctx.name
+            || ctx.name.starts_with(&format!("{} / ", s))
+            || ctx.extends.as_deref() == Some(s.as_str())
+        })
+    } else {
+        true
+    }
+}
+
+/// Validate that from-references have matching standalone runs.
+pub fn validate_from_references(script: &Script) {
+    for run in &script.runs {
+        if let Some(ref ref_args) = run.diff_from {
+            let has_match = script.runs.iter().any(|r| r.args == *ref_args && r.diff_from.is_none());
+            if !has_match {
+                let args_str = ref_args.iter().map(|a| format!("\"{}\"", a)).collect::<Vec<_>>().join(" ");
+                eprintln!("warning: from {} has no matching standalone run (add `run {}` outside any from block)", args_str, args_str);
+            }
+        }
+    }
 }
