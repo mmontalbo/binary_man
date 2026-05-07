@@ -821,6 +821,7 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, mode: 
         // Compact mode: group runs by identical majority observation
         struct RunGroup<'a> {
             run_labels: Vec<String>,
+            run_descs: Vec<(String, String)>,  // (args_str, help description)
             majority_obs: &'a execute::Observation,
             majority_names: Vec<&'a str>,
             universals: Vec<String>,
@@ -842,8 +843,13 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, mode: 
 
             let vs_diff = vs_diff_for(info, &obs_by_args);
 
+            let desc = describe_run(info.args);
+
             if let Some(group) = found {
                 group.run_labels.push(info.args_str.clone());
+                if !desc.is_empty() {
+                    group.run_descs.push((info.args_str.clone(), desc));
+                }
                 if let Some(diff) = vs_diff {
                     group.vs_diffs.push((info.args_str.clone(), diff));
                 }
@@ -857,8 +863,13 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, mode: 
                 if let Some(diff) = vs_diff {
                     vs_diffs.push((info.args_str.clone(), diff));
                 }
+                let mut run_descs = Vec::new();
+                if !desc.is_empty() {
+                    run_descs.push((info.args_str.clone(), desc));
+                }
                 run_groups.push(RunGroup {
                     run_labels: vec![info.args_str.clone()],
+                    run_descs,
                     majority_obs: info.majority_obs,
                     majority_names: info.majority_names.clone(),
                     universals: info.universals.clone(),
@@ -875,6 +886,11 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, mode: 
         for (gi, group) in run_groups.iter().enumerate() {
             out.push_str(&format!("\n## group {} ({} runs): {}\n",
                 gi + 1, group.run_labels.len(), group.run_labels.join(", ")));
+
+            // Flag descriptions from --help
+            for (args, desc) in &group.run_descs {
+                out.push_str(&format!("  {}:{}\n", args, desc));
+            }
 
             let mut summary = group.universals.clone();
             if !group.sensitive_parts.is_empty() {
