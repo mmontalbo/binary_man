@@ -608,12 +608,16 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compac
         let all_stdout_empty = obs_list.iter().all(|(_, o)| o.stdout.trim().is_empty());
         let all_has_fs = obs_list.iter().all(|(_, o)| !o.fs_changes.is_empty());
         let mut universals = Vec::new();
+        let has_signal = exit_codes.iter().any(|c| *c > 128);
         if exit_codes.len() == 1 {
-            universals.push(format!("exit {}", exit_codes[0]));
+            universals.push(format!("exit {}", format_exit(exit_codes[0])));
         } else {
             let mut sorted = exit_codes.clone();
             sorted.sort();
-            universals.push(format!("exit {{{}}}", sorted.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(",")));
+            universals.push(format!("exit {{{}}}", sorted.iter().map(|c| format_exit(*c)).collect::<Vec<_>>().join(",")));
+        }
+        if has_signal {
+            universals.push("SIGNAL".into());
         }
         if all_stdout_nonempty { universals.push("stdout not empty".into()); }
         if all_stdout_empty { universals.push("stdout empty".into()); }
@@ -632,7 +636,7 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, compac
         let sens_label = if sensitive_parts.is_empty() { String::new() } else {
             format!(" [{}]", sensitive_parts.join(", "))
         };
-        eprintln!("  run {}: {}/{} distinct, exit {}{}", args_str, groups.len(), obs_list.len(), exit, sens_label);
+        eprintln!("  run {}: {}/{} distinct, exit {}{}", args_str, groups.len(), obs_list.len(), format_exit(exit), sens_label);
 
         run_infos.push(RunInfo {
             args_str,
@@ -843,6 +847,29 @@ fn format_args(args: &[String]) -> String {
     }
 }
 
+fn format_exit(code: i32) -> String {
+    if code > 128 {
+        let sig = code - 128;
+        let name = match sig {
+            2 => "SIGINT",
+            6 => "SIGABRT",
+            9 => "SIGKILL",
+            11 => "SIGSEGV",
+            13 => "SIGPIPE",
+            14 => "SIGALRM",
+            15 => "SIGTERM",
+            _ => "",
+        };
+        if name.is_empty() {
+            format!("{} (signal {})", code, sig)
+        } else {
+            format!("{} ({})", code, name)
+        }
+    } else {
+        code.to_string()
+    }
+}
+
 fn format_context_group(names: &[&str], total: usize) -> String {
     if names.len() == 1 {
         names[0].to_string()
@@ -869,7 +896,9 @@ fn format_obs(out: &mut String, obs: &execute::Observation, indent: &str) {
     if !obs.stderr.trim().is_empty() {
         out.push_str(&format!("{}stderr: {}\n", indent, obs.stderr.trim()));
     }
-    out.push_str(&format!("{}exit: {}\n", indent, obs.exit_code.unwrap_or(-1)));
+    let exit = obs.exit_code.unwrap_or(-1);
+    let exit_str = format_exit(exit);
+    out.push_str(&format!("{}exit: {}\n", indent, exit_str));
     if !obs.fs_changes.is_empty() {
         out.push_str(&format!("{}fs:\n", indent));
         for change in &obs.fs_changes {
