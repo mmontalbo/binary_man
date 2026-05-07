@@ -631,6 +631,10 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, mode: 
         if !info.universals.is_empty() {
             parts.push(info.universals.join(", "));
         }
+        let res = output::format_resources(&info.majority_obs.resources);
+        if !res.is_empty() {
+            parts.push(res);
+        }
         if !info.sensitive_parts.is_empty() {
             parts.push(format!("sensitive to: {}", info.sensitive_parts.join(", ")));
         }

@@ -58,6 +58,22 @@ pub fn format_trace_summary(obs: &Observation) -> String {
     parts.join(" | ")
 }
 
+/// Format resource usage as a compact summary.
+pub fn format_resources(res: &crate::execute::ResourceUsage) -> String {
+    let mut parts = Vec::new();
+    if res.wall_time_ms > 0 {
+        parts.push(format!("{}ms", res.wall_time_ms));
+    }
+    if res.max_rss_kb > 0 {
+        if res.max_rss_kb >= 1024 {
+            parts.push(format!("{}MB", res.max_rss_kb / 1024));
+        } else {
+            parts.push(format!("{}KB", res.max_rss_kb));
+        }
+    }
+    parts.join(", ")
+}
+
 /// Format run arguments as quoted strings.
 pub fn format_args(args: &[String]) -> String {
     if args.is_empty() {

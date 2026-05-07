@@ -7,6 +7,15 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Stdio;
 
+/// Resource usage from a single execution.
+#[derive(Debug, Clone, Default)]
+pub struct ResourceUsage {
+    pub wall_time_ms: u64,     // wall clock milliseconds
+    pub user_time_ms: u64,     // user CPU milliseconds
+    pub sys_time_ms: u64,      // system CPU milliseconds
+    pub max_rss_kb: u64,       // peak resident set size in KB
+}
+
 /// Observation from a single execution.
 #[derive(Debug, Clone)]
 pub struct Observation {
@@ -14,6 +23,7 @@ pub struct Observation {
     pub stderr: String,
     pub exit_code: Option<i32>,
     pub fs_changes: Vec<FsChange>,
+    pub resources: ResourceUsage,
     pub trace_reads: Vec<String>,    // files opened (--trace mode)
     pub trace_failed: Vec<String>,   // files that failed to open
     pub trace_execs: Vec<String>,    // subprocesses spawned (execve)
@@ -91,6 +101,22 @@ fn get_mode(path: &Path) -> u32 {
     }
     #[cfg(not(unix))]
     { 0 }
+}
+
+/// Get cumulative resource usage for all child processes.
+/// Returns (user_time_ms, sys_time_ms, max_rss_kb).
+fn get_children_rusage() -> (u64, u64, u64) {
+    #[cfg(unix)]
+    {
+        let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+        unsafe { libc::getrusage(libc::RUSAGE_CHILDREN, &mut usage) };
+        let user_ms = (usage.ru_utime.tv_sec as u64) * 1000 + (usage.ru_utime.tv_usec as u64) / 1000;
+        let sys_ms = (usage.ru_stime.tv_sec as u64) * 1000 + (usage.ru_stime.tv_usec as u64) / 1000;
+        let max_rss = usage.ru_maxrss as u64; // KB on Linux
+        (user_ms, sys_ms, max_rss)
+    }
+    #[cfg(not(unix))]
+    { (0, 0, 0) }
 }
 
 fn hash_file(path: &Path) -> u64 {
@@ -252,8 +278,20 @@ fn run_invocation(
         }
     }
 
+    let rusage_before = get_children_rusage();
+    let wall_start = std::time::Instant::now();
+
     let output = child.wait_with_output()
         .with_context(|| format!("wait for {} {:?}", binary, test.args))?;
+
+    let wall_time = wall_start.elapsed();
+    let rusage_after = get_children_rusage();
+    let resources = ResourceUsage {
+        wall_time_ms: wall_time.as_millis() as u64,
+        user_time_ms: rusage_after.0.saturating_sub(rusage_before.0),
+        sys_time_ms: rusage_after.1.saturating_sub(rusage_before.1),
+        max_rss_kb: rusage_after.2,
+    };
 
     // Snapshot after and diff
     let after = snapshot_fs(work_dir);
@@ -274,6 +312,7 @@ fn run_invocation(
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         exit_code: output.status.code(),
         fs_changes,
+        resources,
         trace_reads: trace.reads,
         trace_failed: trace.failed,
         trace_execs: trace.execs,
