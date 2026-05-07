@@ -485,14 +485,19 @@ fn classify_string(s: &str, env_vars: &mut HashSet<String>, config_paths: &mut H
     }
 }
 
-/// Extract flag descriptions from --help text.
-/// Returns a map from flag name (e.g., "-a", "--all") to its one-line description.
-fn extract_flag_descriptions(help_text: &str) -> HashMap<String, String> {
-    let mut descs: HashMap<String, String> = HashMap::new();
+/// Extracted flag info from --help text.
+struct FlagInfo {
+    descs: HashMap<String, String>,       // flag -> description
+    aliases: HashMap<String, String>,     // short -> long (and long -> short)
+    all_flags: HashSet<String>,           // every flag discovered
+}
 
-    // Match lines like: "  -a, --all                  do not ignore entries starting with ."
-    //                   "  --block-size=SIZE          scale sizes by SIZE"
-    //                   "  -C                         list entries by columns"
+/// Extract flag descriptions and aliases from --help text.
+fn extract_flag_info(help_text: &str) -> FlagInfo {
+    let mut descs: HashMap<String, String> = HashMap::new();
+    let mut aliases: HashMap<String, String> = HashMap::new();
+    let mut all_flags: HashSet<String> = HashSet::new();
+
     let re = regex::Regex::new(
         r"^\s+(-[a-zA-Z0-9](?:,\s*--[a-zA-Z][-a-zA-Z0-9]*(?:=\S+)?)?|--[a-zA-Z][-a-zA-Z0-9]*(?:=\S+)?)\s{2,}(.+)"
     ).unwrap();
@@ -501,10 +506,9 @@ fn extract_flag_descriptions(help_text: &str) -> HashMap<String, String> {
         if let Some(cap) = re.captures(line) {
             let flags_part = cap[1].trim();
             let desc = cap[2].trim().to_string();
-            // Parse out individual flags from "  -a, --all" or "  --block-size=SIZE"
+            let mut names: Vec<String> = Vec::new();
             for flag in flags_part.split(',') {
                 let flag = flag.trim();
-                // Strip =VALUE suffix for matching
                 let name = if let Some(eq) = flag.find('=') {
                     &flag[..eq]
                 } else {
@@ -512,11 +516,18 @@ fn extract_flag_descriptions(help_text: &str) -> HashMap<String, String> {
                 };
                 if name.starts_with('-') {
                     descs.insert(name.to_string(), desc.clone());
+                    all_flags.insert(name.to_string());
+                    names.push(name.to_string());
                 }
+            }
+            // Record alias pairs (e.g., -a <-> --all)
+            if names.len() == 2 {
+                aliases.insert(names[0].clone(), names[1].clone());
+                aliases.insert(names[1].clone(), names[0].clone());
             }
         }
     }
-    descs
+    FlagInfo { descs, aliases, all_flags }
 }
 
 fn default_value(hint: &str) -> String {
@@ -632,23 +643,40 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, mode: 
     let probe_dir = test_path.parent().unwrap_or(std::path::Path::new("."));
     let grid = execute::run_grid(binary, &script, probe_dir, sandbox)?;
 
-    // Extract flag descriptions from --help for annotating results
-    let flag_descs = try_help(binary, &[], sandbox)
-        .map(|text| extract_flag_descriptions(&text))
-        .unwrap_or_default();
+    // Extract flag info from --help for annotating results
+    let flag_info = try_help(binary, &[], sandbox)
+        .map(|text| extract_flag_info(&text))
+        .unwrap_or_else(|_| FlagInfo {
+            descs: HashMap::new(), aliases: HashMap::new(), all_flags: HashSet::new(),
+        });
 
     // Look up a description for a run's args
     let describe_run = |args: &[String]| -> String {
         for arg in args {
             if arg.starts_with('-') {
                 let key = if let Some(eq) = arg.find('=') { &arg[..eq] } else { arg.as_str() };
-                if let Some(desc) = flag_descs.get(key) {
+                if let Some(desc) = flag_info.descs.get(key) {
                     return format!("  # {}", desc);
                 }
             }
         }
         String::new()
     };
+
+    // Collect flags that appear in runs
+    let mut tested_flags: HashSet<String> = HashSet::new();
+    for run in &script.runs {
+        for arg in &run.args {
+            if arg.starts_with('-') {
+                let key = if let Some(eq) = arg.find('=') { &arg[..eq] } else { arg.as_str() };
+                tested_flags.insert(key.to_string());
+                // Also mark the alias as tested
+                if let Some(alias) = flag_info.aliases.get(key) {
+                    tested_flags.insert(alias.clone());
+                }
+            }
+        }
+    }
 
     // Build results
     let mut out = String::new();
@@ -657,6 +685,23 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, mode: 
         test_path.file_name().unwrap_or_default().to_string_lossy(),
         grid.context_count, script.runs.len(), grid.cells.len()
     ));
+
+    // Alias map
+    if !flag_info.aliases.is_empty() {
+        let mut pairs: Vec<String> = Vec::new();
+        let mut seen = HashSet::new();
+        for (short, long) in &flag_info.aliases {
+            if short.len() <= 2 && !seen.contains(short) {
+                pairs.push(format!("{} = {}", short, long));
+                seen.insert(short.clone());
+                seen.insert(long.clone());
+            }
+        }
+        if !pairs.is_empty() {
+            pairs.sort();
+            out.push_str(&format!("# Aliases: {}\n", pairs.join(", ")));
+        }
+    }
 
     for (ctx, err) in &grid.setup_failures {
         out.push_str(&format!("\n# SETUP FAILED {}: {}\n", ctx, err));
@@ -1016,6 +1061,19 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, mode: 
         }
     }
     } // match mode
+
+    // Untested flags
+    if !flag_info.all_flags.is_empty() {
+        let untested: Vec<&String> = flag_info.all_flags.iter()
+            .filter(|f| !tested_flags.contains(f.as_str()))
+            .collect();
+        if !untested.is_empty() {
+            let mut sorted: Vec<&str> = untested.iter().map(|s| s.as_str()).collect();
+            sorted.sort();
+            out.push_str(&format!("\n# Not tested ({}/{}): {}\n",
+                untested.len(), flag_info.all_flags.len(), sorted.join(", ")));
+        }
+    }
 
     // Write results file
     let results_path = test_path.with_extension("results");
