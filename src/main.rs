@@ -112,45 +112,45 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox) -> Result<()> {
     }
     println!();
 
-    // Rich binary-agnostic base context
-    // Content designed to exercise: sorting, filtering, field ops, regex, whitespace
-    println!("context \"base\"");
-    println!("  file \"input.txt\" \"alpha\" \"alpha\" \"10\" \"2\" \"BETA\" \"  spaced  \" \"\" \"Jan\" \"100K\" \"hello world\" \"hello\\tworld\"");
-    println!("  file \".hidden\" \"secret content\"");
-    println!("  file \"empty.txt\" empty");
-    println!("  dir \"subdir\"");
-    println!("  file \"subdir/nested.txt\" \"nested content\"");
-    println!("  file \"link.txt\" -> \"input.txt\"");
-    println!("  file \"exec.sh\" \"#!/bin/sh\\necho hello\"");
-    println!("  props \"exec.sh\" executable");
-    println!();
+    // Shared file structure for all content contexts
+    let scaffold = |name: &str, content: &str| {
+        println!("context \"{}\"", name);
+        println!("  file \"input.txt\" {}", content);
+        println!("  file \".hidden\" \"secret content\"");
+        println!("  file \"empty.txt\" empty");
+        println!("  dir \"subdir\"");
+        println!("  file \"subdir/nested.txt\" \"nested content\"");
+        println!("  file \"link.txt\" -> \"input.txt\"");
+        println!("  file \"exec.sh\" \"#!/bin/sh\\necho hello\"");
+        println!("  props \"exec.sh\" executable");
+        println!();
+    };
 
-    // Content perturbations — vary what's inside the files
-    println!("vary from \"base\"");
-    println!("  file \"input.txt\" \"single line\"");
-    println!("  file \"input.txt\" empty");
-    println!("  file \"input.txt\" size 10000");
-    println!("  file \"input.txt\" \"a:1:x\" \"b:2:y\" \"c:3:z\"  # field-delimited");
-    println!("  file \"input.txt\" \"alpha\" \"beta\" \"gamma\"  # no duplicates");
-    println!();
+    // Content archetype contexts — each isolates one input dimension
+    // Collapsing across these reveals which dimension each flag is sensitive to
+    scaffold("alpha", "\"cherry\" \"apple\" \"banana\" \"date\" \"elderberry\"");
+    scaffold("numeric", "\"100\" \"2\" \"30\" \"1\" \"20\" \"3\" \"10\"");
+    scaffold("fielded", "\"bob:30:sales\" \"alice:25:eng\" \"charlie:35:sales\" \"alice:40:mgmt\"");
+    scaffold("duplicated", "\"aaa\" \"bbb\" \"aaa\" \"ccc\" \"bbb\" \"aaa\" \"ddd\"");
+    scaffold("cased", "\"Apple\" \"BANANA\" \"cherry\" \"apple\" \"Cherry\" \"APPLE\"");
 
-    // Structural perturbations — vary what exists
-    println!("vary from \"base\"");
+    // Structural perturbations — vary what exists (applied to alpha only)
+    println!("vary from \"alpha\"");
     println!("  remove \".hidden\"");
     println!("  remove \"subdir\"");
     println!("  remove \"link.txt\"");
     println!("  remove \"exec.sh\"");
     println!();
 
-    // Type/name edge cases — structural equivalence classes
-    println!("vary from \"base\"");
+    // Type/name edge cases
+    println!("vary from \"alpha\"");
     println!("  file \"link.txt\" -> \"nonexistent\"  # broken symlink");
     println!("  file \"-rf\" \"flag-like filename\"");
     println!("  props \"subdir\" readonly  # unreadable directory");
     println!();
 
-    // Property perturbations — vary file attributes
-    println!("vary from \"base\"");
+    // Property perturbations
+    println!("vary from \"alpha\"");
     println!("  props \"input.txt\" readonly");
     println!("  props \"input.txt\" mtime old");
     println!("  file \"input.txt\" size 1");
