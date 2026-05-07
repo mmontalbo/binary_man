@@ -641,6 +641,18 @@ pub fn tokenize(line: &str, _line_num: usize) -> Result<Vec<String>> {
                                 't' => s.push('\t'),
                                 '\\' => s.push('\\'),
                                 '"' => s.push('"'),
+                                'x' => {
+                                    // Hex escape: \xNN
+                                    let mut hex = String::new();
+                                    if let Some(&c) = chars.peek() { if c.is_ascii_hexdigit() { hex.push(c); chars.next(); } }
+                                    if let Some(&c) = chars.peek() { if c.is_ascii_hexdigit() { hex.push(c); chars.next(); } }
+                                    if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                                        s.push(byte as char);
+                                    } else {
+                                        s.push('\\'); s.push('x');
+                                        for c in hex.chars() { s.push(c); }
+                                    }
+                                }
                                 other => { s.push('\\'); s.push(other); }
                             }
                         }

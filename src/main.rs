@@ -134,6 +134,8 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox) -> Result<()> {
     scaffold("duplicated", "\"aaa\" \"aaa\" \"bbb\" \"bbb\" \"bbb\" \"ccc\" \"aaa\"");
     scaffold("cased", "\"Apple\" \"BANANA\" \"cherry\" \"apple\" \"Cherry\" \"APPLE\"");
     scaffold("structured", "\"func setup() {\" \"  init()\" \"  configure()\" \"}\" \"\" \"func process() {\" \"  validate()\" \"  transform()\" \"}\" \"\" \"func main() {\" \"  setup()\" \"  process()\" \"}\"");
+    scaffold("multiline", "\"x\" \"\" \"a long line that contains many words and should exercise wrapping and line length handling in tools that care about width\" \"\" \"  \" \"short\" \"\" \"another medium length line here\"");
+    scaffold("binary_mixed", "\"hello world\" \"normal line\" \"binary\\x00content\\x01here\" \"back to normal\" \"more\\xFFbytes\\xFE\"");
 
     // Structural perturbations — vary what exists (applied to alpha only)
     println!("vary from \"alpha\"");
