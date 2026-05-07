@@ -1,28 +1,46 @@
 #!/usr/bin/env bash
-# Usage: ./explore.sh <binary> [max_rounds]
+# Usage: ./explore.sh <binary> [subcommand args...] [-- max_rounds]
 # Iterative exploration: discovery → run → follow-up → run → ... until convergence.
 # Convergence = no identical groups were split by the follow-up.
+#
+# Examples:
+#   ./explore.sh sort
+#   ./explore.sh sort -- 5
+#   ./explore.sh git diff
+#   ./explore.sh git diff -- 3
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BGRID="$REPO_DIR/target/release/bgrid"
 
-BINARY="$1"
-MAX_ROUNDS="${2:-3}"
+# Parse args: everything before -- is the binary+subcommand, after -- is max_rounds
+BINARY_ARGS=()
+MAX_ROUNDS=3
+while [ $# -gt 0 ]; do
+    if [ "$1" = "--" ]; then
+        shift
+        MAX_ROUNDS="${1:-3}"
+        break
+    fi
+    BINARY_ARGS+=("$1")
+    shift
+done
 
+BINARY="${BINARY_ARGS[0]}"
 if [ -z "$BINARY" ]; then
-    echo "Usage: $0 <binary> [max_rounds]" >&2
+    echo "Usage: $0 <binary> [subcommand args...] [-- max_rounds]" >&2
     exit 1
 fi
 
+LABEL=$(echo "${BINARY_ARGS[*]}" | tr ' ' '_')
 WORKDIR=$(mktemp -d /tmp/bgrid_explore_XXXXXX)
-echo "=== Exploring $BINARY (max $MAX_ROUNDS rounds) ===" >&2
+echo "=== Exploring ${BINARY_ARGS[*]} (max $MAX_ROUNDS rounds) ===" >&2
 echo "workdir: $WORKDIR" >&2
 echo "" >&2
 
 # Round 0: discovery
 echo "[round 0] Discovery..." >&2
-"$BGRID" "$BINARY" > "$WORKDIR/round_0.probe" 2>/dev/null
+"$BGRID" "${BINARY_ARGS[@]}" > "$WORKDIR/round_0.probe" 2>/dev/null
 "$BGRID" --compact "$BINARY" "$WORKDIR/round_0.probe" 2>/dev/null
 
 r0_groups=$(grep -ac "^## group" "$WORKDIR/round_0.results" || echo 0)
