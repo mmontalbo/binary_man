@@ -27,7 +27,7 @@ fn main() -> Result<()> {
         let binary = positional[0];
         let test_path = PathBuf::from(last.as_str());
         if dry_run {
-            cmd_dry_run(binary, &test_path)
+            cmd_dry_run(&test_path)
         } else {
             let sandbox = sandbox::Sandbox::new(trace)?;
             cmd_run(binary, &test_path, &sandbox, compact)
@@ -398,7 +398,7 @@ fn load_script(test_path: &PathBuf) -> Result<parse::Script> {
     Ok(script)
 }
 
-fn cmd_dry_run(_binary: &str, test_path: &PathBuf) -> Result<()> {
+fn cmd_dry_run(test_path: &PathBuf) -> Result<()> {
     let script = load_script(test_path)?;
 
     println!("contexts:");

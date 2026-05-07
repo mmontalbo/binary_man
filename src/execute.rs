@@ -184,14 +184,7 @@ pub fn run_grid(
         };
 
         for (ti, test) in script.runs.iter().enumerate() {
-            if let Some(ref scoped) = test.in_contexts {
-                let matches = scoped.iter().any(|s| {
-                    *s == ctx.name
-                    || ctx.name.starts_with(&format!("{} / ", s))
-                    || ctx.extends.as_deref() == Some(s.as_str())
-                });
-                if !matches { continue; }
-            }
+            if !run_matches_context(test, ctx) { continue; }
 
             let obs = run_invocation(binary, test, work_dir, &env_vars, sandbox)?;
             cells.insert((ctx.name.clone(), ti), obs);
