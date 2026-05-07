@@ -80,13 +80,25 @@ pub fn format_obs(out: &mut String, obs: &Observation, indent: &str) {
             }
         }
     }
-    if !obs.trace_reads.is_empty() || !obs.trace_failed.is_empty() {
+    let has_trace = !obs.trace_reads.is_empty() || !obs.trace_failed.is_empty()
+        || !obs.trace_execs.is_empty() || !obs.trace_net.is_empty()
+        || !obs.trace_signals.is_empty();
+    if has_trace {
         out.push_str(&format!("{}trace:\n", indent));
         if !obs.trace_reads.is_empty() {
             out.push_str(&format!("{}  reads: {}\n", indent, obs.trace_reads.join(", ")));
         }
         if !obs.trace_failed.is_empty() {
             out.push_str(&format!("{}  failed: {}\n", indent, obs.trace_failed.join(", ")));
+        }
+        if !obs.trace_execs.is_empty() {
+            out.push_str(&format!("{}  execs: {}\n", indent, obs.trace_execs.join(", ")));
+        }
+        if !obs.trace_net.is_empty() {
+            out.push_str(&format!("{}  net: {}\n", indent, obs.trace_net.join(", ")));
+        }
+        if !obs.trace_signals.is_empty() {
+            out.push_str(&format!("{}  signals: {}\n", indent, obs.trace_signals.join(", ")));
         }
     }
 }

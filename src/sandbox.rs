@@ -74,15 +74,17 @@ impl Sandbox {
             cmd.arg("--setenv").arg(k).arg(v);
         }
 
-        // The actual command — optionally wrapped in strace
+        // The actual command — wrapped in strace only when tracing this invocation
         cmd.arg("--");
-        if let Some(ref strace) = self.strace {
-            cmd.arg(strace);
-            cmd.arg("-f");
-            cmd.arg("-e").arg("trace=openat");
-            cmd.arg("-o").arg("/trace/.bgrid-trace");
-            cmd.arg("-qq");
-            cmd.arg("--");
+        if trace_dir.is_some() {
+            if let Some(ref strace) = self.strace {
+                cmd.arg(strace);
+                cmd.arg("-f");
+                cmd.arg("-e").arg("trace=openat,connect,execve,kill");
+                cmd.arg("-o").arg("/trace/.bgrid-trace");
+                cmd.arg("-qq");
+                cmd.arg("--");
+            }
         }
         cmd.arg(binary);
         for arg in args {
@@ -93,23 +95,91 @@ impl Sandbox {
     }
 }
 
-/// Parse strace output for workspace file access patterns.
-/// Returns (files_read, files_failed) — paths relative to workspace.
-pub fn parse_trace(trace_dir: &Path) -> (Vec<String>, Vec<String>) {
+/// Parsed strace output.
+pub struct TraceData {
+    pub reads: Vec<String>,    // files successfully opened
+    pub failed: Vec<String>,   // files that failed to open
+    pub execs: Vec<String>,    // subprocesses spawned (execve)
+    pub net: Vec<String>,      // network connection attempts (connect)
+    pub signals: Vec<String>,  // signals sent (kill)
+}
+
+/// Parse strace output for syscall patterns.
+pub fn parse_trace(trace_dir: &Path) -> TraceData {
     let trace_path = trace_dir.join(".bgrid-trace");
-    let mut reads = Vec::new();
-    let mut failed = Vec::new();
+    let mut data = TraceData {
+        reads: Vec::new(),
+        failed: Vec::new(),
+        execs: Vec::new(),
+        net: Vec::new(),
+        signals: Vec::new(),
+    };
     let mut seen_reads = std::collections::HashSet::new();
     let mut seen_failed = std::collections::HashSet::new();
 
     if let Ok(content) = std::fs::read_to_string(&trace_path) {
         for line in content.lines() {
-            // Match: openat(AT_FDCWD, "path", flags) = result
+            // execve: subprocess spawning
+            if line.starts_with("execve(") || line.contains(" execve(") {
+                let Some(start) = line.find('"') else { continue };
+                let Some(end) = line[start + 1..].find('"') else { continue };
+                let path = &line[start + 1..start + 1 + end];
+                // Skip system binaries
+                if !path.starts_with("/nix/") && !path.starts_with("/usr/")
+                    && !path.starts_with("/bin/") {
+                    data.execs.push(path.to_string());
+                }
+                continue;
+            }
+
+            // connect: network attempts
+            if line.contains("connect(") {
+                // Extract the address family and address
+                if line.contains("AF_INET") || line.contains("AF_INET6") {
+                    let detail = if line.contains("ECONNREFUSED") {
+                        "refused"
+                    } else if line.contains("ENETUNREACH") || line.contains("EACCES") {
+                        "blocked"
+                    } else if line.contains("= 0") {
+                        "connected"
+                    } else {
+                        "attempted"
+                    };
+                    // Extract port if visible
+                    let port_info = if let Some(port_start) = line.find("sin_port=htons(") {
+                        let rest = &line[port_start + 15..];
+                        if let Some(port_end) = rest.find(')') {
+                            format!(":{}", &rest[..port_end])
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        String::new()
+                    };
+                    data.net.push(format!("{}{}", detail, port_info));
+                }
+                continue;
+            }
+
+            // kill: signal sending
+            if line.contains("kill(") {
+                if let Some(start) = line.find("kill(") {
+                    let rest = &line[start..];
+                    if let Some(end) = rest.find(')') {
+                        let args = &rest[5..end]; // skip "kill("
+                        if line.contains("= 0") || line.contains("= -1") {
+                            data.signals.push(args.to_string());
+                        }
+                    }
+                }
+                continue;
+            }
+
+            // openat: file access (existing logic)
             let Some(start) = line.find('"') else { continue };
             let Some(end) = line[start + 1..].find('"') else { continue };
             let path = &line[start + 1..start + 1 + end];
 
-            // Skip non-workspace paths
             if path.starts_with("/nix/") || path.starts_with("/etc/")
                 || path.starts_with("/proc/") || path.starts_with("/dev/")
                 || path.starts_with("/usr/") || path.starts_with("/lib")
@@ -119,7 +189,6 @@ pub fn parse_trace(trace_dir: &Path) -> (Vec<String>, Vec<String>) {
                 continue;
             }
 
-            // Normalize path: strip /workspace/ prefix or ./ prefix
             let rel = path.strip_prefix("/workspace/")
                 .or_else(|| path.strip_prefix("./"))
                 .unwrap_or(path);
@@ -128,20 +197,19 @@ pub fn parse_trace(trace_dir: &Path) -> (Vec<String>, Vec<String>) {
 
             if line.contains("ENOENT") || line.contains("EACCES") {
                 if seen_failed.insert(rel.to_string()) {
-                    failed.push(rel.to_string());
+                    data.failed.push(rel.to_string());
                 }
             } else if line.contains("= ") && !line.contains("= -1")
                 && seen_reads.insert(rel.to_string()) {
-                    reads.push(rel.to_string());
+                    data.reads.push(rel.to_string());
             }
         }
-        // Clean up trace file
         let _ = std::fs::remove_file(&trace_path);
     }
 
-    reads.sort();
-    failed.sort();
-    (reads, failed)
+    data.reads.sort();
+    data.failed.sort();
+    data
 }
 
 /// Build sandbox state from setup commands.

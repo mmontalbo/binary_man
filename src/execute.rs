@@ -14,8 +14,11 @@ pub struct Observation {
     pub stderr: String,
     pub exit_code: Option<i32>,
     pub fs_changes: Vec<FsChange>,
-    pub trace_reads: Vec<String>,   // files opened (--trace mode)
-    pub trace_failed: Vec<String>,  // files that failed to open (--trace mode)
+    pub trace_reads: Vec<String>,    // files opened (--trace mode)
+    pub trace_failed: Vec<String>,   // files that failed to open
+    pub trace_execs: Vec<String>,    // subprocesses spawned (execve)
+    pub trace_net: Vec<String>,      // network connection attempts (connect)
+    pub trace_signals: Vec<String>,  // signals sent (kill)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -257,10 +260,13 @@ fn run_invocation(
     let fs_changes = diff_snapshots(&before, &after);
 
     // Parse trace if available
-    let (trace_reads, trace_failed) = if let Some(ref td) = trace_dir {
+    let trace = if let Some(ref td) = trace_dir {
         sandbox::parse_trace(td.path())
     } else {
-        (Vec::new(), Vec::new())
+        sandbox::TraceData {
+            reads: Vec::new(), failed: Vec::new(),
+            execs: Vec::new(), net: Vec::new(), signals: Vec::new(),
+        }
     };
 
     Ok(Observation {
@@ -268,8 +274,11 @@ fn run_invocation(
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         exit_code: output.status.code(),
         fs_changes,
-        trace_reads,
-        trace_failed,
+        trace_reads: trace.reads,
+        trace_failed: trace.failed,
+        trace_execs: trace.execs,
+        trace_net: trace.net,
+        trace_signals: trace.signals,
     })
 }
 
