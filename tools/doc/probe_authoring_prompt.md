@@ -8,7 +8,7 @@ A probe file describes input states and invocations. A tool called bgrid execute
 
 ## Discovery output
 
-The following probe skeleton was auto-generated from `{{BINARY}} --help`. It gives you the flag names but makes poor design choices (no flag combinations, placeholder values). Use it as a starting point for flag names only.
+The following probe skeleton was auto-generated from `{{BINARY}} --help`. Use its contexts, vary blocks, and file structure as a starting point — keep what's useful, adjust what doesn't fit the binary. The skeleton's individual flag runs need improvement: add flag combinations, fix placeholder values, and group related flags with `from` blocks.
 
 ```
 {{DISCOVERY}}
@@ -28,7 +28,7 @@ Follow these principles:
 
 3. **Fix placeholder values**: The discovery skeleton has placeholders like `--key=keydef` or `--sort=word`. Replace these with actual valid values based on the binary's documentation.
 
-4. **Flag combinations**: Test important flags in combination, not just individually.
+4. **Flag combinations**: Many flags only have visible effects when combined with other flags. For example, `--human-readable` may only change output when combined with `-l` (long format). If a flag seems like it modifies output format, test it both alone and combined with format-changing flags. Test at least 5-10 important two-flag combinations.
 
 5. **Use `from` blocks for same-format diffs**: Group related flags and diff them against a base invocation. A `from` block sets a sticky reference -- ALL subsequent runs get that reference until the next `context`, `vary`, `in`, or `from` keyword. To end a from block, start a new section.
 

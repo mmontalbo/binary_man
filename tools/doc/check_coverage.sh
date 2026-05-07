@@ -11,8 +11,11 @@ results_flags=$(grep -aoP '"--?[a-zA-Z][-a-zA-Z0-9]*(?:=[^"]*)?"' "$RESULTS" \
   | tr -d '"' | sed 's/=.*//' | sort -u)
 
 # Extract flags from doc: --flag or -X patterns
+# Filter out permission strings (-rw-r--r--, -rwxr-xr-x)
 doc_flags=$(grep -oP '(?<![a-zA-Z])--?[a-zA-Z][-a-zA-Z0-9]*' "$DOC" \
-  | sed 's/=.*//' | sort -u)
+  | sed 's/=.*//' \
+  | grep -vP '^-r[w-][x-]' \
+  | sort -u)
 
 echo "=== Coverage Check ==="
 
