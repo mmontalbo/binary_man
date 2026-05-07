@@ -131,7 +131,7 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox) -> Result<()> {
     scaffold("alpha", "\"cherry\" \"apple\" \"banana\" \"date\" \"elderberry\"");
     scaffold("numeric", "\"100\" \"2\" \"30\" \"1\" \"20\" \"3\" \"10\"");
     scaffold("fielded", "\"bob:30:sales\" \"alice:25:eng\" \"charlie:35:sales\" \"alice:40:mgmt\"");
-    scaffold("duplicated", "\"aaa\" \"bbb\" \"aaa\" \"ccc\" \"bbb\" \"aaa\" \"ddd\"");
+    scaffold("duplicated", "\"aaa\" \"aaa\" \"bbb\" \"bbb\" \"bbb\" \"ccc\" \"aaa\"");
     scaffold("cased", "\"Apple\" \"BANANA\" \"cherry\" \"apple\" \"Cherry\" \"APPLE\"");
 
     // Structural perturbations — vary what exists (applied to alpha only)
