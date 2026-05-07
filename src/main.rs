@@ -727,11 +727,13 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, mode: 
     }
 
     OutputMode::Default => {
-        // Default mode: summary per run + detail expansion for anomalies
+        // Default mode: summary per run + detail expansion for true anomalies
         for info in &run_infos {
             let majority_exit = info.majority_obs.exit_code.unwrap_or(-1);
-            let is_anomalous = info.groups.len() > 1
-                || output::has_anomalies(info.majority_obs, None)
+
+            // Anomaly = signals, network, sensitive files, or exit code divergence
+            // NOT just "multiple groups" — that's normal behavior
+            let is_anomalous = output::has_anomalies(info.majority_obs, None)
                 || info.obs_list.iter().any(|(_, obs)| output::has_anomalies(obs, Some(majority_exit)));
 
             // Summary line (always shown)
@@ -744,13 +746,8 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, mode: 
                 out.push_str(&format!("  vs {}: {}\n", ref_str, vs));
             }
 
-            // Detail expansion for anomalous runs
-            if is_anomalous {
-                // Show majority output
-                out.push_str(&format!("  {}:\n", output::format_context_group(&info.majority_names, info.obs_list.len())));
-                output::format_obs(&mut out, info.majority_obs, "    ");
-
-                // Show differing groups as deltas
+            // Differing groups as one-line deltas (always, if >1 group)
+            if info.groups.len() > 1 {
                 let largest_idx = info.groups.iter().enumerate()
                     .max_by_key(|(_, (names, _))| names.len())
                     .map(|(i, _)| i).unwrap_or(0);
@@ -761,6 +758,12 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, mode: 
                         out.push_str(&format!("  differs in {}: {}\n", names.join(", "), delta.join("; ")));
                     }
                 }
+            }
+
+            // Full detail expansion only for true anomalies (signal, network, sensitive)
+            if is_anomalous {
+                out.push_str(&format!("  {}:\n", output::format_context_group(&info.majority_names, info.obs_list.len())));
+                output::format_obs_brief(&mut out, info.majority_obs, "    ");
             }
         }
     }
