@@ -331,7 +331,10 @@ echo "$MULTI_GROUPS" | while IFS= read -r group; do
                 }
             '
         else
+            # Extract the stderr message to explain WHY it failed
+            stderr_msg=$(grep -a -A20 "^## group $group_num " "$RESULTS" | grep -a "stderr:" | head -1 | sed 's/.*stderr: //')
             echo "# Group: SKIPPED (exits $majority_exit in all contexts)"
+            [ -n "$stderr_msg" ] && echo "# Reason: $stderr_msg"
             echo "# $runs_str"
         fi
     else
