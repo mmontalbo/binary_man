@@ -25,6 +25,24 @@ pub fn content_fielded() -> Vec<String> {
         .into_iter().map(String::from).collect()
 }
 
+/// Content with tabs, blank lines, trailing whitespace, and mixed formatting.
+/// Exercises: cat -n/-b/-s/-E/-T, fold, fmt, nl, expand/unexpand, col.
+pub fn content_formatted() -> Vec<String> {
+    vec![
+        "first line",
+        "",
+        "",
+        "\tindented with tab",
+        "trailing spaces   ",
+        "",
+        "  leading spaces",
+        "normal line",
+        "\ttwo\ttabs",
+        "last line",
+        "",
+    ].into_iter().map(String::from).collect()
+}
+
 /// Structure level: minimal — just input.txt and other.txt.
 pub fn structure_minimal(content: &[String]) -> Vec<SetupCommand> {
     vec![

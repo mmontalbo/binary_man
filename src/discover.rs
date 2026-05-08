@@ -296,20 +296,23 @@ pub fn generate_initial_script(
     let (pattern_arg, file_arg) = infer_base_args(&help_text);
 
     // --- Latin square base contexts ---
-    // Three factors, three levels each. Each level appears once per row and column.
-    // Main effects (content, structure, properties) are estimable without aliasing.
-    // Data definitions live in data.rs; the Latin square assignment is here.
+    // Four content levels × three structure levels × three property levels.
+    // Property assignment follows Latin square pattern for the first three rows;
+    // fourth row (formatted) cycles to maintain balance.
+    // Data definitions live in data.rs; the assignment is here.
     //
     //              minimal         standard              deep
     // alpha        default         varied-perms          varied-times
     // numeric      varied-times    default               varied-perms
     // fielded      varied-perms    varied-times          default
+    // formatted    default         varied-times          varied-perms
 
     use crate::data;
 
     let content_alpha = data::content_alpha();
     let content_numeric = data::content_numeric();
     let content_fielded = data::content_fielded();
+    let content_formatted = data::content_formatted();
 
     let build_ctx = |name: &str, content: &[String],
                      structure_fn: fn(&[String]) -> Vec<SetupCommand>,
@@ -320,15 +323,18 @@ pub fn generate_initial_script(
     };
 
     let mut contexts: Vec<NamedContext> = vec![
-        build_ctx("alpha_minimal",    &content_alpha,   data::structure_minimal, data::props_default),
-        build_ctx("alpha_standard",   &content_alpha,   data::structure_standard, data::props_perms),
-        build_ctx("alpha_deep",       &content_alpha,   data::structure_deep,    data::props_times),
-        build_ctx("numeric_minimal",  &content_numeric, data::structure_minimal, data::props_times),
-        build_ctx("numeric_standard", &content_numeric, data::structure_standard, data::props_default),
-        build_ctx("numeric_deep",     &content_numeric, data::structure_deep,    data::props_perms),
-        build_ctx("fielded_minimal",  &content_fielded, data::structure_minimal, data::props_perms),
-        build_ctx("fielded_standard", &content_fielded, data::structure_standard, data::props_times),
-        build_ctx("fielded_deep",     &content_fielded, data::structure_deep,    data::props_default),
+        build_ctx("alpha_minimal",      &content_alpha,     data::structure_minimal,  data::props_default),
+        build_ctx("alpha_standard",     &content_alpha,     data::structure_standard, data::props_perms),
+        build_ctx("alpha_deep",         &content_alpha,     data::structure_deep,     data::props_times),
+        build_ctx("numeric_minimal",    &content_numeric,   data::structure_minimal,  data::props_times),
+        build_ctx("numeric_standard",   &content_numeric,   data::structure_standard, data::props_default),
+        build_ctx("numeric_deep",       &content_numeric,   data::structure_deep,     data::props_perms),
+        build_ctx("fielded_minimal",    &content_fielded,   data::structure_minimal,  data::props_perms),
+        build_ctx("fielded_standard",   &content_fielded,   data::structure_standard, data::props_times),
+        build_ctx("fielded_deep",       &content_fielded,   data::structure_deep,     data::props_default),
+        build_ctx("formatted_minimal",  &content_formatted, data::structure_minimal,  data::props_default),
+        build_ctx("formatted_standard", &content_formatted, data::structure_standard, data::props_times),
+        build_ctx("formatted_deep",     &content_formatted, data::structure_deep,     data::props_perms),
         NamedContext { name: "empty_dir".into(), extends: None, commands: vec![] },
     ];
 
