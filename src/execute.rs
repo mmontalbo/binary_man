@@ -49,7 +49,7 @@ pub struct GridResult {
 struct FileInfo {
     size: u64,
     mode: u32,
-    content_hash: u64,
+    mtime: u64, // seconds since epoch
 }
 
 type FsSnapshot = HashMap<String, FileInfo>;
@@ -76,7 +76,7 @@ fn walk_dir(base: &Path, dir: &Path) -> Result<Vec<(String, FileInfo)>> {
 
         if path.is_dir() && !path.is_symlink() {
             let mode = get_mode(&path);
-            entries.push((rel.clone(), FileInfo { size: 0, mode, content_hash: 0 }));
+            entries.push((rel.clone(), FileInfo { size: 0, mode, mtime: 0 }));
             if let Ok(sub) = walk_dir(base, &path) {
                 entries.extend(sub);
             }
@@ -84,8 +84,12 @@ fn walk_dir(base: &Path, dir: &Path) -> Result<Vec<(String, FileInfo)>> {
             let meta = path.metadata();
             let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
             let mode = get_mode(&path);
-            let content_hash = hash_file(&path);
-            entries.push((rel, FileInfo { size, mode, content_hash }));
+            let mtime = meta.as_ref().ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            entries.push((rel, FileInfo { size, mode, mtime }));
         }
     }
     Ok(entries)
@@ -101,15 +105,6 @@ fn get_mode(path: &Path) -> u32 {
     { 0 }
 }
 
-fn hash_file(path: &Path) -> u64 {
-    use std::hash::{Hash, Hasher};
-    use std::collections::hash_map::DefaultHasher;
-    let mut hasher = DefaultHasher::new();
-    if let Ok(content) = std::fs::read(path) {
-        content.hash(&mut hasher);
-    }
-    hasher.finish()
-}
 
 fn diff_snapshots(before: &FsSnapshot, after: &FsSnapshot) -> Vec<FsChange> {
     let mut changes = Vec::new();
@@ -140,8 +135,8 @@ fn diff_snapshots(before: &FsSnapshot, after: &FsSnapshot) -> Vec<FsChange> {
             if before_info.mode != after_info.mode {
                 diffs.push(format!("mode: {:o} -> {:o}", before_info.mode, after_info.mode));
             }
-            if before_info.content_hash != after_info.content_hash && before_info.size == after_info.size {
-                diffs.push("content changed".to_string());
+            if before_info.mtime != after_info.mtime {
+                diffs.push("mtime changed".to_string());
             }
             if !diffs.is_empty() {
                 changes.push(FsChange::Modified {
@@ -170,7 +165,7 @@ fn diff_snapshots(before: &FsSnapshot, after: &FsSnapshot) -> Vec<FsChange> {
 }
 
 /// Per-cell timeout in seconds.
-const CELL_TIMEOUT_SECS: u64 = 5;
+const CELL_TIMEOUT_SECS: u64 = 2;
 
 /// Max concurrent cells (threads).
 const MAX_THREADS: usize = 8;
