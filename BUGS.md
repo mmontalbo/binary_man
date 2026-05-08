@@ -454,7 +454,38 @@ using git's existing `OPTION_UNSIGNED` type.
 
 ---
 
-*All bugs found by bgrid's systematic pairwise flag combination testing.
-The `combine` keyword generates all single + pair combinations from a
-list of flags, enabling automated discovery of flag interaction issues
-that single-flag testing misses.*
+## Git: inconsistent error messages for diff flags outside a repository
+
+**Severity:** Low (UX inconsistency)
+**Affected:** git diff
+**Reproduced on:** git 2.50.1
+**Found by:** automated exploration without a git repo context (2756 cells)
+
+When `git diff` is run outside a repository, flags produce two different
+error messages depending on when they're registered in git's option parser:
+
+```
+$ git diff --raw        → "warning: Not a git repository."
+$ git diff --numstat    → "warning: Not a git repository."
+$ git diff --cached     → "error: unknown option `cached'"
+$ git diff --staged     → "error: unknown option `staged'"
+$ git diff --merge-base → "error: unknown option `merge-base'"
+```
+
+Core diff formatting flags (`--raw`, `--numstat`, `--stat`, `--shortstat`,
+`--name-only`, `--name-status`, `--no-color`, `--quiet`, `--summary`,
+`--text`, `--unified`, `--minimal`, `--no-prefix`, `--no-renames`,
+`--relative`, `--submodule`) are registered unconditionally and produce
+the correct "Not a git repository" error.
+
+Repo-specific flags (`--cached`, `--staged`, `--merge-base`, `--cc`,
+`--combined`, `--ours`, `--theirs`, `--base`, `--refresh`) are only
+registered when a repository is detected, so outside a repo they appear
+as "unknown" — even though they are valid `git diff` flags.
+
+All flags should produce a consistent "not a git repository" message
+when run outside a repo.
+
+*All bugs found by bgrid's systematic behavioral observation. The tool
+runs flags across varied input states and groups by identical behavior,
+revealing inconsistencies mechanically.*
