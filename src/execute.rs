@@ -6,14 +6,12 @@ use anyhow::{Context, Result};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Resource usage from a single execution.
 #[derive(Debug, Clone, Default)]
 pub struct ResourceUsage {
-    pub wall_time_ms: u64,     // wall clock milliseconds
-    pub user_time_ms: u64,     // user CPU milliseconds
-    pub sys_time_ms: u64,      // system CPU milliseconds
-    pub max_rss_kb: u64,       // peak resident set size in KB
+    pub wall_time_ms: u64,
 }
 
 /// Observation from a single execution.
@@ -24,11 +22,11 @@ pub struct Observation {
     pub exit_code: Option<i32>,
     pub fs_changes: Vec<FsChange>,
     pub resources: ResourceUsage,
-    pub trace_reads: Vec<String>,    // files opened (--trace mode)
-    pub trace_failed: Vec<String>,   // files that failed to open
-    pub trace_execs: Vec<String>,    // subprocesses spawned (execve)
-    pub trace_net: Vec<String>,      // network connection attempts (connect)
-    pub trace_signals: Vec<String>,  // signals sent (kill)
+    pub trace_reads: Vec<String>,
+    pub trace_failed: Vec<String>,
+    pub trace_execs: Vec<String>,
+    pub trace_net: Vec<String>,
+    pub trace_signals: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -103,22 +101,6 @@ fn get_mode(path: &Path) -> u32 {
     { 0 }
 }
 
-/// Get cumulative resource usage for all child processes.
-/// Returns (user_time_ms, sys_time_ms, max_rss_kb).
-fn get_children_rusage() -> (u64, u64, u64) {
-    #[cfg(unix)]
-    {
-        let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
-        unsafe { libc::getrusage(libc::RUSAGE_CHILDREN, &mut usage) };
-        let user_ms = (usage.ru_utime.tv_sec as u64) * 1000 + (usage.ru_utime.tv_usec as u64) / 1000;
-        let sys_ms = (usage.ru_stime.tv_sec as u64) * 1000 + (usage.ru_stime.tv_usec as u64) / 1000;
-        let max_rss = usage.ru_maxrss as u64; // KB on Linux
-        (user_ms, sys_ms, max_rss)
-    }
-    #[cfg(not(unix))]
-    { (0, 0, 0) }
-}
-
 fn hash_file(path: &Path) -> u64 {
     use std::hash::{Hash, Hasher};
     use std::collections::hash_map::DefaultHasher;
@@ -187,36 +169,103 @@ fn diff_snapshots(before: &FsSnapshot, after: &FsSnapshot) -> Vec<FsChange> {
     changes
 }
 
-/// Run the entire grid.
+/// Per-cell timeout in seconds.
+const CELL_TIMEOUT_SECS: u64 = 5;
+
+/// Max concurrent cells (threads).
+const MAX_THREADS: usize = 8;
+
+/// Run the entire grid with per-cell parallelism.
+///
+/// Each cell (context × run) gets its own sandbox directory. Context setup is
+/// replayed per cell. All cells run in parallel bounded by a thread pool.
 pub fn run_grid(
     binary: &str,
     script: &Script,
     probe_dir: &Path,
     sandbox: &Sandbox,
 ) -> Result<GridResult> {
+    // Enumerate all (context_index, run_index) pairs
+    let mut work_items: Vec<(usize, usize)> = Vec::new();
+    for (ci, ctx) in script.contexts.iter().enumerate() {
+        for (ri, run) in script.runs.iter().enumerate() {
+            if run_matches_context(run, ctx) {
+                work_items.push((ci, ri));
+            }
+        }
+    }
+
+    let total = work_items.len();
+    let completed = AtomicUsize::new(0);
+
+    // Parallel execution with bounded threads
+    let results: Vec<_> = std::thread::scope(|s| {
+        // Chunk work items across threads
+        let n_threads = MAX_THREADS.min(work_items.len()).max(1);
+        let chunk_size = work_items.len().div_ceil(n_threads);
+        let chunks: Vec<&[(usize, usize)]> = work_items.chunks(chunk_size).collect();
+
+        let handles: Vec<_> = chunks.into_iter().map(|chunk| {
+            let completed = &completed;
+            s.spawn(move || {
+                let mut results: Vec<(String, usize, Result<Observation, String>)> = Vec::new();
+                for &(ci, ri) in chunk {
+                    let ctx = &script.contexts[ci];
+                    let run = &script.runs[ri];
+
+                    // Per-cell sandbox
+                    let sandbox_dir = match tempfile::Builder::new()
+                        .prefix("bgrid_")
+                        .tempdir() {
+                        Ok(d) => d,
+                        Err(e) => {
+                            results.push((ctx.name.clone(), ri, Err(format!("create sandbox: {}", e))));
+                            continue;
+                        }
+                    };
+                    let work_dir = sandbox_dir.path();
+
+                    // Replay context setup
+                    let env_vars = match sandbox::apply_setup(work_dir, binary, &ctx.commands, probe_dir, sandbox) {
+                        Ok(env) => env,
+                        Err(e) => {
+                            results.push((ctx.name.clone(), ri, Err(format!("{}", e))));
+                            continue;
+                        }
+                    };
+
+                    // Run
+                    match run_invocation(binary, run, work_dir, &env_vars, sandbox) {
+                        Ok(obs) => results.push((ctx.name.clone(), ri, Ok(obs))),
+                        Err(e) => results.push((ctx.name.clone(), ri, Err(format!("{}", e)))),
+                    }
+
+                    let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
+                    if done.is_multiple_of(200) || done == total {
+                        eprint!("\r  {}/{} cells", done, total);
+                    }
+                }
+                results
+            })
+        }).collect();
+
+        handles.into_iter()
+            .flat_map(|h| h.join().unwrap())
+            .collect()
+    });
+
+    if total >= 200 {
+        eprintln!(); // newline after progress counter
+    }
+
+    // Collect into GridResult
     let mut cells: HashMap<(String, usize), Observation> = HashMap::new();
     let mut setup_failures: HashMap<String, String> = HashMap::new();
 
-    for ctx in &script.contexts {
-        let sandbox_dir = tempfile::Builder::new()
-            .prefix("bgrid_")
-            .tempdir()
-            .context("create sandbox")?;
-        let work_dir = sandbox_dir.path();
-
-        let env_vars = match sandbox::apply_setup(work_dir, binary, &ctx.commands, probe_dir, sandbox) {
-            Ok(env) => env,
-            Err(e) => {
-                setup_failures.insert(ctx.name.clone(), format!("{}", e));
-                continue;
-            }
-        };
-
-        for (ti, test) in script.runs.iter().enumerate() {
-            if !run_matches_context(test, ctx) { continue; }
-
-            let obs = run_invocation(binary, test, work_dir, &env_vars, sandbox)?;
-            cells.insert((ctx.name.clone(), ti), obs);
+    for (ctx_name, ri, result) in results {
+        match result {
+            Ok(obs) => { cells.insert((ctx_name, ri), obs); }
+            Err(e) => { setup_failures.entry(ctx_name).or_insert(e); }
         }
     }
 
@@ -267,6 +316,13 @@ fn run_invocation(
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
+    // New process group so timeout can kill the entire tree
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        unsafe { cmd.pre_exec(|| { libc::setpgid(0, 0); Ok(()) }); }
+    }
+
     let mut child = cmd.spawn()
         .with_context(|| format!("spawn {} {:?}", binary, test.args))?;
 
@@ -278,19 +334,22 @@ fn run_invocation(
         }
     }
 
-    let rusage_before = get_children_rusage();
     let wall_start = std::time::Instant::now();
+
+    // Per-cell timeout: kill the process group
+    let child_id = child.id();
+    let timer = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(CELL_TIMEOUT_SECS));
+        unsafe { libc::kill(-(child_id as i32), libc::SIGKILL); }
+    });
 
     let output = child.wait_with_output()
         .with_context(|| format!("wait for {} {:?}", binary, test.args))?;
+    drop(timer);
 
     let wall_time = wall_start.elapsed();
-    let rusage_after = get_children_rusage();
     let resources = ResourceUsage {
         wall_time_ms: wall_time.as_millis() as u64,
-        user_time_ms: rusage_after.0.saturating_sub(rusage_before.0),
-        sys_time_ms: rusage_after.1.saturating_sub(rusage_before.1),
-        max_rss_kb: rusage_after.2,
     };
 
     // Snapshot after and diff
