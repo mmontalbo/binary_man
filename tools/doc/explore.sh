@@ -89,17 +89,96 @@ for round in $(seq 1 "$MAX_ROUNDS"); do
     fi
 done
 
-# Summary
-echo "" >&2
-echo "=== Exploration complete ===" >&2
-echo "Results in: $WORKDIR/" >&2
-ls -la "$WORKDIR"/*.results 2>/dev/null | while read -r line; do
-    file=$(echo "$line" | awk '{print $NF}')
-    groups=$(grep -ac "^## group" "$file" || echo 0)
-    multi=$(grep -a "^## group" "$file" | grep -cv "(1 runs)" || echo 0)
-    echo "  $(basename "$file"): $groups groups ($multi identical)" >&2
-done
-
-# Output the final results file path
+# --- Characterization report ---
 final=$(ls -t "$WORKDIR"/*.results 2>/dev/null | head -1)
+if [ -z "$final" ]; then
+    echo "No results produced" >&2
+    exit 1
+fi
+
+echo "" >&2
+echo "=== Characterization Report ===" >&2
+echo "" >&2
+
+# Round history
+echo "Rounds:" >&2
+for f in "$WORKDIR"/round_*.results; do
+    [ -f "$f" ] || continue
+    r=$(basename "$f" | sed 's/round_//;s/.results//')
+    groups=$(grep -ac "^## group" "$f" || echo 0)
+    multi=$(grep -a "^## group" "$f" | grep -cv "(1 runs)" || echo 0)
+    singletons=$((groups - multi))
+    echo "  round $r: $groups groups, $singletons isolated, $multi identical" >&2
+done
+echo "" >&2
+
+# Final state from last results
+total_groups=$(grep -ac "^## group" "$final" || echo 0)
+multi_groups=$(grep -a "^## group" "$final" | grep -cv "(1 runs)" || echo 0)
+singleton_groups=$((total_groups - multi_groups))
+
+# Count total unique flags across all groups
+total_flags=$(grep -a "^## group" "$final" | sed 's/^[^:]*: //' | perl -ne '
+    my @runs = split /,\s+(?=")/, $_;
+    for my $r (@runs) { $r =~ s/^\s+|\s+$//g; print "$r\n" if $r =~ /^"/; }
+' | wc -l)
+
+echo "Final state:" >&2
+echo "  $total_flags runs in $total_groups behavioral groups" >&2
+echo "  $singleton_groups isolated (unique behavior)" >&2
+echo "  $multi_groups identical (equivalent or underexplored)" >&2
+echo "" >&2
+
+# List isolated flags (singleton groups)
+echo "Isolated:" >&2
+grep -a "^## group.*(1 runs):" "$final" | sed 's/^## group [0-9]* (1 runs): /  /' | head -20 >&2
+if [ "$singleton_groups" -gt 20 ]; then
+    echo "  ... and $((singleton_groups - 20)) more" >&2
+fi
+echo "" >&2
+
+# List remaining identical groups with alias detection
+alias_line=$(grep -a "^# Aliases:" "$final" | sed 's/^# Aliases: //')
+echo "Remaining identical groups:" >&2
+grep -a "^## group" "$final" | grep -v "(1 runs)" | while IFS= read -r group; do
+    runs_str=$(echo "$group" | sed 's/^[^:]*: //')
+    count=$(echo "$group" | grep -oP '\d+ runs' | grep -oP '\d+')
+
+    # Check if this is just an alias pair
+    is_alias="no"
+    if [ "$count" -eq 2 ] && [ -n "$alias_line" ]; then
+        # Extract the two flags
+        flags=$(echo "$runs_str" | perl -ne '
+            my @runs = split /,\s+(?=")/, $_;
+            for my $r (@runs) {
+                $r =~ s/^\s+|\s+$//g;
+                if ($r =~ /^"(-[^"]+)"/) { print "$1\n"; }
+            }
+        ')
+        f1=$(echo "$flags" | head -1)
+        f2=$(echo "$flags" | tail -1)
+        if [ -n "$f1" ] && [ -n "$f2" ]; then
+            if echo "$alias_line" | grep -qF -- "$f1 = $f2"; then
+                is_alias="yes"
+            elif echo "$alias_line" | grep -qF -- "$f2 = $f1"; then
+                is_alias="yes"
+            fi
+        fi
+    fi
+
+    if [ "$is_alias" = "yes" ]; then
+        echo "  ALIAS ($count): $runs_str" >&2
+    else
+        echo "  UNEXPLAINED ($count): $runs_str" >&2
+    fi
+done
+echo "" >&2
+
+# Untested flags
+untested=$(grep -a "^# Not tested" "$final" | sed 's/^# Not tested ([^)]*): //')
+if [ -n "$untested" ]; then
+    echo "Not tested: $untested" >&2
+fi
+
+echo "Results: $WORKDIR/" >&2
 echo "$final"
