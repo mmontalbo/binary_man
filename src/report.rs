@@ -370,16 +370,20 @@ pub fn format_exploration_report(
         }
     }
 
-    // Solo-characterized flags
+    // Solo-distinguished flags with exemplar observations
     out.push_str("## Solo (unique behavior)\n");
     let mut sorted_solo: Vec<&String> = solo_distinguished.iter().collect();
     sorted_solo.sort();
     for flag in &sorted_solo {
-        // Find a representative isolated run for this flag
         let desc = flag_info.and_then(|fi| fi.descs.get(flag.as_str()))
             .map(|d| format!("  # {}", d))
             .unwrap_or_default();
         out.push_str(&format!("  {}{}\n", flag, desc));
+
+        // Find the exemplar: the context where this flag's output is most distinctive
+        if let Some(exemplar) = find_exemplar(flag, final_metrics) {
+            out.push_str(&format!("    exemplar: {} | {}\n", exemplar.context, exemplar.summary));
+        }
     }
     out.push('\n');
 
@@ -427,6 +431,73 @@ pub fn format_exploration_report(
     }
 
     out
+}
+
+struct Exemplar {
+    context: String,
+    summary: String,
+}
+
+/// Find the most distinctive observation for a flag.
+/// Looks for the context where the flag's output differs most from its majority behavior.
+fn find_exemplar(target_stem: &str, metrics: &AnalysisMetrics) -> Option<Exemplar> {
+    // Find a run containing this flag with the most context variation
+    let mut best_run: Option<&crate::analyze::RunAnalysis> = None;
+    let mut best_groups = 0;
+
+    for run in &metrics.runs {
+        let stem = flag_stem(&run.args_str);
+        if let Some(stem) = stem {
+            if !is_combination(&stem) && canonical_flag(&stem, None) == *target_stem
+                && run.context_groups.len() > best_groups {
+                best_groups = run.context_groups.len();
+                best_run = Some(run);
+            }
+        }
+    }
+
+    let run = best_run?;
+    if run.context_groups.len() <= 1 { return None; }
+
+    // Find the smallest minority group — the most unusual context for this flag
+    let largest_idx = run.context_groups.iter().enumerate()
+        .max_by_key(|(_, (names, _))| names.len())
+        .map(|(i, _)| i)?;
+
+    let (minority_ctx, minority_obs) = run.context_groups.iter().enumerate()
+        .filter(|(i, _)| *i != largest_idx)
+        .min_by_key(|(_, (names, _))| names.len())
+        .map(|(_, group)| group)?;
+
+    let ctx_name = minority_ctx.first()?;
+
+    // Build summary: what's different about this context's output
+    let majority_obs = &run.majority_obs;
+    let line_diff = minority_obs.stdout.lines().count() as i64
+        - majority_obs.stdout.lines().count() as i64;
+    let exit_diff = if minority_obs.exit_code != majority_obs.exit_code {
+        format!(", exit {}→{}", majority_obs.exit_code.unwrap_or(-1), minority_obs.exit_code.unwrap_or(-1))
+    } else {
+        String::new()
+    };
+
+    // Preview of the distinctive output
+    let preview: String = minority_obs.stdout.lines().take(3)
+        .collect::<Vec<_>>().join(" | ");
+    let preview = if preview.len() > 60 { format!("{}...", &preview[..57]) } else { preview };
+
+    let summary = if line_diff != 0 {
+        format!("{:+} lines{}: {}", line_diff, exit_diff, preview)
+    } else if minority_obs.stdout != majority_obs.stdout {
+        format!("reordered{}: {}", exit_diff, preview)
+    } else {
+        format!("different{}: {}", exit_diff, preview)
+    };
+
+    Some(Exemplar {
+        context: format!("{} {}", run.args_str, ctx_name),
+        summary,
+    })
 }
 
 fn format_alias_map(aliases: &HashMap<String, String>) -> String {
