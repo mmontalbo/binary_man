@@ -78,35 +78,40 @@ pub fn refine(
 
     for group in interaction_groups.iter().take(MAX_INTERACTION_GROUPS) {
         let flags = extract_flags(group);
-        let positionals = extract_positionals(group);
+        let (prefix, trailing) = extract_positionals(group);
 
         let flags: Vec<_> = flags.into_iter().take(MAX_FLAGS_PER_GROUP).collect();
         if flags.len() < 2 { continue; }
 
-        // Generate singles + pairs
+        // Build args as: [prefix (subcommand)..., flags..., trailing (targets)...]
+        let build_interaction_args = |flag_args: &[String]| -> Vec<String> {
+            let mut args = prefix.clone();
+            args.extend(flag_args.iter().cloned());
+            args.extend(trailing.iter().cloned());
+            args
+        };
+
+        let base_args = {
+            let mut a = prefix.clone();
+            a.extend(trailing.iter().cloned());
+            a
+        };
+
         for flag in &flags {
-            let mut args = vec![flag.clone()];
-            args.extend(positionals.iter().cloned());
             runs.push(Run {
-                args,
+                args: build_interaction_args(std::slice::from_ref(flag)),
                 in_contexts: None,
                 stdin: None,
-                diff_from: if positionals.is_empty() { None } else {
-                    Some(positionals.clone())
-                },
+                diff_from: if base_args.is_empty() { None } else { Some(base_args.clone()) },
             });
         }
         for i in 0..flags.len() {
             for j in (i + 1)..flags.len() {
-                let mut args = vec![flags[i].clone(), flags[j].clone()];
-                args.extend(positionals.iter().cloned());
                 runs.push(Run {
-                    args,
+                    args: build_interaction_args(&[flags[i].clone(), flags[j].clone()]),
                     in_contexts: None,
                     stdin: None,
-                    diff_from: if positionals.is_empty() { None } else {
-                        Some(positionals.clone())
-                    },
+                    diff_from: if base_args.is_empty() { None } else { Some(base_args.clone()) },
                 });
             }
         }
@@ -162,9 +167,10 @@ pub fn refine(
         ranked_isolated.sort_by(|a, b| b.dimensions.len().cmp(&a.dimensions.len()));
         let top_isolated: Vec<&IsolatedCandidate> = ranked_isolated.into_iter().take(5).collect();
 
-        // Collect all positional variants seen for the indistinguishable stems
+        // Collect prefix + trailing for each indistinguishable stem's runs
         // Skip stems whose runs were slow (near timeout)
-        let mut stem_positionals: HashMap<String, Vec<Vec<String>>> = HashMap::new();
+        struct StemVariant { prefix: Vec<String>, trailing: Vec<String> }
+        let mut stem_variants: HashMap<String, Vec<StemVariant>> = HashMap::new();
         for group in &metrics.groups {
             for label in &group.run_labels {
                 if slow_runs.contains(label) { continue; }
@@ -172,11 +178,11 @@ pub fn refine(
                     if crate::report::is_combination(&stem) { continue; }
                     let canon = crate::report::canonical_flag(&stem, flag_info.map(|fi| &fi.aliases));
                     if indist_stems.contains(&canon) {
-                        let positionals: Vec<String> = parse_run_label(label).into_iter()
-                            .filter(|a| !a.starts_with('-')).collect();
-                        let entry = stem_positionals.entry(canon).or_default();
-                        if !entry.contains(&positionals) {
-                            entry.push(positionals);
+                        let args = parse_run_label(label);
+                        let (prefix, _, trailing) = split_args(&args);
+                        let entry = stem_variants.entry(canon).or_default();
+                        if !entry.iter().any(|v| v.prefix == prefix && v.trailing == trailing) {
+                            entry.push(StemVariant { prefix, trailing });
                         }
                     }
                 }
@@ -187,14 +193,15 @@ pub fn refine(
         let max_cross_pairs = 40;
 
         for stem in indist_stems {
-            let Some(target_variants) = stem_positionals.get(stem) else { continue };
+            let Some(variants) = stem_variants.get(stem) else { continue };
 
             for candidate in &top_isolated {
-                // Try each target variant for this stem
-                for positionals in target_variants {
-                    let mut args: Vec<String> = candidate.flags.clone();
-                    args.push(stem.clone());
-                    args.extend(positionals.iter().cloned());
+                for variant in variants {
+                    // Build: [prefix..., iso_flags..., stem, trailing...]
+                    let mut all_flags: Vec<String> = candidate.flags.clone();
+                    all_flags.push(stem.clone());
+                    let args = build_run_args(&variant.prefix, &all_flags, &variant.trailing);
+                    let base = build_run_args(&variant.prefix, &[], &variant.trailing);
 
                     if cross_count >= max_cross_pairs { break; }
                     let already_present = runs.iter().any(|r| r.args == args);
@@ -203,18 +210,19 @@ pub fn refine(
                             args,
                             in_contexts: None,
                             stdin: None,
-                            diff_from: if positionals.is_empty() { None } else {
-                                Some(positionals.clone())
-                            },
+                            diff_from: if base.is_empty() { None } else { Some(base) },
                         });
                         cross_count += 1;
                     }
                 }
-                // Also try the isolated flag's own positionals
+                // Also try with isolated flag's own trailing targets
                 if !candidate.positionals.is_empty() {
-                    let mut args: Vec<String> = candidate.flags.clone();
-                    args.push(stem.clone());
-                    args.extend(candidate.positionals.iter().cloned());
+                    let (iso_prefix, _, iso_trailing) = split_args(&candidate.positionals);
+                    let prefix = if let Some(v) = variants.first() { &v.prefix } else { &iso_prefix };
+                    let mut all_flags: Vec<String> = candidate.flags.clone();
+                    all_flags.push(stem.clone());
+                    let args = build_run_args(prefix, &all_flags, &iso_trailing);
+                    let base = build_run_args(prefix, &[], &iso_trailing);
 
                     if cross_count < max_cross_pairs {
                         let already_present = runs.iter().any(|r| r.args == args);
@@ -223,7 +231,7 @@ pub fn refine(
                                 args,
                                 in_contexts: None,
                                 stdin: None,
-                                diff_from: Some(candidate.positionals.clone()),
+                                diff_from: if base.is_empty() { None } else { Some(base) },
                             });
                             cross_count += 1;
                         }
@@ -287,21 +295,19 @@ pub fn refine(
     // --- Strategy 3: Untested flag pickup ---
     if let Some(untested_flags) = untested {
         let deduplicated = deduplicate_aliases(untested_flags, aliases);
-        let positionals = infer_positionals(base_script);
+        let (unt_prefix, unt_trailing) = infer_positionals(base_script);
 
         for flag in deduplicated.iter().take(MAX_UNTESTED_PER_ROUND) {
             if flag == "--help" || flag == "--version" { continue; }
-            let mut args = vec![flag.clone()];
-            args.extend(positionals.iter().cloned());
+            let args = build_run_args(&unt_prefix, std::slice::from_ref(flag), &unt_trailing);
+            let base = build_run_args(&unt_prefix, &[], &unt_trailing);
             let already_present = runs.iter().any(|r| r.args == args);
             if !already_present {
                 runs.push(Run {
                     args,
                     in_contexts: None,
                     stdin: None,
-                    diff_from: if positionals.is_empty() { None } else {
-                        Some(positionals.clone())
-                    },
+                    diff_from: if base.is_empty() { None } else { Some(base) },
                 });
             }
         }
@@ -403,6 +409,34 @@ fn parse_run_label(label: &str) -> Vec<String> {
         .collect()
 }
 
+/// Split args into (prefix, flags, trailing).
+/// Prefix = leading non-flag args (subcommand). Trailing = non-flag args after first flag.
+fn split_args(args: &[String]) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let mut prefix = Vec::new();
+    let mut flags = Vec::new();
+    let mut trailing = Vec::new();
+    let mut seen_flag = false;
+    for arg in args {
+        if arg.starts_with('-') {
+            seen_flag = true;
+            flags.push(arg.clone());
+        } else if seen_flag {
+            trailing.push(arg.clone());
+        } else {
+            prefix.push(arg.clone());
+        }
+    }
+    (prefix, flags, trailing)
+}
+
+/// Build run args preserving subcommand position: [prefix..., flags..., trailing...].
+fn build_run_args(prefix: &[String], flags: &[String], trailing: &[String]) -> Vec<String> {
+    let mut args = prefix.to_vec();
+    args.extend(flags.iter().cloned());
+    args.extend(trailing.iter().cloned());
+    args
+}
+
 /// Count unique flag arguments across runs in a group.
 fn count_unique_flags(group: &crate::analyze::BehaviorGroup) -> usize {
     let mut flags = HashSet::new();
@@ -431,15 +465,31 @@ fn extract_flags(group: &crate::analyze::BehaviorGroup) -> Vec<String> {
 }
 
 /// Extract common positional args from a group's first run label.
-fn extract_positionals(group: &crate::analyze::BehaviorGroup) -> Vec<String> {
-    if group.run_labels.is_empty() { return Vec::new(); }
+/// Extract positional args from a run label, split into (prefix, trailing).
+/// Prefix = leading non-flag args before the first flag (subcommand args).
+/// Trailing = non-flag args after the first flag (file targets).
+fn extract_positionals(group: &crate::analyze::BehaviorGroup) -> (Vec<String>, Vec<String>) {
+    if group.run_labels.is_empty() { return (Vec::new(), Vec::new()); }
     let label = &group.run_labels[0];
-    label.split('"')
+    let args: Vec<String> = label.split('"')
         .enumerate()
         .filter(|(i, _)| i % 2 == 1)
         .map(|(_, s)| s.to_string())
-        .filter(|s| !s.starts_with('-'))
-        .collect()
+        .collect();
+
+    let mut prefix = Vec::new();
+    let mut trailing = Vec::new();
+    let mut seen_flag = false;
+    for arg in &args {
+        if arg.starts_with('-') {
+            seen_flag = true;
+        } else if seen_flag {
+            trailing.push(arg.clone());
+        } else {
+            prefix.push(arg.clone());
+        }
+    }
+    (prefix, trailing)
 }
 
 /// Parse a sensitivity label into (dimension, target).
@@ -635,16 +685,13 @@ fn deduplicate_aliases(
 }
 
 /// Infer common positional args from the base script's runs.
-fn infer_positionals(script: &Script) -> Vec<String> {
-    // Find the most common non-flag trailing args
+/// Infer (prefix, trailing) from the script's runs.
+fn infer_positionals(script: &Script) -> (Vec<String>, Vec<String>) {
     for run in &script.runs {
-        let positionals: Vec<String> = run.args.iter()
-            .filter(|a| !a.starts_with('-'))
-            .cloned()
-            .collect();
-        if !positionals.is_empty() {
-            return positionals;
+        let (prefix, _, trailing) = split_args(&run.args);
+        if !prefix.is_empty() || !trailing.is_empty() {
+            return (prefix, trailing);
         }
     }
-    Vec::new()
+    (Vec::new(), Vec::new())
 }
