@@ -1,4 +1,5 @@
 pub mod analyze;
+pub mod data;
 pub mod discover;
 pub mod execute;
 pub mod output;

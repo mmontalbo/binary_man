@@ -298,128 +298,43 @@ pub fn generate_initial_script(
     // --- Latin square base contexts ---
     // Three factors, three levels each. Each level appears once per row and column.
     // Main effects (content, structure, properties) are estimable without aliasing.
+    // Data definitions live in data.rs; the Latin square assignment is here.
     //
     //              minimal         standard              deep
     // alpha        default         varied-perms          varied-times
     // numeric      varied-times    default               varied-perms
     // fielded      varied-perms    varied-times          default
 
-    // Content levels
-    let content_alpha: Vec<String> = vec!["cherry", "Apple", "banana", "Date", "elderberry", "BANANA", "apple"]
-        .into_iter().map(String::from).collect();
-    let content_numeric: Vec<String> = vec![
-        "100", "2", "30", "1", "20", "3", "10", "50", "8", "200",
-        "15", "99", "7", "42", "1000", "5",
-    ].into_iter().map(String::from).collect();
-    let content_fielded: Vec<String> = vec!["bob:30:sales", "alice:25:eng", "charlie:35:sales"]
-        .into_iter().map(String::from).collect();
+    use crate::data;
 
-    // Structure builders — each returns the setup commands for that structure level
-    let structure_minimal = |content: &[String]| -> Vec<SetupCommand> {
-        vec![
-            SetupCommand::CreateFile { path: "input.txt".into(),
-                content: FileContent::Lines(content.to_vec()) },
-            SetupCommand::CreateFile { path: "other.txt".into(),
-                content: FileContent::Lines(vec!["hello world".into()]) },
-        ]
-    };
+    let content_alpha = data::content_alpha();
+    let content_numeric = data::content_numeric();
+    let content_fielded = data::content_fielded();
 
-    let structure_standard = |content: &[String]| -> Vec<SetupCommand> {
-        vec![
-            SetupCommand::CreateFile { path: "input.txt".into(),
-                content: FileContent::Lines(content.to_vec()) },
-            SetupCommand::CreateFile { path: "other.txt".into(),
-                content: FileContent::Lines(vec!["other content".into(), "second line".into()]) },
-            SetupCommand::CreateFile { path: "a.txt".into(),
-                content: FileContent::Lines(vec!["first".into()]) },
-            SetupCommand::CreateFile { path: "b.txt".into(),
-                content: FileContent::Lines(vec!["second".into()]) },
-            SetupCommand::CreateFile { path: ".hidden".into(),
-                content: FileContent::Lines(vec!["secret".into()]) },
-            SetupCommand::CreateDir { path: "subdir".into() },
-            SetupCommand::CreateFile { path: "subdir/nested.txt".into(),
-                content: FileContent::Lines(vec!["nested".into()]) },
-            SetupCommand::CreateLink { path: "link.txt".into(), target: "input.txt".into() },
-            SetupCommand::CreateFile { path: "exec.sh".into(),
-                content: FileContent::Lines(vec!["#!/bin/sh\necho hello".into()]) },
-            SetupCommand::SetProps { path: "exec.sh".into(), props: vec![Property::Executable] },
-        ]
-    };
-
-    let structure_deep = |content: &[String]| -> Vec<SetupCommand> {
-        vec![
-            SetupCommand::CreateFile { path: "input.txt".into(),
-                content: FileContent::Lines(content.to_vec()) },
-            SetupCommand::CreateFile { path: "other.txt".into(),
-                content: FileContent::Lines(vec!["deep other".into(), "line two".into(), "line three".into()]) },
-            SetupCommand::CreateDir { path: "level1".into() },
-            SetupCommand::CreateDir { path: "level1/level2".into() },
-            SetupCommand::CreateFile { path: "level1/a.txt".into(),
-                content: FileContent::Lines(vec!["depth one".into()]) },
-            SetupCommand::CreateFile { path: "level1/level2/b.txt".into(),
-                content: FileContent::Lines(vec!["depth two".into()]) },
-            SetupCommand::CreateLink { path: "link_to_dir".into(), target: "level1".into() },
-        ]
-    };
-
-    // Property modifiers — appended after structure commands
-    let props_default = |_cmds: &mut Vec<SetupCommand>| {};
-
-    let props_perms = |cmds: &mut Vec<SetupCommand>| {
-        cmds.push(SetupCommand::CreateFile { path: "readonly.dat".into(),
-            content: FileContent::Lines(vec!["protected".into()]) });
-        cmds.push(SetupCommand::SetProps { path: "readonly.dat".into(), props: vec![Property::ReadOnly] });
-        cmds.push(SetupCommand::CreateFile { path: "-rf".into(),
-            content: FileContent::Lines(vec!["flag-like filename".into()]) });
-    };
-
-    let props_times = |cmds: &mut Vec<SetupCommand>| {
-        cmds.push(SetupCommand::CreateFile { path: "old.txt".into(),
-            content: FileContent::Lines(vec!["ancient".into()]) });
-        cmds.push(SetupCommand::SetProps { path: "old.txt".into(), props: vec![Property::MtimeOld] });
-        cmds.push(SetupCommand::CreateFile { path: "big.bin".into(), content: FileContent::Size(10000) });
-    };
-
-    // Latin square: 9 contexts
     let build_ctx = |name: &str, content: &[String],
-                         structure_fn: &dyn Fn(&[String]) -> Vec<SetupCommand>,
-                         props_fn: &dyn Fn(&mut Vec<SetupCommand>)| -> NamedContext {
+                     structure_fn: fn(&[String]) -> Vec<SetupCommand>,
+                     props_fn: fn(&mut Vec<SetupCommand>)| -> NamedContext {
         let mut cmds = structure_fn(content);
         props_fn(&mut cmds);
         NamedContext { name: name.into(), extends: None, commands: cmds }
     };
 
     let mut contexts: Vec<NamedContext> = vec![
-        // Row: alpha       | minimal + default    | standard + perms     | deep + times
-        build_ctx("alpha_minimal",  &content_alpha,   &structure_minimal,  &props_default),
-        build_ctx("alpha_standard", &content_alpha,   &structure_standard, &props_perms),
-        build_ctx("alpha_deep",     &content_alpha,   &structure_deep,     &props_times),
-        // Row: numeric     | minimal + times      | standard + default   | deep + perms
-        build_ctx("numeric_minimal",  &content_numeric,  &structure_minimal,  &props_times),
-        build_ctx("numeric_standard", &content_numeric,  &structure_standard, &props_default),
-        build_ctx("numeric_deep",     &content_numeric,  &structure_deep,     &props_perms),
-        // Row: fielded     | minimal + perms      | standard + times     | deep + default
-        build_ctx("fielded_minimal",  &content_fielded,  &structure_minimal,  &props_perms),
-        build_ctx("fielded_standard", &content_fielded,  &structure_standard, &props_times),
-        build_ctx("fielded_deep",     &content_fielded,  &structure_deep,     &props_default),
-        // Error context: empty workspace
+        build_ctx("alpha_minimal",    &content_alpha,   data::structure_minimal, data::props_default),
+        build_ctx("alpha_standard",   &content_alpha,   data::structure_standard, data::props_perms),
+        build_ctx("alpha_deep",       &content_alpha,   data::structure_deep,    data::props_times),
+        build_ctx("numeric_minimal",  &content_numeric, data::structure_minimal, data::props_times),
+        build_ctx("numeric_standard", &content_numeric, data::structure_standard, data::props_default),
+        build_ctx("numeric_deep",     &content_numeric, data::structure_deep,    data::props_perms),
+        build_ctx("fielded_minimal",  &content_fielded, data::structure_minimal, data::props_perms),
+        build_ctx("fielded_standard", &content_fielded, data::structure_standard, data::props_times),
+        build_ctx("fielded_deep",     &content_fielded, data::structure_deep,    data::props_default),
         NamedContext { name: "empty_dir".into(), extends: None, commands: vec![] },
     ];
 
     // --- Single-factor perturbations from numeric_standard (richest base) ---
     let vary_base = "numeric_standard";
-    let perturbations = vec![
-        SetupCommand::Remove { path: ".hidden".into() },
-        SetupCommand::Remove { path: "subdir".into() },
-        SetupCommand::Remove { path: "link.txt".into() },
-        SetupCommand::CreateFile { path: "input.txt".into(), content: FileContent::Empty },
-        SetupCommand::SetProps { path: "input.txt".into(), props: vec![Property::ReadOnly] },
-        SetupCommand::SetProps { path: "input.txt".into(), props: vec![Property::MtimeOld] },
-        SetupCommand::CreateFile { path: "input.txt".into(), content: FileContent::Size(1) },
-        // Environment perturbations — validated in bwrap sandbox
-        SetupCommand::SetEnv { var: "LC_ALL".into(), value: "en_US.UTF-8".into() },
-        SetupCommand::SetEnv { var: "COLUMNS".into(), value: "40".into() },
-    ];
+    let perturbations = data::perturbations();
 
     let base_ctx = contexts.iter().find(|c| c.name == vary_base).unwrap().clone();
     for perturbation in &perturbations {
@@ -467,7 +382,7 @@ pub fn generate_initial_script(
     // Pattern archetypes: when the tool takes a PATTERN, vary it to exercise
     // different regex/matching behaviors (case, word boundary, metachar, non-matching)
     let patterns: Vec<&str> = if pattern_arg.is_some() {
-        vec!["alpha", "Alpha", "a.*e", "zzzzz"]
+        data::PATTERN_ARCHETYPES.to_vec()
     } else {
         vec![]
     };
