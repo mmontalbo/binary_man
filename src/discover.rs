@@ -305,7 +305,7 @@ pub fn generate_initial_script(
     // fielded      varied-perms    varied-times          default
 
     // Content levels
-    let content_alpha: Vec<String> = vec!["cherry", "apple", "banana", "date", "elderberry"]
+    let content_alpha: Vec<String> = vec!["cherry", "Apple", "banana", "Date", "elderberry", "BANANA", "apple"]
         .into_iter().map(String::from).collect();
     let content_numeric: Vec<String> = vec![
         "100", "2", "30", "1", "20", "3", "10", "50", "8", "200",
@@ -428,6 +428,16 @@ pub fn generate_initial_script(
         cmds.push(perturbation.clone());
         contexts.push(NamedContext { name: variant_name, extends: None, commands: cmds });
     }
+
+    // Locale perturbation on alpha content (mixed case — sensitive to LC_ALL)
+    let alpha_base = contexts.iter().find(|c| c.name == "alpha_minimal").unwrap().clone();
+    let mut locale_cmds = alpha_base.commands.clone();
+    locale_cmds.push(SetupCommand::SetEnv { var: "LC_ALL".into(), value: "en_US.UTF-8".into() });
+    contexts.push(NamedContext {
+        name: "alpha_minimal / env LC_ALL=en_US.UTF-8".into(),
+        extends: None,
+        commands: locale_cmds,
+    });
 
     // --- Build runs ---
     let mut runs: Vec<Run> = Vec::new();
