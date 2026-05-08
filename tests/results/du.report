@@ -1,0 +1,45 @@
+# Exploration: du
+
+## Rounds
+  round 0: 73 isolated cumulative, 20 identical in round (discovery)
+  round 1: 94 isolated cumulative, 31 identical in round (refinement)
+  round 2: 95 isolated cumulative, 36 identical in round (refinement)
+  round 3: 95 isolated cumulative, 36 identical in round (refinement)
+
+## Distinguished: 26/26 flags
+  18 solo (unique behavior)
+  8 via combination only
+  1 behavioral aliases detected
+
+Aliases: -0 = --null, -B = --block-size, -D = --dereference-args, -L = --dereference, -P = --no-dereference, -S = --separate-dirs, -X = --exclude-from, -a = --all, -b = --bytes, -c = --total, -d = --max-depth, -h = --human-readable, -l = --count-links, -s = --summarize, -t = --threshold, -x = --one-file-system
+
+## Solo (unique behavior)
+  --apparent-size  # print apparent sizes rather than device usage; although
+  --exclude  # exclude files that match PATTERN
+  --files0-from  # summarize device usage of the
+  --inodes  # list inode usage information instead of block usage
+  --si  # like -h, but use powers of 1000 not 1024
+  --time  # show time as WORD instead of modification time:
+  -0  # end each output line with NUL, not newline
+  -B  # scale sizes by SIZE before printing them; e.g.,
+  -S  # for directories do not include size of subdirectories
+  -X  # exclude files that match any pattern in FILE
+  -a  # write counts for all files, not just directories
+  -b  # equivalent to '--apparent-size --block-size=1'
+  -c  # produce a grand total
+  -d  # print the total for a directory (or file, with --all)
+  -h  # print sizes in human readable format (e.g., 1K 234M 2G)
+  -m  # like --block-size=1M
+  -s  # display only a total for each argument
+  -t  # exclude entries smaller than SIZE if positive,
+
+## Via combination (distinguishable when paired)
+  --time-style  e.g. "--time" "--time-style" "input.txt"
+  -D  e.g. "--si" "-D"
+  -H  e.g. "-X" "-H"
+  -L  e.g. (pairwise evidence)
+  -P  e.g. (pairwise evidence)
+  -k  e.g. (pairwise evidence)
+  -l  e.g. (pairwise evidence)
+  -x  e.g. "--exclude-from=input.txt" "-x"
+

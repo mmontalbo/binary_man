@@ -1,0 +1,24 @@
+# Exploration: nl
+
+## Rounds
+  round 0: 43 isolated cumulative, 6 identical in round (discovery)
+  round 1: 43 isolated cumulative, 17 identical in round (refinement)
+
+## Distinguished: 10/11 flags
+  10 solo (unique behavior)
+  1 behavioral aliases detected
+
+Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numbering, -h = --header-numbering, -i = --line-increment, -l = --join-blank-lines, -n = --number-format, -p = --no-renumber, -s = --number-separator, -v = --starting-line-number, -w = --number-width
+
+## Solo (unique behavior)
+  -b  # use STYLE for numbering body lines
+  -d  # use CC for logical page delimiters
+  -f  # use STYLE for numbering footer lines
+  -h  # use STYLE for numbering header lines
+  -i  # line number increment at each line
+  -l  # group of NUMBER empty lines counted as one
+  -n  # insert line numbers according to FORMAT
+  -s  # add STRING after (possible) line number
+  -v  # first line number for each section
+  -w  # use NUMBER columns for line numbers
+

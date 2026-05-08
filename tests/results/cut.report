@@ -1,0 +1,28 @@
+# Exploration: cut
+
+## Rounds
+  round 0: 2 isolated cumulative, 9 identical in round (discovery)
+  round 1: 15 isolated cumulative, 13 identical in round (refinement)
+  round 2: 15 isolated cumulative, 13 identical in round (refinement)
+
+## Distinguished: 10/10 flags
+  1 solo (unique behavior)
+  9 via combination only
+  1 behavioral aliases detected
+
+Aliases: -b = --bytes, -c = --characters, -d = --delimiter, -f = --fields, -s = --only-delimited, -z = --zero-terminated
+
+## Solo (unique behavior)
+  -f  # select only these fields;  also print any line
+
+## Via combination (distinguishable when paired)
+  --complement  e.g. "--fields=1" "--complement" "input.txt" "other.txt"
+  --output-delimiter  e.g. "--fields=1" "--output-delimiter"
+  -M  e.g. "--fields=1" "-M"
+  -b  e.g. "--fields=1" "-b"
+  -c  e.g. "--fields=1" "-c"
+  -d  e.g. "--fields=1" "-d"
+  -n  e.g. (pairwise evidence)
+  -s  e.g. "--fields=1" "-s" "input.txt"
+  -z  e.g. "--fields=1" "-z" "input.txt"
+

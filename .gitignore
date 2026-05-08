@@ -2,4 +2,4 @@
 /.direnv/
 .claude/
 *.results
-tests/results/
+tests/results/*.stderr

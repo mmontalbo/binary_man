@@ -1,0 +1,28 @@
+# Exploration: uniq
+
+## Rounds
+  round 0: 4 isolated cumulative, 1 identical in round (discovery)
+  round 1: 28 isolated cumulative, 2 identical in round (refinement)
+  round 2: 28 isolated cumulative, 2 identical in round (refinement)
+
+## Distinguished: 11/11 flags
+  3 solo (unique behavior)
+  8 via combination only
+
+Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, -s = --skip-chars, -u = --unique, -w = --check-chars, -z = --zero-terminated
+
+## Solo (unique behavior)
+  -f  # avoid comparing the first N fields
+  -s  # avoid comparing the first N characters
+  -w  # compare no more than N characters in lines
+
+## Via combination (distinguishable when paired)
+  --all-repeated  e.g. "-w" "--all-repeated"
+  --group  e.g. "-f" "--group"
+  -D  e.g. "-w" "-D"
+  -c  e.g. "-w" "-c"
+  -d  e.g. "-s" "-d"
+  -i  e.g. "-s" "-i"
+  -u  e.g. "-f" "-u"
+  -z  e.g. "-f" "-z"
+

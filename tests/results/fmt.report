@@ -1,0 +1,21 @@
+# Exploration: fmt
+
+## Rounds
+  round 0: 32 isolated cumulative, 12 identical in round (discovery)
+  round 1: 32 isolated cumulative, 12 identical in round (refinement)
+
+## Distinguished: 7/7 flags
+  7 solo (unique behavior)
+  1 behavioral aliases detected
+
+Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t = --tagged-paragraph, -u = --uniform-spacing, -w = --width
+
+## Solo (unique behavior)
+  -c  # preserve indentation of first two lines
+  -g  # goal width (default of 93% of width)
+  -p  # reformat only lines beginning with STRING,
+  -s  # split long lines, but do not refill
+  -t  # indentation of first line different from second
+  -u  # one space between words, two after sentences
+  -w  # maximum line width (default of 75 columns)
+

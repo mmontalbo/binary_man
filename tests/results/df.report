@@ -1,0 +1,29 @@
+# Exploration: df
+
+## Rounds
+  round 0: 85 isolated cumulative, 7 identical in round (discovery)
+  round 1: 85 isolated cumulative, 7 identical in round (refinement)
+
+## Distinguished: 16/16 flags
+  16 solo (unique behavior)
+
+Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a = --all, -h = --human-readable, -i = --inodes, -l = --local, -t = --type, -x = --exclude-type
+
+## Solo (unique behavior)
+  --no-sync  # do not invoke sync before getting usage info (default)
+  --output
+  --sync  # invoke sync before getting usage info
+  --total  # elide all entries insignificant to available space,
+  -B  # scale sizes by SIZE before printing them; e.g.,
+  -H  # print sizes in powers of 1000 (e.g., 1.1G)
+  -P  # use the POSIX output format
+  -T  # print file system type
+  -a  # include pseudo, duplicate, inaccessible file systems
+  -h  # print sizes in powers of 1024 (e.g., 1023M)
+  -i  # list inode information instead of block usage
+  -k  # like --block-size=1K
+  -l  # limit listing to local file systems
+  -t  # limit listing to file systems of type TYPE
+  -v  # (ignored)
+  -x  # limit listing to file systems not of type TYPE
+

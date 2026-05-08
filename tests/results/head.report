@@ -1,0 +1,23 @@
+# Exploration: head
+
+## Rounds
+  round 0: 22 isolated cumulative, 13 identical in round (discovery)
+  round 1: 22 isolated cumulative, 13 identical in round (refinement)
+
+## Distinguished: 4/7 flags
+  4 solo (unique behavior)
+  3 indistinguishable under tested conditions
+
+Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
+
+## Solo (unique behavior)
+  -c  # print the first NUM bytes of each file;
+  -n  # print the first NUM lines instead of the first 10;
+  -v  # always print headers giving file names
+  -z  # line delimiter is NUL, not newline
+
+## Indistinguishable under tested conditions
+  UNEXPLAINED (3): --quiet, --silent, -q
+  UNEXPLAINED (3): --quiet, --silent, -q
+  UNEXPLAINED (3): --quiet, --silent, -q
+

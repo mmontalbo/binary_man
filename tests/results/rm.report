@@ -1,0 +1,33 @@
+# Exploration: rm
+
+## Rounds
+  round 0: 12 isolated cumulative, 10 identical in round (discovery)
+  round 1: 12 isolated cumulative, 11 identical in round (refinement)
+
+## Distinguished: 10/12 flags
+  2 solo (unique behavior)
+  8 via combination only
+  1 behavioral aliases detected
+  2 indistinguishable under tested conditions
+
+Aliases: -d = --dir, -f = --force, -v = --verbose
+
+## Solo (unique behavior)
+  -f  # ignore nonexistent files and arguments, never prompt
+  -v  # explain what is being done
+
+## Via combination (distinguishable when paired)
+  --no-preserve-root  e.g. (pairwise evidence)
+  --one-file-system  e.g. (pairwise evidence)
+  --preserve-root  e.g. (pairwise evidence)
+  --recursive  e.g. (pairwise evidence)
+  -I  e.g. (pairwise evidence)
+  -R  e.g. (pairwise evidence)
+  -d  e.g. (pairwise evidence)
+  -r  e.g. (pairwise evidence)
+
+## Indistinguishable under tested conditions
+  UNEXPLAINED (2): --interactive, -i
+  UNEXPLAINED (2): --interactive, -i
+  UNEXPLAINED (2): --interactive, -i
+

@@ -1,0 +1,262 @@
+# Exploration: sort
+
+## Rounds
+  round 0: 74 isolated cumulative, 27 identical in round (discovery)
+  round 1: 92 isolated cumulative, 34 identical in round (refinement)
+  round 2: 99 isolated cumulative, 34 identical in round (refinement)
+  round 3: 99 isolated cumulative, 34 identical in round (refinement)
+
+## Distinguished: 30/30 flags
+  21 solo (unique behavior)
+  9 via combination only
+  1 behavioral aliases detected
+
+Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --temporary-directory, -V = --version-sort, -b = --ignore-leading-blanks, -d = --dictionary-order, -f = --ignore-case, -g = --general-numeric-sort, -h = --human-numeric-sort, -i = --ignore-nonprinting, -k = --key, -m = --merge, -n = --numeric-sort, -o = --output, -r = --reverse, -s = --stable, -t = --field-separator, -u = --unique, -z = --zero-terminated
+
+## Solo (unique behavior)
+  --batch-size  # merge at most NMERGE inputs at once;
+    exemplar: "--batch-size=nmerge" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
+    base:
+    flag:
+  --debug  # annotate the part of the line used to sort,
+    exemplar: "--debug" "input.txt" "other.txt" in alpha_minimal (-20 lines)
+    base:
+      Apple
+      BANANA
+      Date
+      apple
+      banana
+            ...
+    flag:
+      Apple
+      _____
+      BANANA
+      ______
+      Date
+            ...
+  --files0-from  # read input from the files specified by
+    exemplar: "--files0-from=f" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
+    base:
+    flag:
+  --parallel  # change the number of sorts run concurrently to N
+    exemplar: "--parallel=10" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      Apple
+      BANANA
+      Date
+      apple
+      banana
+            ...
+    flag:
+      Apple
+      BANANA
+      Date
+      apple
+      banana
+            ...
+  --sort  # sort according to WORD:
+    exemplar: "--sort=auto" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
+  -C
+    exemplar: "-C" "input.txt" in empty_dir (different, exit 1→2)
+    base:
+    flag:
+  -R  # shuffle, but group identical keys.  See shuf(1)
+    exemplar: "-R" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      Apple
+      BANANA
+      Date
+      apple
+      banana
+            ...
+    flag:
+      apple
+      hello world
+      Apple
+      BANANA
+      cherry
+            ...
+  -S  # use SIZE for main memory buffer
+    exemplar: "-S" "." in numeric_standard / env COLUMNS=40 (different, exit 2→127)
+    base:
+    flag:
+  -T  # use DIR for temporaries, not $TMPDIR or /tmp;
+    exemplar: "-T" "input.txt" "other.txt" in empty_dir (-2 lines, exit 0→2)
+    base:
+    flag:
+  -V  # natural sort of (version) numbers within text
+    exemplar: "-V" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      Apple
+      BANANA
+      Date
+      apple
+      banana
+            ...
+    flag:
+      Apple
+      BANANA
+      Date
+      apple
+      banana
+            ...
+  -b  # ignore leading blanks
+    exemplar: "-b" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      Apple
+      BANANA
+      Date
+      apple
+      banana
+            ...
+    flag:
+      Apple
+      BANANA
+      Date
+      apple
+      banana
+            ...
+  -d  # consider only blanks and alphanumeric characters
+    exemplar: "-d" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      Apple
+      BANANA
+      Date
+      apple
+      banana
+            ...
+    flag:
+      Apple
+      BANANA
+      Date
+      apple
+      banana
+            ...
+  -f  # fold lower case to upper case characters
+    exemplar: "-f" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      Apple
+      BANANA
+      Date
+      apple
+      banana
+            ...
+    flag:
+      Apple
+      apple
+      BANANA
+      banana
+      cherry
+            ...
+  -i  # consider only printable characters
+    exemplar: "-i" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      Apple
+      BANANA
+      Date
+      apple
+      banana
+            ...
+    flag:
+      Apple
+      BANANA
+      Date
+      apple
+      banana
+            ...
+  -k  # sort via a key; KEYDEF gives location and type
+    exemplar: "-k" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
+    base:
+    flag:
+  -m  # merge already sorted files; do not sort
+    exemplar: "-m" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      Apple
+      BANANA
+      Date
+      apple
+      banana
+            ...
+    flag:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
+  -o  # write result to FILE instead of standard output
+    exemplar: "-o" "input.txt" "other.txt" in alpha_minimal (different)
+    base:
+      Apple
+      BANANA
+      Date
+      apple
+      banana
+            ...
+    flag:
+  -r  # reverse the result of comparisons
+    exemplar: "-r" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      Apple
+      BANANA
+      Date
+      apple
+      banana
+            ...
+    flag:
+      hello world
+      elderberry
+      cherry
+      banana
+      apple
+            ...
+  -t  # use SEP instead of non-blank to blank transition
+    exemplar: "-t" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
+    base:
+    flag:
+  -u  # with -c, check for strict ordering;
+    exemplar: "-u" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      Apple
+      BANANA
+      Date
+      apple
+      banana
+            ...
+    flag:
+      Apple
+      BANANA
+      Date
+      apple
+      banana
+            ...
+  -z  # line delimiter is NUL, not newline
+    exemplar: "-z" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      Apple
+      BANANA
+      Date
+      apple
+      banana
+            ...
+    flag:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
+
+## Via combination (distinguishable when paired)
+  --check  e.g. "-o" "--check" "."
+  --compress-program  e.g. "-o" "--compress-program" "."
+  --random-source  e.g. "-o" "--random-source" "input.txt"
+  -M  e.g. "-R" "-M" "input.txt" "other.txt"
+  -c  e.g. "-R" "-c" "input.txt"
+  -g  e.g. (pairwise evidence)
+  -h  e.g. (pairwise evidence)
+  -n  e.g. (pairwise evidence)
+  -s  e.g. (pairwise evidence)
+

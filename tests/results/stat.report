@@ -1,0 +1,23 @@
+# Exploration: stat
+
+## Rounds
+  round 0: 3 isolated cumulative, 1 identical in round (discovery)
+  round 1: 3 isolated cumulative, 2 identical in round (refinement)
+
+## Distinguished: 7/7 flags
+  2 solo (unique behavior)
+  5 via combination only
+
+Aliases: -L = --dereference, -f = --file-system, -t = --terse
+
+## Solo (unique behavior)
+  --cached  # specify how to use cached attributes;
+  -c  # --format=FORMAT   use the specified FORMAT instead of the default;
+
+## Via combination (distinguishable when paired)
+  --format  e.g. (pairwise evidence)
+  --printf  e.g. (pairwise evidence)
+  -L  e.g. (pairwise evidence)
+  -f  e.g. (pairwise evidence)
+  -t  e.g. (pairwise evidence)
+

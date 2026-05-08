@@ -1,0 +1,20 @@
+# Exploration: fold
+
+## Rounds
+  round 0: 12 isolated cumulative, 3 identical in round (discovery)
+  round 1: 22 isolated cumulative, 7 identical in round (refinement)
+  round 2: 22 isolated cumulative, 7 identical in round (refinement)
+
+## Distinguished: 3/3 flags
+  1 solo (unique behavior)
+  2 via combination only
+
+Aliases: -b = --bytes, -s = --spaces, -w = --width
+
+## Solo (unique behavior)
+  -w  # use WIDTH columns instead of 80
+
+## Via combination (distinguishable when paired)
+  -b  e.g. "--width=10" "-b" "input.txt"
+  -s  e.g. "--width=10" "-s" "input.txt"
+

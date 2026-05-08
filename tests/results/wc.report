@@ -1,0 +1,23 @@
+# Exploration: wc
+
+## Rounds
+  round 0: 22 isolated cumulative, 9 identical in round (discovery)
+  round 1: 22 isolated cumulative, 16 identical in round (refinement)
+
+## Distinguished: 7/7 flags
+  5 solo (unique behavior)
+  2 via combination only
+
+Aliases: -L = --max-line-length, -c = --bytes, -l = --lines, -m = --chars, -w = --words
+
+## Solo (unique behavior)
+  --files0-from  # read input from the files specified by
+  --total  # when to print a line with total counts;
+  -L  # print the maximum display width
+  -l  # print the newline counts
+  -w  # print the word counts
+
+## Via combination (distinguishable when paired)
+  -c  e.g. (pairwise evidence)
+  -m  e.g. (pairwise evidence)
+
