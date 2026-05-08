@@ -113,14 +113,23 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, skeleton: bool)
     for round in 1..=max_rounds {
         let prev_isolated_count = ever_isolated.len();
 
+        // Compute indistinguishable flag stems for targeted refinement
+        let indist_stems = report::indistinguishable_stems(
+            &current_metrics, &ever_isolated, Some(&flag_info.aliases));
+
+        let refine_state = refine::RefineState {
+            ever_isolated: &ever_isolated,
+            unproductive: &unproductive,
+            indist_stems: &indist_stems,
+            round: round - 1,
+            max_rounds,
+        };
+
         let delta = refine::refine(
             &current_script,
             &current_metrics,
             Some(&flag_info),
-            &ever_isolated,
-            &unproductive,
-            round - 1,
-            max_rounds,
+            &refine_state,
         );
 
         let Some(delta_script) = delta else {

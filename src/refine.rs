@@ -4,7 +4,7 @@
 //! with experiments designed to split remaining identical groups.
 //! Returns None when converged (no further refinement possible).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::analyze::AnalysisMetrics;
 use crate::discover::FlagInfo;
@@ -17,20 +17,28 @@ const MAX_FLAGS_PER_GROUP: usize = 8;
 const MAX_UNTESTED_PER_ROUND: usize = 20;
 
 /// Refine an experiment based on analysis metrics.
+/// Accumulated state from previous rounds, passed to refine.
+pub struct RefineState<'a> {
+    pub ever_isolated: &'a HashSet<String>,
+    pub unproductive: &'a HashSet<String>,
+    pub indist_stems: &'a [String],
+    pub round: usize,
+    pub max_rounds: usize,
+}
+
 /// Returns None if converged (no further refinement possible).
-///
-/// `ever_isolated` contains run labels that were isolated in any previous round.
-/// `unproductive` contains run labels that showed no signal (all errors, or in large
-/// identical groups with the same target). Both are excluded from refinement.
 pub fn refine(
     base_script: &Script,
     metrics: &AnalysisMetrics,
     flag_info: Option<&FlagInfo>,
-    ever_isolated: &HashSet<String>,
-    unproductive: &HashSet<String>,
-    round: usize,
-    max_rounds: usize,
+    state: &RefineState,
 ) -> Option<Script> {
+    let ever_isolated = state.ever_isolated;
+    let unproductive = state.unproductive;
+    let indist_stems = state.indist_stems;
+    let round = state.round;
+    let max_rounds = state.max_rounds;
+
     if round >= max_rounds {
         return None;
     }
@@ -105,101 +113,102 @@ pub fn refine(
         strategies.push("interaction");
     }
 
-    // --- Strategy 1b: Cross-group interaction ---
-    // Pair identical-group flags with isolated flags that share sensitivity dimensions.
-    // Only generate pairs where both sides showed sensitivity to the same dimension
-    // (content, structure, size, mtime, etc.). This avoids uninformative pairs and
-    // reduces cell count dramatically.
+    // --- Strategy 1b: Stem-guided cross-group interaction ---
+    // Target specific indistinguishable flag stems (from report-level analysis).
+    // For each indistinguishable stem, pair it with top isolated flags across
+    // all positional arg variants (file AND directory targets).
     let isolated_groups: Vec<_> = metrics.groups.iter()
         .filter(|g| g.isolated() && !unproductive.contains(&g.run_labels[0]))
         .collect();
 
-    if !isolated_groups.is_empty() && !unexplained.is_empty() {
-        // Build dimension sets for isolated groups
+    if !isolated_groups.is_empty() && !indist_stems.is_empty() {
+        // Build isolated candidates with their positionals
         struct IsolatedCandidate {
-            args: Vec<String>,
+            flags: Vec<String>,
+            positionals: Vec<String>,
             dimensions: HashSet<String>,
         }
         let isolated_candidates: Vec<IsolatedCandidate> = isolated_groups.iter()
             .filter(|g| !g.sensitivity.is_empty())
             .map(|g| {
+                let args = parse_run_label(&g.run_labels[0]);
                 let dims: HashSet<String> = g.sensitivity.iter()
                     .map(|s| parse_sensitivity_label(s).0)
                     .collect();
                 IsolatedCandidate {
-                    args: parse_run_label(&g.run_labels[0]),
+                    flags: args.iter().filter(|a| a.starts_with('-')).cloned().collect(),
+                    positionals: args.iter().filter(|a| !a.starts_with('-')).cloned().collect(),
                     dimensions: dims,
                 }
             })
-            .filter(|c| !c.args.is_empty())
+            .filter(|c| !c.flags.is_empty())
             .collect();
 
-        let mut cross_count = 0;
-        let max_cross_pairs = 30; // cap total cross-group pairs to control cell count
-        for group in unexplained.iter().take(2) {
-            let group_dims: HashSet<String> = group.sensitivity.iter()
-                .map(|s| parse_sensitivity_label(s).0)
-                .collect();
-            let group_flags = extract_flags(group);
-            let group_positionals = extract_positionals(group);
+        // Rank isolated candidates by dimension count
+        let mut ranked_isolated: Vec<&IsolatedCandidate> = isolated_candidates.iter().collect();
+        ranked_isolated.sort_by(|a, b| b.dimensions.len().cmp(&a.dimensions.len()));
+        let top_isolated: Vec<&IsolatedCandidate> = ranked_isolated.into_iter().take(5).collect();
 
-            // Find isolated flags that share at least one sensitivity dimension.
-            // Fall back to top isolated by dimension count when no overlap found.
-            let matching_isolated: Vec<&IsolatedCandidate> = {
-                let mut matched: Vec<&IsolatedCandidate> = if group_dims.is_empty() {
-                    Vec::new()
-                } else {
-                    isolated_candidates.iter()
-                        .filter(|c| !c.dimensions.is_disjoint(&group_dims))
-                        .collect()
-                };
-                matched.sort_by(|a, b| {
-                    let a_overlap = a.dimensions.intersection(&group_dims).count();
-                    let b_overlap = b.dimensions.intersection(&group_dims).count();
-                    b_overlap.cmp(&a_overlap)
-                });
-                let mut result: Vec<&IsolatedCandidate> = matched.into_iter().take(3).collect();
-                // Fallback: if no dimension overlap found, use top by dimension count
-                if result.is_empty() {
-                    let mut ranked: Vec<&IsolatedCandidate> = isolated_candidates.iter().collect();
-                    ranked.sort_by(|a, b| b.dimensions.len().cmp(&a.dimensions.len()));
-                    result = ranked.into_iter().take(2).collect();
+        // Collect all positional variants seen for the indistinguishable stems
+        let mut stem_positionals: HashMap<String, Vec<Vec<String>>> = HashMap::new();
+        for group in &metrics.groups {
+            for label in &group.run_labels {
+                if let Some(stem) = crate::report::flag_stem(label) {
+                    if crate::report::is_combination(&stem) { continue; }
+                    let canon = crate::report::canonical_flag(&stem, flag_info.map(|fi| &fi.aliases));
+                    if indist_stems.contains(&canon) {
+                        let positionals: Vec<String> = parse_run_label(label).into_iter()
+                            .filter(|a| !a.starts_with('-')).collect();
+                        let entry = stem_positionals.entry(canon).or_default();
+                        if !entry.contains(&positionals) {
+                            entry.push(positionals);
+                        }
+                    }
                 }
-                result
-            };
+            }
+        }
 
-            for candidate in &matching_isolated {
-                let iso_flags: Vec<&String> = candidate.args.iter()
-                    .filter(|a| a.starts_with('-'))
-                    .collect();
-                if iso_flags.is_empty() { continue; }
+        let mut cross_count = 0;
+        let max_cross_pairs = 40;
 
-                for gflag in group_flags.iter().take(MAX_FLAGS_PER_GROUP) {
-                    // Try both the group's positionals AND the isolated flag's positionals.
-                    // Flags that are no-ops on "input.txt" might show effect on "."
-                    let iso_positionals: Vec<String> = candidate.args.iter()
-                        .filter(|a| !a.starts_with('-')).cloned().collect();
-                    let targets: Vec<Vec<String>> = if group_positionals != iso_positionals && !iso_positionals.is_empty() {
-                        vec![group_positionals.clone(), iso_positionals]
-                    } else {
-                        vec![group_positionals.clone()]
-                    };
+        for stem in indist_stems {
+            let Some(target_variants) = stem_positionals.get(stem) else { continue };
 
-                    for positionals in &targets {
-                        let mut args: Vec<String> = iso_flags.iter().map(|s| s.to_string()).collect();
-                        args.push(gflag.clone());
-                        args.extend(positionals.iter().cloned());
+            for candidate in &top_isolated {
+                // Try each target variant for this stem
+                for positionals in target_variants {
+                    let mut args: Vec<String> = candidate.flags.clone();
+                    args.push(stem.clone());
+                    args.extend(positionals.iter().cloned());
 
-                        if cross_count >= max_cross_pairs { break; }
+                    if cross_count >= max_cross_pairs { break; }
+                    let already_present = runs.iter().any(|r| r.args == args);
+                    if !already_present {
+                        runs.push(Run {
+                            args,
+                            in_contexts: None,
+                            stdin: None,
+                            diff_from: if positionals.is_empty() { None } else {
+                                Some(positionals.clone())
+                            },
+                        });
+                        cross_count += 1;
+                    }
+                }
+                // Also try the isolated flag's own positionals
+                if !candidate.positionals.is_empty() {
+                    let mut args: Vec<String> = candidate.flags.clone();
+                    args.push(stem.clone());
+                    args.extend(candidate.positionals.iter().cloned());
+
+                    if cross_count < max_cross_pairs {
                         let already_present = runs.iter().any(|r| r.args == args);
                         if !already_present {
                             runs.push(Run {
                                 args,
                                 in_contexts: None,
                                 stdin: None,
-                                diff_from: if positionals.is_empty() { None } else {
-                                    Some(positionals.clone())
-                                },
+                                diff_from: Some(candidate.positionals.clone()),
                             });
                             cross_count += 1;
                         }

@@ -13,7 +13,7 @@ use crate::output;
 /// `"--width=10" "."` → `"--width"`
 /// `"--full-time" "-b" "."` → `"--full-time -b"` (combination)
 /// Returns None for runs with no flags (bare positional args).
-fn flag_stem(label: &str) -> Option<String> {
+pub fn flag_stem(label: &str) -> Option<String> {
     let args: Vec<&str> = label.split('"')
         .enumerate()
         .filter(|(i, _)| i % 2 == 1)
@@ -33,7 +33,7 @@ fn flag_stem(label: &str) -> Option<String> {
 
 /// Resolve a flag stem to its canonical form via alias map.
 /// "-b" with alias -b = --ignore-leading-blanks → "-b" (keep shorter form)
-fn canonical_flag(stem: &str, aliases: Option<&HashMap<String, String>>) -> String {
+pub fn canonical_flag(stem: &str, aliases: Option<&HashMap<String, String>>) -> String {
     if let Some(aliases) = aliases {
         // For single flags, check alias
         if !stem.contains(' ') {
@@ -47,8 +47,54 @@ fn canonical_flag(stem: &str, aliases: Option<&HashMap<String, String>>) -> Stri
 }
 
 /// Classify a flag stem as solo (one flag) or combination (multiple flags).
-fn is_combination(stem: &str) -> bool {
+pub fn is_combination(stem: &str) -> bool {
     stem.contains(' ')
+}
+
+/// Compute indistinguishable flag stems from metrics + ever_isolated.
+/// Returns canonical flag stems that are in identical groups and haven't been
+/// distinguished by any run (solo or combination) across all rounds.
+pub fn indistinguishable_stems(
+    metrics: &AnalysisMetrics,
+    ever_isolated: &HashSet<String>,
+    aliases: Option<&HashMap<String, String>>,
+) -> Vec<String> {
+    // Build the distinguished set (same logic as format_exploration_report)
+    let mut distinguished: HashSet<String> = HashSet::new();
+    for label in ever_isolated {
+        let Some(stem) = flag_stem(label) else { continue };
+        if is_combination(&stem) {
+            for part in stem.split(' ') {
+                distinguished.insert(canonical_flag(part, aliases));
+            }
+        } else {
+            distinguished.insert(canonical_flag(&stem, aliases));
+        }
+    }
+
+    // Also include pairwise evidence
+    let pairwise = metrics.pairwise_distinguished();
+    for flag in &pairwise {
+        distinguished.insert(canonical_flag(flag, aliases));
+    }
+
+    // Find stems in identical groups that aren't distinguished
+    let mut indistinguishable: HashSet<String> = HashSet::new();
+    for group in &metrics.groups {
+        if group.isolated() { continue; }
+        for label in &group.run_labels {
+            let Some(stem) = flag_stem(label) else { continue };
+            if is_combination(&stem) { continue; }
+            let canon = canonical_flag(&stem, aliases);
+            if !distinguished.contains(&canon) {
+                indistinguishable.insert(canon);
+            }
+        }
+    }
+
+    let mut sorted: Vec<String> = indistinguishable.into_iter().collect();
+    sorted.sort();
+    sorted
 }
 
 /// Format analysis results for a probe execution.
