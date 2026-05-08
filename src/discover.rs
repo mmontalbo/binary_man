@@ -416,6 +416,9 @@ pub fn generate_initial_script(
         SetupCommand::SetProps { path: "input.txt".into(), props: vec![Property::ReadOnly] },
         SetupCommand::SetProps { path: "input.txt".into(), props: vec![Property::MtimeOld] },
         SetupCommand::CreateFile { path: "input.txt".into(), content: FileContent::Size(1) },
+        // Environment perturbations — validated in bwrap sandbox
+        SetupCommand::SetEnv { var: "LC_ALL".into(), value: "en_US.UTF-8".into() },
+        SetupCommand::SetEnv { var: "COLUMNS".into(), value: "40".into() },
     ];
 
     let base_ctx = contexts.iter().find(|c| c.name == vary_base).unwrap().clone();
