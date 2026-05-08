@@ -22,14 +22,13 @@ bgrid --dry-run <binary> <file.probe> show resolved grid without executing
 (varying file content, directory structure, permissions, timestamps),
 runs every flag across every context in parallel, analyzes behavioral
 groups, refines with cross-group interactions, and converges when no
-new flags are distinguished. Output is a characterization report:
+new flags are distinguished. Output is a distinguishability report:
 
 ```
-## Characterization: 22/49 flags
-  12 solo (unique behavior)
-  10 via combination only
-  4 uncharacterized (in identical groups)
-  7 untested
+## Distinguished: 59/73 flags
+  33 solo (unique behavior)
+  26 via combination only
+  2 untested
 ```
 
 For subcommands: `bgrid git diff` explores `git diff`.
@@ -56,12 +55,14 @@ See [LANGUAGE.md](LANGUAGE.md) for the probe language specification.
 3. **Analysis** groups runs by identical per-context observations.
    Runs in the same group are behaviorally equivalent. Singleton
    groups are isolated — that flag has unique behavior.
-4. **Refinement** generates new experiments to split identical groups:
-   cross-group flag pairing, sensitivity-graduated contexts, untested
-   flag pickup. Converges when no new flags are distinguished.
-5. **Report** shows characterization rate: unique flags distinguished
-   vs total flags discovered, with solo/combination/uncharacterized
-   breakdown.
+4. **Refinement** generates new experiments targeting specific
+   indistinguishable flag stems: cross-group flag pairing (modifier +
+   mode flag), sensitivity-graduated contexts, untested flag pickup.
+   Converges when no new flags are distinguished.
+5. **Report** shows distinguishability rate: unique flags distinguished
+   vs total flags discovered, with solo/combination/indistinguishable
+   breakdown. Uses delta-based grouping (flags grouped by what they
+   change, not what the output looks like).
 
 ## Requirements
 
