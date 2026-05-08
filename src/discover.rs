@@ -474,21 +474,63 @@ pub fn generate_initial_script(
         }
     };
 
+    // Multi-file helper: build args with two file targets
+    let build_args_multi = |flag: Option<&str>, flag_value: Option<&str>,
+                            pat: Option<&str>, target1: &str, target2: &str| -> Vec<String> {
+        let mut args = sub_prefix.clone();
+        if let Some(f) = flag {
+            if let Some(v) = flag_value {
+                args.push(format!("{}={}", f, v));
+            } else {
+                args.push(f.to_string());
+            }
+        }
+        if let Some(p) = pat { args.push(p.to_string()); }
+        args.push(target1.to_string());
+        args.push(target2.to_string());
+        args
+    };
+
+    // Multi-file run emitter: each flag with two file targets
+    let emit_multifile_runs = |pat: Option<&str>, t1: &str, t2: &str, runs: &mut Vec<Run>| {
+        let base = build_args_multi(None, None, pat, t1, t2);
+        runs.push(Run { args: base.clone(), in_contexts: None, stdin: None, diff_from: None });
+
+        for flag in &short_flags {
+            runs.push(Run {
+                args: build_args_multi(Some(flag), None, pat, t1, t2),
+                in_contexts: None, stdin: None, diff_from: Some(base.clone()),
+            });
+        }
+        for (flag, hint) in &long_flags {
+            let val = hint.as_ref().map(|h| default_value(h));
+            runs.push(Run {
+                args: build_args_multi(Some(flag), val.as_deref(), pat, t1, t2),
+                in_contexts: None, stdin: None, diff_from: Some(base.clone()),
+            });
+        }
+    };
+
+    // Determine second file target — pick a file that exists in most contexts
+    let second_file = if file_target == "input.txt" { "other.txt" } else { "input.txt" };
+
     if has_patterns {
         // Pattern-taking tool: emit runs for each pattern × target
         for pat in &patterns {
             emit_flag_runs(Some(pat), file_target, &mut runs);
         }
         if use_dir {
-            // Only use the primary pattern for directory runs (avoid combinatorial explosion)
             emit_flag_runs(Some(patterns[0]), ".", &mut runs);
         }
+        // Multi-file with primary pattern
+        emit_multifile_runs(Some(patterns[0]), file_target, second_file, &mut runs);
     } else if has_file_arg {
-        // File-taking tool: emit file + directory runs
+        // File-taking tool: emit file + directory + multi-file runs
         emit_flag_runs(None, file_target, &mut runs);
         if use_dir {
             emit_flag_runs(None, ".", &mut runs);
         }
+        emit_multifile_runs(None, file_target, second_file, &mut runs);
     } else {
         // No positional arg — flat run list
         for flag in &short_flags {
