@@ -79,8 +79,18 @@ impl ObsKey {
         let stdout_delta = if reference.stdout == obs.stdout {
             "=".to_string()
         } else if added.is_empty() && removed.is_empty() {
-            // Same lines, different order
-            "reordered".to_string()
+            // Same lines, different order — encode as permutation vector.
+            // Map each output line to its position in the reference.
+            // Different reorderings (reverse vs size-sort) produce different vectors.
+            let ref_vec: Vec<&str> = reference.stdout.lines().collect();
+            let obs_vec: Vec<&str> = obs.stdout.lines().collect();
+            let permutation: Vec<String> = obs_vec.iter().map(|line| {
+                // Find position in reference (first match for duplicate handling)
+                ref_vec.iter().position(|r| r == line)
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|| "?".to_string())
+            }).collect();
+            format!("perm[{}]", permutation.join(","))
         } else {
             format!("+[{}] -[{}]", added.join("|"), removed.join("|"))
         };
