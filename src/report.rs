@@ -294,30 +294,19 @@ pub fn format_exploration_report(
         }
     }
 
-    // Collapse distinguished sets through behavioral aliases
-    let collapse_alias = |s: &String| -> String {
-        behavioral_aliases.get(s).unwrap_or(s).clone()
-    };
-    let solo_collapsed: HashSet<String> = solo_distinguished.iter().map(collapse_alias).collect();
-    let combo_collapsed: HashSet<String> = combo_distinguished.iter()
-        .map(collapse_alias)
-        .filter(|s| !solo_collapsed.contains(s))
+    let all_distinguished: HashSet<&String> = solo_distinguished.iter()
+        .chain(combo_distinguished.iter())
         .collect();
-    let all_distinguished: HashSet<String> = solo_collapsed.iter()
-        .chain(combo_collapsed.iter())
-        .cloned().collect();
 
-    // Compute unique stem count: collapse behavioral aliases into the denominator
+    // Compute unique stem count from --help aliases only (not behavioral aliases).
+    // Behavioral aliases are reported separately — they may be genuinely different
+    // flags that are indistinguishable under tested conditions.
     let mut all_stems: HashSet<String> = HashSet::new();
     if let Some(fi) = flag_info {
         for flag in &fi.all_flags {
-            let canon = canonical_flag(flag, aliases);
-            // Map through behavioral aliases to the primary
-            let primary = behavioral_aliases.get(&canon).unwrap_or(&canon).clone();
-            all_stems.insert(primary);
+            all_stems.insert(canonical_flag(flag, aliases));
         }
     }
-    // Remove untested (--help, --version)
     let untested_count = final_metrics.untested_flags.len();
     let unique_stem_count = all_stems.len();
 
@@ -354,9 +343,12 @@ pub fn format_exploration_report(
     let untested = final_metrics.untested_flags.len();
     let distinguished_count = all_distinguished.len().min(unique_stem_count);
     out.push_str(&format!("## Distinguished: {}/{} flags\n", distinguished_count, unique_stem_count));
-    out.push_str(&format!("  {} solo (unique behavior)\n", solo_collapsed.len()));
-    if !combo_collapsed.is_empty() {
-        out.push_str(&format!("  {} via combination only\n", combo_collapsed.len()));
+    out.push_str(&format!("  {} solo (unique behavior)\n", solo_distinguished.len()));
+    if !combo_distinguished.is_empty() {
+        out.push_str(&format!("  {} via combination only\n", combo_distinguished.len()));
+    }
+    if !behavioral_aliases.is_empty() {
+        out.push_str(&format!("  {} behavioral aliases detected\n", behavioral_aliases.len()));
     }
     if !indistinguishable_groups.is_empty() {
         let indist_count: usize = indistinguishable_groups.iter()
