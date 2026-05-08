@@ -307,8 +307,10 @@ pub fn generate_initial_script(
     // Content levels
     let content_alpha: Vec<String> = vec!["cherry", "apple", "banana", "date", "elderberry"]
         .into_iter().map(String::from).collect();
-    let content_numeric: Vec<String> = vec!["100", "2", "30", "1", "20", "3", "10"]
-        .into_iter().map(String::from).collect();
+    let content_numeric: Vec<String> = vec![
+        "100", "2", "30", "1", "20", "3", "10", "50", "8", "200",
+        "15", "99", "7", "42", "1000", "5",
+    ].into_iter().map(String::from).collect();
     let content_fielded: Vec<String> = vec!["bob:30:sales", "alice:25:eng", "charlie:35:sales"]
         .into_iter().map(String::from).collect();
 
@@ -326,6 +328,8 @@ pub fn generate_initial_script(
         vec![
             SetupCommand::CreateFile { path: "input.txt".into(),
                 content: FileContent::Lines(content.to_vec()) },
+            SetupCommand::CreateFile { path: "other.txt".into(),
+                content: FileContent::Lines(vec!["other content".into(), "second line".into()]) },
             SetupCommand::CreateFile { path: "a.txt".into(),
                 content: FileContent::Lines(vec!["first".into()]) },
             SetupCommand::CreateFile { path: "b.txt".into(),
@@ -346,6 +350,8 @@ pub fn generate_initial_script(
         vec![
             SetupCommand::CreateFile { path: "input.txt".into(),
                 content: FileContent::Lines(content.to_vec()) },
+            SetupCommand::CreateFile { path: "other.txt".into(),
+                content: FileContent::Lines(vec!["deep other".into(), "line two".into(), "line three".into()]) },
             SetupCommand::CreateDir { path: "level1".into() },
             SetupCommand::CreateDir { path: "level1/level2".into() },
             SetupCommand::CreateFile { path: "level1/a.txt".into(),
