@@ -143,10 +143,16 @@ pub fn infer_base_args(help_text: &str) -> (Option<String>, Option<String>) {
 /// Map a value hint from --help to a reasonable default.
 pub fn default_value(hint: &str) -> String {
     match hint.to_uppercase().as_str() {
-        "NUM" | "NUMBER" | "N" | "SIZE" | "COLS" | "WIDTH" => "10".into(),
+        "NUM" | "NUMBER" | "N" | "SIZE" | "COLS" | "WIDTH" | "COUNT" | "LINES" | "BYTES" => "10".into(),
         "FILE" | "PATH" | "FILENAME" => "input.txt".into(),
         "DIR" | "DIRECTORY" => ".".into(),
         "PATTERN" | "PAT" | "REGEX" => ".*".into(),
+        "LIST" | "FIELDS" | "FIELD_LIST" => "1".into(),
+        "RANGE" | "SET1" | "SET2" | "CHARS" => "1-3".into(),
+        "CHAR" | "DELIM" | "SEP" => ",".into(),
+        "FORMAT" | "FMT" => "%s".into(),
+        "MODE" => "644".into(),
+        "WORD" | "STYLE" | "TYPE" | "METHOD" | "WHEN" => "auto".into(),
         _ => hint.to_lowercase(),
     }
 }
@@ -295,10 +301,9 @@ pub fn generate_initial_script(
 
     let (pattern_arg, file_arg) = infer_base_args(&help_text);
 
-    // --- Latin square base contexts ---
-    // Four content levels × three structure levels × three property levels.
-    // Property assignment follows Latin square pattern for the first three rows;
-    // fourth row (formatted) cycles to maintain balance.
+    // --- Base contexts ---
+    // Five content levels × three structure levels × three property levels.
+    // Property assignment cycles through Latin square pattern.
     // Data definitions live in data.rs; the assignment is here.
     //
     //              minimal         standard              deep
@@ -306,6 +311,7 @@ pub fn generate_initial_script(
     // numeric      varied-times    default               varied-perms
     // fielded      varied-perms    varied-times          default
     // formatted    default         varied-times          varied-perms
+    // tabular      varied-times    varied-perms          default
 
     use crate::data;
 
@@ -313,6 +319,7 @@ pub fn generate_initial_script(
     let content_numeric = data::content_numeric();
     let content_fielded = data::content_fielded();
     let content_formatted = data::content_formatted();
+    let content_tabular = data::content_tabular();
 
     let build_ctx = |name: &str, content: &[String],
                      structure_fn: fn(&[String]) -> Vec<SetupCommand>,
@@ -335,6 +342,9 @@ pub fn generate_initial_script(
         build_ctx("formatted_minimal",  &content_formatted, data::structure_minimal,  data::props_default),
         build_ctx("formatted_standard", &content_formatted, data::structure_standard, data::props_times),
         build_ctx("formatted_deep",     &content_formatted, data::structure_deep,     data::props_perms),
+        build_ctx("tabular_minimal",    &content_tabular,   data::structure_minimal,  data::props_times),
+        build_ctx("tabular_standard",   &content_tabular,   data::structure_standard, data::props_perms),
+        build_ctx("tabular_deep",       &content_tabular,   data::structure_deep,     data::props_default),
         NamedContext { name: "empty_dir".into(), extends: None, commands: vec![] },
     ];
 

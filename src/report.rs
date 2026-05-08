@@ -239,7 +239,7 @@ pub fn format_exploration_report(
 ) -> String {
     let mut out = String::new();
     let aliases = flag_info.map(|fi| &fi.aliases);
-    let total_flags = flag_info.map(|fi| fi.all_flags.len()).unwrap_or(0);
+    // total_flags from --help (includes both short and long forms of aliases)
 
     // Classify all ever_isolated run labels into flag stems
     let mut solo_distinguished: HashSet<String> = HashSet::new();
@@ -274,11 +274,54 @@ pub fn format_exploration_report(
         }
     }
 
-    let all_distinguished: HashSet<&String> = solo_distinguished.iter()
-        .chain(combo_distinguished.iter())
-        .collect();
+    // Detect behavioral aliases: 2-run groups where both runs are solo flags
+    // with different flag names but identical behavior. These are aliases even
+    // if the --help alias map doesn't list them.
+    let mut behavioral_aliases: HashMap<String, String> = HashMap::new();
+    for group in &final_metrics.groups {
+        if group.run_labels.len() != 2 { continue; }
+        let stems: Vec<Option<String>> = group.run_labels.iter()
+            .map(|l| flag_stem(l).filter(|s| !is_combination(s)))
+            .collect();
+        if let [Some(a), Some(b)] = &stems[..] {
+            let ca = canonical_flag(a, aliases);
+            let cb = canonical_flag(b, aliases);
+            if ca != cb {
+                // These two different flag stems have identical behavior — behavioral aliases
+                let (primary, secondary) = if ca.len() <= cb.len() { (ca, cb) } else { (cb, ca) };
+                behavioral_aliases.insert(secondary, primary);
+            }
+        }
+    }
 
-    // Identify uncharacterized flags (in identical groups, not characterized by any means)
+    // Collapse distinguished sets through behavioral aliases
+    let collapse_alias = |s: &String| -> String {
+        behavioral_aliases.get(s).unwrap_or(s).clone()
+    };
+    let solo_collapsed: HashSet<String> = solo_distinguished.iter().map(collapse_alias).collect();
+    let combo_collapsed: HashSet<String> = combo_distinguished.iter()
+        .map(collapse_alias)
+        .filter(|s| !solo_collapsed.contains(s))
+        .collect();
+    let all_distinguished: HashSet<String> = solo_collapsed.iter()
+        .chain(combo_collapsed.iter())
+        .cloned().collect();
+
+    // Compute unique stem count: collapse behavioral aliases into the denominator
+    let mut all_stems: HashSet<String> = HashSet::new();
+    if let Some(fi) = flag_info {
+        for flag in &fi.all_flags {
+            let canon = canonical_flag(flag, aliases);
+            // Map through behavioral aliases to the primary
+            let primary = behavioral_aliases.get(&canon).unwrap_or(&canon).clone();
+            all_stems.insert(primary);
+        }
+    }
+    // Remove untested (--help, --version)
+    let untested_count = final_metrics.untested_flags.len();
+    let unique_stem_count = all_stems.len();
+
+    // Identify indistinguishable flags (in identical groups, not distinguished by any means)
     let mut indistinguishable_groups: Vec<Vec<String>> = Vec::new();
     for group in &final_metrics.groups {
         if group.isolated() { continue; }
@@ -307,12 +350,13 @@ pub fn format_exploration_report(
     }
     out.push('\n');
 
-    // Flag characterization summary
+    // Flag distinguishability summary
     let untested = final_metrics.untested_flags.len();
-    out.push_str(&format!("## Distinguished: {}/{} flags\n", all_distinguished.len(), total_flags));
-    out.push_str(&format!("  {} solo (unique behavior)\n", solo_distinguished.len()));
-    if !combo_distinguished.is_empty() {
-        out.push_str(&format!("  {} via combination only\n", combo_distinguished.len()));
+    let distinguished_count = all_distinguished.len().min(unique_stem_count);
+    out.push_str(&format!("## Distinguished: {}/{} flags\n", distinguished_count, unique_stem_count));
+    out.push_str(&format!("  {} solo (unique behavior)\n", solo_collapsed.len()));
+    if !combo_collapsed.is_empty() {
+        out.push_str(&format!("  {} via combination only\n", combo_collapsed.len()));
     }
     if !indistinguishable_groups.is_empty() {
         let indist_count: usize = indistinguishable_groups.iter()
@@ -386,7 +430,7 @@ pub fn format_exploration_report(
     // Untested
     if !final_metrics.untested_flags.is_empty() {
         out.push_str(&format!("## Untested ({}/{})\n  {}\n",
-            untested, total_flags,
+            untested_count, unique_stem_count,
             final_metrics.untested_flags.join(", ")));
     }
 

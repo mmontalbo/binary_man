@@ -25,6 +25,25 @@ pub fn content_fielded() -> Vec<String> {
         .into_iter().map(String::from).collect()
 }
 
+/// Tabular content: tab-delimited fields, repeated rows, long lines.
+/// Exercises: cut -f, paste -d, uniq -c/-d/-u, fold -w, awk, sort -t.
+pub fn content_tabular() -> Vec<String> {
+    vec![
+        "name\tage\tcity",
+        "alice\t30\tnew york",
+        "bob\t25\tsan francisco",
+        "alice\t30\tnew york",
+        "charlie\t35\tchicago",
+        "bob\t25\tsan francisco",
+        "diana\t28\tlos angeles",
+        "a]very long line that exceeds eighty characters in total width to exercise fold and fmt and similar line-wrapping tools properly",
+        "eve\t22\tseattle",
+        "alice\t30\tnew york",
+        "frank\t40\tboston",
+        "grace\t33\tdenver",
+    ].into_iter().map(String::from).collect()
+}
+
 /// Content with tabs, blank lines, trailing whitespace, and mixed formatting.
 /// Exercises: cat -n/-b/-s/-E/-T, fold, fmt, nl, expand/unexpand, col.
 pub fn content_formatted() -> Vec<String> {
