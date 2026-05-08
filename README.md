@@ -2,49 +2,66 @@
 
 Observation-driven behavioral specification for CLI binaries. Given a
 binary, `bgrid` runs invocations across varied input states and records
-what happens — stdout, stderr, exit code, and filesystem changes.
+what happens — stdout, stderr, exit code, and filesystem changes. It
+iteratively refines experiments until each flag's behavioral surface
+is isolated or progress stalls.
 
 ## Usage
 
 ```
-bgrid <binary>                        discover flags from --help
-bgrid <binary> <probe-file>           run observation grid
-bgrid --compact <binary> <file.probe> collapsed summary output
-bgrid --trace <binary> <file.probe>   include file access traces
-bgrid --dry-run <binary> <file>       show resolved grid without executing
+bgrid <binary>                        iterative exploration (discover + run + refine)
+bgrid --skeleton <binary>             print probe skeleton for manual authoring
+bgrid <binary> <file.probe>           run observation grid from a probe file
+bgrid --trace <binary> <file.probe>   include syscall traces
+bgrid --dry-run <binary> <file.probe> show resolved grid without executing
 ```
 
-### Discovering a binary
+### Exploring a binary
 
-`bgrid sort` runs `sort --help`, extracts flags, and prints a probe
-skeleton to stdout. Pipe to a file, customize contexts and vary blocks,
-then run:
+`bgrid sort` discovers flags from `--help`, generates orthogonal contexts
+(varying file content, directory structure, permissions, timestamps),
+runs every flag across every context in parallel, analyzes behavioral
+groups, refines with cross-group interactions, and converges when no
+new flags are distinguished. Output is a characterization report:
 
 ```
-bgrid sort > sort.probe       # discover flags, generate skeleton
-# edit sort.probe — add vary blocks, organize runs
-bgrid sort sort.probe          # run the observation grid
+## Characterization: 22/49 flags
+  12 solo (unique behavior)
+  10 via combination only
+  4 uncharacterized (in identical groups)
+  7 untested
 ```
 
-For subcommands: `bgrid git diff` discovers flags for `git diff`.
+For subcommands: `bgrid git diff` explores `git diff`.
 
-### Writing probe files
+### Manual probe authoring
 
-See [LANGUAGE.md](LANGUAGE.md) for the full language specification.
-Probe files describe input states and invocations. The tool executes
-every combination and writes observations to a `.results` file.
+`bgrid --skeleton sort` prints a probe file to stdout. Edit it to add
+custom contexts, vary blocks, and run combinations, then execute:
+
+```
+bgrid --skeleton sort > sort.probe
+# edit sort.probe
+bgrid sort sort.probe
+```
+
+See [LANGUAGE.md](LANGUAGE.md) for the probe language specification.
 
 ## How it works
 
 1. **Contexts** declare input states — files, directories, symlinks,
-   environment variables, and setup commands (`invoke`).
+   environment variables, and setup commands.
 2. **Runs** declare invocations to observe. Each run executes in every
-   applicable context.
-3. **Collapsing** groups contexts that produce identical observations.
-   The contexts that DON'T collapse reveal sensitivity to specific
-   input perturbations.
-4. **Results** are written to a `.results` file with observations,
-   sensitivity analysis, universals, and diffs.
+   applicable context inside a bwrap sandbox.
+3. **Analysis** groups runs by identical per-context observations.
+   Runs in the same group are behaviorally equivalent. Singleton
+   groups are isolated — that flag has unique behavior.
+4. **Refinement** generates new experiments to split identical groups:
+   cross-group flag pairing, sensitivity-graduated contexts, untested
+   flag pickup. Converges when no new flags are distinguished.
+5. **Report** shows characterization rate: unique flags distinguished
+   vs total flags discovered, with solo/combination/uncharacterized
+   breakdown.
 
 ## Requirements
 

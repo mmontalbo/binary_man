@@ -6,17 +6,19 @@ A `.probe` file describes a grid of **input states × invocations**. The tool
 executes every cell and writes observations to a `.results` file.
 
 ```
-bgrid <binary>              discover flags from --help, print probe skeleton
-bgrid <binary> <file.probe> run observation grid, write .results file
-bgrid --dry-run <binary> <file.probe>  show resolved grid without executing
+bgrid <binary>                        iterative exploration (discover + run + refine)
+bgrid --skeleton <binary>             print probe skeleton for manual authoring
+bgrid <binary> <file.probe>           run observation grid, write .results file
+bgrid --dry-run <binary> <file.probe> show resolved grid without executing
 ```
 
-Start with discovery to get a skeleton, then customize it:
+`bgrid <binary>` runs the full exploration loop automatically. For manual
+probe authoring, generate a skeleton and customize it:
 
 ```
-bgrid sort > sort.probe       # discover sort's flags
-# edit sort.probe — add vary blocks for sensitivity testing
-bgrid sort sort.probe          # run the grid
+bgrid --skeleton sort > sort.probe
+# edit sort.probe — add vary blocks, organize runs
+bgrid sort sort.probe
 ```
 
 The tool is binary-agnostic — it knows nothing about any specific binary.
@@ -29,7 +31,7 @@ humans, LMs, or scripts reading the `.results` files.
 
 ## Concepts
 
-Six keywords: **context**, **vary**, **invoke**, **run**, **from**, **in**.
+Eight keywords: **context**, **vary**, **combine**, **invoke**, **run**, **from**, **in**, **stdin**.
 
 ### context
 
@@ -68,6 +70,39 @@ vary from "base"
 ```
 
 5 lines = 5 variants + the base = 6 states.
+
+**vary compound** applies all perturbations together as one variant:
+
+```
+vary compound from "base"
+  remove ".hidden"
+  file "visible.txt" size 1000
+```
+
+1 variant = both perturbations applied simultaneously.
+
+**vary stress** generates 8 adversarial mutations of a file:
+
+```
+vary stress from "base" "visible.txt"
+```
+
+Generates: null_inject, huge_line (1MB), truncated, repeated (1000x),
+empty, invalid_utf8, line_explosion (100K lines), delimiter_flood.
+
+### combine
+
+Generates single + pairwise flag combinations from a list of flags.
+
+```
+combine "input.txt"
+  "-r"
+  "-n"
+  "-u"
+```
+
+Produces 3 singles (`-r`, `-n`, `-u`) + 3 pairs (`-r -n`, `-r -u`, `-n -u`)
+= 6 runs, all with `input.txt` as the trailing positional arg.
 
 ### invoke
 
@@ -174,7 +209,7 @@ Used inside `context`, `extends`, and `vary` blocks:
 | `remove env VAR` | Remove an environment variable |
 | `invoke "args"` | Run the binary under test |
 
-Content strings support escape sequences: `\n`, `\t`, `\\`, `\"`.
+Content strings support escape sequences: `\n`, `\t`, `\\`, `\"`, `\xNN` (hex byte).
 Parent directories are created automatically.
 `from` paths are relative to the probe file's directory.
 Run arguments are passed directly to the binary — no shell expansion.
@@ -190,17 +225,17 @@ Run arguments are passed directly to the binary — no shell expansion.
 
 ## Results file
 
-The tool writes a `.results` file for each `.probe` file. Contains:
+`bgrid <binary> <file.probe>` writes a `.results` file. Contains:
 
-**Observations** — what the binary produced per (context × run) cell.
-Contexts with identical observations are collapsed into one group.
-Two observations are identical when they have the same stdout, stderr,
-exit code, and filesystem changes. The largest group is shown first,
-then each differing group with a `delta` line showing what changed.
+**Behavioral groups** — runs grouped by identical per-context observations.
+Two runs are in the same group when they produce the same stdout, stderr,
+exit code, and filesystem changes in every context. Singleton groups are
+isolated (unique behavior). Multi-run groups are identical (equivalent or
+underexplored).
 
-**Sensitivity** — which vary perturbations produced a different group.
-If "base / remove .hidden" is in a different group than "base", the
-run is sensitive to removing .hidden.
+**Sensitivity** — which context perturbations cause different behavior.
+If "many_files / remove .hidden" is in a different group than "many_files",
+the run is sensitive to that perturbation. Effect sizes are quantified.
 
 **Universals** — properties consistent across all contexts (exit code,
 stdout empty/not-empty, modifies filesystem).
@@ -211,53 +246,37 @@ what's only in this run vs the reference.
 Example results:
 
 ```
-run "." "-a":
-  3 contexts (base, base / remove backup.txt~, base / size=1000):
-    stdout (7 lines):
-      .
-      ..
-      .hidden
-      backup.txt~
-      subdir
-      visible.txt
+# 60 runs in 37 behavioral groups
+
+## group 1 (1 runs): "input.txt"
+  exit 0 | stdout not empty | sensitive to: input.txt=size:1 (-4 lines)
+  10 contexts (few_files, many_files, ...):
+    stdout (5 lines):
+      apple
+      banana
+      cherry
+      date
+      elderberry
     exit: 0
-  differs in base / remove .hidden:
-    stdout (6 lines):
-      .
-      ..
-      backup.txt~
-      subdir
-      visible.txt
+
+## group 5 (3 runs): "-s" "input.txt", "--stable" "input.txt", "-m" "input.txt"
+  exit 0 | stdout not empty
+  all contexts:
+    stdout (5 lines):
+      apple
+      banana
+      cherry
+      date
+      elderberry
     exit: 0
-  differs in empty:
-    stdout (2 lines):
-      .
-      ..
-    exit: 0
-  sensitive to: remove .hidden
-  always: exit 0, stdout not empty
-  from ".":
-    3 only in this: . .. .hidden
-    0 only in ref
-    3 shared
+  vs "input.txt": identical
 ```
 
-## Directory structure
+## Shared contexts
 
-```
-surfaces/<binary>/
-  contexts.probe          # shared contexts + vary (loaded by sibling files)
-  filtering.probe         # filter flag runs
-  sorting.probe           # sort flag runs
-  formatting.probe        # format flag runs
-  errors.probe            # error cases
-  filtering.results       # generated
-  sorting.results         # generated
-  ...
-```
-
-`contexts.probe` (or `setup.probe`) is loaded automatically by all sibling
-`.probe` files in the same directory.
+`contexts.probe` (or `setup.probe`) in the same directory as a probe file
+is loaded automatically, providing shared contexts across sibling probes.
+The probe file's own contexts are merged with the shared ones.
 
 ## Examples
 
