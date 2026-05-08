@@ -299,6 +299,11 @@ pub fn generate_initial_script(
         }
     }
 
+    // Use the discovered flags as the canonical set (not extract_flag_info's
+    // restrictive parsing, which misses flags in non-coreutils help formats).
+    let mut flag_info = flag_info;
+    flag_info.all_flags = seen.clone();
+
     let (pattern_arg, file_arg) = infer_base_args(&help_text);
 
     // --- Base contexts ---
