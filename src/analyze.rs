@@ -43,7 +43,9 @@ pub struct BehaviorGroup {
     obs_list: Vec<(String, ObsKey)>,
 }
 
-/// Lightweight observation key for grouping comparisons (avoids cloning full observations).
+/// Lightweight observation key for grouping comparisons.
+/// For runs without a from-reference, this is the absolute observation.
+/// For runs with a from-reference, this is the delta (what changed vs base).
 #[derive(PartialEq, Eq)]
 struct ObsKey {
     stdout: String,
@@ -59,6 +61,61 @@ impl ObsKey {
             stderr: obs.stderr.clone(),
             exit_code: obs.exit_code,
             fs_changes: obs.fs_changes.clone(),
+        }
+    }
+
+    /// Compute a delta key: what did this observation change relative to the reference?
+    /// Two flags that apply the same transformation to the base produce the same delta.
+    fn from_delta(reference: &Observation, obs: &Observation) -> Self {
+        // Lines only in obs (added by the flag)
+        let ref_lines: HashSet<&str> = reference.stdout.lines().collect();
+        let obs_lines: HashSet<&str> = obs.stdout.lines().collect();
+        let mut added: Vec<&str> = obs_lines.difference(&ref_lines).copied().collect();
+        let mut removed: Vec<&str> = ref_lines.difference(&obs_lines).copied().collect();
+        added.sort();
+        removed.sort();
+
+        // Encode the delta as a canonical string
+        let stdout_delta = if reference.stdout == obs.stdout {
+            "=".to_string()
+        } else if added.is_empty() && removed.is_empty() {
+            // Same lines, different order
+            "reordered".to_string()
+        } else {
+            format!("+[{}] -[{}]", added.join("|"), removed.join("|"))
+        };
+
+        let stderr_delta = if reference.stderr == obs.stderr {
+            "=".to_string()
+        } else if reference.stderr.is_empty() {
+            format!("+{}", obs.stderr.trim())
+        } else if obs.stderr.is_empty() {
+            "-stderr".to_string()
+        } else {
+            "changed".to_string()
+        };
+
+        let exit_delta = if reference.exit_code == obs.exit_code {
+            reference.exit_code
+        } else {
+            // Encode the transition as a synthetic exit code
+            // (we just need equality comparison, not the actual value)
+            Some(reference.exit_code.unwrap_or(0) * 1000 + obs.exit_code.unwrap_or(0))
+        };
+
+        // FS changes delta: what's new vs reference
+        let ref_fs: HashSet<&execute::FsChange> = reference.fs_changes.iter().collect();
+        let obs_fs: HashSet<&execute::FsChange> = obs.fs_changes.iter().collect();
+        let mut fs_delta: Vec<execute::FsChange> = obs_fs.difference(&ref_fs)
+            .map(|c| (*c).clone())
+            .collect();
+        fs_delta.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
+
+        ObsKey {
+            stdout: stdout_delta,
+            stderr: stderr_delta,
+            exit_code: exit_delta,
+            fs_changes: fs_delta,
         }
     }
 }
@@ -235,10 +292,23 @@ pub fn analyze(
             continue;
         }
 
-        // Save obs keys for grouping
-        let obs_keys: Vec<(String, ObsKey)> = obs_list.iter()
-            .map(|(name, obs)| (name.to_string(), ObsKey::from_obs(obs)))
-            .collect();
+        // Save obs keys for grouping.
+        // For runs with a from-reference, use delta keys (what changed vs base).
+        // This groups by "what the flag does" rather than "what the output looks like."
+        let obs_keys: Vec<(String, ObsKey)> = if let Some(ref ref_args) = run.diff_from {
+            obs_list.iter().map(|(name, obs)| {
+                let ref_obs = obs_by_args.get(&(ref_args.as_slice(), *name));
+                let key = match ref_obs {
+                    Some(ref_obs) => ObsKey::from_delta(ref_obs, obs),
+                    None => ObsKey::from_obs(obs), // no reference available, fall back to absolute
+                };
+                (name.to_string(), key)
+            }).collect()
+        } else {
+            obs_list.iter()
+                .map(|(name, obs)| (name.to_string(), ObsKey::from_obs(obs)))
+                .collect()
+        };
         run_obs_keys.push(RunObsEntry {
             run_index: ri,
             keys: obs_keys,
