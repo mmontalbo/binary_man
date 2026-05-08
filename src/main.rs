@@ -18,17 +18,20 @@ fn main() -> Result<()> {
     let compact = args.iter().any(|a| a == "--compact");
     let verbose = args.iter().any(|a| a == "--verbose");
     let trace = args.iter().any(|a| a == "--trace");
+    let skeleton = args.iter().any(|a| a == "--skeleton");
     let positional: Vec<&String> = args.iter().skip(1).filter(|a| !a.starts_with("--")).collect();
 
     let mode = if compact { OutputMode::Compact } else if verbose { OutputMode::Verbose } else { OutputMode::Default };
 
     if positional.is_empty() {
-        eprintln!("Usage: bgrid [--dry-run] [--compact] [--verbose] [--trace] <binary> [<probe-file>]");
-        eprintln!("       bgrid <binary>                          discover flags from --help");
-        eprintln!("       bgrid <binary> <file.probe>              run observation grid");
-        eprintln!("       bgrid --verbose <binary> <file.probe>    full output (all contexts, all traces)");
-        eprintln!("       bgrid --compact <binary> <file.probe>    collapsed output for LM consumption");
-        eprintln!("       bgrid --trace <binary> <file.probe>      include syscall traces");
+        eprintln!("Usage: bgrid [options] <binary> [<probe-file>]");
+        eprintln!("       bgrid <binary>                            explore: discover + run + iterate");
+        eprintln!("       bgrid --skeleton <binary>                 print probe skeleton to stdout");
+        eprintln!("       bgrid <binary> <file.probe>               run observation grid");
+        eprintln!("       bgrid --verbose <binary> <file.probe>     full output (all contexts, all traces)");
+        eprintln!("       bgrid --compact <binary> <file.probe>     collapsed output for LM consumption");
+        eprintln!("       bgrid --trace <binary> <file.probe>       include syscall traces");
+        eprintln!("       bgrid --dry-run <binary> <file.probe>     show grid without executing");
         std::process::exit(1);
     }
 
@@ -44,12 +47,12 @@ fn main() -> Result<()> {
             cmd_run(binary, &test_path, &sandbox, mode)
         }
     } else {
-        let sandbox = sandbox::Sandbox::new(false)?;
-        cmd_discover(&positional, &sandbox)
+        let sandbox = sandbox::Sandbox::new(trace)?;
+        cmd_discover(&positional, &sandbox, mode, skeleton)
     }
 }
 
-fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox) -> Result<()> {
+fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, _mode: OutputMode, skeleton: bool) -> Result<()> {
     use regex::Regex;
 
     let binary = command[0].as_str();
@@ -309,11 +312,45 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox) -> Result<()> {
         }
     }
 
-    eprintln!();
-    eprintln!("# Pipe to a file, then run:");
-    eprintln!("#   bgrid {} > probes.probe", cmd_label);
-    eprintln!("#   bgrid {} probes.probe", cmd_label);
+    if skeleton {
+        // --skeleton: just print the probe and exit (used by explore.sh)
+        return Ok(());
+    }
 
+    // --- Exploration loop ---
+    // Suppress the probe output that was already printed to stdout
+    // by re-running ourselves with --skeleton to capture it to a file
+    eprintln!("NOTE: probe skeleton printed above is the starting point.");
+    eprintln!("Running iterative exploration...");
+    eprintln!();
+
+    let explore_path = std::env::current_exe().ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .and_then(|p| {
+            let repo = p.parent().and_then(|p| p.parent());
+            repo.map(|r| r.join("tools/doc/explore.sh"))
+        });
+
+    if let Some(explore) = &explore_path {
+        if explore.exists() {
+            let mut explore_cmd = std::process::Command::new(explore);
+            for arg in command {
+                explore_cmd.arg(arg.as_str());
+            }
+            explore_cmd.arg("--").arg("3");
+            explore_cmd.stderr(std::process::Stdio::inherit());
+            explore_cmd.stdout(std::process::Stdio::piped());
+            let output = explore_cmd.output()
+                .context("run explore.sh")?;
+            // Print explore output to stderr (report goes to stderr already)
+            if !output.stdout.is_empty() {
+                eprintln!("{}", String::from_utf8_lossy(&output.stdout));
+            }
+            return Ok(());
+        }
+    }
+
+    eprintln!("explore.sh not found — use --skeleton to generate probe manually");
     Ok(())
 }
 
