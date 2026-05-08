@@ -310,7 +310,7 @@ pub fn analyze(
                 let ref_obs = obs_by_args.get(&(ref_args.as_slice(), *name));
                 let key = match ref_obs {
                     Some(ref_obs) => ObsKey::from_delta(ref_obs, obs),
-                    None => ObsKey::from_obs(obs), // no reference available, fall back to absolute
+                    None => ObsKey::from_obs(obs),
                 };
                 (name.to_string(), key)
             }).collect()

@@ -82,7 +82,16 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, skeleton: bool)
     // A run isolated in ANY round stays isolated — it's never re-tested.
     let mut ever_isolated: HashSet<String> = HashSet::new();
     for group in &metrics.groups {
-        if group.isolated() {
+        // Singleton groups are isolated. Also treat alias-pair groups
+        // (2 runs that map to the same flag stem) as effectively isolated.
+        let effectively_isolated = group.isolated() || (group.run_labels.len() == 2 && {
+            let stems: HashSet<String> = group.run_labels.iter()
+                .filter_map(|l| report::flag_stem(l))
+                .map(|s| report::canonical_flag(&s, Some(&flag_info.aliases)))
+                .collect();
+            stems.len() == 1
+        });
+        if effectively_isolated {
             for label in &group.run_labels {
                 ever_isolated.insert(label.clone());
             }
@@ -158,8 +167,16 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, skeleton: bool)
         let delta_metrics = analyze::analyze(&delta_script, &delta_grid, Some(&flag_info), Some(&ever_tested));
 
         // Update cumulative isolation: any newly-isolated run is permanently isolated
+        // Also treat alias-pair groups as effectively isolated
         for group in &delta_metrics.groups {
-            if group.isolated() {
+            let effectively_isolated = group.isolated() || (group.run_labels.len() == 2 && {
+                let stems: HashSet<String> = group.run_labels.iter()
+                    .filter_map(|l| report::flag_stem(l))
+                    .map(|s| report::canonical_flag(&s, Some(&flag_info.aliases)))
+                    .collect();
+                stems.len() == 1
+            });
+            if effectively_isolated {
                 for label in &group.run_labels {
                     ever_isolated.insert(label.clone());
                 }
