@@ -381,8 +381,16 @@ pub fn format_exploration_report(
         out.push_str(&format!("  {}{}\n", flag, desc));
 
         // Find the exemplar: the context where this flag's output is most distinctive
-        if let Some(exemplar) = find_exemplar(flag, final_metrics) {
-            out.push_str(&format!("    exemplar: {} | {}\n", exemplar.context, exemplar.summary));
+        if let Some(ex) = find_exemplar(flag, final_metrics) {
+            out.push_str(&format!("    exemplar: {} in {} ({})\n", ex.run_label, ex.context_name, ex.delta_summary));
+            out.push_str("    base:\n");
+            for line in ex.base_preview.lines() {
+                out.push_str(&format!("      {}\n", line));
+            }
+            out.push_str("    flag:\n");
+            for line in ex.flag_preview.lines() {
+                out.push_str(&format!("      {}\n", line));
+            }
         }
     }
     out.push('\n');
@@ -434,8 +442,11 @@ pub fn format_exploration_report(
 }
 
 struct Exemplar {
-    context: String,
-    summary: String,
+    run_label: String,      // the invocation (e.g., "-R" "." )
+    context_name: String,   // which context (e.g., alpha_standard)
+    base_preview: String,   // base invocation output (truncated)
+    flag_preview: String,   // flag invocation output (truncated)
+    delta_summary: String,  // what changed (+N lines, reordered, etc.)
 }
 
 /// Find the most distinctive observation for a flag.
@@ -471,7 +482,22 @@ fn find_exemplar(target_stem: &str, metrics: &AnalysisMetrics) -> Option<Exempla
 
     let ctx_name = minority_ctx.first()?;
 
-    // Build summary: what's different about this context's output
+    // Find the base run's output in the same context for comparison
+    let base_output = if let Some(ref from_ref) = run.from_ref {
+        let base_label = crate::output::format_args(from_ref);
+        metrics.runs.iter()
+            .find(|r| r.args_str == base_label)
+            .and_then(|base_run| {
+                base_run.context_groups.iter()
+                    .flat_map(|(names, obs)| names.iter().map(move |n| (n, obs)))
+                    .find(|(n, _)| *n == ctx_name)
+                    .map(|(_, obs)| &obs.stdout)
+            })
+    } else {
+        None
+    };
+
+    // Build delta summary
     let majority_obs = &run.majority_obs;
     let line_diff = minority_obs.stdout.lines().count() as i64
         - majority_obs.stdout.lines().count() as i64;
@@ -481,22 +507,36 @@ fn find_exemplar(target_stem: &str, metrics: &AnalysisMetrics) -> Option<Exempla
         String::new()
     };
 
-    // Preview of the distinctive output
-    let preview: String = minority_obs.stdout.lines().take(3)
-        .collect::<Vec<_>>().join(" | ");
-    let preview = if preview.len() > 60 { format!("{}...", &preview[..57]) } else { preview };
-
-    let summary = if line_diff != 0 {
-        format!("{:+} lines{}: {}", line_diff, exit_diff, preview)
+    let delta_summary = if line_diff != 0 {
+        format!("{:+} lines{}", line_diff, exit_diff)
     } else if minority_obs.stdout != majority_obs.stdout {
-        format!("reordered{}: {}", exit_diff, preview)
+        format!("reordered{}", exit_diff)
     } else {
-        format!("different{}: {}", exit_diff, preview)
+        format!("different{}", exit_diff)
     };
 
+    let truncate = |s: &str, max_lines: usize| -> String {
+        let lines: Vec<&str> = s.lines().take(max_lines).collect();
+        let result = lines.join("\n");
+        if s.lines().count() > max_lines {
+            format!("{}\n      ...", result)
+        } else {
+            result
+        }
+    };
+
+    let base_preview = base_output
+        .map(|s| truncate(s, 5))
+        .unwrap_or_else(|| "(no base)".into());
+
+    let flag_preview = truncate(&minority_obs.stdout, 5);
+
     Some(Exemplar {
-        context: format!("{} {}", run.args_str, ctx_name),
-        summary,
+        run_label: run.args_str.clone(),
+        context_name: ctx_name.clone(),
+        base_preview,
+        flag_preview,
+        delta_summary,
     })
 }
 
