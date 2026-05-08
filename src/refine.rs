@@ -143,24 +143,29 @@ pub fn refine(
             let group_flags = extract_flags(group);
             let group_positionals = extract_positionals(group);
 
-            // Find isolated flags that share at least one sensitivity dimension
-            // If the group has NO sensitivity, pair with top isolated by sensitivity count
-            let matching_isolated: Vec<&IsolatedCandidate> = if group_dims.is_empty() {
-                // No sensitivity signal — use top 3 by dimension count as fallback
-                let mut ranked: Vec<&IsolatedCandidate> = isolated_candidates.iter().collect();
-                ranked.sort_by(|a, b| b.dimensions.len().cmp(&a.dimensions.len()));
-                ranked.into_iter().take(3).collect()
-            } else {
-                // Filter to isolated flags sharing a dimension
-                let mut matched: Vec<&IsolatedCandidate> = isolated_candidates.iter()
-                    .filter(|c| !c.dimensions.is_disjoint(&group_dims))
-                    .collect();
+            // Find isolated flags that share at least one sensitivity dimension.
+            // Fall back to top isolated by dimension count when no overlap found.
+            let matching_isolated: Vec<&IsolatedCandidate> = {
+                let mut matched: Vec<&IsolatedCandidate> = if group_dims.is_empty() {
+                    Vec::new()
+                } else {
+                    isolated_candidates.iter()
+                        .filter(|c| !c.dimensions.is_disjoint(&group_dims))
+                        .collect()
+                };
                 matched.sort_by(|a, b| {
                     let a_overlap = a.dimensions.intersection(&group_dims).count();
                     let b_overlap = b.dimensions.intersection(&group_dims).count();
                     b_overlap.cmp(&a_overlap)
                 });
-                matched.into_iter().take(3).collect()
+                let mut result: Vec<&IsolatedCandidate> = matched.into_iter().take(3).collect();
+                // Fallback: if no dimension overlap found, use top by dimension count
+                if result.is_empty() {
+                    let mut ranked: Vec<&IsolatedCandidate> = isolated_candidates.iter().collect();
+                    ranked.sort_by(|a, b| b.dimensions.len().cmp(&a.dimensions.len()));
+                    result = ranked.into_iter().take(2).collect();
+                }
+                result
             };
 
             for candidate in &matching_isolated {
@@ -170,27 +175,34 @@ pub fn refine(
                 if iso_flags.is_empty() { continue; }
 
                 for gflag in group_flags.iter().take(MAX_FLAGS_PER_GROUP) {
-                    let mut args: Vec<String> = iso_flags.iter().map(|s| s.to_string()).collect();
-                    args.push(gflag.clone());
-                    let positionals: Vec<String> = if group_positionals.is_empty() {
-                        candidate.args.iter().filter(|a| !a.starts_with('-')).cloned().collect()
+                    // Try both the group's positionals AND the isolated flag's positionals.
+                    // Flags that are no-ops on "input.txt" might show effect on "."
+                    let iso_positionals: Vec<String> = candidate.args.iter()
+                        .filter(|a| !a.starts_with('-')).cloned().collect();
+                    let targets: Vec<Vec<String>> = if group_positionals != iso_positionals && !iso_positionals.is_empty() {
+                        vec![group_positionals.clone(), iso_positionals]
                     } else {
-                        group_positionals.clone()
+                        vec![group_positionals.clone()]
                     };
-                    args.extend(positionals.iter().cloned());
 
-                    if cross_count >= max_cross_pairs { break; }
-                    let already_present = runs.iter().any(|r| r.args == args);
-                    if !already_present {
-                        runs.push(Run {
-                            args,
-                            in_contexts: None,
-                            stdin: None,
-                            diff_from: if positionals.is_empty() { None } else {
-                                Some(positionals)
-                            },
-                        });
-                        cross_count += 1;
+                    for positionals in &targets {
+                        let mut args: Vec<String> = iso_flags.iter().map(|s| s.to_string()).collect();
+                        args.push(gflag.clone());
+                        args.extend(positionals.iter().cloned());
+
+                        if cross_count >= max_cross_pairs { break; }
+                        let already_present = runs.iter().any(|r| r.args == args);
+                        if !already_present {
+                            runs.push(Run {
+                                args,
+                                in_contexts: None,
+                                stdin: None,
+                                diff_from: if positionals.is_empty() { None } else {
+                                    Some(positionals.clone())
+                                },
+                            });
+                            cross_count += 1;
+                        }
                     }
                 }
                 if cross_count >= max_cross_pairs { break; }
