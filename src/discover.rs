@@ -38,7 +38,7 @@ pub fn extract_flag_info(help_text: &str) -> FlagInfo {
                 } else {
                     flag
                 };
-                if name.starts_with('-') {
+                if name.starts_with('-') && name != "--help" && name != "--version" {
                     descs.insert(name.to_string(), desc.clone());
                     all_flags.insert(name.to_string());
                     names.push(name.to_string());

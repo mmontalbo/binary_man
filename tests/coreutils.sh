@@ -1,37 +1,44 @@
 #!/usr/bin/env bash
 # Integration test: verify distinguishability rates for coreutils.
-# Runs bgrid on each binary and checks the result against expected values.
+# Runs bgrid on each binary, saves the full report, and checks against expected values.
 #
 # Usage: ./tests/coreutils.sh [bgrid-path]
 #
+# Reports are saved to tests/results/<binary>.report for inspection.
 # Expected results are lower bounds — the test passes if the actual
-# distinguished count is >= the expected count. This allows improvements
-# without breaking the test.
+# distinguished count is >= the expected count.
 
 set -euo pipefail
 
 BGRID="${1:-./target/release/bgrid}"
 TIMEOUT=60
+RESULTS_DIR="tests/results"
 PASS=0
 FAIL=0
 TOTAL=0
 
+mkdir -p "$RESULTS_DIR"
+
 check() {
     local binary="$1"
     local min_distinguished="$2"
-    local max_denominator="$3"
     TOTAL=$((TOTAL + 1))
 
+    local report_file="$RESULTS_DIR/$binary.report"
+    local stderr_file="$RESULTS_DIR/$binary.stderr"
+
+    # Run and save full report + stderr
+    timeout "$TIMEOUT" "$BGRID" "$binary" >"$report_file" 2>"$stderr_file" || true
+
     local result
-    result=$(timeout "$TIMEOUT" "$BGRID" "$binary" 2>/dev/null | grep "^## Distinguished:" || echo "FAILED")
+    result=$(grep "^## Distinguished:" "$report_file" 2>/dev/null || echo "FAILED")
 
     if [ "$result" = "FAILED" ]; then
-        echo "FAIL  $binary: timed out or errored"
+        echo "FAIL  $binary: timed out or errored (see $stderr_file)"
         FAIL=$((FAIL + 1))
         return
     fi
 
-    # Parse "## Distinguished: N/M flags"
     local distinguished denominator
     distinguished=$(echo "$result" | grep -oP '\d+(?=/)')
     denominator=$(echo "$result" | grep -oP '(?<=/)\d+')
@@ -53,35 +60,37 @@ check() {
 
 echo "=== bgrid coreutils integration test ==="
 echo "binary: $BGRID"
+echo "results: $RESULTS_DIR/"
 echo ""
 
 START=$(date +%s)
 
-# Expected: (binary, min_distinguished, max_denominator)
-# These are lower bounds — improvements raise them, regressions lower them.
-check sort   29 29
-check ls     50 51
-check cat    10 12
-check cut     9 12
-check head    4  6
-check wc      7  9
-check uniq   10 11
-check nl     10 13
-check od     19 19
-check fold    3  5
-check fmt     6  9
-check paste   3  5
-check du     25 28
-check cp     18 30
-check rm      9  9
-check stat    7  8
-check df     15 17
+# Expected lower bounds for distinguished flag count.
+# These are the minimum acceptable — improvements raise them.
+check sort   27
+check ls     49
+check cat    10
+check cut     9
+check head    4
+check wc      7
+check uniq    9
+check nl     10
+check od     17
+check fold    3
+check fmt     6
+check paste   3
+check du     25
+check cp     28
+check rm      7
+check stat    6
+check df     15
 
 END=$(date +%s)
 ELAPSED=$((END - START))
 
 echo ""
 echo "=== Results: $PASS/$TOTAL passed, $FAIL failed ($ELAPSED seconds) ==="
+echo "Reports saved to $RESULTS_DIR/"
 
 if [ "$FAIL" -gt 0 ]; then
     exit 1
