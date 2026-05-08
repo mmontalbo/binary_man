@@ -106,34 +106,65 @@ pub fn refine(
     }
 
     // --- Strategy 1b: Cross-group interaction ---
-    // Pair identical-group flags with top isolated flags (modifier + mode).
-    // E.g., ls: pair `-h` (identical) with `-l` (isolated) to reveal `-h`'s effect.
+    // Pair identical-group flags with isolated flags that share sensitivity dimensions.
+    // Only generate pairs where both sides showed sensitivity to the same dimension
+    // (content, structure, size, mtime, etc.). This avoids uninformative pairs and
+    // reduces cell count dramatically.
     let isolated_groups: Vec<_> = metrics.groups.iter()
         .filter(|g| g.isolated() && !unproductive.contains(&g.run_labels[0]))
         .collect();
 
     if !isolated_groups.is_empty() && !unexplained.is_empty() {
-        // Pick top 3 isolated flags by sensitivity count (most behavioral signal)
-        let mut ranked_isolated: Vec<_> = isolated_groups.iter()
-            .map(|g| (&g.run_labels[0], g.sensitivity.len()))
+        // Build dimension sets for isolated groups
+        struct IsolatedCandidate {
+            args: Vec<String>,
+            dimensions: HashSet<String>,
+        }
+        let isolated_candidates: Vec<IsolatedCandidate> = isolated_groups.iter()
+            .filter(|g| !g.sensitivity.is_empty())
+            .map(|g| {
+                let dims: HashSet<String> = g.sensitivity.iter()
+                    .map(|s| parse_sensitivity_label(s).0)
+                    .collect();
+                IsolatedCandidate {
+                    args: parse_run_label(&g.run_labels[0]),
+                    dimensions: dims,
+                }
+            })
+            .filter(|c| !c.args.is_empty())
             .collect();
-        ranked_isolated.sort_by(|a, b| b.1.cmp(&a.1));
 
-        let top_isolated: Vec<Vec<String>> = ranked_isolated.iter()
-            .take(3)
-            .map(|(label, _)| parse_run_label(label))
-            .filter(|args| !args.is_empty())
-            .collect();
-
-        // For each unexplained group, pair each flag with each top isolated flag
         let mut cross_count = 0;
+        let max_cross_pairs = 30; // cap total cross-group pairs to control cell count
         for group in unexplained.iter().take(2) {
+            let group_dims: HashSet<String> = group.sensitivity.iter()
+                .map(|s| parse_sensitivity_label(s).0)
+                .collect();
             let group_flags = extract_flags(group);
             let group_positionals = extract_positionals(group);
 
-            for iso_args in &top_isolated {
-                // Extract just the flags from the isolated run
-                let iso_flags: Vec<&String> = iso_args.iter()
+            // Find isolated flags that share at least one sensitivity dimension
+            // If the group has NO sensitivity, pair with top isolated by sensitivity count
+            let matching_isolated: Vec<&IsolatedCandidate> = if group_dims.is_empty() {
+                // No sensitivity signal — use top 3 by dimension count as fallback
+                let mut ranked: Vec<&IsolatedCandidate> = isolated_candidates.iter().collect();
+                ranked.sort_by(|a, b| b.dimensions.len().cmp(&a.dimensions.len()));
+                ranked.into_iter().take(3).collect()
+            } else {
+                // Filter to isolated flags sharing a dimension
+                let mut matched: Vec<&IsolatedCandidate> = isolated_candidates.iter()
+                    .filter(|c| !c.dimensions.is_disjoint(&group_dims))
+                    .collect();
+                matched.sort_by(|a, b| {
+                    let a_overlap = a.dimensions.intersection(&group_dims).count();
+                    let b_overlap = b.dimensions.intersection(&group_dims).count();
+                    b_overlap.cmp(&a_overlap)
+                });
+                matched.into_iter().take(3).collect()
+            };
+
+            for candidate in &matching_isolated {
+                let iso_flags: Vec<&String> = candidate.args.iter()
                     .filter(|a| a.starts_with('-'))
                     .collect();
                 if iso_flags.is_empty() { continue; }
@@ -141,14 +172,14 @@ pub fn refine(
                 for gflag in group_flags.iter().take(MAX_FLAGS_PER_GROUP) {
                     let mut args: Vec<String> = iso_flags.iter().map(|s| s.to_string()).collect();
                     args.push(gflag.clone());
-                    // Use the positionals from whichever side has them
-                    let positionals = if group_positionals.is_empty() {
-                        iso_args.iter().filter(|a| !a.starts_with('-')).cloned().collect()
+                    let positionals: Vec<String> = if group_positionals.is_empty() {
+                        candidate.args.iter().filter(|a| !a.starts_with('-')).cloned().collect()
                     } else {
                         group_positionals.clone()
                     };
                     args.extend(positionals.iter().cloned());
 
+                    if cross_count >= max_cross_pairs { break; }
                     let already_present = runs.iter().any(|r| r.args == args);
                     if !already_present {
                         runs.push(Run {
@@ -162,7 +193,9 @@ pub fn refine(
                         cross_count += 1;
                     }
                 }
+                if cross_count >= max_cross_pairs { break; }
             }
+            if cross_count >= max_cross_pairs { break; }
         }
         if cross_count > 0 {
             strategies.push("cross-group");
