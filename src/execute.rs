@@ -165,7 +165,7 @@ fn diff_snapshots(before: &FsSnapshot, after: &FsSnapshot) -> Vec<FsChange> {
 }
 
 /// Per-cell timeout in seconds.
-const CELL_TIMEOUT_SECS: u64 = 2;
+pub const CELL_TIMEOUT_SECS: u64 = 2;
 
 /// Max concurrent cells (threads).
 const MAX_THREADS: usize = 8;

@@ -117,8 +117,21 @@ pub fn refine(
     // Target specific indistinguishable flag stems (from report-level analysis).
     // For each indistinguishable stem, pair it with top isolated flags across
     // all positional arg variants (file AND directory targets).
+    // Skip flags whose runs were slow (near timeout) — combining or re-testing
+    // them will also be slow or timeout.
+    let timeout_threshold_ms = crate::execute::CELL_TIMEOUT_SECS * 1000 - 500;
+    let slow_runs: HashSet<&String> = metrics.runs.iter()
+        .filter(|r| {
+            // Check max wall time across ALL context groups, not just majority
+            r.context_groups.iter()
+                .any(|(_, obs)| obs.resources.wall_time_ms >= timeout_threshold_ms)
+        })
+        .map(|r| &r.args_str)
+        .collect();
     let isolated_groups: Vec<_> = metrics.groups.iter()
-        .filter(|g| g.isolated() && !unproductive.contains(&g.run_labels[0]))
+        .filter(|g| g.isolated()
+            && !unproductive.contains(&g.run_labels[0])
+            && g.majority_obs.resources.wall_time_ms < timeout_threshold_ms)
         .collect();
 
     if !isolated_groups.is_empty() && !indist_stems.is_empty() {
@@ -150,9 +163,11 @@ pub fn refine(
         let top_isolated: Vec<&IsolatedCandidate> = ranked_isolated.into_iter().take(5).collect();
 
         // Collect all positional variants seen for the indistinguishable stems
+        // Skip stems whose runs were slow (near timeout)
         let mut stem_positionals: HashMap<String, Vec<Vec<String>>> = HashMap::new();
         for group in &metrics.groups {
             for label in &group.run_labels {
+                if slow_runs.contains(label) { continue; }
                 if let Some(stem) = crate::report::flag_stem(label) {
                     if crate::report::is_combination(&stem) { continue; }
                     let canon = crate::report::canonical_flag(&stem, flag_info.map(|fi| &fi.aliases));
@@ -302,6 +317,7 @@ pub fn refine(
         if group.isolated() { continue; }
         for label in &group.run_labels {
             if ever_isolated.contains(label) || unproductive.contains(label) { continue; }
+            if slow_runs.contains(label) { continue; }
             let args = parse_run_label(label);
             if args.is_empty() { continue; }
             let already_present = runs.iter().any(|r| r.args == args);
