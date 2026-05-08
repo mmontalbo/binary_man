@@ -197,6 +197,7 @@ pub fn run_grid(
 
     let total = work_items.len();
     let completed = AtomicUsize::new(0);
+    let grid_start = std::time::Instant::now();
 
     // Parallel execution with bounded threads
     let results: Vec<_> = std::thread::scope(|s| {
@@ -254,6 +255,8 @@ pub fn run_grid(
             .collect()
     });
 
+    let grid_elapsed = grid_start.elapsed();
+
     if total >= 200 {
         eprintln!(); // newline after progress counter
     }
@@ -261,13 +264,27 @@ pub fn run_grid(
     // Collect into GridResult
     let mut cells: HashMap<(String, usize), Observation> = HashMap::new();
     let mut setup_failures: HashMap<String, String> = HashMap::new();
+    let mut timeout_count = 0usize;
 
     for (ctx_name, ri, result) in results {
         match result {
-            Ok(obs) => { cells.insert((ctx_name, ri), obs); }
+            Ok(obs) => {
+                if obs.resources.wall_time_ms >= (CELL_TIMEOUT_SECS * 1000 - 100) {
+                    timeout_count += 1;
+                }
+                cells.insert((ctx_name, ri), obs);
+            }
             Err(e) => { setup_failures.entry(ctx_name).or_insert(e); }
         }
     }
+
+    let cells_per_sec = if grid_elapsed.as_secs() > 0 {
+        total as u64 / grid_elapsed.as_secs()
+    } else {
+        total as u64
+    };
+    eprintln!("  grid: {} cells in {:.1}s ({} cells/s, {} timeouts)",
+        total, grid_elapsed.as_secs_f64(), cells_per_sec, timeout_count);
 
     Ok(GridResult {
         cells,
