@@ -97,6 +97,38 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, _mode: OutputMo
         format!("{} {}", binary, sub_args.join(" "))
     };
 
+    if !skeleton {
+        // Explore mode: skip probe generation, call explore.sh directly
+        let explore_path = std::env::current_exe().ok()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+            .and_then(|p| {
+                let repo = p.parent().and_then(|p| p.parent());
+                repo.map(|r| r.join("tools/doc/explore.sh"))
+            });
+
+        if let Some(explore) = &explore_path {
+            if explore.exists() {
+                let mut explore_cmd = std::process::Command::new(explore);
+                for arg in command {
+                    explore_cmd.arg(arg.as_str());
+                }
+                explore_cmd.arg("--").arg("3");
+                explore_cmd.stderr(std::process::Stdio::inherit());
+                explore_cmd.stdout(std::process::Stdio::piped());
+                let output = explore_cmd.output()
+                    .context("run explore.sh")?;
+                if !output.stdout.is_empty() {
+                    eprintln!("{}", String::from_utf8_lossy(&output.stdout));
+                }
+                return Ok(());
+            }
+        }
+        eprintln!("explore.sh not found — use --skeleton to generate probe manually");
+        return Ok(());
+    }
+
+    // --- Skeleton mode: generate probe to stdout ---
+
     // Inspect the binary for env vars and config paths
     let hints = inspect_binary(binary);
 
@@ -312,41 +344,6 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, _mode: OutputMo
         }
     }
 
-    if skeleton {
-        // --skeleton: just print the probe and exit (used by explore.sh)
-        return Ok(());
-    }
-
-    // --- Exploration loop ---
-    eprintln!();
-
-    let explore_path = std::env::current_exe().ok()
-        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-        .and_then(|p| {
-            let repo = p.parent().and_then(|p| p.parent());
-            repo.map(|r| r.join("tools/doc/explore.sh"))
-        });
-
-    if let Some(explore) = &explore_path {
-        if explore.exists() {
-            let mut explore_cmd = std::process::Command::new(explore);
-            for arg in command {
-                explore_cmd.arg(arg.as_str());
-            }
-            explore_cmd.arg("--").arg("3");
-            explore_cmd.stderr(std::process::Stdio::inherit());
-            explore_cmd.stdout(std::process::Stdio::piped());
-            let output = explore_cmd.output()
-                .context("run explore.sh")?;
-            // Print explore output to stderr (report goes to stderr already)
-            if !output.stdout.is_empty() {
-                eprintln!("{}", String::from_utf8_lossy(&output.stdout));
-            }
-            return Ok(());
-        }
-    }
-
-    eprintln!("explore.sh not found — use --skeleton to generate probe manually");
     Ok(())
 }
 
