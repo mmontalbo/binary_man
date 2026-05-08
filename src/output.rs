@@ -111,43 +111,7 @@ pub fn format_context_group(names: &[&str], total: usize) -> String {
     }
 }
 
-/// Format an observation without trace file lists (for default mode).
-pub fn format_obs_brief(out: &mut String, obs: &Observation, indent: &str) {
-    let stdout_lines: Vec<&str> = obs.stdout.lines().collect();
-    if stdout_lines.is_empty() {
-        out.push_str(&format!("{}stdout: (empty)\n", indent));
-    } else {
-        out.push_str(&format!("{}stdout ({} lines):\n", indent, stdout_lines.len()));
-        for line in stdout_lines.iter().take(20) {
-            out.push_str(&format!("{}  {}\n", indent, line));
-        }
-        if stdout_lines.len() > 20 {
-            out.push_str(&format!("{}  ... ({} more)\n", indent, stdout_lines.len() - 20));
-        }
-    }
-    if !obs.stderr.trim().is_empty() {
-        out.push_str(&format!("{}stderr: {}\n", indent, obs.stderr.trim()));
-    }
-    out.push_str(&format!("{}exit: {}\n", indent, format_exit(obs.exit_code.unwrap_or(-1))));
-    if !obs.fs_changes.is_empty() {
-        out.push_str(&format!("{}fs:\n", indent));
-        for change in &obs.fs_changes {
-            match change {
-                FsChange::Created { path, size } => {
-                    out.push_str(&format!("{}  created: {} ({} bytes)\n", indent, path, size));
-                }
-                FsChange::Deleted { path } => {
-                    out.push_str(&format!("{}  deleted: {}\n", indent, path));
-                }
-                FsChange::Modified { path, detail } => {
-                    out.push_str(&format!("{}  modified: {} ({})\n", indent, path, detail));
-                }
-            }
-        }
-    }
-}
-
-/// Format a single observation's output (full, including trace file lists).
+/// Format a single observation's output.
 pub fn format_obs(out: &mut String, obs: &Observation, indent: &str) {
     let stdout_lines: Vec<&str> = obs.stdout.lines().collect();
     if stdout_lines.is_empty() {

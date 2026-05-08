@@ -5,7 +5,7 @@ use regex::Regex;
 use std::collections::{HashMap, HashSet};
 
 use crate::parse::{
-    FileContent, NamedContext, Property, Run, Script, SetupCommand,
+    self, FileContent, NamedContext, Property, Run, Script, SetupCommand,
 };
 use crate::sandbox::Sandbox;
 
@@ -151,301 +151,112 @@ pub fn default_value(hint: &str) -> String {
     }
 }
 
-/// Binary inspection results from scanning printable strings.
-struct BinaryHints {
-    env_vars: Vec<String>,
-    config_paths: Vec<String>,
-}
-
-/// Scan a binary file for environment variable names and config paths.
-fn inspect_binary(binary: &str) -> BinaryHints {
-    let path = which::which(binary).ok();
-    let data = path.and_then(|p| std::fs::read(p).ok()).unwrap_or_default();
-
-    let mut env_vars = HashSet::new();
-    let mut config_paths = HashSet::new();
-
-    // Extract printable strings (runs of >= 4 printable ASCII chars)
-    let mut current = String::new();
-    for &byte in &data {
-        if (0x20..0x7f).contains(&byte) {
-            current.push(byte as char);
-        } else {
-            if current.len() >= 4 {
-                classify_string(&current, &mut env_vars, &mut config_paths);
-            }
-            current.clear();
-        }
-    }
-    if current.len() >= 4 {
-        classify_string(&current, &mut env_vars, &mut config_paths);
-    }
-
-    // Filter env vars to likely-real ones
-    let skip_env = ["DESCRIPTION", "COMMAND", "ERROR", "WARNING", "VERSION",
-                    "OPTIONS", "USAGE", "ARGUMENTS", "SYNOPSIS", "EXAMPLE",
-                    "DEFAULT", "REQUIRED", "OPTIONAL", "INTERNAL", "ENABLED",
-                    "DISABLED", "SUCCESS", "FAILURE", "UNKNOWN", "INVALID",
-                    "TRUE", "FALSE", "NULL", "NONE", "AUTO"];
-
-    let mut sorted_env: Vec<String> = env_vars.into_iter()
-        .filter(|v| !skip_env.contains(&v.as_str()))
-        .filter(|v| v.len() >= 3 && v.len() <= 40)
-        .collect();
-    sorted_env.sort();
-
-    let mut sorted_paths: Vec<String> = config_paths.into_iter().collect();
-    sorted_paths.sort();
-
-    BinaryHints {
-        env_vars: sorted_env,
-        config_paths: sorted_paths,
-    }
-}
-
-fn classify_string(s: &str, env_vars: &mut HashSet<String>, config_paths: &mut HashSet<String>) {
-    // Environment variable pattern: all uppercase with underscores, 3+ chars
-    let env_suffixes = ["_DIR", "_PATH", "_HOME", "_FILE", "_CONFIG", "_ROOT",
-                        "_PREFIX", "_EDITOR", "_PAGER", "_AUTHOR", "_EMAIL",
-                        "_NAME", "_ENCODING", "_LANG", "_OPTS", "_FLAGS"];
-    if s.chars().all(|c| c.is_ascii_uppercase() || c == '_') && s.len() >= 3
-        && (env_suffixes.iter().any(|suf| s.ends_with(suf))
-            || s.starts_with("LC_")
-            || s.starts_with("XDG_")) {
-        env_vars.insert(s.to_string());
-    }
-
-    // Config path pattern: contains /etc/, .config/, or ~/
-    if (s.contains("/etc/") || s.contains(".config/") || s.starts_with("~/"))
-        && s.len() >= 6 && s.len() <= 80 && !s.contains(' ') && !s.contains("%s") && !s.contains("..")
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || "/-_.~".contains(c)) {
-        config_paths.insert(s.to_string());
-    }
-    // Dotfile pattern: starts with . and looks like a config file
-    if s.starts_with('.') && !s.starts_with("..") && s.len() >= 3 && s.len() <= 40
-        && !s.contains(' ') && !s.contains('(')
-        && (s.contains("rc") || s.contains("config") || s.contains("ignore")
-            || s.contains("profile") || s.ends_with(".conf")
-            || s.ends_with(".cfg") || s.ends_with(".ini")) {
-        config_paths.insert(s.to_string());
-    }
-}
-
 /// Print a probe skeleton to stdout for manual authoring.
+/// Generates the same Script as `generate_initial_script` and serializes it to probe text.
 pub fn print_skeleton(
     binary: &str,
     sub_args: &[&str],
     sandbox: &Sandbox,
 ) -> Result<()> {
-    let help_text = try_help(binary, sub_args, sandbox)?;
+    let (script, flag_info) = generate_initial_script(binary, sub_args, sandbox)?;
 
-    // Extract flags
-    let short_re = Regex::new(r"(?:^|\s)-([a-zA-Z0-9])\b").unwrap();
-    let long_re = Regex::new(r"--([a-zA-Z][a-zA-Z0-9-]*)(?:[=\s]([A-Z][A-Z_]*))?").unwrap();
-
-    let mut short_flags: Vec<String> = Vec::new();
-    let mut long_flags: Vec<(String, Option<String>)> = Vec::new();
-    let mut seen = HashSet::new();
-
-    for line in help_text.lines() {
-        for cap in short_re.captures_iter(line) {
-            let flag = format!("-{}", &cap[1]);
-            if seen.insert(flag.clone()) {
-                short_flags.push(flag);
-            }
-        }
-        for cap in long_re.captures_iter(line) {
-            let name = format!("--{}", &cap[1]);
-            if name == "--help" || name == "--version" { continue; }
-            let hint = cap.get(2).map(|m| m.as_str().to_string());
-            if seen.insert(name.clone()) {
-                long_flags.push((name, hint));
-            }
-        }
-    }
-
-    let (pattern_arg, file_arg) = infer_base_args(&help_text);
     let cmd_label = if sub_args.is_empty() {
         binary.to_string()
     } else {
         format!("{} {}", binary, sub_args.join(" "))
     };
 
-    // Inspect binary for env vars and config paths
-    let hints = inspect_binary(binary);
-
-    // Output skeleton
     println!("# Discovered from: {} --help", cmd_label);
-    println!("# {} short flags, {} long flags found", short_flags.len(), long_flags.len());
-    if !hints.env_vars.is_empty() || !hints.config_paths.is_empty() {
-        println!("#");
-        println!("# Binary inspection:");
-        if !hints.env_vars.is_empty() {
-            println!("#   env vars: {}", hints.env_vars.join(", "));
+    println!("# {} flags found", flag_info.all_flags.len());
+    println!();
+
+    // Serialize contexts
+    for ctx in &script.contexts {
+        // Skip vary-generated contexts (contain " / " in name) — print vary blocks instead below
+        if ctx.name.contains(" / ") { continue; }
+        println!("context \"{}\"", ctx.name);
+        for cmd in &ctx.commands {
+            println!("  {}", format_setup_cmd(cmd));
         }
-        if !hints.config_paths.is_empty() {
-            println!("#   config paths: {}", hints.config_paths.join(", "));
-        }
+        println!();
     }
-    println!();
 
-    // --- Orthogonal base contexts ---
-    println!("context \"few_files\"");
-    println!("  file \"input.txt\" \"cherry\" \"apple\" \"banana\" \"date\" \"elderberry\"");
-    println!("  file \"other.txt\" \"hello world\"");
-    println!();
-
-    println!("context \"many_files\"");
-    println!("  file \"input.txt\" \"100\" \"2\" \"30\" \"1\" \"20\" \"3\" \"10\"");
-    println!("  file \"a.txt\" \"first\"");
-    println!("  file \"b.txt\" \"second\"");
-    println!("  file \"c.log\" \"log entry\"");
-    println!("  file \"data.csv\" \"name,age\" \"alice,25\" \"bob,30\"");
-    println!("  file \".hidden\" \"secret content\"");
-    println!("  file \".config\" \"key=value\"");
-    println!("  dir \"subdir\"");
-    println!("  file \"subdir/nested.txt\" \"nested content\"");
-    println!();
-
-    println!("context \"deep_tree\"");
-    println!("  file \"input.txt\" \"bob:30:sales\" \"alice:25:eng\" \"charlie:35:sales\"");
-    println!("  dir \"level1\"");
-    println!("  dir \"level1/level2\"");
-    println!("  file \"level1/a.txt\" \"depth one\"");
-    println!("  file \"level1/level2/b.txt\" \"depth two\"");
-    println!("  file \"level1/level2/deep.log\" \"deep log\"");
-    println!("  file \"link_to_dir\" -> \"level1\"");
-    println!();
-
-    println!("context \"mixed_types\"");
-    println!("  file \"input.txt\" \"Apple\" \"BANANA\" \"cherry\" \"apple\" \"Cherry\" \"APPLE\"");
-    println!("  file \"empty.txt\" empty");
-    println!("  file \"exec.sh\" \"#!/bin/sh\\necho hello\"");
-    println!("  props \"exec.sh\" executable");
-    println!("  file \"readonly.dat\" \"protected\"");
-    println!("  props \"readonly.dat\" readonly");
-    println!("  file \"link.txt\" -> \"input.txt\"");
-    println!("  file \"broken.lnk\" -> \"nonexistent\"");
-    println!("  file \"-rf\" \"flag-like filename\"");
-    println!();
-
-    println!("context \"timestamped\"");
-    println!("  file \"input.txt\" \"aaa\" \"aaa\" \"bbb\" \"bbb\" \"bbb\" \"ccc\" \"aaa\"");
-    println!("  file \"old.txt\" \"ancient content\"");
-    println!("  props \"old.txt\" mtime old");
-    println!("  file \"big.bin\" size 10000");
-    println!("  file \"tiny.txt\" \"x\"");
-    println!("  file \"medium.txt\" \"line1\" \"line2\" \"line3\" \"line4\" \"line5\"");
-    println!("  dir \"subdir\"");
-    println!("  file \"subdir/recent.txt\" \"fresh\"");
-    println!("  props \"subdir/recent.txt\" mtime recent");
-    println!();
-
-    println!("context \"empty_dir\"");
-    println!("  # empty workspace — error path exerciser");
-    println!();
-
-    // Vary blocks (from many_files)
-    println!("vary from \"many_files\"");
-    println!("  remove \".hidden\"");
-    println!("  remove \".config\"");
-    println!("  remove \"subdir\"");
-    println!("  file \"input.txt\" empty");
-    println!("  props \"input.txt\" readonly");
-    println!("  props \"input.txt\" mtime old");
-    println!("  file \"input.txt\" size 1");
-    println!();
-
-    // Helper: build a run arg list
-    let run_prefix: Vec<&str> = sub_args.to_vec();
-    let build_run = |flag: Option<&str>, flag_value: Option<&str>, pattern: Option<&str>, file: Option<&str>| -> String {
-        let mut parts: Vec<String> = run_prefix.iter().map(|a| format!("\"{}\"", a)).collect();
-        if let Some(f) = flag {
-            if let Some(v) = flag_value {
-                parts.push(format!("\"{}={}\"", f, v));
-            } else {
-                parts.push(format!("\"{}\"", f));
+    // Reconstruct vary blocks from generated contexts
+    let vary_base = "many_files";
+    let vary_contexts: Vec<&NamedContext> = script.contexts.iter()
+        .filter(|c| c.name.starts_with(&format!("{} / ", vary_base)))
+        .collect();
+    if !vary_contexts.is_empty() {
+        println!("vary from \"{}\"", vary_base);
+        for ctx in &vary_contexts {
+            // The last command is the perturbation
+            if let Some(cmd) = ctx.commands.last() {
+                println!("  {}", format_setup_cmd(cmd));
             }
         }
-        if let Some(p) = pattern {
-            parts.push(format!("\"{}\"", p));
-        }
-        if let Some(f) = file {
-            parts.push(format!("\"{}\"", f));
-        }
-        parts.join(" ")
-    };
-
-    let pat = pattern_arg.as_deref();
-    let fil = file_arg.as_deref().unwrap_or("input.txt");
-    let has_file_arg = file_arg.is_some() || pattern_arg.is_some();
-    let use_dir = has_file_arg && fil != ".";
-
-    // --- File-targeted runs ---
-    if has_file_arg {
-        let base_file = build_run(None, None, pat, Some(fil));
-        println!("run {}", base_file);
         println!();
-        println!("from {}", base_file);
-        for flag in &short_flags {
-            println!("  run {}", build_run(Some(flag), None, pat, Some(fil)));
-        }
-        for (flag, hint) in &long_flags {
-            let val = hint.as_ref().map(|h| default_value(h));
-            println!("  run {}", build_run(Some(flag), val.as_deref(), pat, Some(fil)));
-        }
-    } else {
-        for flag in &short_flags {
-            println!("run {}", build_run(Some(flag), None, None, None));
-        }
-        for (flag, hint) in &long_flags {
-            let val = hint.as_ref().map(|h| default_value(h));
-            println!("run {}", build_run(Some(flag), val.as_deref(), None, None));
-        }
     }
 
-    // --- Directory-targeted runs ---
-    if use_dir {
-        println!();
-        println!("# Directory-targeted: exercises filesystem structure");
-        let base_dir = build_run(None, None, pat, Some("."));
-        println!("run {}", base_dir);
-        println!();
-        println!("from {}", base_dir);
-        for flag in &short_flags {
-            println!("  run {}", build_run(Some(flag), None, pat, Some(".")));
-        }
-        for (flag, hint) in &long_flags {
-            let val = hint.as_ref().map(|h| default_value(h));
-            println!("  run {}", build_run(Some(flag), val.as_deref(), pat, Some(".")));
-        }
-    }
+    // Serialize runs
+    let mut current_from: Option<&Vec<String>> = None;
+    for run in &script.runs {
+        let args_str = run.args.iter().map(|a| format!("\"{}\"", a)).collect::<Vec<_>>().join(" ");
 
-    // Boundary runs
-    if has_file_arg {
-        let numeric_hints = ["NUM", "NUMBER", "N", "SIZE", "COLS", "WIDTH", "COUNT", "LINES", "BYTES"];
-        let zero_flags: Vec<&(String, Option<String>)> = long_flags.iter()
-            .filter(|(_, hint)| hint.as_ref().is_some_and(|h| numeric_hints.contains(&h.to_uppercase().as_str())))
-            .collect();
-        if !zero_flags.is_empty() {
-            println!();
-            println!("# Boundary: zero value for numeric flags");
-            for (flag, _) in &zero_flags {
-                println!("run {}", build_run(Some(&format!("{}=0", flag)), None, pat, Some(fil)));
+        match (&run.diff_from, current_from) {
+            (Some(ref from), Some(prev)) if from == prev => {
+                // Inside an existing from block
+                println!("  run {}", args_str);
             }
-            for (flag, _) in zero_flags.iter().take(3) {
-                println!("run {}", build_run(Some(&format!("{}=-1", flag)), None, pat, Some(fil)));
-                println!("run {}", build_run(Some(&format!("{}=2147483647", flag)), None, pat, Some(fil)));
+            (Some(ref from), _) => {
+                // New from block
+                let from_str = from.iter().map(|a| format!("\"{}\"", a)).collect::<Vec<_>>().join(" ");
+                println!();
+                println!("from {}", from_str);
+                println!("  run {}", args_str);
+                current_from = Some(from);
+            }
+            (None, _) => {
+                println!("run {}", args_str);
+                current_from = None;
             }
         }
     }
-
-    // Error provocation
-    println!();
-    println!("# Error: nonexistent file");
-    println!("run {}", build_run(None, None, pat, Some("nonexistent-file.txt")));
 
     Ok(())
+}
+
+fn format_setup_cmd(cmd: &SetupCommand) -> String {
+    match cmd {
+        SetupCommand::CreateFile { path, content } => {
+            match content {
+                FileContent::Lines(lines) => {
+                    let quoted: Vec<String> = lines.iter().map(|l| format!("\"{}\"", l)).collect();
+                    format!("file \"{}\" {}", path, quoted.join(" "))
+                }
+                FileContent::Size(n) => format!("file \"{}\" size {}", path, n),
+                FileContent::Empty => format!("file \"{}\" empty", path),
+                FileContent::From(src) => format!("file \"{}\" from \"{}\"", path, src),
+            }
+        }
+        SetupCommand::CreateDir { path } => format!("dir \"{}\"", path),
+        SetupCommand::CreateLink { path, target } => format!("file \"{}\" -> \"{}\"", path, target),
+        SetupCommand::SetProps { path, props } => {
+            let p: Vec<&str> = props.iter().map(|p| match p {
+                Property::Executable => "executable",
+                Property::MtimeOld => "mtime old",
+                Property::MtimeRecent => "mtime recent",
+                Property::ReadOnly => "readonly",
+            }).collect();
+            format!("props \"{}\" {}", path, p.join(" "))
+        }
+        SetupCommand::SetEnv { var, value } => format!("env {} \"{}\"", var, value),
+        SetupCommand::Remove { path } => format!("remove \"{}\"", path),
+        SetupCommand::RemoveEnv { var } => format!("remove env {}", var),
+        SetupCommand::Invoke { args } => {
+            let quoted: Vec<String> = args.iter().map(|a| format!("\"{}\"", a)).collect();
+            format!("invoke {}", quoted.join(" "))
+        }
+    }
 }
 
 /// Generate an initial Script from binary discovery.
@@ -600,7 +411,7 @@ pub fn generate_initial_script(
 
     let base_ctx = contexts.iter().find(|c| c.name == vary_base).unwrap().clone();
     for perturbation in &perturbations {
-        let variant_name = format!("{} / {}", vary_base, describe_perturbation(perturbation));
+        let variant_name = format!("{} / {}", vary_base, parse::describe_perturbation(perturbation));
         let mut cmds = base_ctx.commands.clone();
         cmds.push(perturbation.clone());
         contexts.push(NamedContext { name: variant_name, extends: None, commands: cmds });
@@ -731,31 +542,3 @@ pub fn generate_initial_script(
     Ok((Script { contexts, runs }, flag_info))
 }
 
-fn describe_perturbation(cmd: &SetupCommand) -> String {
-    match cmd {
-        SetupCommand::Remove { path } => format!("remove {}", path),
-        SetupCommand::RemoveEnv { var } => format!("remove env {}", var),
-        SetupCommand::CreateFile { path, content } => {
-            match content {
-                FileContent::Size(n) => format!("{}=size:{}", path, n),
-                FileContent::Lines(l) if l.len() == 1 => format!("{}={:?}", path, l[0]),
-                FileContent::Lines(l) => format!("{}={}lines", path, l.len()),
-                FileContent::Empty => format!("{}=empty", path),
-                FileContent::From(src) => format!("{}=from:{}", path, src),
-            }
-        }
-        SetupCommand::CreateLink { path, target } => format!("{} -> {}", path, target),
-        SetupCommand::SetProps { path, props } => {
-            let p: Vec<&str> = props.iter().map(|p| match p {
-                Property::Executable => "executable",
-                Property::MtimeOld => "mtime=old",
-                Property::MtimeRecent => "mtime=recent",
-                Property::ReadOnly => "readonly",
-            }).collect();
-            format!("{} {}", path, p.join(" "))
-        }
-        SetupCommand::SetEnv { var, value } => format!("env {}={}", var, value),
-        SetupCommand::CreateDir { path } => format!("dir {}", path),
-        SetupCommand::Invoke { args } => format!("invoke {:?}", args),
-    }
-}

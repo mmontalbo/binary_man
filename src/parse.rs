@@ -497,7 +497,7 @@ fn resolve_vary(contexts: &mut Vec<NamedContext>, vary_blocks: &[VaryBlock]) -> 
     Ok(())
 }
 
-fn describe_perturbation(cmd: &SetupCommand) -> String {
+pub fn describe_perturbation(cmd: &SetupCommand) -> String {
     match cmd {
         SetupCommand::Remove { path } => format!("remove {}", path),
         SetupCommand::RemoveEnv { var } => format!("remove env {}", var),

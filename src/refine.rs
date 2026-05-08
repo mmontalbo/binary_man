@@ -292,14 +292,6 @@ pub fn refine(
     Some(Script { contexts, runs })
 }
 
-/// Check if a 2-run group is a known alias pair (public API for report.rs).
-pub fn is_alias_pair_check(
-    group: &crate::analyze::BehaviorGroup,
-    aliases: Option<&std::collections::HashMap<String, String>>,
-) -> bool {
-    is_alias_pair(group, aliases)
-}
-
 /// Check if a 2-run group is a known alias pair.
 fn is_alias_pair(
     group: &crate::analyze::BehaviorGroup,
