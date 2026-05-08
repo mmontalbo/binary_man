@@ -44,8 +44,8 @@ pub fn content_tabular() -> Vec<String> {
     ].into_iter().map(String::from).collect()
 }
 
-/// Content with tabs, blank lines, trailing whitespace, and mixed formatting.
-/// Exercises: cat -n/-b/-s/-E/-T, fold, fmt, nl, expand/unexpand, col.
+/// Content with tabs, blank lines, trailing whitespace, control characters,
+/// and mixed formatting. Exercises: cat -n/-b/-s/-E/-T/-v, fold, fmt, nl, od, tr.
 pub fn content_formatted() -> Vec<String> {
     vec![
         "first line",
@@ -57,6 +57,8 @@ pub fn content_formatted() -> Vec<String> {
         "  leading spaces",
         "normal line",
         "\ttwo\ttabs",
+        "has\x01control\x07chars",
+        "escape\x1b[31msequence",
         "last line",
         "",
     ].into_iter().map(String::from).collect()
