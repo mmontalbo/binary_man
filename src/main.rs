@@ -318,10 +318,6 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, _mode: OutputMo
     }
 
     // --- Exploration loop ---
-    // Suppress the probe output that was already printed to stdout
-    // by re-running ourselves with --skeleton to capture it to a file
-    eprintln!("NOTE: probe skeleton printed above is the starting point.");
-    eprintln!("Running iterative exploration...");
     eprintln!();
 
     let explore_path = std::env::current_exe().ok()
@@ -906,24 +902,30 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, mode: 
         // Compact mode: group runs by identical majority observation
         struct RunGroup<'a> {
             run_labels: Vec<String>,
-            run_descs: Vec<(String, String)>,  // (args_str, help description)
+            run_descs: Vec<(String, String)>,
             majority_obs: &'a execute::Observation,
             majority_names: Vec<&'a str>,
             universals: Vec<String>,
             sensitive_parts: Vec<String>,
             from_ref: Option<&'a Vec<String>>,
             vs_diffs: Vec<(String, String)>,
+            obs_list: Vec<(&'a str, &'a execute::Observation)>,
         }
 
         let mut run_groups: Vec<RunGroup> = Vec::new();
 
         for info in &run_infos {
+            // Group runs only if they produce identical output in EVERY context
+            // (not just majority — majority-only grouping masks archetype differences)
             let found = run_groups.iter_mut().find(|g| {
-                g.majority_obs.stdout == info.majority_obs.stdout
-                && g.majority_obs.stderr == info.majority_obs.stderr
-                && g.majority_obs.exit_code == info.majority_obs.exit_code
-                && g.majority_obs.fs_changes == info.majority_obs.fs_changes
-                && g.from_ref == info.from_ref
+                if g.from_ref != info.from_ref { return false; }
+                if g.obs_list.len() != info.obs_list.len() { return false; }
+                g.obs_list.iter().zip(info.obs_list.iter()).all(|((_, a), (_, b))| {
+                    a.stdout == b.stdout
+                    && a.stderr == b.stderr
+                    && a.exit_code == b.exit_code
+                    && a.fs_changes == b.fs_changes
+                })
             });
 
             let vs_diff = vs_diff_for(info, &obs_by_args);
@@ -961,6 +963,7 @@ fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox, mode: 
                     sensitive_parts: info.sensitive_parts.clone(),
                     from_ref: info.from_ref,
                     vs_diffs,
+                    obs_list: info.obs_list.clone(),
                 });
             }
         }

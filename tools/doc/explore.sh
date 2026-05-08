@@ -70,7 +70,7 @@ for round in $(seq 1 "$MAX_ROUNDS"); do
 
     # Run follow-up
     echo "[round $round] Running follow-up ($probe_lines lines)..." >&2
-    "$BGRID" --compact "$BINARY" "$WORKDIR/round_${round}.probe" 2>/dev/null
+    "$BGRID" --compact --trace "$BINARY" "$WORKDIR/round_${round}.probe" 2>/dev/null
 
     if [ ! -f "$WORKDIR/round_${round}.results" ]; then
         echo "[round $round] No results — probe may have failed" >&2
