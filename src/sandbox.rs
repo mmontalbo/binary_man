@@ -93,6 +93,49 @@ impl Sandbox {
 
         cmd
     }
+
+    /// Build a bwrap Command that runs a shell script with a batch directory mounted.
+    /// The batch_dir contains cell workspaces and an output directory.
+    /// `script_name` is the filename of the script within batch_dir (e.g., "run.sh").
+    pub fn batch_command(
+        &self,
+        batch_dir: &Path,
+        script_name: &str,
+        env_vars: &HashMap<String, String>,
+    ) -> Command {
+        let mut cmd = Command::new(&self.bwrap);
+
+        cmd.arg("--unshare-net");
+        cmd.arg("--die-with-parent");
+
+        for path in &["/nix", "/usr", "/bin", "/lib", "/lib64", "/etc", "/run"] {
+            if Path::new(path).exists() {
+                cmd.arg("--ro-bind").arg(path).arg(path);
+            }
+        }
+
+        cmd.arg("--proc").arg("/proc");
+        cmd.arg("--dev").arg("/dev");
+        cmd.arg("--tmpfs").arg("/tmp");
+
+        // Mount batch directory (contains cell workspaces + output dir)
+        cmd.arg("--bind").arg(batch_dir).arg("/batch");
+        cmd.arg("--chdir").arg("/batch");
+
+        // Environment
+        cmd.arg("--setenv").arg("HOME").arg("/batch");
+        cmd.arg("--setenv").arg("PATH").arg(std::env::var("PATH").unwrap_or_default());
+        cmd.arg("--setenv").arg("LANG").arg("C");
+        cmd.arg("--setenv").arg("LC_ALL").arg("C");
+        for (k, v) in env_vars {
+            cmd.arg("--setenv").arg(k).arg(v);
+        }
+
+        cmd.arg("--");
+        cmd.arg("sh").arg(format!("/batch/{}", script_name));
+
+        cmd
+    }
 }
 
 /// Parsed strace output.
