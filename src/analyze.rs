@@ -86,20 +86,14 @@ impl AnalysisMetrics {
     }
 
     /// Identify run labels that produced no useful signal:
-    /// - All contexts exited ≥2 (bad input / invalid arg)
-    /// - In a large identical group (≥5 runs) with the same positional args
-    ///   (the target arg isn't exercising the tool's behavior)
+    /// runs in a large identical group (≥5 runs) with the same positional args,
+    /// meaning the target arg isn't exercising the tool's behavior.
+    ///
+    /// Note: error-exit runs are NOT pruned — error behavior is still behavior.
+    /// Two flags that both exit 2 may produce different errors and belong in
+    /// different groups.
     pub fn unproductive_runs(&self) -> HashSet<String> {
         let mut unproductive = HashSet::new();
-
-        // Runs where all contexts errored
-        for run in &self.runs {
-            let all_error = run.context_groups.iter()
-                .all(|(_, obs)| obs.exit_code.unwrap_or(-1) >= 2);
-            if all_error {
-                unproductive.insert(run.args_str.clone());
-            }
-        }
 
         // Runs in large identical groups where all runs share the same
         // non-flag args (same target, same pattern) — the target isn't helping

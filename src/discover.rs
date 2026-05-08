@@ -295,114 +295,117 @@ pub fn generate_initial_script(
 
     let (pattern_arg, file_arg) = infer_base_args(&help_text);
 
-    // --- Orthogonal base contexts ---
-    // Each varies structure, content, properties, and topology simultaneously.
-    // Collapsing across these reveals which dimensions each flag is sensitive to.
-    // --- Orthogonal base contexts ---
-    // Each varies structure, content, properties, and topology simultaneously.
+    // --- Latin square base contexts ---
+    // Three factors, three levels each. Each level appears once per row and column.
+    // Main effects (content, structure, properties) are estimable without aliasing.
+    //
+    //              minimal         standard              deep
+    // alpha        default         varied-perms          varied-times
+    // numeric      varied-times    default               varied-perms
+    // fielded      varied-perms    varied-times          default
+
+    // Content levels
+    let content_alpha: Vec<String> = vec!["cherry", "apple", "banana", "date", "elderberry"]
+        .into_iter().map(String::from).collect();
+    let content_numeric: Vec<String> = vec!["100", "2", "30", "1", "20", "3", "10"]
+        .into_iter().map(String::from).collect();
+    let content_fielded: Vec<String> = vec!["bob:30:sales", "alice:25:eng", "charlie:35:sales"]
+        .into_iter().map(String::from).collect();
+
+    // Structure builders — each returns the setup commands for that structure level
+    let structure_minimal = |content: &[String]| -> Vec<SetupCommand> {
+        vec![
+            SetupCommand::CreateFile { path: "input.txt".into(),
+                content: FileContent::Lines(content.to_vec()) },
+            SetupCommand::CreateFile { path: "other.txt".into(),
+                content: FileContent::Lines(vec!["hello world".into()]) },
+        ]
+    };
+
+    let structure_standard = |content: &[String]| -> Vec<SetupCommand> {
+        vec![
+            SetupCommand::CreateFile { path: "input.txt".into(),
+                content: FileContent::Lines(content.to_vec()) },
+            SetupCommand::CreateFile { path: "a.txt".into(),
+                content: FileContent::Lines(vec!["first".into()]) },
+            SetupCommand::CreateFile { path: "b.txt".into(),
+                content: FileContent::Lines(vec!["second".into()]) },
+            SetupCommand::CreateFile { path: ".hidden".into(),
+                content: FileContent::Lines(vec!["secret".into()]) },
+            SetupCommand::CreateDir { path: "subdir".into() },
+            SetupCommand::CreateFile { path: "subdir/nested.txt".into(),
+                content: FileContent::Lines(vec!["nested".into()]) },
+            SetupCommand::CreateLink { path: "link.txt".into(), target: "input.txt".into() },
+            SetupCommand::CreateFile { path: "exec.sh".into(),
+                content: FileContent::Lines(vec!["#!/bin/sh\necho hello".into()]) },
+            SetupCommand::SetProps { path: "exec.sh".into(), props: vec![Property::Executable] },
+        ]
+    };
+
+    let structure_deep = |content: &[String]| -> Vec<SetupCommand> {
+        vec![
+            SetupCommand::CreateFile { path: "input.txt".into(),
+                content: FileContent::Lines(content.to_vec()) },
+            SetupCommand::CreateDir { path: "level1".into() },
+            SetupCommand::CreateDir { path: "level1/level2".into() },
+            SetupCommand::CreateFile { path: "level1/a.txt".into(),
+                content: FileContent::Lines(vec!["depth one".into()]) },
+            SetupCommand::CreateFile { path: "level1/level2/b.txt".into(),
+                content: FileContent::Lines(vec!["depth two".into()]) },
+            SetupCommand::CreateLink { path: "link_to_dir".into(), target: "level1".into() },
+        ]
+    };
+
+    // Property modifiers — appended after structure commands
+    let props_default = |_cmds: &mut Vec<SetupCommand>| {};
+
+    let props_perms = |cmds: &mut Vec<SetupCommand>| {
+        cmds.push(SetupCommand::CreateFile { path: "readonly.dat".into(),
+            content: FileContent::Lines(vec!["protected".into()]) });
+        cmds.push(SetupCommand::SetProps { path: "readonly.dat".into(), props: vec![Property::ReadOnly] });
+        cmds.push(SetupCommand::CreateFile { path: "-rf".into(),
+            content: FileContent::Lines(vec!["flag-like filename".into()]) });
+    };
+
+    let props_times = |cmds: &mut Vec<SetupCommand>| {
+        cmds.push(SetupCommand::CreateFile { path: "old.txt".into(),
+            content: FileContent::Lines(vec!["ancient".into()]) });
+        cmds.push(SetupCommand::SetProps { path: "old.txt".into(), props: vec![Property::MtimeOld] });
+        cmds.push(SetupCommand::CreateFile { path: "big.bin".into(), content: FileContent::Size(10000) });
+    };
+
+    // Latin square: 9 contexts
+    let build_ctx = |name: &str, content: &[String],
+                         structure_fn: &dyn Fn(&[String]) -> Vec<SetupCommand>,
+                         props_fn: &dyn Fn(&mut Vec<SetupCommand>)| -> NamedContext {
+        let mut cmds = structure_fn(content);
+        props_fn(&mut cmds);
+        NamedContext { name: name.into(), extends: None, commands: cmds }
+    };
+
     let mut contexts: Vec<NamedContext> = vec![
-        // few_files: minimal — 2 files, alpha content. Control context.
-        NamedContext {
-            name: "few_files".into(), extends: None,
-            commands: vec![
-                SetupCommand::CreateFile { path: "input.txt".into(),
-                    content: FileContent::Lines(vec!["cherry".into(), "apple".into(), "banana".into(), "date".into(), "elderberry".into()]) },
-                SetupCommand::CreateFile { path: "other.txt".into(),
-                    content: FileContent::Lines(vec!["hello world".into()]) },
-            ],
-        },
-        // many_files: crowded — 8 files, hidden files, subdir, numeric content.
-        NamedContext {
-            name: "many_files".into(), extends: None,
-            commands: vec![
-                SetupCommand::CreateFile { path: "input.txt".into(),
-                    content: FileContent::Lines(vec!["100".into(), "2".into(), "30".into(), "1".into(), "20".into(), "3".into(), "10".into()]) },
-                SetupCommand::CreateFile { path: "a.txt".into(),
-                    content: FileContent::Lines(vec!["first".into()]) },
-                SetupCommand::CreateFile { path: "b.txt".into(),
-                    content: FileContent::Lines(vec!["second".into()]) },
-                SetupCommand::CreateFile { path: "c.log".into(),
-                    content: FileContent::Lines(vec!["log entry".into()]) },
-                SetupCommand::CreateFile { path: "data.csv".into(),
-                    content: FileContent::Lines(vec!["name,age".into(), "alice,25".into(), "bob,30".into()]) },
-                SetupCommand::CreateFile { path: ".hidden".into(),
-                    content: FileContent::Lines(vec!["secret content".into()]) },
-                SetupCommand::CreateFile { path: ".config".into(),
-                    content: FileContent::Lines(vec!["key=value".into()]) },
-                SetupCommand::CreateDir { path: "subdir".into() },
-                SetupCommand::CreateFile { path: "subdir/nested.txt".into(),
-                    content: FileContent::Lines(vec!["nested content".into()]) },
-            ],
-        },
-        // deep_tree: 3-level nesting, directory symlink, fielded content.
-        NamedContext {
-            name: "deep_tree".into(), extends: None,
-            commands: vec![
-                SetupCommand::CreateFile { path: "input.txt".into(),
-                    content: FileContent::Lines(vec!["bob:30:sales".into(), "alice:25:eng".into(), "charlie:35:sales".into()]) },
-                SetupCommand::CreateDir { path: "level1".into() },
-                SetupCommand::CreateDir { path: "level1/level2".into() },
-                SetupCommand::CreateFile { path: "level1/a.txt".into(),
-                    content: FileContent::Lines(vec!["depth one".into()]) },
-                SetupCommand::CreateFile { path: "level1/level2/b.txt".into(),
-                    content: FileContent::Lines(vec!["depth two".into()]) },
-                SetupCommand::CreateFile { path: "level1/level2/deep.log".into(),
-                    content: FileContent::Lines(vec!["deep log".into()]) },
-                SetupCommand::CreateLink { path: "link_to_dir".into(), target: "level1".into() },
-            ],
-        },
-        // mixed_types: symlinks, broken link, executable, readonly, flag-like name. Cased content.
-        NamedContext {
-            name: "mixed_types".into(), extends: None,
-            commands: vec![
-                SetupCommand::CreateFile { path: "input.txt".into(),
-                    content: FileContent::Lines(vec!["Apple".into(), "BANANA".into(), "cherry".into(), "apple".into(), "Cherry".into(), "APPLE".into()]) },
-                SetupCommand::CreateFile { path: "empty.txt".into(), content: FileContent::Empty },
-                SetupCommand::CreateFile { path: "exec.sh".into(),
-                    content: FileContent::Lines(vec!["#!/bin/sh\necho hello".into()]) },
-                SetupCommand::SetProps { path: "exec.sh".into(), props: vec![Property::Executable] },
-                SetupCommand::CreateFile { path: "readonly.dat".into(),
-                    content: FileContent::Lines(vec!["protected".into()]) },
-                SetupCommand::SetProps { path: "readonly.dat".into(), props: vec![Property::ReadOnly] },
-                SetupCommand::CreateLink { path: "link.txt".into(), target: "input.txt".into() },
-                SetupCommand::CreateLink { path: "broken.lnk".into(), target: "nonexistent".into() },
-                SetupCommand::CreateFile { path: "-rf".into(),
-                    content: FileContent::Lines(vec!["flag-like filename".into()]) },
-            ],
-        },
-        // timestamped: varied sizes (0B-10KB) and timestamps (old/recent). Duplicated content.
-        NamedContext {
-            name: "timestamped".into(), extends: None,
-            commands: vec![
-                SetupCommand::CreateFile { path: "input.txt".into(),
-                    content: FileContent::Lines(vec!["aaa".into(), "aaa".into(), "bbb".into(), "bbb".into(), "bbb".into(), "ccc".into(), "aaa".into()]) },
-                SetupCommand::CreateFile { path: "old.txt".into(),
-                    content: FileContent::Lines(vec!["ancient content".into()]) },
-                SetupCommand::SetProps { path: "old.txt".into(), props: vec![Property::MtimeOld] },
-                SetupCommand::CreateFile { path: "big.bin".into(), content: FileContent::Size(10000) },
-                SetupCommand::CreateFile { path: "tiny.txt".into(),
-                    content: FileContent::Lines(vec!["x".into()]) },
-                SetupCommand::CreateFile { path: "medium.txt".into(),
-                    content: FileContent::Lines(vec!["line1".into(), "line2".into(), "line3".into(), "line4".into(), "line5".into()]) },
-                SetupCommand::CreateDir { path: "subdir".into() },
-                SetupCommand::CreateFile { path: "subdir/recent.txt".into(),
-                    content: FileContent::Lines(vec!["fresh".into()]) },
-                SetupCommand::SetProps { path: "subdir/recent.txt".into(), props: vec![Property::MtimeRecent] },
-            ],
-        },
-        // empty_dir: nothing at all. Universal error-path exerciser.
-        NamedContext {
-            name: "empty_dir".into(), extends: None,
-            commands: vec![],
-        },
+        // Row: alpha       | minimal + default    | standard + perms     | deep + times
+        build_ctx("alpha_minimal",  &content_alpha,   &structure_minimal,  &props_default),
+        build_ctx("alpha_standard", &content_alpha,   &structure_standard, &props_perms),
+        build_ctx("alpha_deep",     &content_alpha,   &structure_deep,     &props_times),
+        // Row: numeric     | minimal + times      | standard + default   | deep + perms
+        build_ctx("numeric_minimal",  &content_numeric,  &structure_minimal,  &props_times),
+        build_ctx("numeric_standard", &content_numeric,  &structure_standard, &props_default),
+        build_ctx("numeric_deep",     &content_numeric,  &structure_deep,     &props_perms),
+        // Row: fielded     | minimal + perms      | standard + times     | deep + default
+        build_ctx("fielded_minimal",  &content_fielded,  &structure_minimal,  &props_perms),
+        build_ctx("fielded_standard", &content_fielded,  &structure_standard, &props_times),
+        build_ctx("fielded_deep",     &content_fielded,  &structure_deep,     &props_default),
+        // Error context: empty workspace
+        NamedContext { name: "empty_dir".into(), extends: None, commands: vec![] },
     ];
 
-    // --- Vary blocks (single-factor perturbations from many_files) ---
-    let vary_base = "many_files";
+    // --- Single-factor perturbations from numeric_standard (richest base) ---
+    let vary_base = "numeric_standard";
     let perturbations = vec![
         SetupCommand::Remove { path: ".hidden".into() },
-        SetupCommand::Remove { path: ".config".into() },
         SetupCommand::Remove { path: "subdir".into() },
+        SetupCommand::Remove { path: "link.txt".into() },
         SetupCommand::CreateFile { path: "input.txt".into(), content: FileContent::Empty },
         SetupCommand::SetProps { path: "input.txt".into(), props: vec![Property::ReadOnly] },
         SetupCommand::SetProps { path: "input.txt".into(), props: vec![Property::MtimeOld] },

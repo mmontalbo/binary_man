@@ -196,8 +196,8 @@ pub fn format_exploration_report(
     let total_flags = flag_info.map(|fi| fi.all_flags.len()).unwrap_or(0);
 
     // Classify all ever_isolated run labels into flag stems
-    let mut solo_characterized: HashSet<String> = HashSet::new();
-    let mut combo_characterized: HashSet<String> = HashSet::new();
+    let mut solo_distinguished: HashSet<String> = HashSet::new();
+    let mut combo_distinguished: HashSet<String> = HashSet::new();
     let mut combo_evidence: HashMap<String, Vec<String>> = HashMap::new();
 
     for label in ever_isolated {
@@ -205,15 +205,15 @@ pub fn format_exploration_report(
         if is_combination(&stem) {
             for part in stem.split(' ') {
                 let canon = canonical_flag(part, aliases);
-                if !solo_characterized.contains(&canon) {
-                    combo_characterized.insert(canon.clone());
+                if !solo_distinguished.contains(&canon) {
+                    combo_distinguished.insert(canon.clone());
                     combo_evidence.entry(canon).or_default().push(label.clone());
                 }
             }
         } else {
             let canon = canonical_flag(&stem, aliases);
-            solo_characterized.insert(canon.clone());
-            combo_characterized.remove(&canon);
+            solo_distinguished.insert(canon.clone());
+            combo_distinguished.remove(&canon);
         }
     }
 
@@ -222,18 +222,18 @@ pub fn format_exploration_report(
     let pairwise = final_metrics.pairwise_distinguished();
     for flag in &pairwise {
         let canon = canonical_flag(flag, aliases);
-        if !solo_characterized.contains(&canon) && !combo_characterized.contains(&canon) {
-            combo_characterized.insert(canon.clone());
+        if !solo_distinguished.contains(&canon) && !combo_distinguished.contains(&canon) {
+            combo_distinguished.insert(canon.clone());
             combo_evidence.entry(canon).or_default().push("(pairwise evidence)".into());
         }
     }
 
-    let all_characterized: HashSet<&String> = solo_characterized.iter()
-        .chain(combo_characterized.iter())
+    let all_distinguished: HashSet<&String> = solo_distinguished.iter()
+        .chain(combo_distinguished.iter())
         .collect();
 
     // Identify uncharacterized flags (in identical groups, not characterized by any means)
-    let mut uncharacterized_groups: Vec<Vec<String>> = Vec::new();
+    let mut indistinguishable_groups: Vec<Vec<String>> = Vec::new();
     for group in &final_metrics.groups {
         if group.isolated() { continue; }
         let stems: Vec<String> = group.run_labels.iter()
@@ -242,10 +242,10 @@ pub fn format_exploration_report(
             .map(|s| canonical_flag(&s, aliases))
             .collect::<HashSet<_>>()
             .into_iter()
-            .filter(|s| !all_characterized.contains(s))
+            .filter(|s| !all_distinguished.contains(s))
             .collect();
         if stems.len() >= 2 {
-            uncharacterized_groups.push(stems);
+            indistinguishable_groups.push(stems);
         }
     }
 
@@ -263,17 +263,17 @@ pub fn format_exploration_report(
 
     // Flag characterization summary
     let untested = final_metrics.untested_flags.len();
-    out.push_str(&format!("## Characterization: {}/{} flags\n", all_characterized.len(), total_flags));
-    out.push_str(&format!("  {} solo (unique behavior)\n", solo_characterized.len()));
-    if !combo_characterized.is_empty() {
-        out.push_str(&format!("  {} via combination only\n", combo_characterized.len()));
+    out.push_str(&format!("## Distinguished: {}/{} flags\n", all_distinguished.len(), total_flags));
+    out.push_str(&format!("  {} solo (unique behavior)\n", solo_distinguished.len()));
+    if !combo_distinguished.is_empty() {
+        out.push_str(&format!("  {} via combination only\n", combo_distinguished.len()));
     }
-    if !uncharacterized_groups.is_empty() {
-        let unchar_count: usize = uncharacterized_groups.iter()
+    if !indistinguishable_groups.is_empty() {
+        let indist_count: usize = indistinguishable_groups.iter()
             .flat_map(|g| g.iter())
             .collect::<HashSet<_>>()
             .len();
-        out.push_str(&format!("  {} uncharacterized (in identical groups)\n", unchar_count));
+        out.push_str(&format!("  {} indistinguishable under tested conditions\n", indist_count));
     }
     if untested > 0 {
         out.push_str(&format!("  {} untested\n", untested));
@@ -290,7 +290,7 @@ pub fn format_exploration_report(
 
     // Solo-characterized flags
     out.push_str("## Solo (unique behavior)\n");
-    let mut sorted_solo: Vec<&String> = solo_characterized.iter().collect();
+    let mut sorted_solo: Vec<&String> = solo_distinguished.iter().collect();
     sorted_solo.sort();
     for flag in &sorted_solo {
         // Find a representative isolated run for this flag
@@ -302,9 +302,9 @@ pub fn format_exploration_report(
     out.push('\n');
 
     // Combo-characterized flags
-    if !combo_characterized.is_empty() {
+    if !combo_distinguished.is_empty() {
         out.push_str("## Via combination (distinguishable when paired)\n");
-        let mut sorted_combo: Vec<&String> = combo_characterized.iter().collect();
+        let mut sorted_combo: Vec<&String> = combo_distinguished.iter().collect();
         sorted_combo.sort();
         for flag in &sorted_combo {
             let example = combo_evidence.get(*flag)
@@ -317,10 +317,10 @@ pub fn format_exploration_report(
     }
 
     // Uncharacterized groups
-    if !uncharacterized_groups.is_empty() {
-        out.push_str("## Uncharacterized (equivalent or underexplored)\n");
+    if !indistinguishable_groups.is_empty() {
+        out.push_str("## Indistinguishable under tested conditions\n");
         // Deduplicate groups that share the same flags
-        for group in &uncharacterized_groups {
+        for group in &indistinguishable_groups {
             let mut sorted = group.clone();
             sorted.sort();
             // Check if this is an alias pair

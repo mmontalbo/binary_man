@@ -55,7 +55,7 @@ pub fn refine(
 
     // Reuse base contexts for perturbation generation
     let base_ctx = base_script.contexts.iter()
-        .find(|c| c.name == "many_files")
+        .find(|c| c.name == "numeric_standard")
         .cloned();
 
     // --- Strategy 1: Interaction testing ---

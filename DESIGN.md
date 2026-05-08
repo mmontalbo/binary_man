@@ -33,22 +33,33 @@ The tool's input space has four independent dimensions:
 | File properties | Permissions, timestamps, sizes | Metadata-aware tools (ls -l, stat, chmod) |
 | Positional arguments | File path vs directory vs pattern | Which code path the binary takes |
 
-The current design varies all four simultaneously across 6 base contexts plus 7 single-factor perturbations = 13 contexts per grid.
+The base contexts use a Latin square design: 3 content levels x 3 structure levels x 3 property levels = 9 contexts where each factor level appears exactly 3 times. This ensures main effects are estimable without aliasing — when a flag behaves differently across structure levels, the difference is attributable to structure alone, not confounded with content or properties.
 
 ## Context design
 
-Each base context presents a distinct world along all four dimensions:
+Latin square matrix (rows = content, columns = structure, cell values = properties):
 
-| Context | Structure | Content | Properties | Target arg |
-|---------|-----------|---------|------------|------------|
-| few_files | 2 files | alpha-sorted words | default | input.txt |
-| many_files | 9 files, hidden, subdir | numeric | default | . |
-| deep_tree | 3-level nesting, dir symlink | colon-delimited | default | input.txt |
-| mixed_types | symlink, broken link, exec, readonly, flag-like name | mixed case | varied perms | input.txt |
-| timestamped | varied sizes (0-10KB), old/recent mtime | duplicated lines | varied times | input.txt |
-| empty_dir | nothing | - | - | . |
+```
+              minimal         standard              deep
+alpha         default         varied-perms          varied-times
+numeric       varied-times    default               varied-perms
+fielded       varied-perms    varied-times          default
+```
 
-Single-factor perturbations from many_files: remove .hidden, remove .config, remove subdir, empty input.txt, readonly, old mtime, size=1. These enable attribution — when a run behaves differently in "many_files / remove .hidden" vs "many_files", the difference is attributable to that specific perturbation.
+| Context | Structure | Content | Properties |
+|---------|-----------|---------|------------|
+| alpha_minimal | 2 files | sorted words | default |
+| alpha_standard | hidden, subdir, symlink, exec | sorted words | readonly, flag-like name |
+| alpha_deep | 3-level nesting, dir symlink | sorted words | old mtime, large file |
+| numeric_minimal | 2 files | integers | old mtime, large file |
+| numeric_standard | hidden, subdir, symlink, exec | integers | default |
+| numeric_deep | 3-level nesting, dir symlink | integers | readonly, flag-like name |
+| fielded_minimal | 2 files | colon-delimited | readonly, flag-like name |
+| fielded_standard | hidden, subdir, symlink, exec | colon-delimited | old mtime, large file |
+| fielded_deep | 3-level nesting, dir symlink | colon-delimited | default |
+| empty_dir | nothing | - | - |
+
+Plus 7 single-factor perturbations from numeric_standard (the standard+default cell, richest structure): remove .hidden, remove subdir, remove link.txt, empty input.txt, readonly, old mtime, size=1. These enable attribution within a single base.
 
 For pattern-taking tools (grep, sed, awk), the pattern argument is also varied: literal match, case variant, regex metacharacter, non-matching. This exercises flags like -i (case sensitivity), -E/-F/-G (regex engine), -w (word boundary).
 
@@ -84,18 +95,18 @@ Three refinement strategies:
 
 **Accumulation.** Flags characterized in any round stay characterized. Unproductive runs (all errors, or in large identical groups with the same target) are pruned from subsequent rounds to avoid wasted cells.
 
-## Characterization metric
+## Distinguishability metric
 
-The primary metric is: **characterized flags / total flags**.
+The primary metric is: **distinguished flags / total flags**.
 
-A flag is characterized if any run containing it (solo or in combination) produces a unique behavioral fingerprint. The report separates:
+A flag is distinguished if any run containing it (solo or in combination) produces a unique behavioral fingerprint under the tested conditions. The report separates:
 
 - **Solo**: the flag alone produces unique behavior across contexts
 - **Via combination**: the flag is distinguishable only when paired with another flag (proven by pairwise evidence from cross-group interaction)
-- **Uncharacterized**: the flag remains in an identical group — no tested condition distinguishes it from other flags in the group
+- **Indistinguishable**: the flag remains in an identical group — no tested condition separates it from other flags in the group. This is a statement about the tested conditions, not about the flag itself; more conditions might distinguish it.
 - **Untested**: discovered from --help but not included in any run
 
-Combination-based characterization is weaker than solo: it proves the flag *does something different* but the specific effect is only visible in combination. Solo characterization means the flag's independent behavioral surface has been observed.
+Combination-based evidence is weaker than solo: it proves the flag *modifies behavior differently than another flag* but the specific independent effect is only visible in combination. Solo evidence means the flag's independent behavioral surface has been directly observed.
 
 ## Limitations
 
