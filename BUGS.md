@@ -1,7 +1,8 @@
-# Bugs and Inconsistencies Found by bgrid
+# Discoveries
 
-All findings are from systematic behavioral observation using bgrid's
-grid execution and pairwise flag combination testing.
+Interesting behaviors, inconsistencies, and bugs found during bgrid
+development. Not all are confirmed bugs — some are design choices,
+some are edge cases, some are genuine issues worth reporting upstream.
 
 ## Git: --stat + --shortstat duplicate summary line
 
@@ -329,39 +330,6 @@ Same inconsistent validation pattern as the diff/grep flags.
 
 ---
 
-*All bugs found by bgrid's systematic behavioral probing across ~5000+
-cells. Methods used: pairwise flag combination testing (`combine`),
-boundary-value probing (negative/zero/extreme values), compound input
-perturbation (`vary compound`), remote interaction via file:// protocol,
-and adversarial context design.*
-
-## Summary
-
-| Finding | Method | Severity |
-|---------|--------|----------|
-| `--stat --shortstat` duplicate summary | `combine` pairwise | Low (UI) |
-| `-U` negative corrupt hunk headers | boundary-value | Medium (breaks parsers) |
-| `--raw + --word-diff` asymmetry | flag interaction | Low (inconsistency) |
-| `--author + --author = OR` vs `--author + --grep = AND` | `combine` pairwise | Informational |
-| `--word-diff-regex` lazy validation | boundary-value | Low (inconsistency) |
-| `-M101%` accepted silently | boundary-value | Informational |
-| `--skip=-1` ignored silently | boundary-value | Informational |
-| `--no-merges + --merges` silent empty | `combine` pairwise | Informational |
-| `grep -C -1` accepts negative, `-A`/`-B` reject | boundary-value | Medium (inconsistent validation) |
-| `--stat --shortstat` duplicate in show, format-patch | pairwise | Low (shared machinery) |
-| `-U-1` corrupt header in show | boundary-value | Medium (shared machinery) |
-| `blame -M101%` accepted | boundary-value | Informational (shared) |
-| `--inter-hunk-context=-100` overlapping hunks | boundary-value | **Medium** (corrupt diff) |
-| `format-patch -v -1` shows `[PATCH v-1]` | boundary-value | Low (cosmetic) |
-| `log --format=%w(-1,0,0)` fails silently | boundary-value | Low (literal output) |
-| `log --format=%<(-1)%s` partial parse | boundary-value | Low (garbage prefix) |
-| `fetch --jobs=2147483647` OOM crash | boundary-value | **Medium** (unchecked calloc) |
-| `fetch --jobs=-1` silently accepted | boundary-value | Low (inconsistent) |
-| `rev-list --max-count/-skip/-parents=-1` wraps | boundary-value | Low (silent wrap) |
-| `repack --window/-depth/-threads=-1` accepted | boundary-value | Low (silent wrap) |
-| `ls-files --abbrev=-1` shows full hash | boundary-value | Low (silent wrap) |
-| **jq** `1e999` roundtrip inconsistency | boundary-value | **Medium** (data loss) |
-| **jq** `length(null)=0` but `length(bool)=error` | type-coercion | Low (inconsistency) |
 
 ## jq: 1e999 roundtrip inconsistency — output doesn't parse back to same value
 
@@ -486,6 +454,3 @@ as "unknown" — even though they are valid `git diff` flags.
 All flags should produce a consistent "not a git repository" message
 when run outside a repo.
 
-*All bugs found by bgrid's systematic behavioral observation. The tool
-runs flags across varied input states and groups by identical behavior,
-revealing inconsistencies mechanically.*
