@@ -3,9 +3,10 @@
 ## Rounds
   round 0: 7 isolated cumulative, 26 identical in round (discovery)
   round 1: 33 isolated cumulative, 8 identical in round (refinement)
-  round 2: 33 isolated cumulative, 9 identical in round (refinement)
+  round 2: 35 isolated cumulative, 8 identical in round (refinement)
+  round 3: 35 isolated cumulative, 9 identical in round (refinement)
 
-## Distinguished: 21/21 flags
+## Distinguished: 21/21 flags (1 observed behavior)
   1 observed behavior (1 solo, 0 via combination)
   20 error-differentiated only (11 solo, 9 via combination)
   1 behavioral aliases detected
@@ -14,51 +15,48 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
 
 ## Solo (unique behavior)
   --show-limits  # show limits on command-line length
-    exemplar: "--show-limits" in numeric_standard / env COLUMNS=40 (-1 lines, exit 0→127)
+    exemplar: "--show-limits" in alpha_minimal (different)
     base:
     flag:
   -E
-    exemplar: "-E" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-E" in alpha_minimal (different)
     base:
     flag:
   -I
-    exemplar: "-I" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-I" in alpha_minimal (different)
     base:
     flag:
   -L  # use at most MAX-LINES non-blank input lines per
-    exemplar: "-L" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-L" in alpha_minimal (different)
     base:
     flag:
   -P  # run at most MAX-PROCS processes at a time
-    exemplar: "-P" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-P" in alpha_minimal (different)
     base:
     flag:
   -a  # read arguments from FILE, not standard input
-    exemplar: "-a" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-a" in alpha_minimal (different)
     base:
     flag:
   -d  # items in input stream are separated by CHARACTER,
-    exemplar: "-d" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-d" in alpha_minimal (different)
     base:
     flag:
   -n  # use at most MAX-ARGS arguments per command line
-    exemplar: "-n" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-n" in alpha_minimal (different)
     base:
     flag:
   -o  # Reopen stdin as /dev/tty in the child process
-    exemplar: "-o" in numeric_standard / env COLUMNS=40 (different, exit 125→127)
-    base:
-    flag:
   -p  # prompt before running commands
-    exemplar: "-p" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-p" in alpha_minimal (different)
     base:
     flag:
   -s  # limit length of command line to MAX-CHARS
-    exemplar: "-s" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-s" in alpha_minimal (different)
     base:
     flag:
   -t  # print commands before executing them
-    exemplar: "-t" in numeric_standard / env COLUMNS=40 (-1 lines, exit 0→127)
+    exemplar: "-t" in alpha_minimal (different)
     base:
     flag:
 
@@ -66,10 +64,10 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
   --eof  e.g. (pairwise evidence)
   --process-slot-var  e.g. "--show-limits" "--process-slot-var"
   --replace  e.g. (pairwise evidence)
-  -0  e.g. (pairwise evidence)
+  -0  e.g. "--show-limits" "-0"
   -e  e.g. (pairwise evidence)
   -i  e.g. (pairwise evidence)
   -l  e.g. (pairwise evidence)
-  -r  e.g. (pairwise evidence)
+  -r  e.g. "--show-limits" "-r"
   -x  e.g. (pairwise evidence)
 

@@ -5,7 +5,7 @@
   round 1: 10 isolated cumulative, 6 identical in round (refinement)
   round 2: 10 isolated cumulative, 6 identical in round (refinement)
 
-## Distinguished: 10/10 flags
+## Distinguished: 10/10 flags (3 observed behavior)
   3 observed behavior (1 solo, 2 via combination)
   7 error-differentiated only (0 solo, 7 via combination)
   1 behavioral aliases detected
@@ -14,13 +14,13 @@ Aliases: -b = --bytes, -c = --characters, -d = --delimiter, -f = --fields, -s = 
 
 ## Solo (unique behavior)
   -f  # select only these fields;  also print any line
-    exemplar: "-f" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-f" "input.txt" in formatted_minimal (different)
     base:
     flag:
 
 ## Via combination (distinguishable when paired)
   --complement  e.g. "--fields=1" "--complement" "input.txt"
-  --output-delimiter  e.g. "--fields=1" "--output-delimiter"
+  --output-delimiter  e.g. "--fields=1" "--output-delimiter" "input.txt"
   -M  e.g. "--fields=1" "-M"
   -b  e.g. "--fields=1" "-b"
   -c  e.g. "--fields=1" "-c"

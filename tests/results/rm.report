@@ -4,7 +4,7 @@
   round 0: 11 isolated cumulative, 8 identical in round (discovery)
   round 1: 11 isolated cumulative, 10 identical in round (refinement)
 
-## Distinguished: 10/12 flags
+## Distinguished: 10/12 flags (10 observed behavior)
   10 observed behavior (2 solo, 8 via combination)
   1 behavioral aliases detected
   2 indistinguishable under tested conditions
@@ -13,11 +13,11 @@ Aliases: -d = --dir, -f = --force, -v = --verbose
 
 ## Solo (unique behavior)
   -f  # ignore nonexistent files and arguments, never prompt
-    exemplar: "-f" "input.txt" "other.txt" in alpha_standard (different)
+    exemplar: "-f" "input.txt" "other.txt" in alpha_minimal (different)
     base:
     flag:
   -v  # explain what is being done
-    exemplar: "-v" "input.txt" "other.txt" in alpha_standard (different)
+    exemplar: "-v" "input.txt" "other.txt" in alpha_minimal (different)
     base:
     flag:
       removed 'input.txt'

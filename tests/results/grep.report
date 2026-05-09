@@ -6,7 +6,7 @@
   round 2: 39 isolated cumulative, 24 identical in round (refinement)
   round 3: 46 isolated cumulative, 26 identical in round (refinement)
 
-## Distinguished: 35/49 flags
+## Distinguished: 35/49 flags (2 observed behavior)
   2 observed behavior (2 solo, 0 via combination)
   33 error-differentiated only (6 solo, 27 via combination)
   1 behavioral aliases detected
@@ -16,44 +16,43 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
 
 ## Solo (unique behavior)
   --binary-files  # assume that binary files are TYPE;
-    exemplar: "--binary-files=auto" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
-    base:
-    flag:
   -D  # how to handle devices, FIFOs and sockets;
-    exemplar: "-D" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
-    base:
-    flag:
   -L  # print only names of FILEs with no selected lines
-    exemplar: "-L" "input.txt" in numeric_standard / env COLUMNS=40 (-1 lines, exit 1→127)
+    exemplar: "-L" "input.txt" in alpha_minimal (different)
     base:
     flag:
+      (standard input)
   -V  # display version information and exit
-    exemplar: "-V" "input.txt" in numeric_standard / env COLUMNS=40 (-10 lines, exit 0→127)
+    exemplar: "-V" "input.txt" in alpha_minimal (different)
     base:
     flag:
+      grep (GNU grep) 3.11
+      Copyright (C) 2023 Free Software Foundation, Inc.
+      License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.
+      This is free software: you are free to change and redistribute it.
+      There is NO WARRANTY, to the extent permitted by law.
+            ...
   -c  # print only a count of selected lines per FILE
-    exemplar: "-c" "input.txt" in numeric_standard / env COLUMNS=40 (-1 lines, exit 1→127)
+    exemplar: "-c" "input.txt" in alpha_minimal (different)
     base:
     flag:
+      0
   -d  # how to handle directories;
-    exemplar: "-d" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-d" "input.txt" in tabular_minimal (different)
     base:
     flag:
   -f  # take PATTERNS from FILE
-    exemplar: "-f" "input.txt" in empty_dir (different, exit 1→2)
+    exemplar: "-f" "input.txt" in tabular_minimal (different)
     base:
     flag:
   -m  # stop after NUM selected lines
-    exemplar: "-m" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
-    base:
-    flag:
 
 ## Via combination (distinguishable when paired)
-  --color  e.g. "-f" "--color" "input.txt"
+  --color  e.g. "-d" "--color" "input.txt"
   --colour  e.g. "-d" "--colour"
-  --exclude  e.g. "-V" "--exclude"
-  --exclude-dir  e.g. "-f" "--exclude-dir" "input.txt"
-  --exclude-from  e.g. "-e" "-w" "--exclude-from" "--no-group-separator" "input.txt"
+  --exclude  e.g. "-f" "--exclude"
+  --exclude-dir  e.g. "-f" "--exclude-dir"
+  --exclude-from  e.g. "-e" "-w" "--exclude-from"
   --group-separator  e.g. "-e" "-w" "--group-separator"
   --include  e.g. "-e" "-w" "--include"
   --label  e.g. "-e" "-w" "--label"
@@ -72,9 +71,9 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
   -I  e.g. "-e" "-w" "--exclude-from" "-I" "input.txt"
   -P  e.g. (pairwise evidence)
   -R  e.g. "-e" "-w" "--exclude-from" "-R" "input.txt"
-  -e  e.g. "-e" "-w" "--exclude-from" "--no-group-separator" "input.txt"
+  -e  e.g. "-e" "-w" "--label"
   -i  e.g. (pairwise evidence)
-  -w  e.g. "-e" "-w" "--exclude-from" "--no-group-separator" "input.txt"
+  -w  e.g. "-e" "-w" "--label"
   -x  e.g. (pairwise evidence)
 
 ## Indistinguishable under tested conditions

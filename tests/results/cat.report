@@ -5,170 +5,170 @@
   round 1: 74 isolated cumulative, 30 identical in round (refinement)
   round 2: 74 isolated cumulative, 29 identical in round (refinement)
 
-## Distinguished: 10/10 flags
+## Distinguished: 10/10 flags (10 observed behavior)
   10 observed behavior (10 solo, 0 via combination)
 
 Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonblank, -n = --number, -s = --squeeze-blank, -v = --show-nonprinting
 
 ## Solo (unique behavior)
   -A  # equivalent to -vET
-    exemplar: "-A" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    exemplar: "-A" "input.txt" "other.txt" in formatted_minimal (-4 lines)
     base:
-      cherry
-      Apple
-      banana
-      Date
-      elderberry
+      first line
+      
+      
+      	indented with tab
+      trailing spaces   
             ...
     flag:
-      cherry$
-      Apple$
-      banana$
-      Date$
-      elderberry$
+      first line$
+      $
+      $
+      ^Iindented with tab$
+      trailing spaces   $
             ...
   -E  # display $ at end of each line
-    exemplar: "-E" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    exemplar: "-E" "input.txt" "other.txt" in formatted_minimal (-4 lines)
     base:
-      cherry
-      Apple
-      banana
-      Date
-      elderberry
+      first line
+      
+      
+      	indented with tab
+      trailing spaces   
             ...
     flag:
-      cherry$
-      Apple$
-      banana$
-      Date$
-      elderberry$
+      first line$
+      $
+      $
+      	indented with tab$
+      trailing spaces   $
             ...
   -T  # display TAB characters as ^I
-    exemplar: "-T" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    exemplar: "-T" "input.txt" "other.txt" in formatted_minimal (-4 lines)
     base:
-      cherry
-      Apple
-      banana
-      Date
-      elderberry
+      first line
+      
+      
+      	indented with tab
+      trailing spaces   
             ...
     flag:
-      cherry
-      Apple
-      banana
-      Date
-      elderberry
+      first line
+      
+      
+      ^Iindented with tab
+      trailing spaces   
             ...
   -b  # number nonempty output lines, overrides -n
-    exemplar: "-b" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    exemplar: "-b" "input.txt" "other.txt" in formatted_minimal (-4 lines)
     base:
-      cherry
-      Apple
-      banana
-      Date
-      elderberry
+      first line
+      
+      
+      	indented with tab
+      trailing spaces   
             ...
     flag:
-           1	cherry
-           2	Apple
-           3	banana
-           4	Date
-           5	elderberry
+           1	first line
+      
+      
+           2		indented with tab
+           3	trailing spaces   
             ...
   -e  # equivalent to -vE
-    exemplar: "-e" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    exemplar: "-e" "input.txt" "other.txt" in formatted_minimal (-4 lines)
     base:
-      cherry
-      Apple
-      banana
-      Date
-      elderberry
+      first line
+      
+      
+      	indented with tab
+      trailing spaces   
             ...
     flag:
-      cherry$
-      Apple$
-      banana$
-      Date$
-      elderberry$
+      first line$
+      $
+      $
+      	indented with tab$
+      trailing spaces   $
             ...
   -n  # number all output lines
-    exemplar: "-n" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    exemplar: "-n" "input.txt" "other.txt" in formatted_minimal (-4 lines)
     base:
-      cherry
-      Apple
-      banana
-      Date
-      elderberry
+      first line
+      
+      
+      	indented with tab
+      trailing spaces   
             ...
     flag:
-           1	cherry
-           2	Apple
-           3	banana
-           4	Date
-           5	elderberry
+           1	first line
+           2	
+           3	
+           4		indented with tab
+           5	trailing spaces   
             ...
   -s  # suppress repeated empty output lines
-    exemplar: "-s" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    exemplar: "-s" "input.txt" "other.txt" in formatted_minimal (-5 lines)
     base:
-      cherry
-      Apple
-      banana
-      Date
-      elderberry
+      first line
+      
+      
+      	indented with tab
+      trailing spaces   
             ...
     flag:
-      cherry
-      Apple
-      banana
-      Date
-      elderberry
+      first line
+      
+      	indented with tab
+      trailing spaces   
+      
             ...
   -t  # equivalent to -vT
-    exemplar: "-t" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    exemplar: "-t" "input.txt" "other.txt" in formatted_minimal (-4 lines)
     base:
-      cherry
-      Apple
-      banana
-      Date
-      elderberry
+      first line
+      
+      
+      	indented with tab
+      trailing spaces   
             ...
     flag:
-      cherry
-      Apple
-      banana
-      Date
-      elderberry
+      first line
+      
+      
+      ^Iindented with tab
+      trailing spaces   
             ...
   -u  # (ignored)
-    exemplar: "-u" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    exemplar: "-u" "input.txt" "other.txt" in formatted_minimal (-4 lines)
     base:
-      cherry
-      Apple
-      banana
-      Date
-      elderberry
+      first line
+      
+      
+      	indented with tab
+      trailing spaces   
             ...
     flag:
-      cherry
-      Apple
-      banana
-      Date
-      elderberry
+      first line
+      
+      
+      	indented with tab
+      trailing spaces   
             ...
   -v  # use ^ and M- notation, except for LFD and TAB
-    exemplar: "-v" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    exemplar: "-v" "input.txt" "other.txt" in formatted_minimal (-4 lines)
     base:
-      cherry
-      Apple
-      banana
-      Date
-      elderberry
+      first line
+      
+      
+      	indented with tab
+      trailing spaces   
             ...
     flag:
-      cherry
-      Apple
-      banana
-      Date
-      elderberry
+      first line
+      
+      
+      	indented with tab
+      trailing spaces   
             ...
 

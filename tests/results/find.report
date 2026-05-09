@@ -5,37 +5,31 @@
   round 1: 28 isolated cumulative, 3 identical in round (refinement)
   round 2: 28 isolated cumulative, 3 identical in round (refinement)
 
-## Distinguished: 4/4 flags
+## Distinguished: 4/4 flags (1 observed behavior)
   1 observed behavior (1 solo, 0 via combination)
   3 error-differentiated only (3 solo, 0 via combination)
 
 ## Solo (unique behavior)
   -D
-    exemplar: "-D" "." in alpha_deep (reordered)
+    exemplar: "-D" "input.txt" "other.txt" in alpha_minimal (different)
     base:
-      .
-      ./level1
-      ./level1/level2
-      ./level1/level2/b.txt
-      ./level1/a.txt
-            ...
+      input.txt
+      other.txt
     flag:
-      .
-      ./level1
-      ./level1/level2
-      ./level1/level2/b.txt
-      ./level1/a.txt
-            ...
+      other.txt
   -N
-    exemplar: "-N" "alpha" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-N" "alpha" "input.txt" in alpha_standard (different)
     base:
+      input.txt
     flag:
   -a
-    exemplar: "-a" "input.txt" in empty_dir (different)
+    exemplar: "-a" "alpha" "input.txt" in alpha_standard (different)
     base:
+      input.txt
     flag:
   -o
-    exemplar: "-o" "input.txt" in empty_dir (different)
+    exemplar: "-o" "alpha" "input.txt" in alpha_standard (different)
     base:
+      input.txt
     flag:
 

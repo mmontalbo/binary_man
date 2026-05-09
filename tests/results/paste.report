@@ -5,18 +5,14 @@
   round 1: 29 isolated cumulative, 9 identical in round (refinement)
   round 2: 29 isolated cumulative, 10 identical in round (refinement)
 
-## Distinguished: 3/3 flags
+## Distinguished: 3/3 flags (3 observed behavior)
   3 observed behavior (3 solo, 0 via combination)
 
 Aliases: -d = --delimiters, -s = --serial, -z = --zero-terminated
 
 ## Solo (unique behavior)
   -d  # reuse characters from LIST instead of TABs
-    exemplar: "-d" "input.txt" "other.txt" in empty_dir (-2 lines, exit 0→1)
-    base:
-    flag:
-  -s  # paste one file at a time instead of in parallel
-    exemplar: "-s" "input.txt" "other.txt" in alpha_minimal (reordered)
+    exemplar: "-d" "input.txt" "other.txt" in alpha_minimal (-1 lines)
     base:
       cherry	hello world
       Apple	
@@ -25,8 +21,11 @@ Aliases: -d = --delimiters, -s = --serial, -z = --zero-terminated
       elderberry	
             ...
     flag:
-      cherry	Apple	banana	Date	elderberry	BANANA	apple
       hello world
+  -s  # paste one file at a time instead of in parallel
+    exemplar: "-s" in alpha_minimal (different)
+    base:
+    flag:
   -z  # line delimiter is NUL, not newline
     exemplar: "-z" "input.txt" "other.txt" in alpha_minimal (-10 lines)
     base:

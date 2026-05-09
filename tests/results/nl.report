@@ -5,7 +5,7 @@
   round 1: 81 isolated cumulative, 11 identical in round (refinement)
   round 2: 81 isolated cumulative, 11 identical in round (refinement)
 
-## Distinguished: 11/11 flags
+## Distinguished: 11/11 flags (10 observed behavior)
   10 observed behavior (9 solo, 1 via combination)
   1 error-differentiated only (1 solo, 0 via combination)
   1 behavioral aliases detected
@@ -14,46 +14,131 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
 
 ## Solo (unique behavior)
   -b  # use STYLE for numbering body lines
-    exemplar: "-b" "alpha" "input.txt" in empty_dir (-16 lines, exit 0→1)
+    exemplar: "-b" "alpha" "input.txt" in formatted_minimal (-3 lines)
     base:
+           1	first line
+             
+             
+           2		indented with tab
+           3	trailing spaces   
+            ...
     flag:
+           1	first line
+           2	
+           3	
+           4		indented with tab
+           5	trailing spaces   
+            ...
   -d  # use CC for logical page delimiters
-    exemplar: "-d" "alpha" "input.txt" in empty_dir (-16 lines, exit 0→1)
+    exemplar: "-d" "input.txt" "other.txt" in alpha_minimal (-1 lines)
     base:
+           1	cherry
+           2	Apple
+           3	banana
+           4	Date
+           5	elderberry
+            ...
     flag:
+           1	hello world
   -f  # use STYLE for numbering footer lines
-    exemplar: "-f" "alpha" "input.txt" in empty_dir (-16 lines, exit 0→1)
+    exemplar: "-f" "alpha" "input.txt" in formatted_minimal (-3 lines)
     base:
+           1	first line
+             
+             
+           2		indented with tab
+           3	trailing spaces   
+            ...
     flag:
+           1	first line
+             
+             
+           2		indented with tab
+           3	trailing spaces   
+            ...
   -h  # use STYLE for numbering header lines
-    exemplar: "-h" "alpha" "input.txt" in empty_dir (-16 lines, exit 0→1)
+    exemplar: "-h" "alpha" "input.txt" in formatted_minimal (-3 lines)
     base:
+           1	first line
+             
+             
+           2		indented with tab
+           3	trailing spaces   
+            ...
     flag:
+           1	first line
+             
+             
+           2		indented with tab
+           3	trailing spaces   
+            ...
   -i  # line number increment at each line
-    exemplar: "-i" "input.txt" "subdir" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-i" "input.txt" "subdir" in alpha_minimal (different)
     base:
+           1	cherry
+           2	Apple
+           3	banana
+           4	Date
+           5	elderberry
+            ...
     flag:
   -l  # group of NUMBER empty lines counted as one
-    exemplar: "-l" "input.txt" "subdir" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-l" "input.txt" "subdir" in alpha_minimal (different)
     base:
+           1	cherry
+           2	Apple
+           3	banana
+           4	Date
+           5	elderberry
+            ...
     flag:
   -n  # insert line numbers according to FORMAT
-    exemplar: "-n" "input.txt" "subdir" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-n" "input.txt" "subdir" in alpha_minimal (different)
     base:
+           1	cherry
+           2	Apple
+           3	banana
+           4	Date
+           5	elderberry
+            ...
     flag:
   -s  # add STRING after (possible) line number
-    exemplar: "-s" "alpha" "input.txt" in empty_dir (-16 lines, exit 0→1)
+    exemplar: "-s" "alpha" "input.txt" in alpha_minimal (-9 lines)
     base:
+           1	cherry
+           2	Apple
+           3	banana
+           4	Date
+           5	elderberry
+            ...
     flag:
+           1alphacherry
+           2alphaApple
+           3alphabanana
+           4alphaDate
+           5alphaelderberry
+            ...
   -v  # first line number for each section
-    exemplar: "-v" "input.txt" "subdir" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-v" "input.txt" "subdir" in alpha_minimal (different)
     base:
+           1	cherry
+           2	Apple
+           3	banana
+           4	Date
+           5	elderberry
+            ...
     flag:
   -w  # use NUMBER columns for line numbers
-    exemplar: "-w" "input.txt" "subdir" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-w" "input.txt" "subdir" in alpha_minimal (different)
     base:
+           1	cherry
+           2	Apple
+           3	banana
+           4	Date
+           5	elderberry
+            ...
     flag:
 
 ## Via combination (distinguishable when paired)
-  -p  e.g. "--join-blank-lines=-1" "-p"
+  -p  e.g. "--join-blank-lines=0" "-p" "input.txt" "other.txt"
 

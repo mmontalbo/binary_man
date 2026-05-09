@@ -1,12 +1,11 @@
 # Exploration: uniq
 
 ## Rounds
-  round 0: 24 isolated cumulative, 34 identical in round (discovery)
-  round 1: 39 isolated cumulative, 18 identical in round (refinement)
-  round 2: 45 isolated cumulative, 15 identical in round (refinement)
-  round 3: 48 isolated cumulative, 16 identical in round (refinement)
+  round 0: 29 isolated cumulative, 34 identical in round (discovery)
+  round 1: 40 isolated cumulative, 16 identical in round (refinement)
+  round 2: 40 isolated cumulative, 20 identical in round (refinement)
 
-## Distinguished: 11/11 flags
+## Distinguished: 11/11 flags (11 observed behavior)
   11 observed behavior (11 solo, 0 via combination)
   1 behavioral aliases detected
 
@@ -14,47 +13,139 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
 
 ## Solo (unique behavior)
   --all-repeated
-    exemplar: "--all-repeated" "input.txt" "other.txt" in formatted_minimal (different)
+    exemplar: "--all-repeated" "input.txt" in formatted_minimal (+2 lines)
     base:
+      first line
+      
+      	indented with tab
+      trailing spaces   
+      
+            ...
     flag:
+      
   --group
-    exemplar: "--group" "input.txt" "other.txt" in alpha_minimal (different)
+    exemplar: "--group" "input.txt" in alpha_minimal (-18 lines)
     base:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
     flag:
+      cherry
+      
+      Apple
+      
+      banana
+            ...
   -D  # print all duplicate lines
-    exemplar: "-D" "input.txt" "other.txt" in numeric_minimal (different)
+    exemplar: "-D" "input.txt" in formatted_minimal (+2 lines)
     base:
+      first line
+      
+      	indented with tab
+      trailing spaces   
+      
+            ...
     flag:
+      
   -c  # prefix lines by the number of occurrences
-    exemplar: "-c" "input.txt" "other.txt" in alpha_minimal (different)
+    exemplar: "-c" "input.txt" in alpha_minimal (-9 lines)
     base:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
     flag:
+            1 cherry
+            1 Apple
+            1 banana
+            1 Date
+            1 elderberry
+            ...
   -d  # only print duplicate lines, one for each group
-    exemplar: "-d" "input.txt" "other.txt" in formatted_minimal (different)
+    exemplar: "-d" "input.txt" in formatted_minimal (+1 lines)
     base:
+      first line
+      
+      	indented with tab
+      trailing spaces   
+      
+            ...
     flag:
   -f  # avoid comparing the first N fields
-    exemplar: "-f" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-f" "input.txt" in formatted_minimal (different)
     base:
+      first line
+      
+      	indented with tab
+      trailing spaces   
+      
+            ...
     flag:
   -i  # ignore differences in case when comparing
-    exemplar: "-i" "input.txt" "other.txt" in alpha_minimal (different)
+    exemplar: "-i" "input.txt" in formatted_minimal (-4 lines)
     base:
+      first line
+      
+      	indented with tab
+      trailing spaces   
+      
+            ...
     flag:
+      first line
+      
+      	indented with tab
+      trailing spaces   
+      
+            ...
   -s  # avoid comparing the first N characters
-    exemplar: "-s" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-s" "input.txt" in formatted_minimal (different)
     base:
+      first line
+      
+      	indented with tab
+      trailing spaces   
+      
+            ...
     flag:
   -u  # only print unique lines
-    exemplar: "-u" "input.txt" "other.txt" in alpha_minimal (different)
+    exemplar: "-u" "input.txt" in formatted_minimal (-5 lines)
     base:
+      first line
+      
+      	indented with tab
+      trailing spaces   
+      
+            ...
     flag:
+      first line
+      	indented with tab
+      trailing spaces   
+      
+        leading spaces
+            ...
   -w  # compare no more than N characters in lines
-    exemplar: "-w" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-w" "input.txt" "other.txt" in formatted_minimal (different)
     base:
     flag:
   -z  # line delimiter is NUL, not newline
-    exemplar: "-z" "input.txt" "other.txt" in alpha_minimal (different)
+    exemplar: "-z" "input.txt" in alpha_minimal (-9 lines)
     base:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
     flag:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
 

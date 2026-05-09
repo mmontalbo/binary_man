@@ -3,10 +3,10 @@
 ## Rounds
   round 0: 31 isolated cumulative, 11 identical in round (discovery)
   round 1: 49 isolated cumulative, 18 identical in round (refinement)
-  round 2: 58 isolated cumulative, 27 identical in round (refinement)
-  round 3: 72 isolated cumulative, 30 identical in round (refinement)
+  round 2: 61 isolated cumulative, 23 identical in round (refinement)
+  round 3: 75 isolated cumulative, 26 identical in round (refinement)
 
-## Distinguished: 36/53 flags
+## Distinguished: 36/53 flags (1 observed behavior)
   1 observed behavior (1 solo, 0 via combination)
   35 error-differentiated only (18 solo, 17 via combination)
   2 behavioral aliases detected
@@ -16,28 +16,22 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
 
 ## Solo (unique behavior)
   --GTYPE-group-format  # format GTYPE input groups with GFMT
-    exemplar: "--GTYPE-group-format=gfmt" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
-    base:
-    flag:
   --LTYPE-line-format  # format LTYPE input lines with LFMT
-    exemplar: "--LTYPE-line-format=lfmt" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
-    base:
-    flag:
   --horizon-lines  # keep NUM lines of the common prefix and suffix
-    exemplar: "--horizon-lines=2147483647" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    exemplar: "--horizon-lines=0" "input.txt" "other.txt" in formatted_minimal (-4 lines)
     base:
-      1,7c1
-      < cherry
-      < Apple
-      < banana
-      < Date
+      1,13c1
+      < first line
+      < 
+      < 
+      < 	indented with tab
             ...
     flag:
-      1,7c1
-      < cherry
-      < Apple
-      < banana
-      < Date
+      1,13c1
+      < first line
+      < 
+      < 
+      < 	indented with tab
             ...
   --line-format  # format all input lines with LFMT
     exemplar: "--line-format=lfmt" "input.txt" "other.txt" in alpha_minimal (reordered)
@@ -51,36 +45,36 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
     flag:
       lfmtlfmtlfmtlfmtlfmtlfmtlfmtlfmt
   --suppress-blank-empty  # suppress space or tab before empty output lines
-    exemplar: "--suppress-blank-empty" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    exemplar: "--suppress-blank-empty" "input.txt" "other.txt" in formatted_minimal (-4 lines)
     base:
-      1,7c1
-      < cherry
-      < Apple
-      < banana
-      < Date
+      1,13c1
+      < first line
+      < 
+      < 
+      < 	indented with tab
             ...
     flag:
-      1,7c1
-      < cherry
-      < Apple
-      < banana
-      < Date
+      1,13c1
+      < first line
+      <
+      <
+      < 	indented with tab
             ...
   --tabsize  # tab stops every NUM (default 8) print columns
-    exemplar: "--tabsize=10" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    exemplar: "--tabsize=2147483647" "input.txt" "other.txt" in formatted_minimal (-4 lines)
     base:
-      1,7c1
-      < cherry
-      < Apple
-      < banana
-      < Date
+      1,13c1
+      < first line
+      < 
+      < 
+      < 	indented with tab
             ...
     flag:
-      1,7c1
-      < cherry
-      < Apple
-      < banana
-      < Date
+      1,13c1
+      < first line
+      < 
+      < 
+      < 	indented with tab
             ...
   --to-file  # compare all operands to FILE2;
     exemplar: "--to-file=input.txt" "input.txt" "other.txt" in alpha_minimal (-10 lines)
@@ -108,16 +102,13 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       < Date
             ...
     flag:
-      --- input.txt	2026-05-09 11:04:17.886662787 -0700
-      +++ other.txt	2026-05-09 11:04:17.886669400 -0700
+      --- input.txt	2026-05-09 11:16:29.202722271 -0700
+      +++ other.txt	2026-05-09 11:16:29.202734595 -0700
       @@ -1,7 +1 @@
       -cherry
       -Apple
             ...
   -D  # output merged file with '#ifdef NAME' diffs
-    exemplar: "-D" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
-    base:
-    flag:
   -T  # make tabs line up by prepending a tab
     exemplar: "-T" "input.txt" "other.txt" in alpha_minimal (-10 lines)
     base:
@@ -135,9 +126,6 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       <	Date
             ...
   -W  # output at most NUM (default 130) print columns
-    exemplar: "-W" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
-    base:
-    flag:
   -e  # output an ed script
     exemplar: "-e" "input.txt" "other.txt" in alpha_minimal (-1 lines, exit 2→1)
     base:
@@ -163,7 +151,7 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
     flag:
       
       
-      2026-05-09 11:04           diff -l input.txt other.txt            Page 1
+      2026-05-09 11:16           diff -l input.txt other.txt            Page 1
       
       
             ...
@@ -181,11 +169,7 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       a7 1
       hello world
   -q  # report only when files differ
-    exemplar: "-q" "input.txt" "other.txt" in empty_dir (-1 lines, exit 1→2)
-    base:
-    flag:
-  -t  # expand tabs to spaces in output
-    exemplar: "-t" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    exemplar: "-q" "input.txt" "other.txt" in alpha_minimal (different)
     base:
       1,7c1
       < cherry
@@ -194,11 +178,22 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       < Date
             ...
     flag:
-      1,7c1
-      < cherry
-      < Apple
-      < banana
-      < Date
+      Files input.txt and other.txt differ
+  -t  # expand tabs to spaces in output
+    exemplar: "-t" "input.txt" "other.txt" in formatted_minimal (-4 lines)
+    base:
+      1,13c1
+      < first line
+      < 
+      < 
+      < 	indented with tab
+            ...
+    flag:
+      1,13c1
+      < first line
+      < 
+      < 
+      <         indented with tab
             ...
   -u
     exemplar: "-u" "input.txt" "other.txt" in alpha_minimal (-10 lines)
@@ -210,16 +205,28 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       < Date
             ...
     flag:
-      --- input.txt	2026-05-09 11:04:17.880582125 -0700
-      +++ other.txt	2026-05-09 11:04:17.880589660 -0700
+      --- input.txt	2026-05-09 11:16:29.196944799 -0700
+      +++ other.txt	2026-05-09 11:16:29.196957083 -0700
       @@ -1,7 +1 @@
       -cherry
       -Apple
             ...
   -v  # output version information and exit
-    exemplar: "-v" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (-8 lines, exit 0→127)
+    exemplar: "-v" "input.txt" "other.txt" in alpha_minimal (different)
     base:
+      1,7c1
+      < cherry
+      < Apple
+      < banana
+      < Date
+            ...
     flag:
+      diff (GNU diffutils) 3.10
+      Copyright (C) 2023 Free Software Foundation, Inc.
+      License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.
+      This is free software: you are free to change and redistribute it.
+      There is NO WARRANTY, to the extent permitted by law.
+            ...
   -y  # output in two columns
     exemplar: "-y" "input.txt" "other.txt" in alpha_minimal (+5 lines)
     base:
@@ -238,18 +245,18 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
             ...
 
 ## Via combination (distinguishable when paired)
-  --color  e.g. "-D" "--color" "input.txt" "other.txt"
-  --context  e.g. "--suppress-blank-empty" "--context" "input.txt" "other.txt"
+  --color  e.g. "--paginate" "--color" "input.txt" "other.txt"
+  --context  e.g. "--paginate" "--context" "--no-dereference" "input.txt" "other.txt"
   --from-file  e.g. "-u" "--from-file" "input.txt" "other.txt"
-  --ignore-file-name-case  e.g. "--unified" "--ignore-file-name-case" "input.txt" "other.txt"
+  --ignore-file-name-case  e.g. "--paginate" "--ignore-file-name-case" "input.txt" "other.txt"
   --label  e.g. (pairwise evidence)
   --left-column  e.g. "--unified" "--color" "--left-column" "--speed-large-files" "input.txt" "other.txt"
-  --no-dereference  e.g. "--unified" "--color" "--no-dereference" "input.txt" "other.txt"
+  --no-dereference  e.g. "--unified" "--color" "--no-dereference" "--speed-large-files" "input.txt" "other.txt"
   --no-ignore-file-name-case  e.g. "--unified" "--color" "--no-ignore-file-name-case" "input.txt" "other.txt"
   --normal  e.g. (pairwise evidence)
   --palette  e.g. (pairwise evidence)
   --speed-large-files  e.g. "--unified" "--color" "--left-column" "--speed-large-files" "input.txt" "other.txt"
-  --strip-trailing-cr  e.g. "--unified" "--color" "--left-column" "--strip-trailing-cr" "input.txt" "other.txt"
+  --strip-trailing-cr  e.g. "-u" "--color" "--no-ignore-file-name-case" "--strip-trailing-cr" "input.txt" "other.txt"
   -F  e.g. (pairwise evidence)
   -I  e.g. "-X" "-I" "input.txt" "other.txt"
   -S  e.g. "-X" "-S" "input.txt" "other.txt"

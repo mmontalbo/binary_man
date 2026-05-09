@@ -374,7 +374,8 @@ pub fn format_exploration_report(
     // Flag distinguishability summary
     let untested = final_metrics.untested_flags.len();
     let distinguished_count = all_distinguished.len().min(unique_stem_count);
-    out.push_str(&format!("## Distinguished: {}/{} flags\n", distinguished_count, unique_stem_count));
+    out.push_str(&format!("## Distinguished: {}/{} flags ({} observed behavior)\n",
+        distinguished_count, unique_stem_count, total_observed));
     out.push_str(&format!("  {} observed behavior ({} solo, {} via combination)\n",
         total_observed, solo_observed.len(), combo_observed.len()));
     if total_error_only > 0 {
@@ -484,37 +485,53 @@ struct Exemplar {
 }
 
 /// Find the most distinctive observation for a flag.
-/// Looks for the context where the flag's output differs most from its majority behavior.
+/// Picks the context where this flag's output is shared by the fewest other flags —
+/// the context that most clearly demonstrates what makes this flag unique.
 fn find_exemplar(target_stem: &str, metrics: &AnalysisMetrics) -> Option<Exemplar> {
-    // Find a run containing this flag with the most context variation
-    let mut best_run: Option<&crate::analyze::RunAnalysis> = None;
-    let mut best_groups = 0;
+    // Find all solo runs for this flag (not combinations)
+    let target_runs: Vec<&crate::analyze::RunAnalysis> = metrics.runs.iter()
+        .filter(|run| {
+            let stem = flag_stem(&run.args_str);
+            stem.as_ref().map(|s| !is_combination(s) && canonical_flag(s, None) == *target_stem)
+                .unwrap_or(false)
+        })
+        .collect();
 
-    for run in &metrics.runs {
-        let stem = flag_stem(&run.args_str);
-        if let Some(stem) = stem {
-            if !is_combination(&stem) && canonical_flag(&stem, None) == *target_stem
-                && run.context_groups.len() > best_groups {
-                best_groups = run.context_groups.len();
-                best_run = Some(run);
+    if target_runs.is_empty() { return None; }
+
+    // Collect all solo run outputs per context for comparison
+    // For each context name, how many OTHER runs produce the same stdout?
+    let mut best_context: Option<(&str, &crate::analyze::RunAnalysis, &crate::execute::Observation)> = None;
+    let mut best_uniqueness = usize::MAX; // lower = more unique
+
+    for run in &target_runs {
+        for (ctx_names, obs) in &run.context_groups {
+            // Skip error-only contexts (exit >= 2 with empty stdout)
+            if obs.exit_code.unwrap_or(-1) >= 2 && obs.stdout.trim().is_empty() {
+                continue;
+            }
+
+            for ctx_name in ctx_names {
+                // Count how many other runs produce the same stdout in this context
+                let same_output_count = metrics.runs.iter()
+                    .filter(|other| !std::ptr::eq(*other, *run))
+                    .filter(|other| {
+                        other.context_groups.iter()
+                            .any(|(names, other_obs)| {
+                                names.contains(ctx_name) && other_obs.stdout == obs.stdout
+                            })
+                    })
+                    .count();
+
+                if same_output_count < best_uniqueness {
+                    best_uniqueness = same_output_count;
+                    best_context = Some((ctx_name.as_str(), run, obs));
+                }
             }
         }
     }
 
-    let run = best_run?;
-    if run.context_groups.len() <= 1 { return None; }
-
-    // Find the smallest minority group — the most unusual context for this flag
-    let largest_idx = run.context_groups.iter().enumerate()
-        .max_by_key(|(_, (names, _))| names.len())
-        .map(|(i, _)| i)?;
-
-    let (minority_ctx, minority_obs) = run.context_groups.iter().enumerate()
-        .filter(|(i, _)| *i != largest_idx)
-        .min_by_key(|(_, (names, _))| names.len())
-        .map(|(_, group)| group)?;
-
-    let ctx_name = minority_ctx.first()?;
+    let (ctx_name, run, minority_obs) = best_context?;
 
     // Find the base run's output in the same context for comparison
     let base_output = if let Some(ref from_ref) = run.from_ref {
@@ -567,7 +584,7 @@ fn find_exemplar(target_stem: &str, metrics: &AnalysisMetrics) -> Option<Exempla
 
     Some(Exemplar {
         run_label: run.args_str.clone(),
-        context_name: ctx_name.clone(),
+        context_name: ctx_name.to_string(),
         base_preview,
         flag_preview,
         delta_summary,
