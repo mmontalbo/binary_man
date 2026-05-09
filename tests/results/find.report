@@ -5,9 +5,9 @@
   round 1: 28 isolated cumulative, 3 identical in round (refinement)
   round 2: 28 isolated cumulative, 3 identical in round (refinement)
 
-## Distinguished: 4/4 flags (1 observed behavior)
-  1 observed behavior (1 solo, 0 via combination)
-  3 error-differentiated only (3 solo, 0 via combination)
+## Observed: 1/4 flags
+  1 solo, 0 via combination
+  3 additional error-differentiated
 
 ## Solo (unique behavior)
   -D

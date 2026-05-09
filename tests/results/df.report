@@ -6,70 +6,63 @@
   round 2: 192 isolated cumulative, 18 identical in round (refinement)
   round 3: 198 isolated cumulative, 18 identical in round (refinement)
 
-## Distinguished: 16/16 flags (15 observed behavior)
-  15 observed behavior (15 solo, 0 via combination)
-  1 error-differentiated only (1 solo, 0 via combination)
+## Observed: 15/16 flags
+  15 solo, 0 via combination
+  1 additional error-differentiated
   1 behavioral aliases detected
 
 Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a = --all, -h = --human-readable, -i = --inodes, -l = --local, -t = --type, -x = --exclude-type
 
 ## Solo (unique behavior)
   --no-sync  # do not invoke sync before getting usage info (default)
-    exemplar: "--no-sync" in alpha_minimal (reordered)
+    exemplar: "--no-sync" "alpha" "input.txt" in alpha_minimal (reordered)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304142948 6055404700  18% /nix
-      tmpfs                                                    32881716       7928   32873788   1% /run
-      tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
-            ...
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304172912 6055374736  18% /batch
     flag:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304139440 6055408208  18% /nix
-      tmpfs                                                    32881716       7928   32873788   1% /run
-      tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
-            ...
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304168648 6055379000  18% /batch
   --output
     exemplar: "--output" "input.txt" "other.txt" in alpha_minimal (reordered)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304139988 6055407660  18% /batch
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304139988 6055407660  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304171012 6055376636  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304171012 6055376636  18% /batch
     flag:
       Filesystem                                             Type    Inodes   IUsed     IFree IUse%  1K-blocks       Used      Avail Use% File      Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 ext4 244158464 3157547 241000917    2% 7750211880 1304144100 6055403548  18% input.txt /batch
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 ext4 244158464 3157547 241000917    2% 7750211880 1304144100 6055403548  18% other.txt /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 ext4 244158464 3156765 241001699    2% 7750211880 1304164300 6055383348  18% input.txt /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 ext4 244158464 3156765 241001699    2% 7750211880 1304164300 6055383348  18% other.txt /batch
   --sync  # invoke sync before getting usage info
-    exemplar: "--sync" "alpha" "." in alpha_minimal (different)
+    exemplar: "--sync" "input.txt" "subdir" in alpha_minimal (-1 lines, exit 0→1)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304143344 6055404304  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304164444 6055383204  18% /batch
     flag:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304142412 6055405236  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304166976 6055380672  18% /batch
   --total  # elide all entries insignificant to available space,
-    exemplar: "--total" "input.txt" in alpha_minimal (reordered)
+    exemplar: "--total" "." in alpha_minimal (reordered)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304145456 6055402192  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304171028 6055376620  18% /batch
     flag:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304143084 6055404564  18% /batch
-      total                                                  7750211880 1304143084 6055404564  18% -
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304168408 6055379240  18% /batch
+      total                                                  7750211880 1304168408 6055379240  18% -
   -B  # scale sizes by SIZE before printing them; e.g.,
-    exemplar: "-B" "alpha" "." in alpha_standard (different)
+    exemplar: "-B" "input.txt" "other.txt" in alpha_standard (different)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304135844 6055411804  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304168028 6055379620  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304168028 6055379620  18% /batch
     flag:
   -H  # print sizes in powers of 1000 (e.g., 1.1G)
     exemplar: "-H" in alpha_minimal (different)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304142948 6055404700  18% /nix
-      tmpfs                                                    32881716       7928   32873788   1% /run
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304171812 6055375836  18% /nix
+      tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
             ...
     flag:
@@ -83,41 +76,33 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
     exemplar: "-P" "input.txt" in alpha_minimal (reordered)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304145456 6055402192  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304180828 6055366820  18% /batch
     flag:
       Filesystem                                             1024-blocks       Used  Available Capacity Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5  7750211880 1304123216 6055424432      18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5  7750211880 1304134424 6055413224      18% /batch
   -T  # print file system type
-    exemplar: "-T" in alpha_minimal (reordered)
+    exemplar: "-T" "alpha" "input.txt" in alpha_minimal (reordered)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304142948 6055404700  18% /nix
-      tmpfs                                                    32881716       7928   32873788   1% /run
-      tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
-            ...
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304172912 6055374736  18% /batch
     flag:
-      Filesystem                                             Type      1K-blocks       Used  Available Use% Mounted on
-      tmpfs                                                  tmpfs      65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 ext4     7750211880 1304139520 6055408128  18% /nix
-      tmpfs                                                  tmpfs      32881716       7928   32873788   1% /run
-      tmpfs                                                  tmpfs          1024          0       1024   0% /run/credentials/systemd-journald.service
-            ...
+      Filesystem                                             Type  1K-blocks       Used  Available Use% Mounted on
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 ext4 7750211880 1304163908 6055383740  18% /batch
   -a  # include pseudo, duplicate, inaccessible file systems
     exemplar: "-a" "input.txt" in alpha_minimal (reordered)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304145456 6055402192  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304180828 6055366820  18% /batch
     flag:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304116992 6055430656  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304130496 6055417152  18% /batch
   -h  # print sizes in powers of 1024 (e.g., 1023M)
     exemplar: "-h" in alpha_minimal (different)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304142948 6055404700  18% /nix
-      tmpfs                                                    32881716       7928   32873788   1% /run
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304171812 6055375836  18% /nix
+      tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
             ...
     flag:
@@ -128,59 +113,59 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
       tmpfs                                                   1.0M     0  1.0M   0% /run/credentials/systemd-journald.service
             ...
   -i  # list inode information instead of block usage
-    exemplar: "-i" in alpha_minimal (reordered)
+    exemplar: "-i" "input.txt" "subdir" in alpha_minimal (reordered)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304142948 6055404700  18% /nix
-      tmpfs                                                    32881716       7928   32873788   1% /run
-      tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
-            ...
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304164444 6055383204  18% /batch
     flag:
       Filesystem                                                Inodes   IUsed     IFree IUse% Mounted on
-      tmpfs                                                   16440857      13  16440844    1% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 244158464 3157705 241000759    2% /nix
-      tmpfs                                                   16440857    2444  16438413    1% /run
-      tmpfs                                                       1024       1      1023    1% /run/credentials/systemd-journald.service
-            ...
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 244158464 3156869 241001595    2% /batch
   -k  # like --block-size=1K
     exemplar: "-k" "input.txt" in alpha_minimal (reordered)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304145456 6055402192  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304180828 6055366820  18% /batch
     flag:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304124740 6055422908  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304136436 6055411212  18% /batch
   -l  # limit listing to local file systems
     exemplar: "-l" "input.txt" in alpha_minimal (reordered)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304145456 6055402192  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304180828 6055366820  18% /batch
     flag:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304120064 6055427584  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304132496 6055415152  18% /batch
   -t  # limit listing to file systems of type TYPE
     exemplar: "-t" "input.txt" "other.txt" in alpha_standard (different)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304126124 6055421524  18% /batch
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304126128 6055421520  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304168028 6055379620  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304168028 6055379620  18% /batch
     flag:
   -v  # (ignored)
-    exemplar: "-v" "alpha" "input.txt" in alpha_minimal (reordered)
+    exemplar: "-v" in alpha_minimal (reordered)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304148376 6055399272  18% /batch
+      tmpfs                                                    65763428          0   65763428   0% /
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304171812 6055375836  18% /nix
+      tmpfs                                                    32881716       7924   32873792   1% /run
+      tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
+            ...
     flag:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304144016 6055403632  18% /batch
+      tmpfs                                                    65763428          0   65763428   0% /
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304168140 6055379508  18% /nix
+      tmpfs                                                    32881716       7924   32873792   1% /run
+      tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
+            ...
   -x  # limit listing to file systems not of type TYPE
     exemplar: "-x" "input.txt" "subdir" in alpha_standard (+2 lines, exit 1→0)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304139064 6055408584  18% /batch
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304139064 6055408584  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304152644 6055395004  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304152644 6055395004  18% /batch
     flag:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304127900 6055419748  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304162440 6055385208  18% /batch
 

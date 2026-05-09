@@ -6,9 +6,9 @@
   round 2: 40 isolated cumulative, 32 identical in round (refinement)
   round 3: 40 isolated cumulative, 32 identical in round (refinement)
 
-## Distinguished: 7/7 flags (5 observed behavior)
-  5 observed behavior (2 solo, 3 via combination)
-  2 error-differentiated only (2 solo, 0 via combination)
+## Observed: 5/7 flags
+  2 solo, 3 via combination
+  2 additional error-differentiated
 
 Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
 
@@ -39,24 +39,24 @@ Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
     flag:
       ==> standard input <==
   -z  # line delimiter is NUL, not newline
-    exemplar: "-z" "input.txt" "other.txt" in numeric_minimal (-1 lines)
+    exemplar: "-z" "input.txt" in numeric_minimal (different)
     base:
-      ==> input.txt <==
       100
       2
       30
       1
+      20
             ...
     flag:
-      ==> input.txt <==
       100
       2
       30
       1
+      20
             ...
 
 ## Via combination (distinguishable when paired)
   --quiet  e.g. (pairwise evidence)
-  --silent  e.g. "-c" "--silent" "input.txt" "other.txt"
+  --silent  e.g. "-n" "--silent" "input.txt"
   -q  e.g. (pairwise evidence)
 

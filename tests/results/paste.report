@@ -5,8 +5,8 @@
   round 1: 29 isolated cumulative, 9 identical in round (refinement)
   round 2: 29 isolated cumulative, 10 identical in round (refinement)
 
-## Distinguished: 3/3 flags (3 observed behavior)
-  3 observed behavior (3 solo, 0 via combination)
+## Observed: 3/3 flags
+  3 solo, 0 via combination
 
 Aliases: -d = --delimiters, -s = --serial, -z = --zero-terminated
 
@@ -23,9 +23,16 @@ Aliases: -d = --delimiters, -s = --serial, -z = --zero-terminated
     flag:
       hello world
   -s  # paste one file at a time instead of in parallel
-    exemplar: "-s" in alpha_minimal (different)
+    exemplar: "-s" "input.txt" "subdir" in alpha_standard (reordered)
     base:
+      cherry	
+      Apple	
+      banana	
+      Date	
+      elderberry	
+            ...
     flag:
+      cherry	Apple	banana	Date	elderberry	BANANA	apple
   -z  # line delimiter is NUL, not newline
     exemplar: "-z" "input.txt" "other.txt" in alpha_minimal (-10 lines)
     base:

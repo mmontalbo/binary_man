@@ -1,13 +1,13 @@
 # Exploration: uniq
 
 ## Rounds
-  round 0: 29 isolated cumulative, 34 identical in round (discovery)
-  round 1: 40 isolated cumulative, 16 identical in round (refinement)
-  round 2: 40 isolated cumulative, 20 identical in round (refinement)
+  round 0: 18 isolated cumulative, 35 identical in round (discovery)
+  round 1: 37 isolated cumulative, 23 identical in round (refinement)
+  round 2: 44 isolated cumulative, 21 identical in round (refinement)
+  round 3: 49 isolated cumulative, 21 identical in round (refinement)
 
-## Distinguished: 11/11 flags (11 observed behavior)
-  11 observed behavior (11 solo, 0 via combination)
-  1 behavioral aliases detected
+## Observed: 11/11 flags
+  11 solo, 0 via combination
 
 Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, -s = --skip-chars, -u = --unique, -w = --check-chars, -z = --zero-terminated
 
@@ -77,14 +77,8 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
             ...
     flag:
   -f  # avoid comparing the first N fields
-    exemplar: "-f" "input.txt" in formatted_minimal (different)
+    exemplar: "-f" in formatted_minimal (different)
     base:
-      first line
-      
-      	indented with tab
-      trailing spaces   
-      
-            ...
     flag:
   -i  # ignore differences in case when comparing
     exemplar: "-i" "input.txt" in formatted_minimal (-4 lines)
@@ -103,14 +97,8 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
       
             ...
   -s  # avoid comparing the first N characters
-    exemplar: "-s" "input.txt" in formatted_minimal (different)
+    exemplar: "-s" "input.txt" "other.txt" in formatted_minimal (different)
     base:
-      first line
-      
-      	indented with tab
-      trailing spaces   
-      
-            ...
     flag:
   -u  # only print unique lines
     exemplar: "-u" "input.txt" in formatted_minimal (-5 lines)

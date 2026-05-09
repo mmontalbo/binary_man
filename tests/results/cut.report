@@ -5,9 +5,9 @@
   round 1: 10 isolated cumulative, 6 identical in round (refinement)
   round 2: 10 isolated cumulative, 6 identical in round (refinement)
 
-## Distinguished: 10/10 flags (3 observed behavior)
-  3 observed behavior (1 solo, 2 via combination)
-  7 error-differentiated only (0 solo, 7 via combination)
+## Observed: 3/10 flags
+  1 solo, 2 via combination
+  7 additional error-differentiated
   1 behavioral aliases detected
 
 Aliases: -b = --bytes, -c = --characters, -d = --delimiter, -f = --fields, -s = --only-delimited, -z = --zero-terminated

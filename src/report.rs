@@ -373,14 +373,11 @@ pub fn format_exploration_report(
 
     // Flag distinguishability summary
     let untested = final_metrics.untested_flags.len();
-    let distinguished_count = all_distinguished.len().min(unique_stem_count);
-    out.push_str(&format!("## Distinguished: {}/{} flags ({} observed behavior)\n",
-        distinguished_count, unique_stem_count, total_observed));
-    out.push_str(&format!("  {} observed behavior ({} solo, {} via combination)\n",
-        total_observed, solo_observed.len(), combo_observed.len()));
+    out.push_str(&format!("## Observed: {}/{} flags\n", total_observed, unique_stem_count));
+    out.push_str(&format!("  {} solo, {} via combination\n",
+        solo_observed.len(), combo_observed.len()));
     if total_error_only > 0 {
-        out.push_str(&format!("  {} error-differentiated only ({} solo, {} via combination)\n",
-            total_error_only, solo_error_only.len(), combo_error_only.len()));
+        out.push_str(&format!("  {} additional error-differentiated\n", total_error_only));
     }
     if !behavioral_aliases.is_empty() {
         out.push_str(&format!("  {} behavioral aliases detected\n", behavioral_aliases.len()));

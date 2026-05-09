@@ -2,31 +2,27 @@
 
 ## Rounds
   round 0: 15 isolated cumulative, 13 identical in round (discovery)
-  round 1: 24 isolated cumulative, 26 identical in round (refinement)
-  round 2: 40 isolated cumulative, 33 identical in round (refinement)
-  round 3: 52 isolated cumulative, 43 identical in round (refinement)
+  round 1: 26 isolated cumulative, 25 identical in round (refinement)
+  round 2: 30 isolated cumulative, 38 identical in round (refinement)
+  round 3: 52 isolated cumulative, 41 identical in round (refinement)
 
-## Distinguished: 23/24 flags (21 observed behavior)
-  21 observed behavior (4 solo, 17 via combination)
-  2 error-differentiated only (2 solo, 0 via combination)
-  2 behavioral aliases detected
+## Observed: 21/24 flags
+  4 solo, 17 via combination
+  2 additional error-differentiated
+  1 behavioral aliases detected
 
 ## Solo (unique behavior)
   --debug
-    exemplar: "--debug" "alpha" "input.txt" in alpha_minimal (-63 lines)
+    exemplar: "--debug" "input.txt" "other.txt" in alpha_minimal (-7 lines)
     base:
-      cherry
-      lpha
-      Apple
-      lpha
-      banana
-            ...
+      nput.txt
+      hello world
     flag:
       SED PROGRAM:
-        a\lpha
+        i\nput.txt
       
-      INPUT:   'input.txt' line 1
-      PATTERN: cherry
+      INPUT:   'other.txt' line 1
+      PATTERN: hello world
             ...
   --follow-symlinks
     exemplar: "--follow-symlinks" "alpha" "input.txt" in alpha_minimal (-18 lines)
@@ -45,39 +41,43 @@
       banana
             ...
   --in-place
-    exemplar: "--in-place" "alpha" "input.txt" in numeric_standard / input.txt=size:1 (different)
-    base:
-      x
-      lpha
-    flag:
-  --posix
-    exemplar: "--posix" "input.txt" in numeric_standard / input.txt=size:1 (different)
-    base:
-    flag:
-  -i
-    exemplar: "-i" "input.txt" "other.txt" in numeric_standard / input.txt=size:1 (different)
+    exemplar: "--in-place" "input.txt" "other.txt" in numeric_standard / input.txt=size:1 (different)
     base:
       nput.txt
       other content
       nput.txt
       second line
     flag:
-  -l
-    exemplar: "-l" "input.txt" in numeric_standard / input.txt=size:1 (different)
+  --posix
+    exemplar: "--posix" "alpha" "input.txt" in numeric_standard / input.txt=size:1 (different)
     base:
+      x
+      lpha
+    flag:
+  -i
+    exemplar: "-i" "alpha" "input.txt" in numeric_standard / input.txt=size:1 (different)
+    base:
+      x
+      lpha
+    flag:
+  -l
+    exemplar: "-l" "alpha" "input.txt" in numeric_standard / input.txt=size:1 (different)
+    base:
+      x
+      lpha
     flag:
 
 ## Via combination (distinguishable when paired)
   --expression  e.g. (pairwise evidence)
-  --file  e.g. "--posix" "--file" "input.txt"
+  --file  e.g. "--debug" "--file" "--unbuffered"
   --line-length  e.g. (pairwise evidence)
-  --null-data  e.g. "--follow-symlinks" "--in-place" "--null-data" "--silent" "input.txt" "other.txt"
+  --null-data  e.g. "--follow-symlinks" "--in-place" "--null-data" "--silent" "alpha" "input.txt"
   --quiet  e.g. (pairwise evidence)
   --regexp-extended  e.g. (pairwise evidence)
-  --sandbox  e.g. "--follow-symlinks" "--in-place" "--sandbox" "input.txt" "other.txt"
+  --sandbox  e.g. (pairwise evidence)
   --separate  e.g. "--follow-symlinks" "--in-place" "--separate" "alpha" "input.txt"
-  --silent  e.g. "--follow-symlinks" "--in-place" "--null-data" "--silent" "input.txt" "other.txt"
-  --unbuffered  e.g. "--follow-symlinks" "--in-place" "--sandbox" "--unbuffered" "alpha" "input.txt"
+  --silent  e.g. "--follow-symlinks" "--in-place" "--null-data" "--silent" "alpha" "input.txt"
+  --unbuffered  e.g. "--debug" "--in-place" "--unbuffered" "input.txt" "other.txt"
   -E  e.g. (pairwise evidence)
   -e  e.g. (pairwise evidence)
   -n  e.g. (pairwise evidence)

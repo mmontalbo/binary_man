@@ -4,13 +4,13 @@
   round 0: 13 isolated cumulative, 8 identical in round (discovery)
   round 1: 35 isolated cumulative, 17 identical in round (refinement)
   round 2: 39 isolated cumulative, 24 identical in round (refinement)
-  round 3: 46 isolated cumulative, 26 identical in round (refinement)
+  round 3: 47 isolated cumulative, 24 identical in round (refinement)
 
-## Distinguished: 35/49 flags (2 observed behavior)
-  2 observed behavior (2 solo, 0 via combination)
-  33 error-differentiated only (6 solo, 27 via combination)
+## Observed: 2/49 flags
+  2 solo, 0 via combination
+  34 additional error-differentiated
   1 behavioral aliases detected
-  14 indistinguishable under tested conditions
+  13 indistinguishable under tested conditions
 
 Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --devices, -E = --extended-regexp, -F = --fixed-strings, -G = --basic-regexp, -H = --with-filename, -L = --files-without-match, -P = --perl-regexp, -R = --dereference-recursive, -T = --initial-tab, -U = --binary, -Z = --null, -a = --text, -b = --byte-offset, -c = --count, -d = --directories, -e = --regexp, -f = --file, -h = --no-filename, -i = --ignore-case, -l = --files-with-matches, -m = --max-count, -n = --line-number, -o = --only-matching, -r = --recursive, -s = --no-messages, -v = --invert-match, -w = --word-regexp, -x = --line-regexp, -z = --null-data
 
@@ -48,11 +48,11 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
   -m  # stop after NUM selected lines
 
 ## Via combination (distinguishable when paired)
-  --color  e.g. "-d" "--color" "input.txt"
-  --colour  e.g. "-d" "--colour"
+  --color  e.g. "-f" "--color" "input.txt"
+  --colour  e.g. "-f" "--colour" "input.txt"
   --exclude  e.g. "-f" "--exclude"
-  --exclude-dir  e.g. "-f" "--exclude-dir"
-  --exclude-from  e.g. "-e" "-w" "--exclude-from"
+  --exclude-dir  e.g. "-d" "--exclude-dir" "input.txt"
+  --exclude-from  e.g. "-e" "-w" "--exclude-from" "--no-group-separator" "input.txt"
   --group-separator  e.g. "-e" "-w" "--group-separator"
   --include  e.g. "-e" "-w" "--include"
   --label  e.g. "-e" "-w" "--label"
@@ -71,11 +71,12 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
   -I  e.g. "-e" "-w" "--exclude-from" "-I" "input.txt"
   -P  e.g. (pairwise evidence)
   -R  e.g. "-e" "-w" "--exclude-from" "-R" "input.txt"
-  -e  e.g. "-e" "-w" "--label"
+  -T  e.g. "-e" "-w" "--exclude-from" "-T" "input.txt"
+  -e  e.g. "-e" "-w" "--exclude-from" "--no-group-separator" "input.txt"
   -i  e.g. (pairwise evidence)
-  -w  e.g. "-e" "-w" "--label"
+  -w  e.g. "-e" "-w" "--exclude-from" "--no-group-separator" "input.txt"
   -x  e.g. (pairwise evidence)
 
 ## Indistinguishable under tested conditions
-  UNEXPLAINED (14): -T, -U, -Z, -a, -b, -h, -l, -n, -o, -q, -r, -s, -v, -z
+  UNEXPLAINED (13): -U, -Z, -a, -b, -h, -l, -n, -o, -q, -r, -s, -v, -z
 

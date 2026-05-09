@@ -5,25 +5,25 @@
   round 1: 22 isolated cumulative, 22 identical in round (refinement)
   round 2: 22 isolated cumulative, 22 identical in round (refinement)
 
-## Distinguished: 7/7 flags (6 observed behavior)
-  6 observed behavior (1 solo, 5 via combination)
-  1 error-differentiated only (1 solo, 0 via combination)
+## Observed: 6/7 flags
+  1 solo, 5 via combination
+  1 additional error-differentiated
 
 Aliases: -L = --max-line-length, -c = --bytes, -l = --lines, -m = --chars, -w = --words
 
 ## Solo (unique behavior)
   --files0-from  # read input from the files specified by
-    exemplar: "--files0-from=f" "input.txt" "subdir" in alpha_minimal (different)
+    exemplar: "--files0-from=f" "alpha" "input.txt" in alpha_minimal (different)
     base:
        7  7 49 input.txt
        7  7 49 total
     flag:
   --total  # when to print a line with total counts;
-    exemplar: "--total=auto" in alpha_minimal (different)
+    exemplar: "--total=auto" "." in alpha_minimal (different)
     base:
-            0       0       0
+            0       0       0 .
     flag:
-            0       0       0
+            0       0       0 .
 
 ## Via combination (distinguishable when paired)
   -L  e.g. (pairwise evidence)

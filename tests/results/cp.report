@@ -2,27 +2,26 @@
 
 ## Rounds
   round 0: 34 isolated cumulative, 11 identical in round (discovery)
-  round 1: 42 isolated cumulative, 21 identical in round (refinement)
-  round 2: 50 isolated cumulative, 24 identical in round (refinement)
-  round 3: 56 isolated cumulative, 32 identical in round (refinement)
+  round 1: 36 isolated cumulative, 24 identical in round (refinement)
+  round 2: 43 isolated cumulative, 34 identical in round (refinement)
+  round 3: 53 isolated cumulative, 33 identical in round (refinement)
 
-## Distinguished: 33/36 flags (30 observed behavior)
-  30 observed behavior (12 solo, 18 via combination)
-  3 error-differentiated only (3 solo, 0 via combination)
+## Observed: 31/36 flags
+  12 solo, 19 via combination
+  3 additional error-differentiated
   1 behavioral aliases detected
-  3 indistinguishable under tested conditions
+  2 indistinguishable under tested conditions
 
 Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-target-directory, -a = --archive, -f = --force, -i = --interactive, -l = --link, -n = --no-clobber, -s = --symbolic-link, -t = --target-directory, -v = --verbose, -x = --one-file-system
 
 ## Solo (unique behavior)
   --attributes-only  # don't copy the file data, just the attributes
-    exemplar: "--attributes-only" "input.txt" "subdir" in alpha_minimal (different)
+    exemplar: "--attributes-only" "input.txt" "other.txt" in alpha_minimal (different)
     base:
     flag:
   --backup
-    exemplar: "--backup" in alpha_minimal (different)
+    exemplar: "--backup" "input.txt" "other.txt" in alpha_minimal (different)
     base:
-      (no base)
     flag:
   --debug  # explain how a file is copied.  Implies -v
     exemplar: "--debug" "input.txt" "other.txt" in alpha_minimal (different)
@@ -39,20 +38,19 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     base:
     flag:
   --reflink
-    exemplar: "--reflink" "input.txt" "subdir" in alpha_minimal (different)
+    exemplar: "--reflink" "input.txt" "other.txt" in alpha_minimal (different)
     base:
     flag:
   --remove-destination  # remove each existing destination file before
-    exemplar: "--remove-destination" in alpha_minimal (different)
+    exemplar: "--remove-destination" "input.txt" "subdir" in alpha_minimal (different)
     base:
-      (no base)
     flag:
   -S  # override the usual backup suffix
-    exemplar: "-S" "input.txt" "other.txt" in alpha_minimal (different)
+    exemplar: "-S" "input.txt" "subdir" in alpha_minimal (different)
     base:
     flag:
   -T  # treat DEST as a normal file
-    exemplar: "-T" "input.txt" "subdir" in alpha_minimal (different, exit 1→0)
+    exemplar: "-T" "input.txt" "other.txt" in alpha_minimal (different)
     base:
     flag:
   -b  # like --backup but does not accept an argument
@@ -76,31 +74,33 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     base:
     flag:
   -v  # explain what is being done
-    exemplar: "-v" "input.txt" "other.txt" in alpha_minimal (different)
+    exemplar: "-v" "input.txt" "subdir" in alpha_minimal (reordered)
     base:
     flag:
-      'input.txt' -> 'other.txt'
+      'input.txt' -> 'subdir'
 
 ## Via combination (distinguishable when paired)
-  --context  e.g. "--debug" "--context" "input.txt" "other.txt"
-  --copy-contents  e.g. "--suffix=suffix" "--copy-contents" "input.txt" "other.txt"
+  --context  e.g. "--suffix=suffix" "--context" "input.txt" "other.txt"
+  --copy-contents  e.g. (pairwise evidence)
   --keep-directory-symlink  e.g. "--remove-destination" "--keep-directory-symlink" "input.txt" "other.txt"
-  --preserve  e.g. "--remove-destination" "--backup" "--preserve" "input.txt" "other.txt"
-  --recursive  e.g. "--debug" "--backup" "--recursive" "input.txt" "other.txt"
+  --preserve  e.g. "--reflink" "--preserve" "input.txt" "other.txt"
+  --recursive  e.g. "--target-directory=." "--recursive" "input.txt" "subdir"
   --sparse  e.g. (pairwise evidence)
-  --strip-trailing-slashes  e.g. "--debug" "--backup" "--strip-trailing-slashes" "input.txt" "other.txt"
-  --update  e.g. "--suffix=suffix" "--copy-contents" "--update" "input.txt" "other.txt"
-  -H  e.g. "-H" "-R" "input.txt" "other.txt"
+  --strip-trailing-slashes  e.g. (pairwise evidence)
+  --update  e.g. "--backup" "--update" "input.txt" "other.txt"
+  -H  e.g. (pairwise evidence)
   -L  e.g. (pairwise evidence)
-  -P  e.g. "-d" "-P" "input.txt" "other.txt"
-  -R  e.g. "-H" "-R" "input.txt" "other.txt"
+  -P  e.g. (pairwise evidence)
+  -R  e.g. (pairwise evidence)
   -Z  e.g. (pairwise evidence)
   -a  e.g. (pairwise evidence)
-  -d  e.g. "-d" "-P" "input.txt" "other.txt"
+  -d  e.g. (pairwise evidence)
   -f  e.g. (pairwise evidence)
   -n  e.g. "-b" "-n" "input.txt" "subdir"
+  -p  e.g. "--suffix=suffix" "--backup" "-p" "input.txt" "other.txt"
   -r  e.g. (pairwise evidence)
 
 ## Indistinguishable under tested conditions
-  UNEXPLAINED (3): -p, -u, -x
+  UNEXPLAINED (2): -u, -x
+  UNEXPLAINED (2): -u, -x
 

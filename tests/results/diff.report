@@ -3,12 +3,12 @@
 ## Rounds
   round 0: 31 isolated cumulative, 11 identical in round (discovery)
   round 1: 49 isolated cumulative, 18 identical in round (refinement)
-  round 2: 61 isolated cumulative, 23 identical in round (refinement)
-  round 3: 75 isolated cumulative, 26 identical in round (refinement)
+  round 2: 58 isolated cumulative, 27 identical in round (refinement)
+  round 3: 72 isolated cumulative, 30 identical in round (refinement)
 
-## Distinguished: 36/53 flags (1 observed behavior)
-  1 observed behavior (1 solo, 0 via combination)
-  35 error-differentiated only (18 solo, 17 via combination)
+## Observed: 1/53 flags
+  1 solo, 0 via combination
+  35 additional error-differentiated
   2 behavioral aliases detected
   17 indistinguishable under tested conditions
 
@@ -102,8 +102,8 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       < Date
             ...
     flag:
-      --- input.txt	2026-05-09 11:16:29.202722271 -0700
-      +++ other.txt	2026-05-09 11:16:29.202734595 -0700
+      --- input.txt	2026-05-09 11:22:57.377863624 -0700
+      +++ other.txt	2026-05-09 11:22:57.377871188 -0700
       @@ -1,7 +1 @@
       -cherry
       -Apple
@@ -151,7 +151,7 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
     flag:
       
       
-      2026-05-09 11:16           diff -l input.txt other.txt            Page 1
+      2026-05-09 11:22           diff -l input.txt other.txt            Page 1
       
       
             ...
@@ -205,8 +205,8 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       < Date
             ...
     flag:
-      --- input.txt	2026-05-09 11:16:29.196944799 -0700
-      +++ other.txt	2026-05-09 11:16:29.196957083 -0700
+      --- input.txt	2026-05-09 11:22:57.373886436 -0700
+      +++ other.txt	2026-05-09 11:22:57.373896024 -0700
       @@ -1,7 +1 @@
       -cherry
       -Apple
@@ -245,26 +245,26 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
             ...
 
 ## Via combination (distinguishable when paired)
-  --color  e.g. "--paginate" "--color" "input.txt" "other.txt"
-  --context  e.g. "--paginate" "--context" "--no-dereference" "input.txt" "other.txt"
+  --color  e.g. "-u" "--color" "--no-dereference" "--speed-large-files" "input.txt" "other.txt"
+  --context  e.g. "-l" "--context" "input.txt" "other.txt"
   --from-file  e.g. "-u" "--from-file" "input.txt" "other.txt"
-  --ignore-file-name-case  e.g. "--paginate" "--ignore-file-name-case" "input.txt" "other.txt"
+  --ignore-file-name-case  e.g. "-u" "--ignore-file-name-case" "--left-column" "input.txt" "other.txt"
   --label  e.g. (pairwise evidence)
-  --left-column  e.g. "--unified" "--color" "--left-column" "--speed-large-files" "input.txt" "other.txt"
-  --no-dereference  e.g. "--unified" "--color" "--no-dereference" "--speed-large-files" "input.txt" "other.txt"
-  --no-ignore-file-name-case  e.g. "--unified" "--color" "--no-ignore-file-name-case" "input.txt" "other.txt"
+  --left-column  e.g. "-u" "--ignore-file-name-case" "--left-column" "input.txt" "other.txt"
+  --no-dereference  e.g. "-u" "--color" "--no-dereference" "--speed-large-files" "input.txt" "other.txt"
+  --no-ignore-file-name-case  e.g. "-u" "--color" "--no-ignore-file-name-case" "input.txt" "other.txt"
   --normal  e.g. (pairwise evidence)
   --palette  e.g. (pairwise evidence)
-  --speed-large-files  e.g. "--unified" "--color" "--left-column" "--speed-large-files" "input.txt" "other.txt"
-  --strip-trailing-cr  e.g. "-u" "--color" "--no-ignore-file-name-case" "--strip-trailing-cr" "input.txt" "other.txt"
+  --speed-large-files  e.g. "-u" "--color" "--no-dereference" "--speed-large-files" "input.txt" "other.txt"
+  --strip-trailing-cr  e.g. "-u" "--color" "--no-dereference" "--strip-trailing-cr" "input.txt" "other.txt"
   -F  e.g. (pairwise evidence)
   -I  e.g. "-X" "-I" "input.txt" "other.txt"
   -S  e.g. "-X" "-S" "input.txt" "other.txt"
-  -X  e.g. "-X" "-D" "input.txt" "other.txt"
+  -X  e.g. "-X" "--color" "input.txt" "other.txt"
   -x  e.g. (pairwise evidence)
 
 ## Indistinguishable under tested conditions
   UNEXPLAINED (13): --suppress-common-lines, --unidirectional-new-file, -B, -E, -N, -Z, -a, -b, -d, -i, -r, -s, -w
-  UNEXPLAINED (2): -c, -p
   UNEXPLAINED (2): -C, -U
+  UNEXPLAINED (2): -c, -p
 

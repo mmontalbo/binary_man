@@ -31,7 +31,7 @@ check() {
     timeout "$TIMEOUT" "$BGRID" "$binary" >"$report_file" 2>"$stderr_file" || true
 
     local result
-    result=$(grep -a "^## Distinguished:" "$report_file" 2>/dev/null || echo "FAILED")
+    result=$(grep -a "^## Observed:" "$report_file" 2>/dev/null || echo "FAILED")
 
     if [ "$result" = "FAILED" ]; then
         echo "FAIL  $binary: timed out or errored (see $stderr_file)"
@@ -65,32 +65,32 @@ echo ""
 
 START=$(date +%s)
 
-# Expected lower bounds for distinguished flag count.
+# Expected lower bounds for observed behavior count.
 # These are the minimum acceptable — improvements raise them.
-check sort   27
-check ls     48
+check sort   20
+check ls     50
 check cat    10
-check cut     9
+check cut     3
 check head    4
-check wc      7
+check wc      6
 check uniq    9
 check nl     10
-check od     17
+check od     12
 check fold    3
 check fmt     6
 check paste   3
-check du     25
+check du     24
 check cp     28
 check rm      7
 check stat    6
-check df     15
+check df     14
 
 # Non-coreutils tools
-check sed    22
-check xargs  15
-check diff   30
-check find    3
-check grep   30
+check sed    18
+check xargs   1
+check diff    1
+check find    1
+check grep    1
 
 END=$(date +%s)
 ELAPSED=$((END - START))

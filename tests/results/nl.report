@@ -5,10 +5,10 @@
   round 1: 81 isolated cumulative, 11 identical in round (refinement)
   round 2: 81 isolated cumulative, 11 identical in round (refinement)
 
-## Distinguished: 11/11 flags (10 observed behavior)
-  10 observed behavior (9 solo, 1 via combination)
-  1 error-differentiated only (1 solo, 0 via combination)
-  1 behavioral aliases detected
+## Observed: 10/11 flags
+  9 solo, 1 via combination
+  1 additional error-differentiated
+  2 behavioral aliases detected
 
 Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numbering, -h = --header-numbering, -i = --line-increment, -l = --join-blank-lines, -n = --number-format, -p = --no-renumber, -s = --number-separator, -v = --starting-line-number, -w = --number-width
 
@@ -103,7 +103,7 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
             ...
     flag:
   -s  # add STRING after (possible) line number
-    exemplar: "-s" "alpha" "input.txt" in alpha_minimal (-9 lines)
+    exemplar: "-s" "input.txt" "other.txt" in alpha_minimal (-1 lines)
     base:
            1	cherry
            2	Apple
@@ -112,12 +112,7 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
            5	elderberry
             ...
     flag:
-           1alphacherry
-           2alphaApple
-           3alphabanana
-           4alphaDate
-           5alphaelderberry
-            ...
+           1input.txthello world
   -v  # first line number for each section
     exemplar: "-v" "input.txt" "subdir" in alpha_minimal (different)
     base:
@@ -140,5 +135,5 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
     flag:
 
 ## Via combination (distinguishable when paired)
-  -p  e.g. "--join-blank-lines=0" "-p" "input.txt" "other.txt"
+  -p  e.g. "-s" "-p" "input.txt" "other.txt"
 
