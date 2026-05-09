@@ -58,14 +58,6 @@ pub fn format_trace_summary(obs: &Observation) -> String {
     parts.join(" | ")
 }
 
-/// Format resource usage as a compact summary.
-pub fn format_resources(res: &crate::execute::ResourceUsage) -> String {
-    if res.wall_time_ms > 0 {
-        format!("{}ms", res.wall_time_ms)
-    } else {
-        String::new()
-    }
-}
 
 /// Format run arguments as quoted strings.
 pub fn format_args(args: &[String]) -> String {
