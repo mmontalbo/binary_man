@@ -8,7 +8,7 @@
 ## Observed: 6/7 flags
   6 solo, 0 via combination
   1 additional error-differentiated
-  1 behavioral aliases detected
+  2 behavioral aliases detected
 
 Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t = --tagged-paragraph, -u = --uniform-spacing, -w = --width
 

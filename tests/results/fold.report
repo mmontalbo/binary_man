@@ -12,14 +12,8 @@ Aliases: -b = --bytes, -s = --spaces, -w = --width
 
 ## Solo (unique behavior)
   -w  # use WIDTH columns instead of 80
-    exemplar: "-w" "input.txt" "other.txt" in alpha_minimal (different)
+    exemplar: "-w" in alpha_minimal (different)
     base:
-      cherry
-      Apple
-      banana
-      Date
-      elderberry
-            ...
     flag:
 
 ## Via combination (distinguishable when paired)

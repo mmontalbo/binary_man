@@ -3,8 +3,8 @@
 ## Rounds
   round 0: 7 isolated cumulative, 26 identical in round (discovery)
   round 1: 33 isolated cumulative, 8 identical in round (refinement)
-  round 2: 35 isolated cumulative, 8 identical in round (refinement)
-  round 3: 36 isolated cumulative, 9 identical in round (refinement)
+  round 2: 34 isolated cumulative, 8 identical in round (refinement)
+  round 3: 36 isolated cumulative, 8 identical in round (refinement)
 
 ## Observed: 1/21 flags
   1 solo, 0 via combination
@@ -61,13 +61,13 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
     flag:
 
 ## Via combination (distinguishable when paired)
-  --eof  e.g. (pairwise evidence)
+  --eof  e.g. "--show-limits" "--eof"
   --process-slot-var  e.g. "--show-limits" "--process-slot-var"
-  --replace  e.g. (pairwise evidence)
+  --replace  e.g. "--show-limits" "--replace"
   -0  e.g. (pairwise evidence)
-  -e  e.g. (pairwise evidence)
-  -i  e.g. "--show-limits" "-i"
+  -e  e.g. "--show-limits" "-e"
+  -i  e.g. (pairwise evidence)
   -l  e.g. (pairwise evidence)
-  -r  e.g. "--show-limits" "-r"
-  -x  e.g. "--show-limits" "-x"
+  -r  e.g. (pairwise evidence)
+  -x  e.g. (pairwise evidence)
 

@@ -15,14 +15,22 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
 
 ## Solo (unique behavior)
   --endian  # swap input bytes according the specified order
-    exemplar: "--endian" "alpha" "." in alpha_standard (different)
+    exemplar: "--endian" "input.txt" "subdir" in alpha_standard (different)
     base:
-      0000000
+      0000000 064143 071145 074562 040412 070160 062554 061012 067141
+      0000020 067141 005141 060504 062564 062412 062154 071145 062542
+      0000040 071162 005171 040502 040516 040516 060412 070160 062554
+      0000060 000012
+      0000061
     flag:
   --strings
-    exemplar: "--strings" "." in alpha_standard (different)
+    exemplar: "--strings" "alpha" "input.txt" in alpha_standard (different)
     base:
-      0000000
+      0000000 064143 071145 074562 040412 070160 062554 061012 067141
+      0000020 067141 005141 060504 062564 062412 062154 071145 062542
+      0000040 071162 005171 040502 040516 040516 060412 070160 062554
+      0000060 000012
+      0000061
     flag:
   --traditional  # accept arguments in third form above
     exemplar: "--traditional" "input.txt" in alpha_minimal (+1 lines)
@@ -39,7 +47,17 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000060 000012
       0000061
   -A  # output format for file offsets; RADIX is one
-    exemplar: "-A" "input.txt" in alpha_standard (different)
+    exemplar: "-A" "input.txt" "other.txt" in alpha_standard (different)
+    base:
+      0000000 064143 071145 074562 040412 070160 062554 061012 067141
+      0000020 067141 005141 060504 062564 062412 062154 071145 062542
+      0000040 071162 005171 040502 040516 040516 060412 070160 062554
+      0000060 067412 064164 071145 061440 067157 062564 072156 071412
+      0000100 061545 067157 020144 064554 062556 000012
+            ...
+    flag:
+  -N  # limit dump to BYTES input bytes
+    exemplar: "-N" "alpha" "input.txt" in alpha_standard (different)
     base:
       0000000 064143 071145 074562 040412 070160 062554 061012 067141
       0000020 067141 005141 060504 062564 062412 062154 071145 062542
@@ -47,25 +65,10 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000060 000012
       0000061
     flag:
-  -N  # limit dump to BYTES input bytes
-    exemplar: "-N" "input.txt" "other.txt" in alpha_standard (different)
-    base:
-      0000000 064143 071145 074562 040412 070160 062554 061012 067141
-      0000020 067141 005141 060504 062564 062412 062154 071145 062542
-      0000040 071162 005171 040502 040516 040516 060412 070160 062554
-      0000060 067412 064164 071145 061440 067157 062564 072156 071412
-      0000100 061545 067157 020144 064554 062556 000012
-            ...
-    flag:
   -S
-    exemplar: "-S" "input.txt" "other.txt" in alpha_standard (different)
+    exemplar: "-S" "." in alpha_standard (different)
     base:
-      0000000 064143 071145 074562 040412 070160 062554 061012 067141
-      0000020 067141 005141 060504 062564 062412 062154 071145 062542
-      0000040 071162 005171 040502 040516 040516 060412 070160 062554
-      0000060 067412 064164 071145 061440 067157 062564 072156 071412
-      0000100 061545 067157 020144 064554 062556 000012
-            ...
+      0000000
     flag:
   -a  # same as -t a,  select named characters, ignoring high-order bit
     exemplar: "-a" "input.txt" "other.txt" in alpha_minimal (-1 lines)
@@ -152,13 +155,9 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000060  1818585098  1998614380  1684828783          10
       0000075
   -j  # skip BYTES input bytes first
-    exemplar: "-j" "input.txt" in alpha_standard (different)
+    exemplar: "-j" "." in alpha_standard (different)
     base:
-      0000000 064143 071145 074562 040412 070160 062554 061012 067141
-      0000020 067141 005141 060504 062564 062412 062154 071145 062542
-      0000040 071162 005171 040502 040516 040516 060412 070160 062554
-      0000060 000012
-      0000061
+      0000000
     flag:
   -l  # same as -t dL, select decimal longs
     exemplar: "-l" "input.txt" "other.txt" in alpha_minimal (-1 lines)
@@ -189,14 +188,13 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000060  26634  27749  28524  30496  29295  25708     10
       0000075
   -t  # select output format or formats
-    exemplar: "-t" "input.txt" "other.txt" in alpha_standard (different)
+    exemplar: "-t" "input.txt" in alpha_standard (different)
     base:
       0000000 064143 071145 074562 040412 070160 062554 061012 067141
       0000020 067141 005141 060504 062564 062412 062154 071145 062542
       0000040 071162 005171 040502 040516 040516 060412 070160 062554
-      0000060 067412 064164 071145 061440 067157 062564 072156 071412
-      0000100 061545 067157 020144 064554 062556 000012
-            ...
+      0000060 000012
+      0000061
     flag:
   -x  # same as -t x2, select hexadecimal 2-byte units
     exemplar: "-x" "input.txt" "other.txt" in alpha_minimal (-1 lines)
@@ -214,7 +212,7 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000075
 
 ## Via combination (distinguishable when paired)
-  --width  e.g. "--read-bytes=-1" "--width" "input.txt"
+  --width  e.g. "--skip-bytes=2147483647" "--width" "input.txt" "subdir"
   -o  e.g. (pairwise evidence)
 
 ## Indistinguishable under tested conditions

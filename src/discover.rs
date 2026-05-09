@@ -528,6 +528,70 @@ pub fn generate_initial_script(
         eprintln!("  stdin: accepted");
     }
 
+    // Probe values for value-taking flags: try candidates and keep what works
+    if let Some(first_pattern) = working_patterns.first() {
+        let value_candidates = ["1", "auto", ",", ":", "input.txt", ".", "0"];
+        let probe_dir = tempfile::Builder::new().prefix("bgrid_val_").tempdir().ok();
+        if let Some(ref probe_dir) = probe_dir {
+            let work_dir = probe_dir.path();
+            let _ = std::fs::write(work_dir.join("input.txt"), "cherry\napple\nbanana\n");
+            let _ = std::fs::write(work_dir.join("other.txt"), "hello world\n");
+            let _ = std::fs::create_dir(work_dir.join("subdir"));
+            let env = std::collections::HashMap::new();
+
+            #[allow(clippy::needless_range_loop)]
+            for i in 0..long_flags.len() {
+                let (ref flag, ref hint) = long_flags[i];
+                if hint.is_none() { continue; }
+
+                let default_val = default_value(hint.as_ref().unwrap());
+                let flag_arg = format!("{}={}", flag, default_val);
+                let mut test_args: Vec<String> = sub_args.iter().map(|s| s.to_string()).collect();
+                test_args.push(flag_arg);
+                test_args.extend(first_pattern.iter().cloned());
+                let test_refs: Vec<&str> = test_args.iter().map(|s| s.as_str()).collect();
+
+                let mut cmd = sandbox.command(binary, &test_refs, work_dir, &env, None);
+                cmd.stdin(std::process::Stdio::null());
+                cmd.stdout(std::process::Stdio::piped());
+                cmd.stderr(std::process::Stdio::piped());
+
+                let default_works = cmd.output()
+                    .map(|o| o.status.code().unwrap_or(-1) <= 1)
+                    .unwrap_or(false);
+
+                if default_works { continue; }
+
+                // Default failed — try candidate values
+                let mut found_value = None;
+                for &candidate in &value_candidates {
+                    let flag_arg2 = format!("{}={}", long_flags[i].0, candidate);
+                    let mut test_args2: Vec<String> = sub_args.iter().map(|s| s.to_string()).collect();
+                    test_args2.push(flag_arg2);
+                    test_args2.extend(first_pattern.iter().cloned());
+                    let test_refs2: Vec<&str> = test_args2.iter().map(|s| s.as_str()).collect();
+
+                    let _ = std::fs::write(work_dir.join("input.txt"), "cherry\napple\nbanana\n");
+
+                    let mut cmd2 = sandbox.command(binary, &test_refs2, work_dir, &env, None);
+                    cmd2.stdin(std::process::Stdio::null());
+                    cmd2.stdout(std::process::Stdio::piped());
+                    cmd2.stderr(std::process::Stdio::piped());
+
+                    if let Ok(output) = cmd2.output() {
+                        if output.status.code().unwrap_or(-1) <= 1 {
+                            found_value = Some(candidate.to_uppercase());
+                            break;
+                        }
+                    }
+                }
+                if let Some(val) = found_value {
+                    long_flags[i].1 = Some(val);
+                }
+            }
+        }
+    }
+
     // --- Base contexts ---
     // Five content levels × three structure levels × three property levels.
     // Property assignment cycles through Latin square pattern.

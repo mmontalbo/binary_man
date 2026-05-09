@@ -11,12 +11,14 @@
 
 ## Solo (unique behavior)
   -D
-    exemplar: "-D" "input.txt" "other.txt" in alpha_minimal (different)
+    exemplar: "-D" "input.txt" "subdir" in alpha_standard (different)
     base:
       input.txt
-      other.txt
+      subdir
+      subdir/nested.txt
     flag:
-      other.txt
+      subdir
+      subdir/nested.txt
   -N
     exemplar: "-N" "alpha" "input.txt" in alpha_standard (different)
     base:

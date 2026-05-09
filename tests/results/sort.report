@@ -1,14 +1,14 @@
 # Exploration: sort
 
 ## Rounds
-  round 0: 38 isolated cumulative, 64 identical in round (discovery)
-  round 1: 104 isolated cumulative, 54 identical in round (refinement)
-  round 2: 113 isolated cumulative, 42 identical in round (refinement)
-  round 3: 121 isolated cumulative, 42 identical in round (refinement)
+  round 0: 36 isolated cumulative, 60 identical in round (discovery)
+  round 1: 117 isolated cumulative, 46 identical in round (refinement)
+  round 2: 119 isolated cumulative, 39 identical in round (refinement)
+  round 3: 127 isolated cumulative, 39 identical in round (refinement)
 
-## Observed: 23/30 flags
-  16 solo, 7 via combination
-  7 additional error-differentiated
+## Observed: 24/30 flags
+  17 solo, 7 via combination
+  6 additional error-differentiated
   1 behavioral aliases detected
 
 Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --temporary-directory, -V = --version-sort, -b = --ignore-leading-blanks, -d = --dictionary-order, -f = --ignore-case, -g = --general-numeric-sort, -h = --human-numeric-sort, -i = --ignore-nonprinting, -k = --key, -m = --merge, -n = --numeric-sort, -o = --output, -r = --reverse, -s = --stable, -t = --field-separator, -u = --unique, -z = --zero-terminated
@@ -16,7 +16,7 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
 ## Solo (unique behavior)
   --batch-size  # merge at most NMERGE inputs at once;
   --debug  # annotate the part of the line used to sort,
-    exemplar: "--debug" "input.txt" "other.txt" in alpha_minimal (-20 lines)
+    exemplar: "--debug" "input.txt" in alpha_minimal (-18 lines)
     base:
       Apple
       BANANA
@@ -59,12 +59,7 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
             ...
     flag:
   -C
-    exemplar: "-C" in alpha_minimal (different)
-    base:
-      (no base)
-    flag:
-  -R  # shuffle, but group identical keys.  See shuf(1)
-    exemplar: "-R" "input.txt" in alpha_minimal (-9 lines)
+    exemplar: "-C" "input.txt" in alpha_minimal (different)
     base:
       Apple
       BANANA
@@ -73,15 +68,25 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       banana
             ...
     flag:
-      banana
+  -R  # shuffle, but group identical keys.  See shuf(1)
+    exemplar: "-R" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
       Apple
+      BANANA
       Date
-      cherry
+      apple
+      banana
+            ...
+    flag:
+      hello world
+      Apple
+      BANANA
+      Date
       elderberry
             ...
   -S  # use SIZE for main memory buffer
   -T  # use DIR for temporaries, not $TMPDIR or /tmp;
-    exemplar: "-T" "input.txt" "other.txt" in numeric_standard (different)
+    exemplar: "-T" "input.txt" "other.txt" in many_files /input.txt readonly (different)
     base:
       1
       10
@@ -125,7 +130,7 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       escape[31msequence
             ...
   -d  # consider only blanks and alphanumeric characters
-    exemplar: "-d" "input.txt" in tabular_minimal (-4 lines)
+    exemplar: "-d" "input.txt" "other.txt" in tabular_minimal (-5 lines)
     base:
       a]very long line that exceeds eighty characters in total width to exercise fold and fmt and similar line-wrapping tools properly
       alice	30	new york
@@ -200,7 +205,7 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
             ...
     flag:
   -r  # reverse the result of comparisons
-    exemplar: "-r" "input.txt" in alpha_minimal (-9 lines)
+    exemplar: "-r" "input.txt" "other.txt" in alpha_minimal (-10 lines)
     base:
       Apple
       BANANA
@@ -209,15 +214,15 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       banana
             ...
     flag:
+      hello world
       elderberry
       cherry
       banana
       apple
-      Date
             ...
   -t  # use SEP instead of non-blank to blank transition
   -u  # with -c, check for strict ordering;
-    exemplar: "-u" "input.txt" in formatted_minimal (-6 lines)
+    exemplar: "-u" "input.txt" "other.txt" in formatted_minimal (-7 lines)
     base:
       
       
@@ -251,12 +256,12 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
 
 ## Via combination (distinguishable when paired)
   --check  e.g. "--output=input.txt" "--check" "input.txt"
-  --compress-program  e.g. "--output=input.txt" "--compress-program" "input.txt" "other.txt"
-  --random-source  e.g. "--output=input.txt" "--random-source" "input.txt"
-  -M  e.g. "-M" "-h"
-  -c  e.g. "--random-sort" "-c" "input.txt"
-  -g  e.g. "-d" "-g"
-  -h  e.g. "-M" "-h"
-  -n  e.g. "-M" "-n"
-  -s  e.g. "--random-sort" "-s" "input.txt" "other.txt"
+  --compress-program  e.g. "--output=input.txt" "--compress-program" "input.txt"
+  --random-source  e.g. "--output=input.txt" "--random-source" "-s"
+  -M  e.g. "--output=input.txt" "-M" "-s" "input.txt" "other.txt"
+  -c  e.g. "--output=input.txt" "--compress-program" "-c"
+  -g  e.g. "-g" "-h"
+  -h  e.g. "-g" "-h"
+  -n  e.g. "-h" "-n"
+  -s  e.g. "--output=input.txt" "-M" "-s" "input.txt" "other.txt"
 
