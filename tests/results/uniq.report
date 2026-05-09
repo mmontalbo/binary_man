@@ -2,27 +2,17 @@
 
 ## Rounds
   round 0: 36 isolated cumulative, 12 identical in round (discovery)
-  round 1: 42 isolated cumulative, 21 identical in round (refinement)
-  round 2: 43 isolated cumulative, 21 identical in round (refinement)
-  round 3: 46 isolated cumulative, 19 identical in round (refinement)
+  round 1: 36 isolated cumulative, 27 identical in round (refinement)
 
 ## Distinguished: 11/11 flags
-  11 observed behavior (11 solo, 0 via combination)
+  11 observed behavior (8 solo, 3 via combination)
   1 behavioral aliases detected
 
 Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, -s = --skip-chars, -u = --unique, -w = --check-chars, -z = --zero-terminated
 
 ## Solo (unique behavior)
-  --all-repeated
-    exemplar: "--all-repeated" "input.txt" "other.txt" in numeric_deep (different)
-    base:
-    flag:
   --group
     exemplar: "--group" "input.txt" "other.txt" in alpha_minimal (different)
-    base:
-    flag:
-  -D  # print all duplicate lines
-    exemplar: "-D" "input.txt" "other.txt" in numeric_deep (different)
     base:
     flag:
   -c  # prefix lines by the number of occurrences
@@ -34,11 +24,7 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
     base:
     flag:
   -f  # avoid comparing the first N fields
-    exemplar: "-f" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
-    base:
-    flag:
-  -i  # ignore differences in case when comparing
-    exemplar: "-i" "input.txt" "other.txt" in alpha_minimal (different)
+    exemplar: "-f" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -s  # avoid comparing the first N characters
@@ -57,4 +43,9 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
     exemplar: "-z" "input.txt" "other.txt" in alpha_minimal (different)
     base:
     flag:
+
+## Via combination (distinguishable when paired)
+  --all-repeated  e.g. (pairwise evidence)
+  -D  e.g. (pairwise evidence)
+  -i  e.g. (pairwise evidence)
 

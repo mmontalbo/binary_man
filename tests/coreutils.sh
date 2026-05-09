@@ -85,6 +85,13 @@ check rm      7
 check stat    6
 check df     15
 
+# Non-coreutils tools
+check sed    22
+check xargs  15
+check diff   30
+check find    3
+check grep   30
+
 END=$(date +%s)
 ELAPSED=$((END - START))
 

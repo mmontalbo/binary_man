@@ -1,0 +1,75 @@
+# Exploration: xargs
+
+## Rounds
+  round 0: 23 isolated cumulative, 5 identical in round (discovery)
+  round 1: 43 isolated cumulative, 7 identical in round (refinement)
+  round 2: 43 isolated cumulative, 9 identical in round (refinement)
+
+## Distinguished: 21/21 flags
+  1 observed behavior (1 solo, 0 via combination)
+  20 error-differentiated only (11 solo, 9 via combination)
+
+Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = --delimiter, -n = --max-args, -o = --open-tty, -p = --interactive, -r = --no-run-if-empty, -s = --max-chars, -t = --verbose, -x = --exit
+
+## Solo (unique behavior)
+  --show-limits  # show limits on command-line length
+    exemplar: "--show-limits" in numeric_standard / env COLUMNS=40 (-1 lines, exit 0→127)
+    base:
+    flag:
+  -E
+    exemplar: "-E" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
+  -I
+    exemplar: "-I" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+      (no base)
+    flag:
+  -L  # use at most MAX-LINES non-blank input lines per
+    exemplar: "-L" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
+  -P  # run at most MAX-PROCS processes at a time
+    exemplar: "-P" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
+  -a  # read arguments from FILE, not standard input
+    exemplar: "-a" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
+  -d  # items in input stream are separated by CHARACTER,
+    exemplar: "-d" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
+  -n  # use at most MAX-ARGS arguments per command line
+    exemplar: "-n" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
+  -o  # Reopen stdin as /dev/tty in the child process
+    exemplar: "-o" in numeric_standard / env COLUMNS=40 (different, exit 125→127)
+    base:
+    flag:
+  -p  # prompt before running commands
+    exemplar: "-p" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
+  -s  # limit length of command line to MAX-CHARS
+    exemplar: "-s" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
+  -t  # print commands before executing them
+    exemplar: "-t" in numeric_standard / env COLUMNS=40 (-1 lines, exit 0→127)
+    base:
+    flag:
+
+## Via combination (distinguishable when paired)
+  --eof  e.g. "-d" "--eof"
+  --process-slot-var  e.g. "-a" "--process-slot-var"
+  --replace  e.g. "-d" "--replace"
+  -0  e.g. "-d" "-0"
+  -e  e.g. "-d" "-e"
+  -i  e.g. "-a" "-i"
+  -l  e.g. "-a" "-l"
+  -r  e.g. "--arg-file=input.txt" "-r"
+  -x  e.g. (pairwise evidence)
+

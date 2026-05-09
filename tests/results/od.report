@@ -15,7 +15,7 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
 
 ## Solo (unique behavior)
   --endian  # swap input bytes according the specified order
-    exemplar: "--endian" "input.txt" "subdir" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "--endian" "alpha" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   --strings
@@ -27,15 +27,15 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
     base:
     flag:
   -A  # output format for file offsets; RADIX is one
-    exemplar: "-A" "input.txt" "subdir" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-A" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -N  # limit dump to BYTES input bytes
-    exemplar: "-N" "input.txt" "subdir" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-N" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -S
-    exemplar: "-S" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-S" "alpha" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -a  # same as -t a,  select named characters, ignoring high-order bit
@@ -123,7 +123,7 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000060  1818585098  1998614380  1684828783          10
       0000075
   -j  # skip BYTES input bytes first
-    exemplar: "-j" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-j" "alpha" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -l  # same as -t dL, select decimal longs
@@ -174,8 +174,8 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000075
 
 ## Via combination (distinguishable when paired)
-  --width  e.g. "-c" "--width" "input.txt"
-  -o  e.g. "-a" "-o" "input.txt"
+  --width  e.g. "-a" "--width" "input.txt" "other.txt"
+  -o  e.g. "-a" "-o" "input.txt" "subdir"
 
 ## Indistinguishable under tested conditions
   UNEXPLAINED (2): -v, -w

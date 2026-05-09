@@ -1,0 +1,83 @@
+# Exploration: grep
+
+## Rounds
+  round 0: 13 isolated cumulative, 8 identical in round (discovery)
+  round 1: 35 isolated cumulative, 17 identical in round (refinement)
+  round 2: 39 isolated cumulative, 24 identical in round (refinement)
+  round 3: 47 isolated cumulative, 25 identical in round (refinement)
+
+## Distinguished: 36/49 flags
+  2 observed behavior (2 solo, 0 via combination)
+  34 error-differentiated only (6 solo, 28 via combination)
+  1 behavioral aliases detected
+  13 indistinguishable under tested conditions
+
+Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --devices, -E = --extended-regexp, -F = --fixed-strings, -G = --basic-regexp, -H = --with-filename, -L = --files-without-match, -P = --perl-regexp, -R = --dereference-recursive, -T = --initial-tab, -U = --binary, -Z = --null, -a = --text, -b = --byte-offset, -c = --count, -d = --directories, -e = --regexp, -f = --file, -h = --no-filename, -i = --ignore-case, -l = --files-with-matches, -m = --max-count, -n = --line-number, -o = --only-matching, -r = --recursive, -s = --no-messages, -v = --invert-match, -w = --word-regexp, -x = --line-regexp, -z = --null-data
+
+## Solo (unique behavior)
+  --binary-files  # assume that binary files are TYPE;
+    exemplar: "--binary-files=auto" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
+    base:
+    flag:
+  -D  # how to handle devices, FIFOs and sockets;
+    exemplar: "-D" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
+    base:
+    flag:
+  -L  # print only names of FILEs with no selected lines
+    exemplar: "-L" "input.txt" in numeric_standard / env COLUMNS=40 (-1 lines, exit 1→127)
+    base:
+    flag:
+  -V  # display version information and exit
+    exemplar: "-V" "input.txt" in numeric_standard / env COLUMNS=40 (-10 lines, exit 0→127)
+    base:
+    flag:
+  -c  # print only a count of selected lines per FILE
+    exemplar: "-c" "input.txt" in numeric_standard / env COLUMNS=40 (-1 lines, exit 1→127)
+    base:
+    flag:
+  -d  # how to handle directories;
+    exemplar: "-d" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
+  -f  # take PATTERNS from FILE
+    exemplar: "-f" "input.txt" in empty_dir (different, exit 1→2)
+    base:
+    flag:
+  -m  # stop after NUM selected lines
+    exemplar: "-m" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
+    base:
+    flag:
+
+## Via combination (distinguishable when paired)
+  --color  e.g. "-f" "--color" "input.txt"
+  --colour  e.g. "-f" "--colour" "input.txt"
+  --exclude  e.g. "-V" "--exclude"
+  --exclude-dir  e.g. "-d" "--exclude-dir" "input.txt"
+  --exclude-from  e.g. "-e" "-w" "--exclude-from" "-H" "input.txt"
+  --group-separator  e.g. "-e" "-w" "--group-separator"
+  --include  e.g. "-e" "-w" "--include"
+  --label  e.g. "-e" "-w" "--label"
+  --line-buffered  e.g. (pairwise evidence)
+  --no-group-separator  e.g. "-e" "-w" "--exclude-from" "--no-group-separator" "input.txt"
+  --no-ignore-case  e.g. "-e" "-w" "--exclude-from" "--no-ignore-case" "input.txt"
+  --quiet  e.g. "-e" "-w" "--exclude-from" "--quiet" "input.txt"
+  --silent  e.g. "-e" "-w" "--exclude-from" "--silent" "input.txt"
+  -A  e.g. "-B" "-A" "input.txt"
+  -B  e.g. "-B" "-A" "input.txt"
+  -C  e.g. (pairwise evidence)
+  -E  e.g. (pairwise evidence)
+  -F  e.g. (pairwise evidence)
+  -G  e.g. (pairwise evidence)
+  -H  e.g. "-e" "-w" "--exclude-from" "-H" "input.txt"
+  -I  e.g. "-e" "-w" "--exclude-from" "-I" "input.txt"
+  -P  e.g. (pairwise evidence)
+  -R  e.g. "-e" "-w" "--exclude-from" "-R" "input.txt"
+  -T  e.g. "-e" "-w" "--exclude-from" "-T" "input.txt"
+  -e  e.g. "-e" "-w" "--exclude-from" "-H" "input.txt"
+  -i  e.g. (pairwise evidence)
+  -w  e.g. "-e" "-w" "--exclude-from" "-H" "input.txt"
+  -x  e.g. (pairwise evidence)
+
+## Indistinguishable under tested conditions
+  UNEXPLAINED (13): -U, -Z, -a, -b, -h, -l, -n, -o, -q, -r, -s, -v, -z
+

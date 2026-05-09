@@ -1,0 +1,73 @@
+# Exploration: sed
+
+## Rounds
+  round 0: 17 isolated cumulative, 12 identical in round (discovery)
+  round 1: 22 isolated cumulative, 27 identical in round (refinement)
+  round 2: 26 isolated cumulative, 39 identical in round (refinement)
+  round 3: 29 isolated cumulative, 49 identical in round (refinement)
+
+## Distinguished: 24/24 flags
+  22 observed behavior (4 solo, 18 via combination)
+  2 error-differentiated only (2 solo, 0 via combination)
+  1 behavioral aliases detected
+
+## Solo (unique behavior)
+  --debug
+    exemplar: "--debug" "alpha" "input.txt" in empty_dir (-112 lines, exit 0→2)
+    base:
+    flag:
+      SED PROGRAM:
+        a\lpha
+  --follow-symlinks
+    exemplar: "--follow-symlinks" "alpha" "input.txt" in empty_dir (-32 lines, exit 0→4)
+    base:
+    flag:
+  --in-place
+    exemplar: "--in-place" "alpha" "input.txt" in alpha_standard (different)
+    base:
+      cherry
+      lpha
+      Apple
+      lpha
+      banana
+            ...
+    flag:
+  --posix
+    exemplar: "--posix" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
+  -i
+    exemplar: "-i" "alpha" "input.txt" in alpha_standard (different)
+    base:
+      cherry
+      lpha
+      Apple
+      lpha
+      banana
+            ...
+    flag:
+  -l
+    exemplar: "-l" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
+
+## Via combination (distinguishable when paired)
+  --expression  e.g. "--in-place" "--expression" "input.txt" "other.txt"
+  --file  e.g. "--debug" "--file" "input.txt"
+  --line-length  e.g. "--debug" "--line-length" "alpha" "input.txt"
+  --null-data  e.g. (pairwise evidence)
+  --quiet  e.g. (pairwise evidence)
+  --regexp-extended  e.g. (pairwise evidence)
+  --sandbox  e.g. (pairwise evidence)
+  --separate  e.g. (pairwise evidence)
+  --silent  e.g. "--debug" "--file" "--silent" "input.txt"
+  --unbuffered  e.g. (pairwise evidence)
+  -E  e.g. (pairwise evidence)
+  -e  e.g. (pairwise evidence)
+  -f  e.g. "--in-place" "-f"
+  -n  e.g. (pairwise evidence)
+  -r  e.g. (pairwise evidence)
+  -s  e.g. (pairwise evidence)
+  -u  e.g. (pairwise evidence)
+  -z  e.g. (pairwise evidence)
+

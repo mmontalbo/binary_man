@@ -17,6 +17,6 @@ Aliases: -b = --bytes, -s = --spaces, -w = --width
     flag:
 
 ## Via combination (distinguishable when paired)
-  -b  e.g. "--width=10" "-b" "input.txt"
-  -s  e.g. "-w" "-s" "input.txt"
+  -b  e.g. "--width=10" "-b" "input.txt" "subdir"
+  -s  e.g. "--width=10" "-s" "input.txt" "subdir"
 

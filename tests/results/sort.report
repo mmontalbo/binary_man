@@ -2,19 +2,20 @@
 
 ## Rounds
   round 0: 82 isolated cumulative, 25 identical in round (discovery)
-  round 1: 118 isolated cumulative, 32 identical in round (refinement)
-  round 2: 118 isolated cumulative, 43 identical in round (refinement)
+  round 1: 113 isolated cumulative, 35 identical in round (refinement)
+  round 2: 121 isolated cumulative, 35 identical in round (refinement)
+  round 3: 121 isolated cumulative, 37 identical in round (refinement)
 
-## Distinguished: 29/30 flags
+## Distinguished: 30/30 flags
   23 observed behavior (16 solo, 7 via combination)
-  6 error-differentiated only (5 solo, 1 via combination)
+  7 error-differentiated only (5 solo, 2 via combination)
   1 behavioral aliases detected
 
 Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --temporary-directory, -V = --version-sort, -b = --ignore-leading-blanks, -d = --dictionary-order, -f = --ignore-case, -g = --general-numeric-sort, -h = --human-numeric-sort, -i = --ignore-nonprinting, -k = --key, -m = --merge, -n = --numeric-sort, -o = --output, -r = --reverse, -s = --stable, -t = --field-separator, -u = --unique, -z = --zero-terminated
 
 ## Solo (unique behavior)
   --batch-size  # merge at most NMERGE inputs at once;
-    exemplar: "--batch-size=nmerge" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
+    exemplar: "--batch-size=nmerge" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
     base:
     flag:
   --debug  # annotate the part of the line used to sort,
@@ -54,7 +55,7 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       banana
             ...
   --sort  # sort according to WORD:
-    exemplar: "--sort=auto" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "--sort=auto" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -C
@@ -73,12 +74,12 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
     flag:
       apple
       Apple
-      elderberry
       BANANA
       hello world
+      banana
             ...
   -S  # use SIZE for main memory buffer
-    exemplar: "-S" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
+    exemplar: "-S" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
     base:
     flag:
   -T  # use DIR for temporaries, not $TMPDIR or /tmp;
@@ -166,7 +167,7 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       banana
             ...
   -k  # sort via a key; KEYDEF gives location and type
-    exemplar: "-k" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
+    exemplar: "-k" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
     base:
     flag:
   -m  # merge already sorted files; do not sort
@@ -212,7 +213,7 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       apple
             ...
   -t  # use SEP instead of non-blank to blank transition
-    exemplar: "-t" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
+    exemplar: "-t" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
     base:
     flag:
   -u  # with -c, check for strict ordering;
@@ -249,12 +250,13 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
             ...
 
 ## Via combination (distinguishable when paired)
-  --check  e.g. "-o" "--check" "input.txt"
+  --check  e.g. "--random-sort" "--check" "input.txt"
   --compress-program  e.g. "--output=input.txt" "--compress-program" "input.txt"
-  --random-source  e.g. "--output=input.txt" "--random-source" "input.txt" "other.txt"
+  --random-source  e.g. "-o" "--random-source" "input.txt" "other.txt"
   -M  e.g. "-M" "-n"
-  -g  e.g. "-g" "-h"
+  -c  e.g. "-R" "-c" "input.txt"
+  -g  e.g. "-d" "-g"
   -h  e.g. "-g" "-h"
-  -n  e.g. "-M" "-n"
+  -n  e.g. "-i" "-n"
   -s  e.g. (pairwise evidence)
 
