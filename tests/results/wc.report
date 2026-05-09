@@ -13,7 +13,7 @@ Aliases: -L = --max-line-length, -c = --bytes, -l = --lines, -m = --chars, -w = 
 
 ## Solo (unique behavior)
   --files0-from  # read input from the files specified by
-    exemplar: "--files0-from=f" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "--files0-from=f" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   --total  # when to print a line with total counts;

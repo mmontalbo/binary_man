@@ -209,6 +209,105 @@ pub fn probe_arg_patterns(
     working
 }
 
+/// Discovered subcommand with its behavioral classification.
+#[derive(Debug)]
+pub struct SubcommandInfo {
+    pub name: String,
+    pub exits_ok: bool,          // exit 0 in empty workspace
+    pub modifies_fs: bool,       // created/modified files (state builder)
+    pub recognized: bool,        // different error from "unknown command"
+}
+
+/// Probe the binary for subcommands by trying common verbs.
+/// Returns subcommands classified as working, state-building, or recognized.
+pub fn probe_subcommands(
+    binary: &str,
+    sandbox: &Sandbox,
+) -> Vec<SubcommandInfo> {
+    use crate::data;
+
+    let probe_dir = match tempfile::Builder::new().prefix("bgrid_subcmd_").tempdir() {
+        Ok(d) => d,
+        Err(_) => return Vec::new(),
+    };
+    let work_dir = probe_dir.path();
+
+    // Set up minimal files
+    let _ = std::fs::write(work_dir.join("input.txt"), "cherry\napple\nbanana\n");
+    let _ = std::fs::write(work_dir.join("other.txt"), "hello world\n");
+    let _ = std::fs::create_dir(work_dir.join("subdir"));
+
+    let env = std::collections::HashMap::new();
+
+    // First, get the "unknown command" baseline by trying a nonsense word
+    let mut baseline_cmd = sandbox.command(binary, &["xyzzy_not_a_command"], work_dir, &env, None);
+    baseline_cmd.stdin(std::process::Stdio::null());
+    baseline_cmd.stdout(std::process::Stdio::piped());
+    baseline_cmd.stderr(std::process::Stdio::piped());
+    let baseline_stderr = baseline_cmd.output()
+        .map(|o| String::from_utf8_lossy(&o.stderr).to_string())
+        .unwrap_or_default();
+
+    let mut results = Vec::new();
+
+    for &verb in data::SUBCOMMAND_CANDIDATES {
+        // Reset workspace for each probe
+        let _ = std::fs::write(work_dir.join("input.txt"), "cherry\napple\nbanana\n");
+        let _ = std::fs::write(work_dir.join("other.txt"), "hello world\n");
+
+        let before_count = count_files(work_dir);
+
+        let mut cmd = sandbox.command(binary, &[verb], work_dir, &env, None);
+        cmd.stdin(std::process::Stdio::null());
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+
+        let output = match cmd.output() {
+            Ok(o) => o,
+            Err(_) => continue,
+        };
+
+        let exit = output.status.code().unwrap_or(-1);
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        let after_count = count_files(work_dir);
+        let modifies_fs = after_count != before_count;
+
+        // A subcommand is "recognized" if it produces a structurally different
+        // error than the unknown-command baseline (not just the command name echoed)
+        let normalized_stderr = stderr.replace(verb, "___");
+        let normalized_baseline = baseline_stderr.replace("xyzzy_not_a_command", "___");
+        let recognized = exit == 0 || normalized_stderr != normalized_baseline;
+
+        if recognized {
+            results.push(SubcommandInfo {
+                name: verb.to_string(),
+                exits_ok: exit == 0,
+                modifies_fs,
+                recognized,
+            });
+        }
+    }
+
+    results
+}
+
+fn count_files(dir: &std::path::Path) -> usize {
+    walkdir_count(dir).unwrap_or(0)
+}
+
+fn walkdir_count(dir: &std::path::Path) -> Option<usize> {
+    let mut count = 0;
+    for entry in std::fs::read_dir(dir).ok()? {
+        let entry = entry.ok()?;
+        count += 1;
+        if entry.path().is_dir() && !entry.path().is_symlink() {
+            count += walkdir_count(&entry.path()).unwrap_or(0);
+        }
+    }
+    Some(count)
+}
+
 /// Map a value hint from --help to a reasonable default.
 pub fn default_value(hint: &str) -> String {
     match hint.to_uppercase().as_str() {

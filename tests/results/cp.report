@@ -1,14 +1,16 @@
 # Exploration: cp
 
 ## Rounds
-  round 0: 38 isolated cumulative, 11 identical in round (discovery)
-  round 1: 41 isolated cumulative, 17 identical in round (refinement)
-  round 2: 46 isolated cumulative, 22 identical in round (refinement)
-  round 3: 56 isolated cumulative, 26 identical in round (refinement)
+  round 0: 34 isolated cumulative, 11 identical in round (discovery)
+  round 1: 39 isolated cumulative, 20 identical in round (refinement)
+  round 2: 50 isolated cumulative, 24 identical in round (refinement)
+  round 3: 58 isolated cumulative, 34 identical in round (refinement)
 
-## Distinguished: 35/36 flags
-  32 observed behavior (16 solo, 16 via combination)
+## Distinguished: 33/36 flags
+  30 observed behavior (14 solo, 16 via combination)
   3 error-differentiated only (3 solo, 0 via combination)
+  3 behavioral aliases detected
+  3 indistinguishable under tested conditions
 
 Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-target-directory, -a = --archive, -f = --force, -i = --interactive, -l = --link, -n = --no-clobber, -s = --symbolic-link, -t = --target-directory, -v = --verbose, -x = --one-file-system
 
@@ -27,6 +29,10 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     flag:
       'input.txt' -> 'other.txt'
       copy offload: yes, reflink: unsupported, sparse detection: no
+  --keep-directory-symlink  # follow existing symlinks to directories
+    exemplar: "--keep-directory-symlink" "input.txt" "other.txt" in alpha_minimal (different)
+    base:
+    flag:
   --no-preserve  # don't preserve the specified attributes
     exemplar: "--no-preserve=attr_list" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
@@ -36,19 +42,11 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     base:
     flag:
   --reflink
-    exemplar: "--reflink" "input.txt" "other.txt" in tabular_deep (different)
+    exemplar: "--reflink" "input.txt" "other.txt" in empty_dir (different)
     base:
     flag:
   --remove-destination  # remove each existing destination file before
     exemplar: "--remove-destination" "input.txt" "other.txt" in alpha_minimal (different)
-    base:
-    flag:
-  -L  # always follow symbolic links in SOURCE
-    exemplar: "-L" "input.txt" "other.txt" in alpha_minimal (different)
-    base:
-    flag:
-  -R
-    exemplar: "-R" "input.txt" "other.txt" in alpha_minimal (different)
     base:
     flag:
   -S  # override the usual backup suffix
@@ -57,10 +55,6 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     flag:
   -T  # treat DEST as a normal file
     exemplar: "-T" "input.txt" "other.txt" in alpha_minimal (different)
-    base:
-    flag:
-  -Z  # set SELinux security context of destination
-    exemplar: "-Z" "input.txt" "other.txt" in alpha_minimal (different)
     base:
     flag:
   -b  # like --backup but does not accept an argument
@@ -94,20 +88,24 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     flag:
 
 ## Via combination (distinguishable when paired)
-  --context  e.g. "--suffix=suffix" "--context" "input.txt" "other.txt"
+  --context  e.g. "--remove-destination" "--context" "input.txt" "other.txt"
   --copy-contents  e.g. "--debug" "--copy-contents" "input.txt" "other.txt"
-  --keep-directory-symlink  e.g. "--backup" "--keep-directory-symlink" "input.txt" "other.txt"
-  --preserve  e.g. (pairwise evidence)
-  --recursive  e.g. (pairwise evidence)
-  --sparse  e.g. "--sparse=auto" "--strip-trailing-slashes" "-r" "input.txt" "other.txt"
-  --strip-trailing-slashes  e.g. "--sparse=auto" "--strip-trailing-slashes" "-r" "input.txt" "other.txt"
-  --update  e.g. "--suffix=suffix" "--context" "--update" "input.txt" "other.txt"
+  --preserve  e.g. "-b" "--preserve" "--update" "input.txt" "other.txt"
+  --recursive  e.g. "-b" "--recursive" "--update" "input.txt" "other.txt"
+  --sparse  e.g. (pairwise evidence)
+  --strip-trailing-slashes  e.g. "-b" "--recursive" "--strip-trailing-slashes" "input.txt" "other.txt"
+  --update  e.g. "-b" "--preserve" "--update" "input.txt" "other.txt"
   -H  e.g. (pairwise evidence)
+  -L  e.g. (pairwise evidence)
   -P  e.g. (pairwise evidence)
+  -R  e.g. (pairwise evidence)
   -a  e.g. (pairwise evidence)
   -d  e.g. (pairwise evidence)
   -f  e.g. (pairwise evidence)
   -n  e.g. "-b" "-n" "input.txt" "subdir"
-  -p  e.g. "--suffix=suffix" "--context" "-p" "input.txt" "other.txt"
-  -r  e.g. "--sparse=auto" "--strip-trailing-slashes" "-r" "input.txt" "other.txt"
+  -r  e.g. (pairwise evidence)
+
+## Indistinguishable under tested conditions
+  UNEXPLAINED (3): -Z, -p, -u
+  UNEXPLAINED (2): -Z, -u
 

@@ -7,7 +7,7 @@
 ## Distinguished: 10/11 flags
   9 observed behavior (9 solo, 0 via combination)
   1 error-differentiated only (1 solo, 0 via combination)
-  2 behavioral aliases detected
+  1 behavioral aliases detected
 
 Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numbering, -h = --header-numbering, -i = --line-increment, -l = --join-blank-lines, -n = --number-format, -p = --no-renumber, -s = --number-separator, -v = --starting-line-number, -w = --number-width
 

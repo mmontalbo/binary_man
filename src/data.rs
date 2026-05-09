@@ -161,6 +161,20 @@ pub const PATTERN_ARCHETYPES: &[&str] = &[
     "zzzzz",    // non-matching
 ];
 
+/// Common subcommand verbs for behavioral subcommand discovery.
+/// Probed as first positional arg: `binary verb`. The ones that
+/// exit 0 or produce a recognized error are real subcommands.
+pub const SUBCOMMAND_CANDIDATES: &[&str] = &[
+    "init", "add", "commit", "status", "diff", "log", "show",
+    "clone", "push", "pull", "fetch", "merge", "rebase", "branch",
+    "checkout", "reset", "rm", "mv", "tag", "stash", "remote",
+    "build", "run", "test", "install", "clean", "update", "publish",
+    "create", "delete", "list", "get", "set", "describe", "apply",
+    "start", "stop", "restart", "exec", "inspect", "config",
+    "new", "check", "fmt", "lint", "deploy", "serve", "migrate",
+    "info", "version", "help",
+];
+
 /// Candidate invocation patterns for behavioral arg discovery.
 /// Each is a list of positional args to try. The binary is probed with each
 /// pattern; patterns that exit 0 become the target types for the full grid.

@@ -55,6 +55,27 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, skeleton: bool)
 
     let max_rounds = 3;
 
+    // Probe for subcommands (if no subcommand was specified)
+    if sub_args.is_empty() {
+        let subcommands = discover::probe_subcommands(binary, sandbox);
+        if !subcommands.is_empty() {
+            let working: Vec<_> = subcommands.iter().filter(|s| s.exits_ok).collect();
+            let builders: Vec<_> = subcommands.iter().filter(|s| s.modifies_fs).collect();
+            let recognized: Vec<_> = subcommands.iter().filter(|s| !s.exits_ok && s.recognized).collect();
+            eprintln!("=== Subcommands discovered for {} ===", binary);
+            if !working.is_empty() {
+                eprintln!("  working: {}", working.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", "));
+            }
+            if !builders.is_empty() {
+                eprintln!("  state builders: {}", builders.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", "));
+            }
+            if !recognized.is_empty() {
+                eprintln!("  need state: {}", recognized.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", "));
+            }
+            eprintln!();
+        }
+    }
+
     // Round 0: generate initial script from --help discovery
     let (script, flag_info) = discover::generate_initial_script(binary, &sub_args, sandbox)?;
     eprintln!("=== Exploring {} (max {} rounds) ===", cmd_label, max_rounds);
