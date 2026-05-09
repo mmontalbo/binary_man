@@ -140,6 +140,75 @@ pub fn infer_base_args(help_text: &str) -> (Option<String>, Option<String>) {
     (None, None)
 }
 
+/// Probe the binary with candidate arg patterns to discover which invocation
+/// patterns succeed. Returns the list of working arg patterns (each is a vec
+/// of positional args). Replaces help-text parsing with behavioral observation.
+pub fn probe_arg_patterns(
+    binary: &str,
+    sub_args: &[&str],
+    sandbox: &Sandbox,
+) -> Vec<Vec<String>> {
+    use crate::data;
+
+    // Create a minimal workspace for probing
+    let probe_dir = match tempfile::Builder::new().prefix("bgrid_probe_").tempdir() {
+        Ok(d) => d,
+        Err(_) => return vec![vec!["input.txt".into()]], // fallback
+    };
+    let work_dir = probe_dir.path();
+
+    // Set up minimal files for probing
+    let _ = std::fs::write(work_dir.join("input.txt"), "cherry\napple\nbanana\n");
+    let _ = std::fs::write(work_dir.join("other.txt"), "hello world\n");
+    let _ = std::fs::create_dir(work_dir.join("subdir"));
+    let _ = std::fs::write(work_dir.join("subdir/nested.txt"), "nested\n");
+
+    let env = std::collections::HashMap::new();
+    let mut working = Vec::new();
+
+    for candidate in data::ARG_CANDIDATES {
+        let mut args: Vec<&str> = sub_args.to_vec();
+        args.extend(candidate.iter());
+
+        let mut cmd = sandbox.command(binary, &args, work_dir, &env, None);
+        cmd.stdin(std::process::Stdio::null());
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+
+        if let Ok(output) = cmd.output() {
+            let exit = output.status.code().unwrap_or(-1);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let has_output = !stdout.trim().is_empty();
+            let has_fs_effect = {
+                // Quick check: did any file get created or modified?
+                // Compare against known initial files
+                let after_count = std::fs::read_dir(work_dir)
+                    .map(|d| d.count()).unwrap_or(0);
+                after_count > 3 // started with input.txt, other.txt, subdir
+            };
+
+            // Pattern works if: exit 0, or exit 0 with output, or exit 0 with fs effect
+            // Also accept exit 1 with output (grep no-match, diff differences-found)
+            if exit == 0 || (exit <= 1 && has_output) || has_fs_effect {
+                let pattern: Vec<String> = candidate.iter().map(|s| s.to_string()).collect();
+                working.push(pattern);
+            }
+
+            // Reset workspace for next probe (in case a command modified files)
+            let _ = std::fs::write(work_dir.join("input.txt"), "cherry\napple\nbanana\n");
+            let _ = std::fs::write(work_dir.join("other.txt"), "hello world\n");
+        }
+    }
+
+    // Deduplicate: if both (file) and (file, file) work, keep both
+    // If nothing worked, fall back to single file
+    if working.is_empty() {
+        working.push(vec!["input.txt".into()]);
+    }
+
+    working
+}
+
 /// Map a value hint from --help to a reasonable default.
 pub fn default_value(hint: &str) -> String {
     match hint.to_uppercase().as_str() {
@@ -304,7 +373,8 @@ pub fn generate_initial_script(
     let mut flag_info = flag_info;
     flag_info.all_flags = seen.clone();
 
-    let (pattern_arg, file_arg) = infer_base_args(&help_text);
+    // Discover which invocation patterns work by probing the binary
+    let working_patterns = probe_arg_patterns(binary, sub_args, sandbox);
 
     // --- Base contexts ---
     // Five content levels × three structure levels × three property levels.
@@ -375,123 +445,30 @@ pub fn generate_initial_script(
         commands: locale_cmds,
     });
 
-    // --- Build runs ---
+    // --- Build runs from behaviorally-discovered arg patterns ---
     let mut runs: Vec<Run> = Vec::new();
     let sub_prefix: Vec<String> = sub_args.iter().map(|s| s.to_string()).collect();
 
-    // Helper: build args with a specific positional target
-    let build_args = |flag: Option<&str>, flag_value: Option<&str>,
-                      pat: Option<&str>, target: &str| -> Vec<String> {
-        let mut args = sub_prefix.clone();
-        if let Some(f) = flag {
-            if let Some(v) = flag_value {
-                args.push(format!("{}={}", f, v));
-            } else {
-                args.push(f.to_string());
-            }
-        }
-        if let Some(p) = pat { args.push(p.to_string()); }
-        args.push(target.to_string());
-        args
-    };
+    // For each working arg pattern, generate a base run + flag runs
+    for pattern in &working_patterns {
+        // Build base args: sub_prefix + positional args
+        let base_args: Vec<String> = sub_prefix.iter()
+            .chain(pattern.iter())
+            .cloned().collect();
 
-    // Determine positional targets
-    let file_target = file_arg.as_deref().unwrap_or("input.txt");
-    let has_file_arg = file_arg.is_some() || pattern_arg.is_some();
-    let use_dir = has_file_arg && file_target != ".";
+        // Base run (no flags)
+        runs.push(Run { args: base_args.clone(), in_contexts: None, stdin: None, diff_from: None });
 
-    // Pattern archetypes: when the tool takes a PATTERN, vary it to exercise
-    // different regex/matching behaviors (case, word boundary, metachar, non-matching)
-    let patterns: Vec<&str> = if pattern_arg.is_some() {
-        data::PATTERN_ARCHETYPES.to_vec()
-    } else {
-        vec![]
-    };
-    let has_patterns = !patterns.is_empty();
-
-    // Helper: emit a set of flag runs for a given (pattern, target) combination
-    let emit_flag_runs = |pat: Option<&str>, target: &str, runs: &mut Vec<Run>| {
-        let base = build_args(None, None, pat, target);
-        runs.push(Run { args: base.clone(), in_contexts: None, stdin: None, diff_from: None });
-
-        for flag in &short_flags {
-            runs.push(Run {
-                args: build_args(Some(flag), None, pat, target),
-                in_contexts: None, stdin: None, diff_from: Some(base.clone()),
-            });
-        }
-        for (flag, hint) in &long_flags {
-            let val = hint.as_ref().map(|h| default_value(h));
-            runs.push(Run {
-                args: build_args(Some(flag), val.as_deref(), pat, target),
-                in_contexts: None, stdin: None, diff_from: Some(base.clone()),
-            });
-        }
-    };
-
-    // Multi-file helper: build args with two file targets
-    let build_args_multi = |flag: Option<&str>, flag_value: Option<&str>,
-                            pat: Option<&str>, target1: &str, target2: &str| -> Vec<String> {
-        let mut args = sub_prefix.clone();
-        if let Some(f) = flag {
-            if let Some(v) = flag_value {
-                args.push(format!("{}={}", f, v));
-            } else {
-                args.push(f.to_string());
-            }
-        }
-        if let Some(p) = pat { args.push(p.to_string()); }
-        args.push(target1.to_string());
-        args.push(target2.to_string());
-        args
-    };
-
-    // Multi-file run emitter: each flag with two file targets
-    let emit_multifile_runs = |pat: Option<&str>, t1: &str, t2: &str, runs: &mut Vec<Run>| {
-        let base = build_args_multi(None, None, pat, t1, t2);
-        runs.push(Run { args: base.clone(), in_contexts: None, stdin: None, diff_from: None });
-
-        for flag in &short_flags {
-            runs.push(Run {
-                args: build_args_multi(Some(flag), None, pat, t1, t2),
-                in_contexts: None, stdin: None, diff_from: Some(base.clone()),
-            });
-        }
-        for (flag, hint) in &long_flags {
-            let val = hint.as_ref().map(|h| default_value(h));
-            runs.push(Run {
-                args: build_args_multi(Some(flag), val.as_deref(), pat, t1, t2),
-                in_contexts: None, stdin: None, diff_from: Some(base.clone()),
-            });
-        }
-    };
-
-    // Determine second file target — pick a file that exists in most contexts
-    let second_file = if file_target == "input.txt" { "other.txt" } else { "input.txt" };
-
-    if has_patterns {
-        // Pattern-taking tool: emit runs for each pattern × target
-        for pat in &patterns {
-            emit_flag_runs(Some(pat), file_target, &mut runs);
-        }
-        if use_dir {
-            emit_flag_runs(Some(patterns[0]), ".", &mut runs);
-        }
-        // Multi-file with primary pattern
-        emit_multifile_runs(Some(patterns[0]), file_target, second_file, &mut runs);
-    } else if has_file_arg {
-        // File-taking tool: emit file + directory + multi-file runs
-        emit_flag_runs(None, file_target, &mut runs);
-        if use_dir {
-            emit_flag_runs(None, ".", &mut runs);
-        }
-        emit_multifile_runs(None, file_target, second_file, &mut runs);
-    } else {
-        // No positional arg — flat run list
+        // Flag runs with from-reference to base
         for flag in &short_flags {
             let mut args = sub_prefix.clone();
             args.push(flag.clone());
-            runs.push(Run { args, in_contexts: None, stdin: None, diff_from: None });
+            args.extend(pattern.iter().cloned());
+            runs.push(Run {
+                args,
+                in_contexts: None, stdin: None,
+                diff_from: Some(base_args.clone()),
+            });
         }
         for (flag, hint) in &long_flags {
             let mut args = sub_prefix.clone();
@@ -501,40 +478,56 @@ pub fn generate_initial_script(
             } else {
                 args.push(flag.clone());
             }
-            runs.push(Run { args, in_contexts: None, stdin: None, diff_from: None });
+            args.extend(pattern.iter().cloned());
+            runs.push(Run {
+                args,
+                in_contexts: None, stdin: None,
+                diff_from: Some(base_args.clone()),
+            });
         }
     }
 
-    // --- Boundary runs for numeric flags (primary pattern only) ---
-    if has_file_arg {
-        let boundary_pat = if has_patterns { Some(patterns[0]) } else { None };
+    // Boundary runs for numeric flags (using first working pattern)
+    if let Some(first_pattern) = working_patterns.first() {
         let numeric_hints = ["NUM", "NUMBER", "N", "SIZE", "COLS", "WIDTH", "COUNT", "LINES", "BYTES"];
         let zero_flags: Vec<&(String, Option<String>)> = long_flags.iter()
             .filter(|(_, hint)| hint.as_ref().is_some_and(|h| numeric_hints.contains(&h.to_uppercase().as_str())))
             .collect();
-        let base_file = build_args(None, None, boundary_pat, file_target);
-        for (flag, _) in &zero_flags {
-            runs.push(Run {
-                args: build_args(Some(&format!("{}=0", flag)), None, boundary_pat, file_target),
-                in_contexts: None, stdin: None, diff_from: Some(base_file.clone()),
-            });
-        }
-        for (flag, _) in zero_flags.iter().take(3) {
-            runs.push(Run {
-                args: build_args(Some(&format!("{}=-1", flag)), None, boundary_pat, file_target),
-                in_contexts: None, stdin: None, diff_from: Some(base_file.clone()),
-            });
-            runs.push(Run {
-                args: build_args(Some(&format!("{}=2147483647", flag)), None, boundary_pat, file_target),
-                in_contexts: None, stdin: None, diff_from: Some(base_file.clone()),
-            });
+        if !zero_flags.is_empty() {
+            let base_args: Vec<String> = sub_prefix.iter()
+                .chain(first_pattern.iter())
+                .cloned().collect();
+            for (flag, _) in &zero_flags {
+                let mut args = sub_prefix.clone();
+                args.push(format!("{}=0", flag));
+                args.extend(first_pattern.iter().cloned());
+                runs.push(Run {
+                    args, in_contexts: None, stdin: None,
+                    diff_from: Some(base_args.clone()),
+                });
+            }
+            for (flag, _) in zero_flags.iter().take(3) {
+                let mut args1 = sub_prefix.clone();
+                args1.push(format!("{}=-1", flag));
+                args1.extend(first_pattern.iter().cloned());
+                runs.push(Run {
+                    args: args1, in_contexts: None, stdin: None,
+                    diff_from: Some(base_args.clone()),
+                });
+                let mut args2 = sub_prefix.clone();
+                args2.push(format!("{}=2147483647", flag));
+                args2.extend(first_pattern.iter().cloned());
+                runs.push(Run {
+                    args: args2, in_contexts: None, stdin: None,
+                    diff_from: Some(base_args.clone()),
+                });
+            }
         }
     }
 
-    // Error provocation
+    // Error provocation: nonexistent file
     {
         let mut err_args = sub_prefix.clone();
-        if let Some(ref p) = pattern_arg { err_args.push(p.clone()); }
         err_args.push("nonexistent-file.txt".into());
         runs.push(Run { args: err_args, in_contexts: None, stdin: None, diff_from: None });
     }

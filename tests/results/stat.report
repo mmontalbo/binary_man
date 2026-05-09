@@ -1,31 +1,88 @@
 # Exploration: stat
 
 ## Rounds
-  round 0: 3 isolated cumulative, 1 identical in round (discovery)
-  round 1: 3 isolated cumulative, 2 identical in round (refinement)
+  round 0: 59 isolated cumulative, 4 identical in round (discovery)
+  round 1: 59 isolated cumulative, 4 identical in round (refinement)
 
 ## Distinguished: 7/7 flags
-  0 observed behavior (0 solo, 0 via combination)
-  7 error-differentiated only (2 solo, 5 via combination)
+  6 observed behavior (6 solo, 0 via combination)
+  1 error-differentiated only (1 solo, 0 via combination)
+  2 behavioral aliases detected
 
 Aliases: -L = --dereference, -f = --file-system, -t = --terse
 
 ## Solo (unique behavior)
   --cached  # specify how to use cached attributes;
-    exemplar: "--cached=644" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "--cached=644" "input.txt" "subdir" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
-      (no base)
     flag:
+  --format
+    exemplar: "--format=%s" "input.txt" "other.txt" in alpha_minimal (reordered)
+    base:
+        File: input.txt
+        Size: 49        	Blocks: 8          IO Block: 4096   regular file
+      Device: 254,0	Inode: 143982664   Links: 1
+      Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
+      Access: 2026-05-08 20:41:43.349590735 -0700
+            ...
+    flag:
+      49
+      12
+  --printf  # like --format, but interpret backslash escapes,
+    exemplar: "--printf=%s" "input.txt" "other.txt" in alpha_minimal (reordered)
+    base:
+        File: input.txt
+        Size: 49        	Blocks: 8          IO Block: 4096   regular file
+      Device: 254,0	Inode: 143982664   Links: 1
+      Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
+      Access: 2026-05-08 20:41:43.349590735 -0700
+            ...
+    flag:
+      4912
+  -L  # follow links
+    exemplar: "-L" "input.txt" "other.txt" in alpha_minimal (+16 lines, exit 127→0)
+    base:
+        File: input.txt
+        Size: 49        	Blocks: 8          IO Block: 4096   regular file
+      Device: 254,0	Inode: 143982664   Links: 1
+      Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
+      Access: 2026-05-08 20:41:43.349590735 -0700
+            ...
+    flag:
+        File: input.txt
+        Size: 49        	Blocks: 8          IO Block: 4096   regular file
+      Device: 254,0	Inode: 143982718   Links: 1
+      Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
+      Access: 2026-05-08 20:41:43.349666618 -0700
+            ...
   -c  # --format=FORMAT   use the specified FORMAT instead of the default;
-    exemplar: "-c" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-c" "input.txt" "other.txt" in empty_dir (-1 lines, exit 0→1)
     base:
-      (no base)
     flag:
-
-## Via combination (distinguishable when paired)
-  --format  e.g. (pairwise evidence)
-  --printf  e.g. (pairwise evidence)
-  -L  e.g. (pairwise evidence)
-  -f  e.g. (pairwise evidence)
-  -t  e.g. (pairwise evidence)
+  -f  # display file system status instead of file status
+    exemplar: "-f" "input.txt" "subdir" in alpha_minimal (+5 lines, exit 127→1)
+    base:
+        File: input.txt
+        Size: 49        	Blocks: 8          IO Block: 4096   regular file
+      Device: 254,0	Inode: 143983309   Links: 1
+      Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
+      Access: 2026-05-08 20:41:43.351072220 -0700
+            ...
+    flag:
+        File: "input.txt"
+          ID: c63eb3646de0a34 Namelen: 255     Type: ext2/ext3
+      Block size: 4096       Fundamental block size: 4096
+      Blocks: Total: 1937552970 Free: 1611621664 Available: 1513955606
+      Inodes: Total: 244158464  Free: 241057970
+  -t  # print the information in terse form
+    exemplar: "-t" "." in alpha_minimal (+1 lines, exit 127→0)
+    base:
+        File: .
+        Size: 4096      	Blocks: 8          IO Block: 4096   directory
+      Device: 254,0	Inode: 143983096   Links: 2
+      Access: (0755/drwxr-xr-x)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
+      Access: 2026-05-08 20:41:43.350314430 -0700
+            ...
+    flag:
+      . 4096 8 41ed 1000 100 fe00 143982694 2 0 0 1778298103 1778298103 1778298103 1778298103 4096
 

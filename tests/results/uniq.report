@@ -1,40 +1,51 @@
 # Exploration: uniq
 
 ## Rounds
-  round 0: 4 isolated cumulative, 1 identical in round (discovery)
-  round 1: 28 isolated cumulative, 2 identical in round (refinement)
-  round 2: 28 isolated cumulative, 2 identical in round (refinement)
+  round 0: 36 isolated cumulative, 12 identical in round (discovery)
+  round 1: 36 isolated cumulative, 27 identical in round (refinement)
 
 ## Distinguished: 11/11 flags
-  0 observed behavior (0 solo, 0 via combination)
-  11 error-differentiated only (3 solo, 8 via combination)
+  11 observed behavior (8 solo, 3 via combination)
+  1 behavioral aliases detected
 
 Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, -s = --skip-chars, -u = --unique, -w = --check-chars, -z = --zero-terminated
 
 ## Solo (unique behavior)
-  -f  # avoid comparing the first N fields
-    exemplar: "-f" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+  --group
+    exemplar: "--group" "input.txt" "other.txt" in alpha_minimal (different)
     base:
-      (no base)
+    flag:
+  -c  # prefix lines by the number of occurrences
+    exemplar: "-c" "input.txt" "other.txt" in alpha_minimal (different)
+    base:
+    flag:
+  -d  # only print duplicate lines, one for each group
+    exemplar: "-d" "input.txt" "other.txt" in fielded_deep (different)
+    base:
+    flag:
+  -f  # avoid comparing the first N fields
+    exemplar: "-f" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
     flag:
   -s  # avoid comparing the first N characters
     exemplar: "-s" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
-      (no base)
+    flag:
+  -u  # only print unique lines
+    exemplar: "-u" "input.txt" "other.txt" in alpha_minimal (different)
+    base:
     flag:
   -w  # compare no more than N characters in lines
-    exemplar: "-w" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-w" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
-      (no base)
+    flag:
+  -z  # line delimiter is NUL, not newline
+    exemplar: "-z" "input.txt" "other.txt" in alpha_minimal (different)
+    base:
     flag:
 
 ## Via combination (distinguishable when paired)
-  --all-repeated  e.g. "-w" "--all-repeated"
-  --group  e.g. "-f" "--group"
-  -D  e.g. "-s" "-D"
-  -c  e.g. "-f" "-c"
-  -d  e.g. "-f" "-d"
-  -i  e.g. "-f" "-i"
-  -u  e.g. "-f" "-u"
-  -z  e.g. "-w" "-z"
+  --all-repeated  e.g. (pairwise evidence)
+  -D  e.g. (pairwise evidence)
+  -i  e.g. (pairwise evidence)
 

@@ -1,8 +1,8 @@
 # Exploration: fmt
 
 ## Rounds
-  round 0: 32 isolated cumulative, 12 identical in round (discovery)
-  round 1: 32 isolated cumulative, 12 identical in round (refinement)
+  round 0: 58 isolated cumulative, 21 identical in round (discovery)
+  round 1: 58 isolated cumulative, 22 identical in round (refinement)
 
 ## Distinguished: 7/7 flags
   6 observed behavior (6 solo, 0 via combination)
@@ -21,11 +21,11 @@ Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t 
       cherry Apple banana Date elderberry BANANA apple
       hello world
   -g  # goal width (default of 93% of width)
-    exemplar: "-g" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-g" "input.txt" "subdir" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -p  # reformat only lines beginning with STRING,
-    exemplar: "-p" "input.txt" "other.txt" in empty_dir (-2 lines, exit 0→1)
+    exemplar: "-p" "alpha" "input.txt" in empty_dir (-16 lines, exit 0→1)
     base:
     flag:
   -s  # split long lines, but do not refill
@@ -61,7 +61,7 @@ Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t 
       cherry Apple banana Date elderberry BANANA apple
       hello world
   -w  # maximum line width (default of 75 columns)
-    exemplar: "-w" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-w" "input.txt" "subdir" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
 

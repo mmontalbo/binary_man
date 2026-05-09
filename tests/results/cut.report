@@ -1,14 +1,14 @@
 # Exploration: cut
 
 ## Rounds
-  round 0: 2 isolated cumulative, 9 identical in round (discovery)
-  round 1: 15 isolated cumulative, 13 identical in round (refinement)
-  round 2: 15 isolated cumulative, 13 identical in round (refinement)
+  round 0: 1 isolated cumulative, 4 identical in round (discovery)
+  round 1: 10 isolated cumulative, 6 identical in round (refinement)
+  round 2: 10 isolated cumulative, 6 identical in round (refinement)
 
 ## Distinguished: 10/10 flags
   3 observed behavior (1 solo, 2 via combination)
   7 error-differentiated only (0 solo, 7 via combination)
-  2 behavioral aliases detected
+  1 behavioral aliases detected
 
 Aliases: -b = --bytes, -c = --characters, -d = --delimiter, -f = --fields, -s = --only-delimited, -z = --zero-terminated
 

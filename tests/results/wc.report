@@ -1,18 +1,19 @@
 # Exploration: wc
 
 ## Rounds
-  round 0: 22 isolated cumulative, 9 identical in round (discovery)
-  round 1: 22 isolated cumulative, 16 identical in round (refinement)
+  round 0: 46 isolated cumulative, 19 identical in round (discovery)
+  round 1: 46 isolated cumulative, 29 identical in round (refinement)
 
 ## Distinguished: 7/7 flags
   6 observed behavior (4 solo, 2 via combination)
   1 error-differentiated only (1 solo, 0 via combination)
+  1 behavioral aliases detected
 
 Aliases: -L = --max-line-length, -c = --bytes, -l = --lines, -m = --chars, -w = --words
 
 ## Solo (unique behavior)
   --files0-from  # read input from the files specified by
-    exemplar: "--files0-from=f" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "--files0-from=f" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   --total  # when to print a line with total counts;

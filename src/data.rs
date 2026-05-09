@@ -160,3 +160,17 @@ pub const PATTERN_ARCHETYPES: &[&str] = &[
     "a.*e",     // regex metacharacter
     "zzzzz",    // non-matching
 ];
+
+/// Candidate invocation patterns for behavioral arg discovery.
+/// Each is a list of positional args to try. The binary is probed with each
+/// pattern; patterns that exit 0 become the target types for the full grid.
+/// Order: most common patterns first.
+pub const ARG_CANDIDATES: &[&[&str]] = &[
+    &[],                              // no args (ls, df, ps)
+    &["input.txt"],                   // single file (cat, sort, head)
+    &["."],                           // directory (ls ., du .)
+    &["input.txt", "other.txt"],      // two files (diff, paste) or source+dest (cp, mv)
+    &["input.txt", "subdir"],         // file to directory (cp file dir/)
+    &["alpha", "input.txt"],          // pattern + file (grep, sed)
+    &["alpha", "."],                  // pattern + directory (grep -r)
+];

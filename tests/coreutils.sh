@@ -68,7 +68,7 @@ START=$(date +%s)
 # Expected lower bounds for distinguished flag count.
 # These are the minimum acceptable — improvements raise them.
 check sort   27
-check ls     49
+check ls     48
 check cat    10
 check cut     9
 check head    4

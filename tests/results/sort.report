@@ -1,21 +1,21 @@
 # Exploration: sort
 
 ## Rounds
-  round 0: 74 isolated cumulative, 27 identical in round (discovery)
-  round 1: 92 isolated cumulative, 34 identical in round (refinement)
-  round 2: 101 isolated cumulative, 34 identical in round (refinement)
-  round 3: 101 isolated cumulative, 34 identical in round (refinement)
+  round 0: 82 isolated cumulative, 25 identical in round (discovery)
+  round 1: 116 isolated cumulative, 33 identical in round (refinement)
+  round 2: 117 isolated cumulative, 37 identical in round (refinement)
+  round 3: 122 isolated cumulative, 36 identical in round (refinement)
 
 ## Distinguished: 30/30 flags
-  22 observed behavior (15 solo, 7 via combination)
-  8 error-differentiated only (6 solo, 2 via combination)
+  23 observed behavior (16 solo, 7 via combination)
+  7 error-differentiated only (5 solo, 2 via combination)
   1 behavioral aliases detected
 
 Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --temporary-directory, -V = --version-sort, -b = --ignore-leading-blanks, -d = --dictionary-order, -f = --ignore-case, -g = --general-numeric-sort, -h = --human-numeric-sort, -i = --ignore-nonprinting, -k = --key, -m = --merge, -n = --numeric-sort, -o = --output, -r = --reverse, -s = --stable, -t = --field-separator, -u = --unique, -z = --zero-terminated
 
 ## Solo (unique behavior)
   --batch-size  # merge at most NMERGE inputs at once;
-    exemplar: "--batch-size=nmerge" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
+    exemplar: "--batch-size=nmerge" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
     base:
     flag:
   --debug  # annotate the part of the line used to sort,
@@ -35,7 +35,7 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       Date
             ...
   --files0-from  # read input from the files specified by
-    exemplar: "--files0-from=f" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
+    exemplar: "--files0-from=f" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
     base:
     flag:
   --parallel  # change the number of sorts run concurrently to N
@@ -55,7 +55,7 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       banana
             ...
   --sort  # sort according to WORD:
-    exemplar: "--sort=auto" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "--sort=auto" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -C
@@ -72,14 +72,14 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       banana
             ...
     flag:
-      hello world
       Apple
-      elderberry
       banana
-      apple
+      BANANA
+      elderberry
+      cherry
             ...
   -S  # use SIZE for main memory buffer
-    exemplar: "-S" "." in numeric_standard / env COLUMNS=40 (different, exit 2→127)
+    exemplar: "-S" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
     base:
     flag:
   -T  # use DIR for temporaries, not $TMPDIR or /tmp;
@@ -213,7 +213,7 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       apple
             ...
   -t  # use SEP instead of non-blank to blank transition
-    exemplar: "-t" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
+    exemplar: "-t" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
     base:
     flag:
   -u  # with -c, check for strict ordering;
@@ -250,13 +250,13 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
             ...
 
 ## Via combination (distinguishable when paired)
-  --check  e.g. "-o" "--check"
-  --compress-program  e.g. "-o" "--compress-program" "."
-  --random-source  e.g. "-o" "--random-source"
-  -M  e.g. "-R" "-M"
-  -c  e.g. "-o" "-c" "."
-  -g  e.g. (pairwise evidence)
-  -h  e.g. (pairwise evidence)
-  -n  e.g. (pairwise evidence)
+  --check  e.g. "-o" "--check" "input.txt" "other.txt"
+  --compress-program  e.g. "--output=input.txt" "--compress-program" "-c" "input.txt" "other.txt"
+  --random-source  e.g. "--output=input.txt" "--random-source" "-c" "input.txt"
+  -M  e.g. "-i" "-M"
+  -c  e.g. "--output=input.txt" "--compress-program" "-c" "input.txt" "other.txt"
+  -g  e.g. "-g" "-M"
+  -h  e.g. "-i" "-h"
+  -n  e.g. "-h" "-n"
   -s  e.g. (pairwise evidence)
 

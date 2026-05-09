@@ -1,9 +1,9 @@
 # Exploration: fold
 
 ## Rounds
-  round 0: 12 isolated cumulative, 3 identical in round (discovery)
-  round 1: 22 isolated cumulative, 7 identical in round (refinement)
-  round 2: 22 isolated cumulative, 7 identical in round (refinement)
+  round 0: 17 isolated cumulative, 5 identical in round (discovery)
+  round 1: 31 isolated cumulative, 7 identical in round (refinement)
+  round 2: 31 isolated cumulative, 7 identical in round (refinement)
 
 ## Distinguished: 3/3 flags
   3 observed behavior (1 solo, 2 via combination)
@@ -12,11 +12,11 @@ Aliases: -b = --bytes, -s = --spaces, -w = --width
 
 ## Solo (unique behavior)
   -w  # use WIDTH columns instead of 80
-    exemplar: "-w" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-w" "alpha" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
 
 ## Via combination (distinguishable when paired)
   -b  e.g. "--width=10" "-b" "input.txt" "other.txt"
-  -s  e.g. "-w" "-s" "input.txt"
+  -s  e.g. "-w" "-s" "input.txt" "other.txt"
 

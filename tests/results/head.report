@@ -1,23 +1,23 @@
 # Exploration: head
 
 ## Rounds
-  round 0: 22 isolated cumulative, 13 identical in round (discovery)
-  round 1: 22 isolated cumulative, 13 identical in round (refinement)
+  round 0: 37 isolated cumulative, 23 identical in round (discovery)
+  round 1: 40 isolated cumulative, 32 identical in round (refinement)
+  round 2: 40 isolated cumulative, 32 identical in round (refinement)
 
-## Distinguished: 4/7 flags
-  2 observed behavior (2 solo, 0 via combination)
+## Distinguished: 7/7 flags
+  5 observed behavior (2 solo, 3 via combination)
   2 error-differentiated only (2 solo, 0 via combination)
-  3 indistinguishable under tested conditions
 
 Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
 
 ## Solo (unique behavior)
   -c  # print the first NUM bytes of each file;
-    exemplar: "-c" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-c" "input.txt" "subdir" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -n  # print the first NUM lines instead of the first 10;
-    exemplar: "-n" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-n" "input.txt" "subdir" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -v  # always print headers giving file names
@@ -53,8 +53,8 @@ Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
       Date
             ...
 
-## Indistinguishable under tested conditions
-  UNEXPLAINED (3): --quiet, --silent, -q
-  UNEXPLAINED (3): --quiet, --silent, -q
-  UNEXPLAINED (3): --quiet, --silent, -q
+## Via combination (distinguishable when paired)
+  --quiet  e.g. (pairwise evidence)
+  --silent  e.g. "-n" "--silent" "input.txt" "other.txt"
+  -q  e.g. (pairwise evidence)
 

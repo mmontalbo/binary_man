@@ -340,15 +340,17 @@ pub fn format_exploration_report(
     out.push('\n');
 
     // Classify evidence quality: did we actually see the flag work?
-    // A flag has "observed behavior" if any of its runs exited 0 with stdout
-    // that differs from the base run's stdout in at least one context.
+    // A flag has "observed behavior" if any of its runs exited 0 with either:
+    // - non-empty stdout (the flag produced visible output), OR
+    // - filesystem changes (the flag modified files — silent tools like cp, mv, rm)
     let has_observed_behavior = |stem: &str| -> bool {
         for run in &final_metrics.runs {
             let run_stem = flag_stem(&run.args_str);
             if run_stem.as_deref() == Some(stem) || run_stem.as_ref().map(|s| canonical_flag(s, aliases)) == Some(stem.to_string()) {
-                // Check if any context group shows exit 0 with non-empty stdout
                 for (_, obs) in &run.context_groups {
-                    if obs.exit_code == Some(0) && !obs.stdout.trim().is_empty() {
+                    if obs.exit_code == Some(0)
+                        && (!obs.stdout.trim().is_empty() || !obs.fs_changes.is_empty())
+                    {
                         return true;
                     }
                 }

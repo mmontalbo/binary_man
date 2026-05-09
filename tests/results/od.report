@@ -1,24 +1,25 @@
 # Exploration: od
 
 ## Rounds
-  round 0: 51 isolated cumulative, 6 identical in round (discovery)
-  round 1: 76 isolated cumulative, 8 identical in round (refinement)
-  round 2: 76 isolated cumulative, 14 identical in round (refinement)
+  round 0: 90 isolated cumulative, 15 identical in round (discovery)
+  round 1: 113 isolated cumulative, 16 identical in round (refinement)
+  round 2: 113 isolated cumulative, 36 identical in round (refinement)
 
-## Distinguished: 20/21 flags
-  15 observed behavior (14 solo, 1 via combination)
+## Distinguished: 19/21 flags
+  14 observed behavior (12 solo, 2 via combination)
   5 error-differentiated only (5 solo, 0 via combination)
   1 behavioral aliases detected
+  2 indistinguishable under tested conditions
 
 Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --format, -v = --output-duplicates
 
 ## Solo (unique behavior)
   --endian  # swap input bytes according the specified order
-    exemplar: "--endian" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "--endian" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   --strings
-    exemplar: "--strings" "input.txt" "other.txt" in empty_dir (different, exit 0→1)
+    exemplar: "--strings" "input.txt" "subdir" in empty_dir (different)
     base:
     flag:
   --traditional  # accept arguments in third form above
@@ -26,15 +27,15 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
     base:
     flag:
   -A  # output format for file offsets; RADIX is one
-    exemplar: "-A" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-A" "alpha" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -N  # limit dump to BYTES input bytes
-    exemplar: "-N" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-N" "alpha" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -S
-    exemplar: "-S" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-S" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -a  # same as -t a,  select named characters, ignoring high-order bit
@@ -122,7 +123,7 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000060  1818585098  1998614380  1684828783          10
       0000075
   -j  # skip BYTES input bytes first
-    exemplar: "-j" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-j" "alpha" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -l  # same as -t dL, select decimal longs
@@ -139,20 +140,6 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000040  4705770412548125298  7308339923282182478
       0000060  8583983401233901578          44634501743
       0000075
-  -o  # same as -t o2, select octal 2-byte units
-    exemplar: "-o" "input.txt" "other.txt" in alpha_minimal (-1 lines)
-    base:
-      0000000 064143 071145 074562 040412 070160 062554 061012 067141
-      0000020 067141 005141 060504 062564 062412 062154 071145 062542
-      0000040 071162 005171 040502 040516 040516 060412 070160 062554
-      0000060 064012 066145 067554 073440 071157 062154 000012
-      0000075
-    flag:
-      0000000 064143 071145 074562 040412 070160 062554 061012 067141
-      0000020 067141 005141 060504 062564 062412 062154 071145 062542
-      0000040 071162 005171 040502 040516 040516 060412 070160 062554
-      0000060 064012 066145 067554 073440 071157 062154 000012
-      0000075
   -s  # same as -t d2, select decimal 2-byte units
     exemplar: "-s" "input.txt" "other.txt" in alpha_minimal (-1 lines)
     base:
@@ -168,23 +155,9 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000060  26634  27749  28524  30496  29295  25708     10
       0000075
   -t  # select output format or formats
-    exemplar: "-t" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-t" "alpha" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
-  -v  # do not use * to mark line suppression
-    exemplar: "-v" "input.txt" "other.txt" in alpha_minimal (-1 lines)
-    base:
-      0000000 064143 071145 074562 040412 070160 062554 061012 067141
-      0000020 067141 005141 060504 062564 062412 062154 071145 062542
-      0000040 071162 005171 040502 040516 040516 060412 070160 062554
-      0000060 064012 066145 067554 073440 071157 062154 000012
-      0000075
-    flag:
-      0000000 064143 071145 074562 040412 070160 062554 061012 067141
-      0000020 067141 005141 060504 062564 062412 062154 071145 062542
-      0000040 071162 005171 040502 040516 040516 060412 070160 062554
-      0000060 064012 066145 067554 073440 071157 062154 000012
-      0000075
   -x  # same as -t x2, select hexadecimal 2-byte units
     exemplar: "-x" "input.txt" "other.txt" in alpha_minimal (-1 lines)
     base:
@@ -201,5 +174,11 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000075
 
 ## Via combination (distinguishable when paired)
-  --width  e.g. "-c" "--width" "input.txt" "other.txt"
+  --width  e.g. "-f" "--width" "input.txt"
+  -o  e.g. "-a" "-o" "input.txt"
+
+## Indistinguishable under tested conditions
+  UNEXPLAINED (2): -v, -w
+  UNEXPLAINED (2): -v, -w
+  UNEXPLAINED (2): -v, -w
 
