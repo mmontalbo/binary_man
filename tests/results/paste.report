@@ -1,8 +1,9 @@
 # Exploration: paste
 
 ## Rounds
-  round 0: 29 isolated cumulative, 11 identical in round (discovery)
-  round 1: 29 isolated cumulative, 8 identical in round (refinement)
+  round 0: 11 isolated cumulative, 21 identical in round (discovery)
+  round 1: 29 isolated cumulative, 9 identical in round (refinement)
+  round 2: 29 isolated cumulative, 10 identical in round (refinement)
 
 ## Distinguished: 3/3 flags
   3 observed behavior (3 solo, 0 via combination)

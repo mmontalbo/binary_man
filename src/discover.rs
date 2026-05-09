@@ -640,19 +640,62 @@ pub fn generate_initial_script(
     }
 
     // Stdin runs: if the binary accepts stdin, generate runs that pipe content
+    // combined with each working arg pattern (not just bare stdin)
     if stdin_works {
         let stdin_content = parse::StdinSource::Lines(
             vec!["cherry".into(), "apple".into(), "banana".into()]
         );
-        let base_args: Vec<String> = sub_prefix.clone();
-        // Base stdin run (no flags)
+
+        // Stdin with each working arg pattern
+        for pattern in &working_patterns {
+            let base_args: Vec<String> = sub_prefix.iter()
+                .chain(pattern.iter())
+                .cloned().collect();
+
+            runs.push(Run {
+                args: base_args.clone(),
+                in_contexts: None,
+                stdin: Some(stdin_content.clone()),
+                diff_from: None,
+            });
+
+            for flag in &short_flags {
+                let mut args = sub_prefix.clone();
+                args.push(flag.clone());
+                args.extend(pattern.iter().cloned());
+                runs.push(Run {
+                    args,
+                    in_contexts: None,
+                    stdin: Some(stdin_content.clone()),
+                    diff_from: Some(base_args.clone()),
+                });
+            }
+            for (flag, hint) in &long_flags {
+                let mut args = sub_prefix.clone();
+                let val = hint.as_ref().map(|h| default_value(h));
+                if let Some(v) = val {
+                    args.push(format!("{}={}", flag, v));
+                } else {
+                    args.push(flag.clone());
+                }
+                args.extend(pattern.iter().cloned());
+                runs.push(Run {
+                    args,
+                    in_contexts: None,
+                    stdin: Some(stdin_content.clone()),
+                    diff_from: Some(base_args.clone()),
+                });
+            }
+        }
+
+        // Also stdin with no positional args (bare stdin)
+        let bare_args: Vec<String> = sub_prefix.clone();
         runs.push(Run {
-            args: base_args.clone(),
+            args: bare_args.clone(),
             in_contexts: None,
             stdin: Some(stdin_content.clone()),
             diff_from: None,
         });
-        // Flag runs via stdin
         for flag in &short_flags {
             let mut args = sub_prefix.clone();
             args.push(flag.clone());
@@ -660,7 +703,7 @@ pub fn generate_initial_script(
                 args,
                 in_contexts: None,
                 stdin: Some(stdin_content.clone()),
-                diff_from: Some(base_args.clone()),
+                diff_from: Some(bare_args.clone()),
             });
         }
         for (flag, hint) in &long_flags {
@@ -675,7 +718,7 @@ pub fn generate_initial_script(
                 args,
                 in_contexts: None,
                 stdin: Some(stdin_content.clone()),
-                diff_from: Some(base_args.clone()),
+                diff_from: Some(bare_args.clone()),
             });
         }
     }

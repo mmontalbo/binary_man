@@ -1,8 +1,9 @@
 # Exploration: find
 
 ## Rounds
-  round 0: 28 isolated cumulative, 7 identical in round (discovery)
+  round 0: 19 isolated cumulative, 30 identical in round (discovery)
   round 1: 28 isolated cumulative, 3 identical in round (refinement)
+  round 2: 28 isolated cumulative, 3 identical in round (refinement)
 
 ## Distinguished: 4/4 flags
   1 observed behavior (1 solo, 0 via combination)
@@ -10,9 +11,14 @@
 
 ## Solo (unique behavior)
   -D
-    exemplar: "-D" "input.txt" in alpha_deep (reordered)
+    exemplar: "-D" "." in alpha_deep (reordered)
     base:
-      input.txt
+      .
+      ./level1
+      ./level1/level2
+      ./level1/level2/b.txt
+      ./level1/a.txt
+            ...
     flag:
       .
       ./level1
@@ -25,7 +31,7 @@
     base:
     flag:
   -a
-    exemplar: "-a" "input.txt" "other.txt" in empty_dir (different)
+    exemplar: "-a" "input.txt" in empty_dir (different)
     base:
     flag:
   -o

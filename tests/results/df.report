@@ -1,9 +1,10 @@
 # Exploration: df
 
 ## Rounds
-  round 0: 185 isolated cumulative, 21 identical in round (discovery)
-  round 1: 189 isolated cumulative, 17 identical in round (refinement)
-  round 2: 189 isolated cumulative, 17 identical in round (refinement)
+  round 0: 155 isolated cumulative, 33 identical in round (discovery)
+  round 1: 178 isolated cumulative, 18 identical in round (refinement)
+  round 2: 192 isolated cumulative, 18 identical in round (refinement)
+  round 3: 198 isolated cumulative, 18 identical in round (refinement)
 
 ## Distinguished: 16/16 flags
   15 observed behavior (15 solo, 0 via combination)
@@ -14,42 +15,42 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
 
 ## Solo (unique behavior)
   --no-sync  # do not invoke sync before getting usage info (default)
-    exemplar: "--no-sync" "input.txt" "subdir" in alpha_minimal (-1 lines, exit 0→1)
+    exemplar: "--no-sync" "alpha" "." in alpha_minimal (reordered)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304052812 6055494836  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304098684 6055448964  18% /batch
     flag:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304051368 6055496280  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304102792 6055444856  18% /batch
   --output
-    exemplar: "--output" "input.txt" "subdir" in alpha_minimal (-1 lines, exit 0→1)
+    exemplar: "--output" "input.txt" in alpha_minimal (reordered)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304052812 6055494836  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304103448 6055444200  18% /batch
     flag:
       Filesystem                                             Type    Inodes   IUsed     IFree IUse%  1K-blocks       Used      Avail Use% File      Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 ext4 244158464 3145712 241012752    2% 7750211880 1304054080 6055493568  18% input.txt /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 ext4 244158464 3156778 241001686    2% 7750211880 1304103016 6055444632  18% input.txt /batch
   --sync  # invoke sync before getting usage info
-    exemplar: "--sync" "input.txt" "other.txt" in alpha_minimal (reordered)
+    exemplar: "--sync" "input.txt" "subdir" in alpha_minimal (-1 lines, exit 0→1)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304050876 6055496772  18% /batch
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304050876 6055496772  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304096608 6055451040  18% /batch
     flag:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304052376 6055495272  18% /batch
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304052376 6055495272  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304109760 6055437888  18% /batch
   --total  # elide all entries insignificant to available space,
-    exemplar: "--total" "alpha" "." in alpha_minimal (reordered)
+    exemplar: "--total" "input.txt" "other.txt" in alpha_minimal (reordered)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304052672 6055494976  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304104308 6055443340  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304104308 6055443340  18% /batch
     flag:
-      Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304036540 6055511108  18% /batch
-      total                                                  7750211880 1304036540 6055511108  18% -
+      Filesystem                                               1K-blocks       Used   Available Use% Mounted on
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5  7750211880 1304096668  6055450980  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5  7750211880 1304096668  6055450980  18% /batch
+      total                                                  15500423760 2608193336 12110901960  18% -
   -B  # scale sizes by SIZE before printing them; e.g.,
-    exemplar: "-B" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-B" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -H  # print sizes in powers of 1000 (e.g., 1.1G)
@@ -57,77 +58,77 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
     base:
     flag:
   -P  # use the POSIX output format
-    exemplar: "-P" "input.txt" "subdir" in alpha_minimal (-1 lines, exit 0→1)
+    exemplar: "-P" "input.txt" in alpha_minimal (reordered)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304052812 6055494836  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304103448 6055444200  18% /batch
     flag:
       Filesystem                                             1024-blocks       Used  Available Capacity Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5  7750211880 1304056088 6055491560      18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5  7750211880 1304077508 6055470140      18% /batch
   -T  # print file system type
-    exemplar: "-T" "." in alpha_minimal (reordered)
+    exemplar: "-T" "input.txt" "subdir" in alpha_minimal (reordered)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304050684 6055496964  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304096608 6055451040  18% /batch
     flag:
       Filesystem                                             Type  1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 ext4 7750211880 1304035920 6055511728  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 ext4 7750211880 1304104940 6055442708  18% /batch
   -a  # include pseudo, duplicate, inaccessible file systems
-    exemplar: "-a" "alpha" "." in alpha_minimal (reordered)
+    exemplar: "-a" "input.txt" in alpha_minimal (reordered)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304052672 6055494976  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304103448 6055444200  18% /batch
     flag:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304037972 6055509676  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304070752 6055476896  18% /batch
   -h  # print sizes in powers of 1024 (e.g., 1023M)
     exemplar: "-h" "input.txt" "subdir" in empty_dir (-3 lines, exit 0→1)
     base:
     flag:
   -i  # list inode information instead of block usage
-    exemplar: "-i" "alpha" "input.txt" in alpha_minimal (reordered)
+    exemplar: "-i" "input.txt" "other.txt" in alpha_standard (reordered)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304050624 6055497024  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304098864 6055448784  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304098864 6055448784  18% /batch
     flag:
       Filesystem                                                Inodes   IUsed     IFree IUse% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 244158464 3144529 241013935    2% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 244158464 3156652 241001812    2% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 244158464 3156652 241001812    2% /batch
   -k  # like --block-size=1K
-    exemplar: "-k" "alpha" "input.txt" in alpha_minimal (reordered)
+    exemplar: "-k" "input.txt" in alpha_minimal (reordered)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304050624 6055497024  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304103448 6055444200  18% /batch
     flag:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304053104 6055494544  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304081320 6055466328  18% /batch
   -l  # limit listing to local file systems
     exemplar: "-l" "input.txt" in alpha_minimal (reordered)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304052504 6055495144  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304103448 6055444200  18% /batch
     flag:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304051700 6055495948  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304074536 6055473112  18% /batch
   -t  # limit listing to file systems of type TYPE
     exemplar: "-t" "alpha" "input.txt" in empty_dir (different)
     base:
     flag:
   -v  # (ignored)
-    exemplar: "-v" "input.txt" "other.txt" in alpha_minimal (reordered)
+    exemplar: "-v" "." in alpha_minimal (reordered)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304050876 6055496772  18% /batch
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304050876 6055496772  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304109260 6055438388  18% /batch
     flag:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304051300 6055496348  18% /batch
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304051300 6055496348  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304096816 6055450832  18% /batch
   -x  # limit listing to file systems not of type TYPE
-    exemplar: "-x" "alpha" "input.txt" in alpha_minimal (reordered)
+    exemplar: "-x" "alpha" "." in alpha_minimal (reordered)
     base:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304050624 6055497024  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304098684 6055448964  18% /batch
     flag:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304051436 6055496212  18% /batch
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1304097624 6055450024  18% /batch
 

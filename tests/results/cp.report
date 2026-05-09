@@ -1,25 +1,22 @@
 # Exploration: cp
 
 ## Rounds
-  round 0: 38 isolated cumulative, 11 identical in round (discovery)
-  round 1: 39 isolated cumulative, 16 identical in round (refinement)
-  round 2: 53 isolated cumulative, 22 identical in round (refinement)
-  round 3: 56 isolated cumulative, 29 identical in round (refinement)
+  round 0: 34 isolated cumulative, 11 identical in round (discovery)
+  round 1: 36 isolated cumulative, 19 identical in round (refinement)
+  round 2: 41 isolated cumulative, 31 identical in round (refinement)
+  round 3: 51 isolated cumulative, 37 identical in round (refinement)
 
-## Distinguished: 34/36 flags
-  31 observed behavior (16 solo, 15 via combination)
+## Distinguished: 33/36 flags
+  30 observed behavior (13 solo, 17 via combination)
   3 error-differentiated only (3 solo, 0 via combination)
-  2 indistinguishable under tested conditions
+  2 behavioral aliases detected
+  3 indistinguishable under tested conditions
 
 Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-target-directory, -a = --archive, -f = --force, -i = --interactive, -l = --link, -n = --no-clobber, -s = --symbolic-link, -t = --target-directory, -v = --verbose, -x = --one-file-system
 
 ## Solo (unique behavior)
   --attributes-only  # don't copy the file data, just the attributes
     exemplar: "--attributes-only" "input.txt" "subdir" in empty_dir (different, exit 0→1)
-    base:
-    flag:
-  --backup
-    exemplar: "--backup" "input.txt" "other.txt" in alpha_minimal (different)
     base:
     flag:
   --debug  # explain how a file is copied.  Implies -v
@@ -29,7 +26,7 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
       'input.txt' -> 'other.txt'
       copy offload: yes, reflink: unsupported, sparse detection: no
   --no-preserve  # don't preserve the specified attributes
-    exemplar: "--no-preserve=attr_list" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "--no-preserve=attr_list" "input.txt" "subdir" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   --parents  # use full source file name under DIRECTORY
@@ -37,23 +34,19 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     base:
     flag:
   --reflink
-    exemplar: "--reflink" "input.txt" "other.txt" in alpha_deep (different)
+    exemplar: "--reflink" "input.txt" "other.txt" in empty_dir (different)
     base:
     flag:
   --remove-destination  # remove each existing destination file before
     exemplar: "--remove-destination" "input.txt" "other.txt" in alpha_minimal (different)
     base:
     flag:
-  --update
-    exemplar: "--update" "input.txt" "subdir" in alpha_standard (different)
+  -L  # always follow symbolic links in SOURCE
+    exemplar: "-L" "input.txt" "other.txt" in alpha_minimal (different)
     base:
     flag:
-  -H  # follow command-line symbolic links in SOURCE
-    exemplar: "-H" "input.txt" "other.txt" in alpha_minimal (different)
-    base:
-    flag:
-  -R
-    exemplar: "-R" "input.txt" "other.txt" in alpha_minimal (different)
+  -P  # never follow symbolic links in SOURCE
+    exemplar: "-P" "input.txt" "other.txt" in alpha_minimal (different)
     base:
     flag:
   -S  # override the usual backup suffix
@@ -66,10 +59,6 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     flag:
   -b  # like --backup but does not accept an argument
     exemplar: "-b" "input.txt" "other.txt" in alpha_minimal (different)
-    base:
-    flag:
-  -d  # same as --no-dereference --preserve=links
-    exemplar: "-d" "input.txt" "other.txt" in alpha_minimal (different)
     base:
     flag:
   -i  # prompt before overwrite (overrides a previous -n
@@ -85,7 +74,7 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     base:
     flag:
   -t  # copy all SOURCE arguments into DIRECTORY
-    exemplar: "-t" "input.txt" "subdir" in empty_dir (different)
+    exemplar: "-t" "input.txt" "other.txt" in empty_dir (different)
     base:
     flag:
   -v  # explain what is being done
@@ -95,22 +84,24 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
       'input.txt' -> 'other.txt'
 
 ## Via combination (distinguishable when paired)
-  --context  e.g. "--reflink" "--context" "input.txt" "other.txt"
-  --copy-contents  e.g. "--remove-destination" "--copy-contents" "input.txt" "other.txt"
-  --keep-directory-symlink  e.g. "--remove-destination" "--keep-directory-symlink" "input.txt" "other.txt"
-  --preserve  e.g. "--suffix=suffix" "--preserve" "input.txt" "other.txt"
-  --recursive  e.g. (pairwise evidence)
+  --backup  e.g. "--debug" "--backup" "--preserve" "input.txt" "other.txt"
+  --context  e.g. "--debug" "--context" "input.txt" "other.txt"
+  --copy-contents  e.g. (pairwise evidence)
+  --keep-directory-symlink  e.g. (pairwise evidence)
+  --preserve  e.g. "--debug" "--backup" "--preserve" "input.txt" "other.txt"
+  --recursive  e.g. "--debug" "--backup" "--recursive" "input.txt" "other.txt"
   --sparse  e.g. (pairwise evidence)
-  --strip-trailing-slashes  e.g. "--remove-destination" "--keep-directory-symlink" "--strip-trailing-slashes" "input.txt" "other.txt"
-  -L  e.g. (pairwise evidence)
-  -P  e.g. (pairwise evidence)
+  --strip-trailing-slashes  e.g. "--reflink" "--preserve" "--strip-trailing-slashes" "input.txt" "other.txt"
+  --update  e.g. "--reflink" "--preserve" "--update" "input.txt" "other.txt"
+  -H  e.g. (pairwise evidence)
+  -R  e.g. (pairwise evidence)
   -Z  e.g. (pairwise evidence)
   -a  e.g. (pairwise evidence)
+  -d  e.g. (pairwise evidence)
   -f  e.g. (pairwise evidence)
   -n  e.g. "-b" "-n" "input.txt" "subdir"
   -r  e.g. (pairwise evidence)
-  -x  e.g. (pairwise evidence)
 
 ## Indistinguishable under tested conditions
-  UNEXPLAINED (2): -p, -u
+  UNEXPLAINED (3): -p, -u, -x
 

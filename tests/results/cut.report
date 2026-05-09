@@ -20,7 +20,7 @@ Aliases: -b = --bytes, -c = --characters, -d = --delimiter, -f = --fields, -s = 
 
 ## Via combination (distinguishable when paired)
   --complement  e.g. "--fields=1" "--complement" "input.txt"
-  --output-delimiter  e.g. "--fields=1" "--output-delimiter" "input.txt"
+  --output-delimiter  e.g. "--fields=1" "--output-delimiter"
   -M  e.g. "--fields=1" "-M"
   -b  e.g. "--fields=1" "-b"
   -c  e.g. "--fields=1" "-c"

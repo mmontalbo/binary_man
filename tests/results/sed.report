@@ -3,13 +3,13 @@
 ## Rounds
   round 0: 15 isolated cumulative, 13 identical in round (discovery)
   round 1: 24 isolated cumulative, 26 identical in round (refinement)
-  round 2: 40 isolated cumulative, 33 identical in round (refinement)
-  round 3: 52 isolated cumulative, 41 identical in round (refinement)
+  round 2: 32 isolated cumulative, 37 identical in round (refinement)
+  round 3: 44 isolated cumulative, 43 identical in round (refinement)
 
 ## Distinguished: 23/24 flags
   21 observed behavior (4 solo, 17 via combination)
   2 error-differentiated only (2 solo, 0 via combination)
-  1 behavioral aliases detected
+  2 behavioral aliases detected
 
 ## Solo (unique behavior)
   --debug
@@ -23,7 +23,7 @@
     base:
     flag:
   --in-place
-    exemplar: "--in-place" "alpha" "input.txt" in alpha_standard (different)
+    exemplar: "--in-place" "alpha" "input.txt" in alpha_minimal (different)
     base:
       cherry
       lpha
@@ -37,7 +37,7 @@
     base:
     flag:
   -i
-    exemplar: "-i" "alpha" "input.txt" in alpha_standard (different)
+    exemplar: "-i" "alpha" "input.txt" in alpha_minimal (different)
     base:
       cherry
       lpha
@@ -47,21 +47,21 @@
             ...
     flag:
   -l
-    exemplar: "-l" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-l" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
 
 ## Via combination (distinguishable when paired)
   --expression  e.g. (pairwise evidence)
-  --file  e.g. "--posix" "--file" "input.txt"
+  --file  e.g. "--debug" "--file" "input.txt" "other.txt"
   --line-length  e.g. (pairwise evidence)
-  --null-data  e.g. "--follow-symlinks" "--in-place" "--null-data" "--unbuffered" "input.txt" "other.txt"
+  --null-data  e.g. "--debug" "--in-place" "--null-data" "--silent" "input.txt" "other.txt"
   --quiet  e.g. (pairwise evidence)
   --regexp-extended  e.g. (pairwise evidence)
-  --sandbox  e.g. "--follow-symlinks" "--in-place" "--sandbox" "--silent" "input.txt" "other.txt"
-  --separate  e.g. "--follow-symlinks" "--in-place" "--separate" "input.txt" "other.txt"
-  --silent  e.g. "--follow-symlinks" "--in-place" "--sandbox" "--silent" "input.txt" "other.txt"
-  --unbuffered  e.g. "--follow-symlinks" "--in-place" "--null-data" "--unbuffered" "input.txt" "other.txt"
+  --sandbox  e.g. (pairwise evidence)
+  --separate  e.g. (pairwise evidence)
+  --silent  e.g. "--debug" "--in-place" "--null-data" "--silent" "input.txt" "other.txt"
+  --unbuffered  e.g. "--follow-symlinks" "--in-place" "--unbuffered" "alpha" "input.txt"
   -E  e.g. (pairwise evidence)
   -e  e.g. (pairwise evidence)
   -n  e.g. (pairwise evidence)

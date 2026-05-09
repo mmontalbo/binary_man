@@ -1,10 +1,9 @@
 # Exploration: xargs
 
 ## Rounds
-  round 0: 21 isolated cumulative, 24 identical in round (discovery)
-  round 1: 25 isolated cumulative, 8 identical in round (refinement)
-  round 2: 27 isolated cumulative, 8 identical in round (refinement)
-  round 3: 28 isolated cumulative, 8 identical in round (refinement)
+  round 0: 7 isolated cumulative, 26 identical in round (discovery)
+  round 1: 33 isolated cumulative, 8 identical in round (refinement)
+  round 2: 33 isolated cumulative, 9 identical in round (refinement)
 
 ## Distinguished: 21/21 flags
   1 observed behavior (1 solo, 0 via combination)
@@ -64,13 +63,13 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
     flag:
 
 ## Via combination (distinguishable when paired)
-  --eof  e.g. "--show-limits" "--eof"
+  --eof  e.g. (pairwise evidence)
   --process-slot-var  e.g. "--show-limits" "--process-slot-var"
   --replace  e.g. (pairwise evidence)
-  -0  e.g. "--show-limits" "-0"
+  -0  e.g. (pairwise evidence)
   -e  e.g. (pairwise evidence)
   -i  e.g. (pairwise evidence)
-  -l  e.g. "--show-limits" "-l"
+  -l  e.g. (pairwise evidence)
   -r  e.g. (pairwise evidence)
   -x  e.g. (pairwise evidence)
 

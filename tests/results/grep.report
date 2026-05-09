@@ -4,7 +4,7 @@
   round 0: 13 isolated cumulative, 8 identical in round (discovery)
   round 1: 35 isolated cumulative, 17 identical in round (refinement)
   round 2: 39 isolated cumulative, 24 identical in round (refinement)
-  round 3: 58 isolated cumulative, 24 identical in round (refinement)
+  round 3: 46 isolated cumulative, 26 identical in round (refinement)
 
 ## Distinguished: 35/49 flags
   2 observed behavior (2 solo, 0 via combination)
@@ -49,17 +49,17 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
     flag:
 
 ## Via combination (distinguishable when paired)
-  --color  e.g. "-d" "--color" "input.txt"
-  --colour  e.g. "-f" "--colour" "input.txt"
-  --exclude  e.g. "-d" "--exclude" "input.txt"
-  --exclude-dir  e.g. "-f" "--exclude-dir"
+  --color  e.g. "-f" "--color" "input.txt"
+  --colour  e.g. "-d" "--colour"
+  --exclude  e.g. "-V" "--exclude"
+  --exclude-dir  e.g. "-f" "--exclude-dir" "input.txt"
   --exclude-from  e.g. "-e" "-w" "--exclude-from" "--no-group-separator" "input.txt"
   --group-separator  e.g. "-e" "-w" "--group-separator"
   --include  e.g. "-e" "-w" "--include"
   --label  e.g. "-e" "-w" "--label"
   --line-buffered  e.g. (pairwise evidence)
   --no-group-separator  e.g. "-e" "-w" "--exclude-from" "--no-group-separator" "input.txt"
-  --no-ignore-case  e.g. "-d" "--no-ignore-case"
+  --no-ignore-case  e.g. "-e" "-w" "--exclude-from" "--no-ignore-case" "input.txt"
   --quiet  e.g. "-e" "-w" "--exclude-from" "--quiet" "input.txt"
   --silent  e.g. "-e" "-w" "--exclude-from" "--silent" "input.txt"
   -A  e.g. "-B" "-A" "input.txt"
@@ -69,7 +69,7 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
   -F  e.g. (pairwise evidence)
   -G  e.g. (pairwise evidence)
   -H  e.g. "-e" "-w" "--exclude-from" "-H" "input.txt"
-  -I  e.g. "-d" "-I" "input.txt"
+  -I  e.g. "-e" "-w" "--exclude-from" "-I" "input.txt"
   -P  e.g. (pairwise evidence)
   -R  e.g. "-e" "-w" "--exclude-from" "-R" "input.txt"
   -e  e.g. "-e" "-w" "--exclude-from" "--no-group-separator" "input.txt"

@@ -1,11 +1,12 @@
 # Exploration: nl
 
 ## Rounds
-  round 0: 66 isolated cumulative, 22 identical in round (discovery)
-  round 1: 66 isolated cumulative, 31 identical in round (refinement)
+  round 0: 53 isolated cumulative, 73 identical in round (discovery)
+  round 1: 81 isolated cumulative, 11 identical in round (refinement)
+  round 2: 81 isolated cumulative, 11 identical in round (refinement)
 
-## Distinguished: 10/11 flags
-  9 observed behavior (9 solo, 0 via combination)
+## Distinguished: 11/11 flags
+  10 observed behavior (9 solo, 1 via combination)
   1 error-differentiated only (1 solo, 0 via combination)
   1 behavioral aliases detected
 
@@ -52,4 +53,7 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
     exemplar: "-w" "input.txt" "subdir" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
+
+## Via combination (distinguishable when paired)
+  -p  e.g. "--join-blank-lines=-1" "-p"
 

@@ -24,7 +24,7 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
     base:
     flag:
   --horizon-lines  # keep NUM lines of the common prefix and suffix
-    exemplar: "--horizon-lines=0" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    exemplar: "--horizon-lines=2147483647" "input.txt" "other.txt" in alpha_minimal (-10 lines)
     base:
       1,7c1
       < cherry
@@ -67,7 +67,7 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       < Date
             ...
   --tabsize  # tab stops every NUM (default 8) print columns
-    exemplar: "--tabsize=2147483647" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    exemplar: "--tabsize=10" "input.txt" "other.txt" in alpha_minimal (-10 lines)
     base:
       1,7c1
       < cherry
@@ -108,8 +108,8 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       < Date
             ...
     flag:
-      --- input.txt	2026-05-09 10:59:22.013077103 -0700
-      +++ other.txt	2026-05-09 10:59:22.013114614 -0700
+      --- input.txt	2026-05-09 11:04:17.886662787 -0700
+      +++ other.txt	2026-05-09 11:04:17.886669400 -0700
       @@ -1,7 +1 @@
       -cherry
       -Apple
@@ -163,7 +163,7 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
     flag:
       
       
-      2026-05-09 10:59           diff -l input.txt other.txt            Page 1
+      2026-05-09 11:04           diff -l input.txt other.txt            Page 1
       
       
             ...
@@ -210,8 +210,8 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       < Date
             ...
     flag:
-      --- input.txt	2026-05-09 10:59:22.008315532 -0700
-      +++ other.txt	2026-05-09 10:59:22.008323056 -0700
+      --- input.txt	2026-05-09 11:04:17.880582125 -0700
+      +++ other.txt	2026-05-09 11:04:17.880589660 -0700
       @@ -1,7 +1 @@
       -cherry
       -Apple
@@ -238,18 +238,18 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
             ...
 
 ## Via combination (distinguishable when paired)
-  --color  e.g. "--unified" "--color" "--no-dereference" "--speed-large-files" "input.txt" "other.txt"
-  --context  e.g. "--paginate" "--context" "input.txt" "other.txt"
-  --from-file  e.g. "--unified" "--from-file" "input.txt" "other.txt"
-  --ignore-file-name-case  e.g. "-u" "--ignore-file-name-case" "--no-dereference" "input.txt" "other.txt"
+  --color  e.g. "-D" "--color" "input.txt" "other.txt"
+  --context  e.g. "--suppress-blank-empty" "--context" "input.txt" "other.txt"
+  --from-file  e.g. "-u" "--from-file" "input.txt" "other.txt"
+  --ignore-file-name-case  e.g. "--unified" "--ignore-file-name-case" "input.txt" "other.txt"
   --label  e.g. (pairwise evidence)
-  --left-column  e.g. "-u" "--ignore-file-name-case" "--left-column" "--speed-large-files" "input.txt" "other.txt"
-  --no-dereference  e.g. "--unified" "--color" "--no-dereference" "--speed-large-files" "input.txt" "other.txt"
-  --no-ignore-file-name-case  e.g. "-u" "--ignore-file-name-case" "--no-ignore-file-name-case" "input.txt" "other.txt"
+  --left-column  e.g. "--unified" "--color" "--left-column" "--speed-large-files" "input.txt" "other.txt"
+  --no-dereference  e.g. "--unified" "--color" "--no-dereference" "input.txt" "other.txt"
+  --no-ignore-file-name-case  e.g. "--unified" "--color" "--no-ignore-file-name-case" "input.txt" "other.txt"
   --normal  e.g. (pairwise evidence)
   --palette  e.g. (pairwise evidence)
-  --speed-large-files  e.g. "--unified" "--color" "--no-dereference" "--speed-large-files" "input.txt" "other.txt"
-  --strip-trailing-cr  e.g. "-u" "--color" "--left-column" "--strip-trailing-cr" "input.txt" "other.txt"
+  --speed-large-files  e.g. "--unified" "--color" "--left-column" "--speed-large-files" "input.txt" "other.txt"
+  --strip-trailing-cr  e.g. "--unified" "--color" "--left-column" "--strip-trailing-cr" "input.txt" "other.txt"
   -F  e.g. (pairwise evidence)
   -I  e.g. "-X" "-I" "input.txt" "other.txt"
   -S  e.g. "-X" "-S" "input.txt" "other.txt"

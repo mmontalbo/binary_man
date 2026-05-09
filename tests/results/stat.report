@@ -1,7 +1,7 @@
 # Exploration: stat
 
 ## Rounds
-  round 0: 60 isolated cumulative, 6 identical in round (discovery)
+  round 0: 60 isolated cumulative, 22 identical in round (discovery)
   round 1: 60 isolated cumulative, 6 identical in round (refinement)
 
 ## Distinguished: 7/7 flags
@@ -21,9 +21,9 @@ Aliases: -L = --dereference, -f = --file-system, -t = --terse
     base:
         File: input.txt
         Size: 49        	Blocks: 8          IO Block: 4096   regular file
-      Device: 254,0	Inode: 143525271   Links: 1
+      Device: 254,0	Inode: 144310942   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-09 10:59:03.893976205 -0700
+      Access: 2026-05-09 11:03:55.827197490 -0700
             ...
     flag:
       49
@@ -33,9 +33,9 @@ Aliases: -L = --dereference, -f = --file-system, -t = --terse
     base:
         File: input.txt
         Size: 49        	Blocks: 8          IO Block: 4096   regular file
-      Device: 254,0	Inode: 143525271   Links: 1
+      Device: 254,0	Inode: 144310942   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-09 10:59:03.893976205 -0700
+      Access: 2026-05-09 11:03:55.827197490 -0700
             ...
     flag:
       4912
@@ -44,19 +44,19 @@ Aliases: -L = --dereference, -f = --file-system, -t = --terse
     base:
         File: input.txt
         Size: 49        	Blocks: 8          IO Block: 4096   regular file
-      Device: 254,0	Inode: 143525271   Links: 1
+      Device: 254,0	Inode: 144310942   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-09 10:59:03.893976205 -0700
+      Access: 2026-05-09 11:03:55.827197490 -0700
             ...
     flag:
         File: input.txt
         Size: 49        	Blocks: 8          IO Block: 4096   regular file
-      Device: 254,0	Inode: 143524520   Links: 1
+      Device: 254,0	Inode: 144310998   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-09 10:59:03.892324718 -0700
+      Access: 2026-05-09 11:03:55.827279044 -0700
             ...
   -c  # --format=FORMAT   use the specified FORMAT instead of the default;
-    exemplar: "-c" "input.txt" "other.txt" in empty_dir (-1 lines, exit 0→1)
+    exemplar: "-c" "alpha" "input.txt" in empty_dir (-1 lines, exit 0→1)
     base:
     flag:
   -f  # display file system status instead of file status
@@ -64,26 +64,25 @@ Aliases: -L = --dereference, -f = --file-system, -t = --terse
     base:
         File: .
         Size: 4096      	Blocks: 8          IO Block: 4096   directory
-      Device: 254,0	Inode: 143524862   Links: 2
+      Device: 254,0	Inode: 144311148   Links: 2
       Access: (0755/drwxr-xr-x)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-09 10:59:03.893352809 -0700
+      Access: 2026-05-09 11:03:55.828037086 -0700
             ...
     flag:
         File: "."
           ID: c63eb3646de0a34 Namelen: 255     Type: ext2/ext3
       Block size: 4096       Fundamental block size: 4096
-      Blocks: Total: 1937552970 Free: 1611544928 Available: 1513878870
-      Inodes: Total: 244158464  Free: 241018570
+      Blocks: Total: 1937552970 Free: 1611542008 Available: 1513875950
+      Inodes: Total: 244158464  Free: 241018244
   -t  # print the information in terse form
-    exemplar: "-t" "input.txt" "other.txt" in alpha_minimal (+2 lines, exit 127→0)
+    exemplar: "-t" "input.txt" in alpha_minimal (+1 lines, exit 127→0)
     base:
         File: input.txt
         Size: 49        	Blocks: 8          IO Block: 4096   regular file
-      Device: 254,0	Inode: 143525271   Links: 1
+      Device: 254,0	Inode: 144311401   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-09 10:59:03.893976205 -0700
+      Access: 2026-05-09 11:03:55.828474762 -0700
             ...
     flag:
-      input.txt 49 8 81a4 1000 100 fe00 143524717 1 0 0 1778349543 1778349543 1778349543 1778349543 4096
-      other.txt 12 8 81a4 1000 100 fe00 143524724 1 0 0 1778349543 1778349543 1778349543 1778349543 4096
+      input.txt 49 8 81a4 1000 100 fe00 144311300 1 0 0 1778349835 1778349835 1778349835 1778349835 4096
 

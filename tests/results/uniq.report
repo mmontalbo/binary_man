@@ -1,19 +1,28 @@
 # Exploration: uniq
 
 ## Rounds
-  round 0: 41 isolated cumulative, 19 identical in round (discovery)
-  round 1: 44 isolated cumulative, 25 identical in round (refinement)
-  round 2: 44 isolated cumulative, 27 identical in round (refinement)
+  round 0: 24 isolated cumulative, 34 identical in round (discovery)
+  round 1: 39 isolated cumulative, 18 identical in round (refinement)
+  round 2: 45 isolated cumulative, 15 identical in round (refinement)
+  round 3: 48 isolated cumulative, 16 identical in round (refinement)
 
 ## Distinguished: 11/11 flags
-  11 observed behavior (9 solo, 2 via combination)
+  11 observed behavior (11 solo, 0 via combination)
   1 behavioral aliases detected
 
 Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, -s = --skip-chars, -u = --unique, -w = --check-chars, -z = --zero-terminated
 
 ## Solo (unique behavior)
+  --all-repeated
+    exemplar: "--all-repeated" "input.txt" "other.txt" in formatted_minimal (different)
+    base:
+    flag:
   --group
     exemplar: "--group" "input.txt" "other.txt" in alpha_minimal (different)
+    base:
+    flag:
+  -D  # print all duplicate lines
+    exemplar: "-D" "input.txt" "other.txt" in numeric_minimal (different)
     base:
     flag:
   -c  # prefix lines by the number of occurrences
@@ -41,15 +50,11 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
     base:
     flag:
   -w  # compare no more than N characters in lines
-    exemplar: "-w" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-w" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -z  # line delimiter is NUL, not newline
     exemplar: "-z" "input.txt" "other.txt" in alpha_minimal (different)
     base:
     flag:
-
-## Via combination (distinguishable when paired)
-  --all-repeated  e.g. (pairwise evidence)
-  -D  e.g. (pairwise evidence)
 
