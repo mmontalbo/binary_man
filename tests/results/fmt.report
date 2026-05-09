@@ -6,16 +6,61 @@
 
 ## Distinguished: 7/7 flags
   7 solo (unique behavior)
-  1 behavioral aliases detected
+  2 behavioral aliases detected
 
 Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t = --tagged-paragraph, -u = --uniform-spacing, -w = --width
 
 ## Solo (unique behavior)
   -c  # preserve indentation of first two lines
+    exemplar: "-c" "input.txt" "other.txt" in alpha_minimal (reordered)
+    base:
+      cherry Apple banana Date elderberry BANANA apple
+      hello world
+    flag:
+      cherry Apple banana Date elderberry BANANA apple
+      hello world
   -g  # goal width (default of 93% of width)
+    exemplar: "-g" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
   -p  # reformat only lines beginning with STRING,
+    exemplar: "-p" "input.txt" "other.txt" in empty_dir (-2 lines, exit 0→1)
+    base:
+    flag:
   -s  # split long lines, but do not refill
+    exemplar: "-s" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      cherry Apple banana Date elderberry BANANA apple
+      hello world
+    flag:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
   -t  # indentation of first line different from second
+    exemplar: "-t" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      cherry Apple banana Date elderberry BANANA apple
+      hello world
+    flag:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
   -u  # one space between words, two after sentences
+    exemplar: "-u" "input.txt" "other.txt" in alpha_minimal (reordered)
+    base:
+      cherry Apple banana Date elderberry BANANA apple
+      hello world
+    flag:
+      cherry Apple banana Date elderberry BANANA apple
+      hello world
   -w  # maximum line width (default of 75 columns)
+    exemplar: "-w" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
 

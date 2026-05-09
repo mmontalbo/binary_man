@@ -31,7 +31,7 @@ check() {
     timeout "$TIMEOUT" "$BGRID" "$binary" >"$report_file" 2>"$stderr_file" || true
 
     local result
-    result=$(grep "^## Distinguished:" "$report_file" 2>/dev/null || echo "FAILED")
+    result=$(grep -a "^## Distinguished:" "$report_file" 2>/dev/null || echo "FAILED")
 
     if [ "$result" = "FAILED" ]; then
         echo "FAIL  $binary: timed out or errored (see $stderr_file)"

@@ -12,9 +12,45 @@ Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
 
 ## Solo (unique behavior)
   -c  # print the first NUM bytes of each file;
+    exemplar: "-c" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
   -n  # print the first NUM lines instead of the first 10;
+    exemplar: "-n" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
   -v  # always print headers giving file names
+    exemplar: "-v" "input.txt" "other.txt" in alpha_minimal (-4 lines)
+    base:
+      ==> input.txt <==
+      cherry
+      Apple
+      banana
+      Date
+            ...
+    flag:
+      ==> input.txt <==
+      cherry
+      Apple
+      banana
+      Date
+            ...
   -z  # line delimiter is NUL, not newline
+    exemplar: "-z" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      ==> input.txt <==
+      cherry
+      Apple
+      banana
+      Date
+            ...
+    flag:
+      ==> input.txt <==
+      cherry
+      Apple
+      banana
+      Date
+            ...
 
 ## Indistinguishable under tested conditions
   UNEXPLAINED (3): --quiet, --silent, -q

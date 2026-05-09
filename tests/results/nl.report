@@ -6,19 +6,49 @@
 
 ## Distinguished: 10/11 flags
   10 solo (unique behavior)
-  1 behavioral aliases detected
+  2 behavioral aliases detected
 
 Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numbering, -h = --header-numbering, -i = --line-increment, -l = --join-blank-lines, -n = --number-format, -p = --no-renumber, -s = --number-separator, -v = --starting-line-number, -w = --number-width
 
 ## Solo (unique behavior)
   -b  # use STYLE for numbering body lines
+    exemplar: "-b" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
   -d  # use CC for logical page delimiters
+    exemplar: "-d" "input.txt" "other.txt" in empty_dir (-2 lines, exit 0→1)
+    base:
+    flag:
   -f  # use STYLE for numbering footer lines
+    exemplar: "-f" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
   -h  # use STYLE for numbering header lines
+    exemplar: "-h" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
   -i  # line number increment at each line
+    exemplar: "-i" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
   -l  # group of NUMBER empty lines counted as one
+    exemplar: "-l" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
   -n  # insert line numbers according to FORMAT
+    exemplar: "-n" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
   -s  # add STRING after (possible) line number
+    exemplar: "-s" "input.txt" "other.txt" in empty_dir (-2 lines, exit 0→1)
+    base:
+    flag:
   -v  # first line number for each section
+    exemplar: "-v" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
   -w  # use NUMBER columns for line numbers
+    exemplar: "-w" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
 

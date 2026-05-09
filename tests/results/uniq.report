@@ -13,16 +13,28 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
 
 ## Solo (unique behavior)
   -f  # avoid comparing the first N fields
+    exemplar: "-f" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+      (no base)
+    flag:
   -s  # avoid comparing the first N characters
+    exemplar: "-s" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+      (no base)
+    flag:
   -w  # compare no more than N characters in lines
+    exemplar: "-w" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+      (no base)
+    flag:
 
 ## Via combination (distinguishable when paired)
-  --all-repeated  e.g. "-w" "--all-repeated"
-  --group  e.g. "-f" "--group"
+  --all-repeated  e.g. "-s" "--all-repeated"
+  --group  e.g. "-w" "--group"
   -D  e.g. "-w" "-D"
-  -c  e.g. "-w" "-c"
-  -d  e.g. "-s" "-d"
-  -i  e.g. "-s" "-i"
-  -u  e.g. "-f" "-u"
-  -z  e.g. "-f" "-z"
+  -c  e.g. "-s" "-c"
+  -d  e.g. "-w" "-d"
+  -i  e.g. "-w" "-i"
+  -u  e.g. "-w" "-u"
+  -z  e.g. "-s" "-z"
 

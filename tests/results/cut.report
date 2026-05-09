@@ -14,10 +14,13 @@ Aliases: -b = --bytes, -c = --characters, -d = --delimiter, -f = --fields, -s = 
 
 ## Solo (unique behavior)
   -f  # select only these fields;  also print any line
+    exemplar: "-f" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+    flag:
 
 ## Via combination (distinguishable when paired)
-  --complement  e.g. "--fields=1" "--complement" "input.txt" "other.txt"
-  --output-delimiter  e.g. "--fields=1" "--output-delimiter"
+  --complement  e.g. "--fields=1" "--complement" "input.txt"
+  --output-delimiter  e.g. "--fields=1" "--output-delimiter" "input.txt" "other.txt"
   -M  e.g. "--fields=1" "-M"
   -b  e.g. "--fields=1" "-b"
   -c  e.g. "--fields=1" "-c"

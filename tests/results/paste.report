@@ -11,6 +11,35 @@ Aliases: -d = --delimiters, -s = --serial, -z = --zero-terminated
 
 ## Solo (unique behavior)
   -d  # reuse characters from LIST instead of TABs
+    exemplar: "-d" "input.txt" "other.txt" in empty_dir (-2 lines, exit 0→1)
+    base:
+    flag:
   -s  # paste one file at a time instead of in parallel
+    exemplar: "-s" "input.txt" "other.txt" in alpha_minimal (reordered)
+    base:
+      cherry	hello world
+      Apple	
+      banana	
+      Date	
+      elderberry	
+            ...
+    flag:
+      cherry	Apple	banana	Date	elderberry	BANANA	apple
+      hello world
   -z  # line delimiter is NUL, not newline
+    exemplar: "-z" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      cherry	hello world
+      Apple	
+      banana	
+      Date	
+      elderberry	
+            ...
+    flag:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
 

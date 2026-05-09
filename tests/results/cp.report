@@ -14,8 +14,20 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
 
 ## Solo (unique behavior)
   --no-preserve  # don't preserve the specified attributes
+    exemplar: "--no-preserve=attr_list" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+      (no base)
+    flag:
   -S  # override the usual backup suffix
+    exemplar: "-S" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+      (no base)
+    flag:
   -t  # copy all SOURCE arguments into DIRECTORY
+    exemplar: "-t" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+      (no base)
+    flag:
 
 ## Via combination (distinguishable when paired)
   --attributes-only  e.g. (pairwise evidence)
@@ -29,7 +41,7 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
   --recursive  e.g. (pairwise evidence)
   --reflink  e.g. (pairwise evidence)
   --remove-destination  e.g. (pairwise evidence)
-  --sparse  e.g. "-b" "-n" "--sparse" "-L"
+  --sparse  e.g. "-b" "-n" "--sparse" "-p"
   --strip-trailing-slashes  e.g. (pairwise evidence)
   --update  e.g. (pairwise evidence)
   -H  e.g. (pairwise evidence)
@@ -39,12 +51,12 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
   -T  e.g. "-b" "-n" "--sparse" "-T"
   -Z  e.g. "-b" "-n" "--sparse" "-Z"
   -a  e.g. (pairwise evidence)
-  -b  e.g. "-b" "-n" "--sparse" "-L"
+  -b  e.g. "-b" "-n" "--sparse" "-p"
   -d  e.g. (pairwise evidence)
   -f  e.g. (pairwise evidence)
   -i  e.g. (pairwise evidence)
   -l  e.g. "-b" "-n" "--sparse" "-l"
-  -n  e.g. "-b" "-n" "--sparse" "-L"
+  -n  e.g. "-b" "-n" "--sparse" "-p"
   -p  e.g. "-b" "-n" "--sparse" "-p"
   -r  e.g. "-b" "-n" "--sparse" "-r"
   -s  e.g. "-b" "-n" "--sparse" "-s"

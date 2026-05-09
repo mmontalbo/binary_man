@@ -12,7 +12,15 @@ Aliases: -L = --dereference, -f = --file-system, -t = --terse
 
 ## Solo (unique behavior)
   --cached  # specify how to use cached attributes;
+    exemplar: "--cached=644" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+      (no base)
+    flag:
   -c  # --format=FORMAT   use the specified FORMAT instead of the default;
+    exemplar: "-c" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    base:
+      (no base)
+    flag:
 
 ## Via combination (distinguishable when paired)
   --format  e.g. (pairwise evidence)

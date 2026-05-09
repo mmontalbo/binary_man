@@ -11,13 +11,163 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
 
 ## Solo (unique behavior)
   -A  # equivalent to -vET
+    exemplar: "-A" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
+    flag:
+      cherry$
+      Apple$
+      banana$
+      Date$
+      elderberry$
+            ...
   -E  # display $ at end of each line
+    exemplar: "-E" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
+    flag:
+      cherry$
+      Apple$
+      banana$
+      Date$
+      elderberry$
+            ...
   -T  # display TAB characters as ^I
+    exemplar: "-T" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
+    flag:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
   -b  # number nonempty output lines, overrides -n
+    exemplar: "-b" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
+    flag:
+           1	cherry
+           2	Apple
+           3	banana
+           4	Date
+           5	elderberry
+            ...
   -e  # equivalent to -vE
+    exemplar: "-e" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
+    flag:
+      cherry$
+      Apple$
+      banana$
+      Date$
+      elderberry$
+            ...
   -n  # number all output lines
+    exemplar: "-n" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
+    flag:
+           1	cherry
+           2	Apple
+           3	banana
+           4	Date
+           5	elderberry
+            ...
   -s  # suppress repeated empty output lines
+    exemplar: "-s" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
+    flag:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
   -t  # equivalent to -vT
+    exemplar: "-t" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
+    flag:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
   -u  # (ignored)
+    exemplar: "-u" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
+    flag:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
   -v  # use ^ and M- notation, except for LFD and TAB
+    exemplar: "-v" "input.txt" "other.txt" in alpha_minimal (-10 lines)
+    base:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
+    flag:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
 
