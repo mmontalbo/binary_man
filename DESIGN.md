@@ -33,35 +33,43 @@ The tool's input space has four independent dimensions:
 | File properties | Permissions, timestamps, sizes | Metadata-aware tools (ls -l, stat, chmod) |
 | Positional arguments | File, directory, multi-file, pattern variants | Which code path the binary takes |
 
-The base contexts use a Latin square design: 3 content levels x 3 structure levels x 3 property levels = 9 contexts where each factor level appears exactly 3 times. This ensures main effects are estimable without aliasing — when a flag behaves differently across structure levels, the difference is attributable to structure alone, not confounded with content or properties.
+The base contexts use a Latin square design: 5 content levels x 3 structure levels x 3 property levels. Property assignment cycles through a Latin square pattern. This ensures main effects are estimable without aliasing — when a flag behaves differently across structure levels, the difference is attributable to structure alone, not confounded with content or properties.
 
-All structure levels include `input.txt` and `other.txt` so multi-file invocations work in every context. The numeric content level has 16 lines (longer than default truncation thresholds like `head -n 10`).
+All structure levels include `input.txt` and `other.txt` so multi-file invocations work in every context. Content and structure definitions are in `data.rs`.
 
 ## Context design
 
-Latin square matrix (rows = content, columns = structure, cell values = properties):
+5 content levels x 3 structure levels with cycling property assignment:
 
 ```
               minimal         standard              deep
 alpha         default         varied-perms          varied-times
 numeric       varied-times    default               varied-perms
 fielded       varied-perms    varied-times          default
+formatted     default         varied-times          varied-perms
+tabular       varied-times    varied-perms          default
 ```
 
-| Context | Structure | Content | Properties |
-|---------|-----------|---------|------------|
-| alpha_minimal | input.txt + other.txt | 5 sorted words | default |
-| alpha_standard | + hidden, subdir, symlink, exec | 5 sorted words | readonly, flag-like name |
-| alpha_deep | + 3-level nesting, dir symlink | 5 sorted words | old mtime, large file |
-| numeric_minimal | input.txt + other.txt | 16 integers | old mtime, large file |
-| numeric_standard | + hidden, subdir, symlink, exec | 16 integers | default |
-| numeric_deep | + 3-level nesting, dir symlink | 16 integers | readonly, flag-like name |
-| fielded_minimal | input.txt + other.txt | 3 colon-delimited | readonly, flag-like name |
-| fielded_standard | + hidden, subdir, symlink, exec | 3 colon-delimited | old mtime, large file |
-| fielded_deep | + 3-level nesting, dir symlink | 3 colon-delimited | default |
-| empty_dir | nothing | - | - |
+**Content levels** (what's in input.txt):
+- **alpha**: 7 mixed-case words (cherry, Apple, banana, Date, ...)
+- **numeric**: 16 integers (exercises truncation — longer than `head -n 10`)
+- **fielded**: 3 colon-delimited records (bob:30:sales, ...)
+- **formatted**: tabs, blank lines, trailing whitespace, control characters (\\x01, \\x07, \\x1b)
+- **tabular**: tab-delimited fields, repeated rows, long line >80 chars
 
-Plus 7 single-factor perturbations from numeric_standard (the standard+default cell, richest structure): remove .hidden, remove subdir, remove link.txt, empty input.txt, readonly, old mtime, size=1. These enable attribution within a single base.
+**Structure levels** (what files exist):
+- **minimal**: input.txt + other.txt (2 files)
+- **standard**: + hidden, subdir, symlink, exec, more files (10 entries)
+- **deep**: + 3-level nesting, directory symlink (7 entries)
+
+**Property levels** (file metadata):
+- **default**: no special properties
+- **varied-perms**: readonly file, flag-like filename (`-rf`)
+- **varied-times**: old mtime, large file (10KB)
+
+Plus: empty_dir (nothing — error path exerciser), 9 single-factor perturbations from numeric_standard (remove .hidden, remove subdir, remove link.txt, empty input.txt, readonly, old mtime, size=1, LC_ALL=en_US.UTF-8, COLUMNS=40), and a locale perturbation on alpha_minimal (mixed-case content + UTF-8 locale).
+
+Total: ~27 contexts per grid.
 
 For pattern-taking tools (grep, sed, awk), the pattern argument is also varied: literal match, case variant, regex metacharacter, non-matching. This exercises flags like -i (case sensitivity), -E/-F/-G (regex engine), -w (word boundary).
 
@@ -114,20 +122,30 @@ A flag is distinguished if any run containing it (solo or in combination) produc
 
 Combination-based evidence is weaker than solo: it proves the flag *modifies behavior differently than another flag* but the specific independent effect is only visible in combination. Solo evidence means the flag's independent behavioral surface has been directly observed.
 
+**Behavioral aliases** are detected when two flags with different names produce identical behavior across all contexts. These are reported separately — they may be genuine aliases (same flag, different name) or genuinely different flags that are indistinguishable under tested conditions.
+
+**Exemplar observations** are shown for each solo flag: the context where the flag's behavior is most distinctive, with both the base invocation output and the flag invocation output. This mechanically demonstrates what the flag does without documentation or prior knowledge.
+
 ## Limitations
 
 **Positional argument coverage.** Runs are generated with three target types: single file (`input.txt`), directory (`.`), and multi-file (`input.txt other.txt`). Pattern-taking tools also get four pattern variants. This covers most invocation patterns but not all — stdin piping, glob expansion, and recursive directory arguments are not yet generated.
 
 **Modifier flags require combination testing.** Flags like -h, -G, -k that modify another flag's output (e.g., -l) cannot be distinguished solo. Cross-group interaction addresses this but the evidence is weaker — it proves the flag modifies behavior differently, not what its independent effect is.
 
-**Context diversity is binary-agnostic, not binary-optimal.** The same 17 contexts (10 base + 7 perturbations) are used for every binary. A sort-specific probe with carefully chosen content would distinguish more flags than the generic contexts. The trade-off is automation vs coverage.
+**Context diversity is binary-agnostic, not binary-optimal.** The same ~27 contexts are used for every binary. A sort-specific probe with carefully chosen content would distinguish more flags than the generic contexts. The trade-off is automation vs coverage.
 
 **Delta grouping is lossy for non-permutation reorderings.** When output lines are added or removed AND reordered simultaneously, the delta encodes the set difference but not the order of shared lines. Two flags that add the same lines but in different positions may be incorrectly grouped.
 
 **No semantic interpretation.** The tool reports *that* flags differ, not *why*. Understanding what `-n` does (numeric sort) requires reading the output, not just knowing it's isolated. The behavioral groups are evidence for interpretation, not interpretation itself.
 
-**Environment and terminal sensitivity are untested.** The sandbox sets LANG=C and pipes stdout (no TTY). Flags sensitive to locale (LC_COLLATE), terminal width (COLUMNS), or terminal type (TERM) may be indistinguishable because their triggering conditions don't exist in the sandbox.
+**Environment sensitivity is limited.** The sandbox defaults to LANG=C with piped stdout (no TTY). LC_ALL and COLUMNS perturbations are included but terminal-dependent flags (color output, cursor control) may be indistinguishable because stdout is not a TTY.
+
+**Stateful binaries need manual setup.** Tools like git that require prerequisite state (repositories, commits) cannot be fully explored automatically. The `invoke` mechanism supports manual context setup, but automatic discovery of prerequisite invoke sequences is not yet implemented.
 
 ## Execution
 
-Each cell gets its own bwrap sandbox (network-isolated, separate mount namespace). Context setup is replayed per cell. All cells run in parallel bounded by a thread pool (8 threads). A 5-second per-cell timeout kills runaway processes via process group signal. Wall time is recorded per cell; CPU time and memory are not measured in parallel mode.
+Cells are grouped by context. For each context, all cell workspaces are created as subdirectories under a batch parent, a shell script runs all commands with per-command `timeout`, and bwrap is invoked once per context (not per cell). This reduces thousands of bwrap namespace creations to ~27, achieving ~5000 cells/s.
+
+Each cell gets its own workspace directory within the batch. The bwrap sandbox provides network isolation and a controlled mount namespace (read-only system paths, writable workspace). A 2-second per-command timeout kills runaway processes. Contexts are processed in parallel across 8 threads.
+
+The integration test verifies 17 coreutils binaries in ~40 seconds.

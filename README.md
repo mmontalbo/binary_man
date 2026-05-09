@@ -22,14 +22,8 @@ bgrid --dry-run <binary> <file.probe> show resolved grid without executing
 (varying file content, directory structure, permissions, timestamps),
 runs every flag across every context in parallel, analyzes behavioral
 groups, refines with cross-group interactions, and converges when no
-new flags are distinguished. Output is a distinguishability report:
-
-```
-## Distinguished: 59/73 flags
-  33 solo (unique behavior)
-  26 via combination only
-  2 untested
-```
+new flags are distinguished. Output is a distinguishability report
+with exemplar observations showing what each flag does.
 
 For subcommands: `bgrid git diff` explores `git diff`.
 
@@ -70,10 +64,19 @@ See [LANGUAGE.md](LANGUAGE.md) for the probe language specification.
 - bubblewrap (`bwrap`) — install via your package manager
 - Rust toolchain
 
+## Testing
+
+```
+cargo test                    # unit tests
+./tests/coreutils.sh          # integration test (17 binaries, ~40s)
+```
+
+Reference reports with exemplar observations for each binary are
+in `tests/results/`.
+
 ## Development
 
 ```
 nix develop              # enter dev shell (or use direnv)
 cargo build              # build bgrid
-cargo test               # run unit tests
 ```
