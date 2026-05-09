@@ -1,10 +1,10 @@
 # Exploration: sort
 
 ## Rounds
-  round 0: 82 isolated cumulative, 25 identical in round (discovery)
-  round 1: 113 isolated cumulative, 35 identical in round (refinement)
-  round 2: 121 isolated cumulative, 35 identical in round (refinement)
-  round 3: 121 isolated cumulative, 37 identical in round (refinement)
+  round 0: 91 isolated cumulative, 39 identical in round (discovery)
+  round 1: 122 isolated cumulative, 48 identical in round (refinement)
+  round 2: 129 isolated cumulative, 38 identical in round (refinement)
+  round 3: 131 isolated cumulative, 41 identical in round (refinement)
 
 ## Distinguished: 30/30 flags
   23 observed behavior (16 solo, 7 via combination)
@@ -15,7 +15,7 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
 
 ## Solo (unique behavior)
   --batch-size  # merge at most NMERGE inputs at once;
-    exemplar: "--batch-size=nmerge" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
+    exemplar: "--batch-size=nmerge" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
     base:
     flag:
   --debug  # annotate the part of the line used to sort,
@@ -55,7 +55,7 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       banana
             ...
   --sort  # sort according to WORD:
-    exemplar: "--sort=auto" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "--sort=auto" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -C
@@ -72,14 +72,14 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       banana
             ...
     flag:
-      apple
       Apple
-      BANANA
+      cherry
+      apple
+      elderberry
       hello world
-      banana
             ...
   -S  # use SIZE for main memory buffer
-    exemplar: "-S" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
+    exemplar: "-S" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
     base:
     flag:
   -T  # use DIR for temporaries, not $TMPDIR or /tmp;
@@ -213,7 +213,7 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       apple
             ...
   -t  # use SEP instead of non-blank to blank transition
-    exemplar: "-t" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
+    exemplar: "-t" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
     base:
     flag:
   -u  # with -c, check for strict ordering;
@@ -250,13 +250,13 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
             ...
 
 ## Via combination (distinguishable when paired)
-  --check  e.g. "--random-sort" "--check" "input.txt"
-  --compress-program  e.g. "--output=input.txt" "--compress-program" "input.txt"
-  --random-source  e.g. "-o" "--random-source" "input.txt" "other.txt"
-  -M  e.g. "-M" "-n"
+  --check  e.g. "-o" "--check" "input.txt" "other.txt"
+  --compress-program  e.g. "-o" "--compress-program" "input.txt"
+  --random-source  e.g. "--output=input.txt" "--random-source" "input.txt"
+  -M  e.g. "-d" "-M"
   -c  e.g. "-R" "-c" "input.txt"
-  -g  e.g. "-d" "-g"
-  -h  e.g. "-g" "-h"
-  -n  e.g. "-i" "-n"
-  -s  e.g. (pairwise evidence)
+  -g  e.g. "-g" "-n"
+  -h  e.g. "-h" "-n"
+  -n  e.g. "-g" "-n"
+  -s  e.g. "-R" "-s" "input.txt" "other.txt"
 

@@ -1,13 +1,14 @@
 # Exploration: fmt
 
 ## Rounds
-  round 0: 58 isolated cumulative, 21 identical in round (discovery)
-  round 1: 58 isolated cumulative, 22 identical in round (refinement)
+  round 0: 58 isolated cumulative, 27 identical in round (discovery)
+  round 1: 59 isolated cumulative, 21 identical in round (refinement)
+  round 2: 59 isolated cumulative, 21 identical in round (refinement)
 
 ## Distinguished: 7/7 flags
   6 observed behavior (6 solo, 0 via combination)
   1 error-differentiated only (1 solo, 0 via combination)
-  1 behavioral aliases detected
+  2 behavioral aliases detected
 
 Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t = --tagged-paragraph, -u = --uniform-spacing, -w = --width
 
@@ -21,7 +22,7 @@ Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t 
       cherry Apple banana Date elderberry BANANA apple
       hello world
   -g  # goal width (default of 93% of width)
-    exemplar: "-g" "input.txt" "subdir" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-g" "alpha" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -p  # reformat only lines beginning with STRING,
@@ -61,7 +62,7 @@ Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t 
       cherry Apple banana Date elderberry BANANA apple
       hello world
   -w  # maximum line width (default of 75 columns)
-    exemplar: "-w" "input.txt" "subdir" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-w" "alpha" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
 

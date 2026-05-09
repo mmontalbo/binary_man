@@ -143,17 +143,18 @@ pub fn infer_base_args(help_text: &str) -> (Option<String>, Option<String>) {
 /// Probe the binary with candidate arg patterns to discover which invocation
 /// patterns succeed. Returns the list of working arg patterns (each is a vec
 /// of positional args). Replaces help-text parsing with behavioral observation.
+/// Returns (working_arg_patterns, stdin_works).
 pub fn probe_arg_patterns(
     binary: &str,
     sub_args: &[&str],
     sandbox: &Sandbox,
-) -> Vec<Vec<String>> {
+) -> (Vec<Vec<String>>, bool) {
     use crate::data;
 
     // Create a minimal workspace for probing
     let probe_dir = match tempfile::Builder::new().prefix("bgrid_probe_").tempdir() {
         Ok(d) => d,
-        Err(_) => return vec![vec!["input.txt".into()]], // fallback
+        Err(_) => return (vec![vec!["input.txt".into()]], false), // fallback
     };
     let work_dir = probe_dir.path();
 
@@ -200,13 +201,62 @@ pub fn probe_arg_patterns(
         }
     }
 
-    // Deduplicate: if both (file) and (file, file) work, keep both
-    // If nothing worked, fall back to single file
+    // Probe stdin: try piping content with no file arg and with sub_args only
+    let mut stdin_works = false;
+    {
+        let mut args: Vec<&str> = sub_args.to_vec();
+        // Some tools need a flag to signal stdin (like sort with no args reads stdin)
+        // Try with no args first
+        let mut cmd = sandbox.command(binary, &args, work_dir, &env, None);
+        cmd.stdin(std::process::Stdio::piped());
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+
+        if let Ok(mut child) = cmd.spawn() {
+            // Write content to stdin
+            if let Some(mut stdin) = child.stdin.take() {
+                use std::io::Write;
+                let _ = stdin.write_all(b"cherry\napple\nbanana\n");
+            }
+            // Wait with a short timeout
+            if let Ok(output) = child.wait_with_output() {
+                let exit = output.status.code().unwrap_or(-1);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if (exit == 0 || exit == 1) && !stdout.trim().is_empty() {
+                    stdin_works = true;
+                }
+            }
+        }
+
+        // Also try with "-" as explicit stdin marker
+        if !stdin_works {
+            args.push("-");
+            let mut cmd2 = sandbox.command(binary, &args, work_dir, &env, None);
+            cmd2.stdin(std::process::Stdio::piped());
+            cmd2.stdout(std::process::Stdio::piped());
+            cmd2.stderr(std::process::Stdio::piped());
+
+            if let Ok(mut child) = cmd2.spawn() {
+                if let Some(mut stdin) = child.stdin.take() {
+                    use std::io::Write;
+                    let _ = stdin.write_all(b"cherry\napple\nbanana\n");
+                }
+                if let Ok(output) = child.wait_with_output() {
+                    let exit = output.status.code().unwrap_or(-1);
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    if (exit == 0 || exit == 1) && !stdout.trim().is_empty() {
+                        stdin_works = true;
+                    }
+                }
+            }
+        }
+    }
+
     if working.is_empty() {
         working.push(vec!["input.txt".into()]);
     }
 
-    working
+    (working, stdin_works)
 }
 
 /// Discovered subcommand with its behavioral classification.
@@ -473,7 +523,10 @@ pub fn generate_initial_script(
     flag_info.all_flags = seen.clone();
 
     // Discover which invocation patterns work by probing the binary
-    let working_patterns = probe_arg_patterns(binary, sub_args, sandbox);
+    let (working_patterns, stdin_works) = probe_arg_patterns(binary, sub_args, sandbox);
+    if stdin_works {
+        eprintln!("  stdin: accepted");
+    }
 
     // --- Base contexts ---
     // Five content levels × three structure levels × three property levels.
@@ -581,6 +634,47 @@ pub fn generate_initial_script(
             runs.push(Run {
                 args,
                 in_contexts: None, stdin: None,
+                diff_from: Some(base_args.clone()),
+            });
+        }
+    }
+
+    // Stdin runs: if the binary accepts stdin, generate runs that pipe content
+    if stdin_works {
+        let stdin_content = parse::StdinSource::Lines(
+            vec!["cherry".into(), "apple".into(), "banana".into()]
+        );
+        let base_args: Vec<String> = sub_prefix.clone();
+        // Base stdin run (no flags)
+        runs.push(Run {
+            args: base_args.clone(),
+            in_contexts: None,
+            stdin: Some(stdin_content.clone()),
+            diff_from: None,
+        });
+        // Flag runs via stdin
+        for flag in &short_flags {
+            let mut args = sub_prefix.clone();
+            args.push(flag.clone());
+            runs.push(Run {
+                args,
+                in_contexts: None,
+                stdin: Some(stdin_content.clone()),
+                diff_from: Some(base_args.clone()),
+            });
+        }
+        for (flag, hint) in &long_flags {
+            let mut args = sub_prefix.clone();
+            let val = hint.as_ref().map(|h| default_value(h));
+            if let Some(v) = val {
+                args.push(format!("{}={}", flag, v));
+            } else {
+                args.push(flag.clone());
+            }
+            runs.push(Run {
+                args,
+                in_contexts: None,
+                stdin: Some(stdin_content.clone()),
                 diff_from: Some(base_args.clone()),
             });
         }

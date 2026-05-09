@@ -1,13 +1,13 @@
 # Exploration: sed
 
 ## Rounds
-  round 0: 17 isolated cumulative, 12 identical in round (discovery)
-  round 1: 22 isolated cumulative, 27 identical in round (refinement)
-  round 2: 26 isolated cumulative, 39 identical in round (refinement)
-  round 3: 29 isolated cumulative, 49 identical in round (refinement)
+  round 0: 15 isolated cumulative, 13 identical in round (discovery)
+  round 1: 24 isolated cumulative, 26 identical in round (refinement)
+  round 2: 40 isolated cumulative, 33 identical in round (refinement)
+  round 3: 52 isolated cumulative, 41 identical in round (refinement)
 
-## Distinguished: 24/24 flags
-  22 observed behavior (4 solo, 18 via combination)
+## Distinguished: 23/24 flags
+  21 observed behavior (4 solo, 17 via combination)
   2 error-differentiated only (2 solo, 0 via combination)
   1 behavioral aliases detected
 
@@ -33,7 +33,7 @@
             ...
     flag:
   --posix
-    exemplar: "--posix" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "--posix" "alpha" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -i
@@ -47,24 +47,23 @@
             ...
     flag:
   -l
-    exemplar: "-l" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-l" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
 
 ## Via combination (distinguishable when paired)
-  --expression  e.g. "--in-place" "--expression" "input.txt" "other.txt"
-  --file  e.g. "--debug" "--file" "input.txt"
-  --line-length  e.g. "--debug" "--line-length" "alpha" "input.txt"
-  --null-data  e.g. (pairwise evidence)
+  --expression  e.g. (pairwise evidence)
+  --file  e.g. "--posix" "--file" "input.txt"
+  --line-length  e.g. (pairwise evidence)
+  --null-data  e.g. "--follow-symlinks" "--in-place" "--null-data" "--unbuffered" "input.txt" "other.txt"
   --quiet  e.g. (pairwise evidence)
   --regexp-extended  e.g. (pairwise evidence)
-  --sandbox  e.g. (pairwise evidence)
-  --separate  e.g. (pairwise evidence)
-  --silent  e.g. "--debug" "--file" "--silent" "input.txt"
-  --unbuffered  e.g. (pairwise evidence)
+  --sandbox  e.g. "--follow-symlinks" "--in-place" "--sandbox" "--silent" "input.txt" "other.txt"
+  --separate  e.g. "--follow-symlinks" "--in-place" "--separate" "input.txt" "other.txt"
+  --silent  e.g. "--follow-symlinks" "--in-place" "--sandbox" "--silent" "input.txt" "other.txt"
+  --unbuffered  e.g. "--follow-symlinks" "--in-place" "--null-data" "--unbuffered" "input.txt" "other.txt"
   -E  e.g. (pairwise evidence)
   -e  e.g. (pairwise evidence)
-  -f  e.g. "--in-place" "-f"
   -n  e.g. (pairwise evidence)
   -r  e.g. (pairwise evidence)
   -s  e.g. (pairwise evidence)

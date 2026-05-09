@@ -1,7 +1,7 @@
 # Exploration: find
 
 ## Rounds
-  round 0: 28 isolated cumulative, 3 identical in round (discovery)
+  round 0: 28 isolated cumulative, 7 identical in round (discovery)
   round 1: 28 isolated cumulative, 3 identical in round (refinement)
 
 ## Distinguished: 4/4 flags
@@ -25,11 +25,11 @@
     base:
     flag:
   -a
-    exemplar: "-a" "input.txt" in empty_dir (different)
+    exemplar: "-a" "input.txt" "other.txt" in empty_dir (different)
     base:
     flag:
   -o
-    exemplar: "-o" "input.txt" "subdir" in empty_dir (different)
+    exemplar: "-o" "input.txt" in empty_dir (different)
     base:
     flag:
 

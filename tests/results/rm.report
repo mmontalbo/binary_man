@@ -13,14 +13,15 @@ Aliases: -d = --dir, -f = --force, -v = --verbose
 
 ## Solo (unique behavior)
   -f  # ignore nonexistent files and arguments, never prompt
-    exemplar: "-f" "input.txt" in alpha_standard (different)
+    exemplar: "-f" "input.txt" "other.txt" in alpha_standard (different)
     base:
     flag:
   -v  # explain what is being done
-    exemplar: "-v" "input.txt" in alpha_standard (different)
+    exemplar: "-v" "input.txt" "other.txt" in alpha_standard (different)
     base:
     flag:
       removed 'input.txt'
+      removed 'other.txt'
 
 ## Via combination (distinguishable when paired)
   --no-preserve-root  e.g. (pairwise evidence)

@@ -1,8 +1,8 @@
 # Exploration: wc
 
 ## Rounds
-  round 0: 46 isolated cumulative, 19 identical in round (discovery)
-  round 1: 46 isolated cumulative, 29 identical in round (refinement)
+  round 0: 52 isolated cumulative, 24 identical in round (discovery)
+  round 1: 52 isolated cumulative, 22 identical in round (refinement)
 
 ## Distinguished: 7/7 flags
   6 observed behavior (4 solo, 2 via combination)

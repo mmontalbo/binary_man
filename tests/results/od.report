@@ -1,9 +1,9 @@
 # Exploration: od
 
 ## Rounds
-  round 0: 90 isolated cumulative, 15 identical in round (discovery)
-  round 1: 113 isolated cumulative, 16 identical in round (refinement)
-  round 2: 113 isolated cumulative, 36 identical in round (refinement)
+  round 0: 100 isolated cumulative, 26 identical in round (discovery)
+  round 1: 123 isolated cumulative, 16 identical in round (refinement)
+  round 2: 123 isolated cumulative, 36 identical in round (refinement)
 
 ## Distinguished: 19/21 flags
   14 observed behavior (12 solo, 2 via combination)
@@ -15,7 +15,7 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
 
 ## Solo (unique behavior)
   --endian  # swap input bytes according the specified order
-    exemplar: "--endian" "alpha" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "--endian" "input.txt" "subdir" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   --strings
@@ -27,15 +27,15 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
     base:
     flag:
   -A  # output format for file offsets; RADIX is one
-    exemplar: "-A" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-A" "input.txt" "subdir" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -N  # limit dump to BYTES input bytes
-    exemplar: "-N" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-N" "input.txt" "subdir" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -S
-    exemplar: "-S" "alpha" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-S" "alpha" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -a  # same as -t a,  select named characters, ignoring high-order bit
@@ -123,7 +123,7 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000060  1818585098  1998614380  1684828783          10
       0000075
   -j  # skip BYTES input bytes first
-    exemplar: "-j" "alpha" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-j" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -l  # same as -t dL, select decimal longs
@@ -155,7 +155,7 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000060  26634  27749  28524  30496  29295  25708     10
       0000075
   -t  # select output format or formats
-    exemplar: "-t" "alpha" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 1→127)
+    exemplar: "-t" "alpha" "." in numeric_standard / env COLUMNS=40 (different, exit 1→127)
     base:
     flag:
   -x  # same as -t x2, select hexadecimal 2-byte units
@@ -174,8 +174,8 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000075
 
 ## Via combination (distinguishable when paired)
-  --width  e.g. "-a" "--width" "input.txt" "other.txt"
-  -o  e.g. "-a" "-o" "input.txt" "subdir"
+  --width  e.g. "-c" "--width" "input.txt"
+  -o  e.g. "-a" "-o" "input.txt"
 
 ## Indistinguishable under tested conditions
   UNEXPLAINED (2): -v, -w

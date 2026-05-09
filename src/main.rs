@@ -58,7 +58,12 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, skeleton: bool)
     // Probe for subcommands (if no subcommand was specified)
     if sub_args.is_empty() {
         let subcommands = discover::probe_subcommands(binary, sandbox);
-        if !subcommands.is_empty() {
+        // Only report if some candidates were rejected — if ALL succeed,
+        // the binary just accepts any arg as a filename, not subcommands
+        let total_probed = binary_grid::data::SUBCOMMAND_CANDIDATES.len();
+        let has_real_subcommands = !subcommands.is_empty()
+            && subcommands.len() < total_probed;
+        if has_real_subcommands {
             let working: Vec<_> = subcommands.iter().filter(|s| s.exits_ok).collect();
             let builders: Vec<_> = subcommands.iter().filter(|s| s.modifies_fs).collect();
             let recognized: Vec<_> = subcommands.iter().filter(|s| !s.exits_ok && s.recognized).collect();

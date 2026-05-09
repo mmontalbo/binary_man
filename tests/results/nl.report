@@ -1,8 +1,8 @@
 # Exploration: nl
 
 ## Rounds
-  round 0: 62 isolated cumulative, 10 identical in round (discovery)
-  round 1: 62 isolated cumulative, 31 identical in round (refinement)
+  round 0: 66 isolated cumulative, 22 identical in round (discovery)
+  round 1: 66 isolated cumulative, 31 identical in round (refinement)
 
 ## Distinguished: 10/11 flags
   9 observed behavior (9 solo, 0 via combination)
