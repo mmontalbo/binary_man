@@ -5,7 +5,7 @@
   round 1: 19 isolated cumulative, 6 identical in round (refinement)
 
 ## Distinguished: 3/3 flags
-  3 solo (unique behavior)
+  3 observed behavior (3 solo, 0 via combination)
 
 Aliases: -d = --delimiters, -s = --serial, -z = --zero-terminated
 

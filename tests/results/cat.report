@@ -5,7 +5,7 @@
   round 1: 38 isolated cumulative, 15 identical in round (refinement)
 
 ## Distinguished: 10/10 flags
-  10 solo (unique behavior)
+  10 observed behavior (10 solo, 0 via combination)
 
 Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonblank, -n = --number, -s = --squeeze-blank, -v = --show-nonprinting
 

@@ -339,13 +339,45 @@ pub fn format_exploration_report(
     }
     out.push('\n');
 
+    // Classify evidence quality: did we actually see the flag work?
+    // A flag has "observed behavior" if any of its runs exited 0 with stdout
+    // that differs from the base run's stdout in at least one context.
+    let has_observed_behavior = |stem: &str| -> bool {
+        for run in &final_metrics.runs {
+            let run_stem = flag_stem(&run.args_str);
+            if run_stem.as_deref() == Some(stem) || run_stem.as_ref().map(|s| canonical_flag(s, aliases)) == Some(stem.to_string()) {
+                // Check if any context group shows exit 0 with non-empty stdout
+                for (_, obs) in &run.context_groups {
+                    if obs.exit_code == Some(0) && !obs.stdout.trim().is_empty() {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    };
+
+    let solo_observed: Vec<&String> = solo_distinguished.iter()
+        .filter(|s| has_observed_behavior(s)).collect();
+    let solo_error_only: Vec<&String> = solo_distinguished.iter()
+        .filter(|s| !has_observed_behavior(s)).collect();
+    let combo_observed: Vec<&String> = combo_distinguished.iter()
+        .filter(|s| has_observed_behavior(s)).collect();
+    let combo_error_only: Vec<&String> = combo_distinguished.iter()
+        .filter(|s| !has_observed_behavior(s)).collect();
+
+    let total_observed = solo_observed.len() + combo_observed.len();
+    let total_error_only = solo_error_only.len() + combo_error_only.len();
+
     // Flag distinguishability summary
     let untested = final_metrics.untested_flags.len();
     let distinguished_count = all_distinguished.len().min(unique_stem_count);
     out.push_str(&format!("## Distinguished: {}/{} flags\n", distinguished_count, unique_stem_count));
-    out.push_str(&format!("  {} solo (unique behavior)\n", solo_distinguished.len()));
-    if !combo_distinguished.is_empty() {
-        out.push_str(&format!("  {} via combination only\n", combo_distinguished.len()));
+    out.push_str(&format!("  {} observed behavior ({} solo, {} via combination)\n",
+        total_observed, solo_observed.len(), combo_observed.len()));
+    if total_error_only > 0 {
+        out.push_str(&format!("  {} error-differentiated only ({} solo, {} via combination)\n",
+            total_error_only, solo_error_only.len(), combo_error_only.len()));
     }
     if !behavioral_aliases.is_empty() {
         out.push_str(&format!("  {} behavioral aliases detected\n", behavioral_aliases.len()));

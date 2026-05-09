@@ -6,8 +6,8 @@
   round 2: 76 isolated cumulative, 14 identical in round (refinement)
 
 ## Distinguished: 20/21 flags
-  19 solo (unique behavior)
-  1 via combination only
+  15 observed behavior (14 solo, 1 via combination)
+  5 error-differentiated only (5 solo, 0 via combination)
   1 behavioral aliases detected
 
 Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --format, -v = --output-duplicates
@@ -18,7 +18,7 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
     base:
     flag:
   --strings
-    exemplar: "--strings" "input.txt" in empty_dir (different, exit 0→1)
+    exemplar: "--strings" "input.txt" "other.txt" in empty_dir (different, exit 0→1)
     base:
     flag:
   --traditional  # accept arguments in third form above
@@ -201,5 +201,5 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000075
 
 ## Via combination (distinguishable when paired)
-  --width  e.g. "-d" "--width" "input.txt"
+  --width  e.g. "-c" "--width" "input.txt" "other.txt"
 

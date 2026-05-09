@@ -5,8 +5,8 @@
   round 1: 12 isolated cumulative, 11 identical in round (refinement)
 
 ## Distinguished: 10/12 flags
-  2 solo (unique behavior)
-  8 via combination only
+  1 observed behavior (1 solo, 0 via combination)
+  9 error-differentiated only (1 solo, 8 via combination)
   1 behavioral aliases detected
   2 indistinguishable under tested conditions
 

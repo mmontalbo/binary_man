@@ -6,8 +6,8 @@
   round 2: 28 isolated cumulative, 2 identical in round (refinement)
 
 ## Distinguished: 11/11 flags
-  3 solo (unique behavior)
-  8 via combination only
+  0 observed behavior (0 solo, 0 via combination)
+  11 error-differentiated only (3 solo, 8 via combination)
 
 Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, -s = --skip-chars, -u = --unique, -w = --check-chars, -z = --zero-terminated
 
@@ -29,12 +29,12 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
     flag:
 
 ## Via combination (distinguishable when paired)
-  --all-repeated  e.g. "-s" "--all-repeated"
-  --group  e.g. "-w" "--group"
-  -D  e.g. "-w" "-D"
-  -c  e.g. "-s" "-c"
-  -d  e.g. "-w" "-d"
-  -i  e.g. "-w" "-i"
-  -u  e.g. "-w" "-u"
-  -z  e.g. "-s" "-z"
+  --all-repeated  e.g. "-w" "--all-repeated"
+  --group  e.g. "-f" "--group"
+  -D  e.g. "-s" "-D"
+  -c  e.g. "-f" "-c"
+  -d  e.g. "-f" "-d"
+  -i  e.g. "-f" "-i"
+  -u  e.g. "-f" "-u"
+  -z  e.g. "-w" "-z"
 

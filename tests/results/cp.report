@@ -7,8 +7,8 @@
   round 3: 17 isolated cumulative, 3 identical in round (refinement)
 
 ## Distinguished: 36/36 flags
-  3 solo (unique behavior)
-  33 via combination only
+  0 observed behavior (0 solo, 0 via combination)
+  36 error-differentiated only (3 solo, 33 via combination)
 
 Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-target-directory, -a = --archive, -f = --force, -i = --interactive, -l = --link, -n = --no-clobber, -s = --symbolic-link, -t = --target-directory, -v = --verbose, -x = --one-file-system
 
@@ -41,7 +41,7 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
   --recursive  e.g. (pairwise evidence)
   --reflink  e.g. (pairwise evidence)
   --remove-destination  e.g. (pairwise evidence)
-  --sparse  e.g. "-b" "-n" "--sparse" "-p"
+  --sparse  e.g. "-b" "-n" "--sparse" "-P"
   --strip-trailing-slashes  e.g. (pairwise evidence)
   --update  e.g. (pairwise evidence)
   -H  e.g. (pairwise evidence)
@@ -51,12 +51,12 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
   -T  e.g. "-b" "-n" "--sparse" "-T"
   -Z  e.g. "-b" "-n" "--sparse" "-Z"
   -a  e.g. (pairwise evidence)
-  -b  e.g. "-b" "-n" "--sparse" "-p"
+  -b  e.g. "-b" "-n" "--sparse" "-P"
   -d  e.g. (pairwise evidence)
   -f  e.g. (pairwise evidence)
   -i  e.g. (pairwise evidence)
   -l  e.g. "-b" "-n" "--sparse" "-l"
-  -n  e.g. "-b" "-n" "--sparse" "-p"
+  -n  e.g. "-b" "-n" "--sparse" "-P"
   -p  e.g. "-b" "-n" "--sparse" "-p"
   -r  e.g. "-b" "-n" "--sparse" "-r"
   -s  e.g. "-b" "-n" "--sparse" "-s"

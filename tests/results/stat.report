@@ -5,8 +5,8 @@
   round 1: 3 isolated cumulative, 2 identical in round (refinement)
 
 ## Distinguished: 7/7 flags
-  2 solo (unique behavior)
-  5 via combination only
+  0 observed behavior (0 solo, 0 via combination)
+  7 error-differentiated only (2 solo, 5 via combination)
 
 Aliases: -L = --dereference, -f = --file-system, -t = --terse
 

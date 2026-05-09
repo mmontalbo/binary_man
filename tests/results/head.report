@@ -5,7 +5,8 @@
   round 1: 22 isolated cumulative, 13 identical in round (refinement)
 
 ## Distinguished: 4/7 flags
-  4 solo (unique behavior)
+  2 observed behavior (2 solo, 0 via combination)
+  2 error-differentiated only (2 solo, 0 via combination)
   3 indistinguishable under tested conditions
 
 Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated

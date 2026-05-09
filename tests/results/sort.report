@@ -7,15 +7,15 @@
   round 3: 101 isolated cumulative, 34 identical in round (refinement)
 
 ## Distinguished: 30/30 flags
-  21 solo (unique behavior)
-  9 via combination only
+  22 observed behavior (15 solo, 7 via combination)
+  8 error-differentiated only (6 solo, 2 via combination)
   1 behavioral aliases detected
 
 Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --temporary-directory, -V = --version-sort, -b = --ignore-leading-blanks, -d = --dictionary-order, -f = --ignore-case, -g = --general-numeric-sort, -h = --human-numeric-sort, -i = --ignore-nonprinting, -k = --key, -m = --merge, -n = --numeric-sort, -o = --output, -r = --reverse, -s = --stable, -t = --field-separator, -u = --unique, -z = --zero-terminated
 
 ## Solo (unique behavior)
   --batch-size  # merge at most NMERGE inputs at once;
-    exemplar: "--batch-size=nmerge" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
+    exemplar: "--batch-size=nmerge" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
     base:
     flag:
   --debug  # annotate the part of the line used to sort,
@@ -72,14 +72,14 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       banana
             ...
     flag:
-      banana
-      BANANA
-      elderberry
       hello world
-      cherry
+      Apple
+      elderberry
+      banana
+      apple
             ...
   -S  # use SIZE for main memory buffer
-    exemplar: "-S" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
+    exemplar: "-S" "." in numeric_standard / env COLUMNS=40 (different, exit 2→127)
     base:
     flag:
   -T  # use DIR for temporaries, not $TMPDIR or /tmp;
@@ -213,7 +213,7 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       apple
             ...
   -t  # use SEP instead of non-blank to blank transition
-    exemplar: "-t" "input.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
+    exemplar: "-t" "input.txt" "other.txt" in numeric_standard / env COLUMNS=40 (different, exit 2→127)
     base:
     flag:
   -u  # with -c, check for strict ordering;
@@ -250,11 +250,11 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
             ...
 
 ## Via combination (distinguishable when paired)
-  --check  e.g. "-o" "--check" "input.txt"
-  --compress-program  e.g. "-R" "--compress-program" "input.txt" "other.txt"
-  --random-source  e.g. "-o" "--random-source" "input.txt"
-  -M  e.g. "-R" "-M" "input.txt" "other.txt"
-  -c  e.g. "--output=input.txt" "-c" "input.txt"
+  --check  e.g. "-o" "--check"
+  --compress-program  e.g. "-o" "--compress-program" "."
+  --random-source  e.g. "-o" "--random-source"
+  -M  e.g. "-R" "-M"
+  -c  e.g. "-o" "-c" "."
   -g  e.g. (pairwise evidence)
   -h  e.g. (pairwise evidence)
   -n  e.g. (pairwise evidence)

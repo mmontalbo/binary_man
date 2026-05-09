@@ -5,7 +5,8 @@
   round 1: 32 isolated cumulative, 12 identical in round (refinement)
 
 ## Distinguished: 7/7 flags
-  7 solo (unique behavior)
+  6 observed behavior (6 solo, 0 via combination)
+  1 error-differentiated only (1 solo, 0 via combination)
   2 behavioral aliases detected
 
 Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t = --tagged-paragraph, -u = --uniform-spacing, -w = --width
