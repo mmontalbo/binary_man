@@ -5,11 +5,9 @@ development. Not all are confirmed bugs — some are design choices,
 some are edge cases, some are genuine issues worth reporting upstream.
 
 ## Git: --stat + --shortstat duplicate summary line
-
-**Severity:** Low (UI bug)
-**Affected:** git diff, git log (shared diff machinery)
-**Reproduced on:** git 2.50.1
-**Found by:** `combine` pairwise flag testing (535 cells)
+Observed in: git diff, git log (shared diff machinery)
+Version: git 2.50.1
+Method: `combine` pairwise flag testing (535 cells)
 
 When `--stat` and `--shortstat` are both specified, the summary line
 ("N files changed, M insertions(+), K deletions(-)") appears twice.
@@ -31,17 +29,15 @@ Reproducible regardless of flag order. Also appears in:
 - `git log --oneline --stat --shortstat`
 
 ## Git: --raw + --word-diff silently drops word-diff
-
-**Severity:** Low (inconsistency)
-**Affected:** git diff
-**Reproduced on:** git 2.50.1
-**Found by:** manual flag interaction probing (216 cells)
+Observed in: git diff
+Version: git 2.50.1
+Method: manual flag interaction probing (216 cells)
 
 `--raw` combined with `-p` shows BOTH outputs (raw lines then patch).
 But `--raw` combined with `--word-diff` shows ONLY raw output — the
 word-diff is silently suppressed.
 
-Since `--word-diff` is a variant of patch format (`-p`), these should
+Since `--word-diff` is a variant of patch format (`-p`), these might be expected to
 behave the same: either both concatenate or both override.
 
 ```
@@ -50,25 +46,21 @@ $ git diff --raw --word-diff  # shows raw only (word-diff dropped)
 ```
 
 ## Git: --no-merges + --merges produces silent empty output
-
-**Severity:** Informational (questionable UX)
-**Affected:** git log
-**Reproduced on:** git 2.50.1
-**Found by:** `combine` pairwise flag testing (152 cells)
+Observed in: git log
+Version: git 2.50.1
+Method: `combine` pairwise flag testing (152 cells)
 
 Contradictory filters `--no-merges --merges` produce empty output with
 exit 0 — no error, no warning. Both filters are applied (only merges
 AND no merges = nothing matches).
 
-Arguably should produce an error or warning since the flags are mutually
+Could arguably produce an error or warning since the flags are mutually
 contradictory and the result is always empty.
 
 ## Git: Multiple --author flags are OR'd but --author + --grep is AND'd
-
-**Severity:** Informational (inconsistent semantics)
-**Affected:** git log
-**Reproduced on:** git 2.50.1
-**Found by:** `combine` pairwise flag testing (152 cells)
+Observed in: git log
+Version: git 2.50.1
+Method: `combine` pairwise flag testing (152 cells)
 
 ```
 git log --author=Alice --author=Bob    # OR: shows both authors
@@ -83,11 +75,9 @@ This is documented but the asymmetry is surprising.
 ---
 
 ## Git: -U-1 (negative context) produces corrupt unified diff header
-
-**Severity:** Medium (produces malformed output that breaks parsers)
-**Affected:** git diff
-**Reproduced on:** git 2.50.1
-**Found by:** boundary-value probing (222 cells)
+Observed in: git diff
+Version: git 2.50.1
+Method: boundary-value probing (222 cells)
 
 Passing a negative value to `-U` (context lines) is accepted silently
 and produces a corrupt unified diff hunk header:
@@ -108,7 +98,7 @@ $ git diff -U0
 ```
 
 Any tool that parses unified diff format (patch, diffstat, code review
-tools, IDE integrations) would fail on the malformed header. Git should
+tools, IDE integrations) would fail on the malformed header. One approach would be to
 either reject negative -U values or clamp to 0.
 
 The corruption scales with the magnitude of the negative value:
@@ -123,11 +113,9 @@ The negative value appears to be used in arithmetic that wraps or
 overflows, producing progressively more corrupt output.
 
 ## Git: --word-diff-regex validation is lazy (only on use)
-
-**Severity:** Low (inconsistent error handling)
-**Affected:** git diff
-**Reproduced on:** git 2.50.1
-**Found by:** boundary-value probing (352 cells)
+Observed in: git diff
+Version: git 2.50.1
+Method: boundary-value probing (352 cells)
 
 `--word-diff --word-diff-regex=[invalid` produces exit 128 ("fatal:
 invalid regular expression") — but only for contexts that have diffs.
@@ -141,25 +129,21 @@ $ git diff --word-diff --word-diff-regex='[invalid'  # clean repo: exit 0
 
 This means the same command with the same flags succeeds or fails
 depending on whether there are diffs to show — surprising and
-inconsistent. The regex should be validated eagerly.
+inconsistent. 
 
 ## Git: -M101% (over 100% rename threshold) accepted silently
-
-**Severity:** Low (nonsensical input, benign behavior)
-**Affected:** git diff
-**Reproduced on:** git 2.50.1
-**Found by:** boundary-value probing (222 cells)
+Observed in: git diff
+Version: git 2.50.1
+Method: boundary-value probing (222 cells)
 
 `-M101%` is accepted without error. Since nothing can be >100% similar,
 this effectively means "never detect renames" — same as omitting -M.
-Should arguably produce a warning.
+
 
 ## Git: --skip=-1 (negative skip) silently ignored
-
-**Severity:** Low (nonsensical input, benign behavior)
-**Affected:** git log
-**Reproduced on:** git 2.50.1
-**Found by:** boundary-value probing (352 cells)
+Observed in: git log
+Version: git 2.50.1
+Method: boundary-value probing (352 cells)
 
 `git log --skip=-1` is accepted without error and behaves as if
 `--skip=0` (shows all commits, skips nothing). Negative skip values
@@ -177,15 +161,13 @@ limit values are silently treated as their absolute value.
 ---
 
 ## Git: grep -C -1 accepts negative but -A -1 and -B -1 reject
-
-**Severity:** Medium (inconsistent input validation, wrong output)
-**Affected:** git grep
-**Reproduced on:** git 2.50.1
-**Found by:** boundary-value probing across git blame, show, format-patch, grep
+Observed in: git grep
+Version: git 2.50.1
+Method: boundary-value probing across git blame, show, format-patch, grep
 
 `-A -1` and `-B -1` correctly error with "expects a non-negative integer
 value." But `-C -1` is silently accepted and produces output with extra
-context lines that shouldn't be there.
+context lines from between matches.
 
 ```
 $ git grep -A -1 error    # error: expects non-negative (exit 129)
@@ -194,18 +176,16 @@ $ git grep -C -1 error    # SUCCESS: shows matches + mystery context (exit 0)
 ```
 
 `-C N` is documented as equivalent to `-A N -B N`. If `-A` and `-B`
-reject -1, `-C` should too. The negative value is likely wrapping to a
+reject -1, but `-C` does not. The negative value is likely wrapping to a
 large unsigned integer, producing context lines from between matches.
 
 Same class of bug as `git diff -U-1` — negative numeric values accepted
 by some code paths but not others.
 
 ## Git: --inter-hunk-context with negative value produces overlapping hunks
-
-**Severity:** Medium (produces structurally invalid diff)
-**Affected:** git diff, git show, git format-patch (shared machinery)
-**Reproduced on:** git 2.50.1
-**Found by:** boundary-value probing (152 cells)
+Observed in: git diff, git show, git format-patch (shared machinery)
+Version: git 2.50.1
+Method: boundary-value probing (152 cells)
 
 `--inter-hunk-context=-100` produces a diff with overlapping hunks and
 misclassified lines. Normal diff of a file with 3 changed lines in 5
@@ -218,7 +198,7 @@ $ git diff --inter-hunk-context=-100
 -aaa
 +AAA
  bbb
- CCC                   ← WRONG: shown as context, actually changed from 'ccc'
+ CCC                   ← shown as context, but was actually changed from 'ccc'
  ddd
 @@ -1,5 +1,5 @@       ← hunk 2: lines 1-5 (OVERLAPS hunk 1!)
  AAA
@@ -241,26 +221,22 @@ patch would produce corrupt results. Worse than `-U-1` which only
 corrupts headers — this corrupts the actual diff content.
 
 ## Git: format-patch -v -1 produces [PATCH v-1] in subject
-
-**Severity:** Low (cosmetic, nonsensical output)
-**Affected:** git format-patch
-**Reproduced on:** git 2.50.1
-**Found by:** boundary-value probing (152 cells)
+Observed in: git format-patch
+Version: git 2.50.1
+Method: boundary-value probing (152 cells)
 
 Negative version number is accepted and shown literally:
 ```
 Subject: [PATCH v-1] initial
 ```
 
-Should either reject negative version or clamp to 1.
+
 
 ## Git: --stat --shortstat duplicate confirmed in show, format-patch
+Observed in: git show, git format-patch (in addition to diff, log)
+Version: git 2.50.1
 
-**Severity:** Low (shared diff machinery)
-**Affected:** git show, git format-patch (in addition to diff, log)
-**Reproduced on:** git 2.50.1
-
-The `--stat --shortstat` duplicate summary line bug exists in every git
+The `--stat --shortstat` duplicate summary line behavior exists in every git
 command that uses the diff output machinery. Confirmed in:
 - `git diff --stat --shortstat`
 - `git log --stat --shortstat`
@@ -270,11 +246,9 @@ command that uses the diff output machinery. Confirmed in:
 ---
 
 ## Git: fetch --jobs=2147483647 OOM crash via unchecked calloc
-
-**Severity:** Medium (denial of service, unchecked allocation)
-**Affected:** git fetch
-**Reproduced on:** git 2.50.1
-**Found by:** boundary-value probing of remote operations
+Observed in: git fetch
+Version: git 2.50.1
+Method: boundary-value probing of remote operations
 
 `git fetch --jobs=2147483647` crashes with `fatal: Out of memory,
 calloc failed`. Git passes the user-supplied value directly to calloc
@@ -291,7 +265,7 @@ value wraps or is treated as "auto"). And `--jobs=0` also works.
 
 The `--jobs` flag controls parallelism for fetching from multiple
 remotes or submodules. The natural upper bound is the number of things
-to fetch (typically 1-100). The fix should allocate based on
+to fetch (typically 1-100). A fix could allocate based on
 `min(jobs, actual_work_items)` rather than trusting the user value
 for an allocation size.
 
@@ -299,11 +273,9 @@ Same root cause as the OPT_INTEGER class: user input flows into a
 resource allocation without bounds checking.
 
 ## Git: rev-list, repack, ls-files accept negative values silently
-
-**Severity:** Low (silent wrap, benign behavior)
-**Affected:** git rev-list, git repack, git ls-files
-**Reproduced on:** git 2.50.1
-**Found by:** boundary-value probing across subcommands
+Observed in: git rev-list, git repack, git ls-files
+Version: git 2.50.1
+Method: boundary-value probing across subcommands
 
 Multiple subcommands accept negative values for flags where only
 non-negative values make sense:
@@ -329,13 +301,9 @@ $ git for-each-ref --count=-1  # exit 129 (rejected)
 Same inconsistent validation pattern as the diff/grep flags.
 
 ---
-
-
 ## jq: 1e999 roundtrip inconsistency — output doesn't parse back to same value
-
-**Severity:** Medium (data loss in pipelines)
-**Affected:** jq 1.7.1
-**Found by:** boundary-value probing (595 cells)
+Observed in: jq 1.7.1
+Method: boundary-value probing (595 cells)
 
 `1e999` as a jq filter literal outputs `1E+999`. But when jq parses
 `1E+999` as input, it becomes `1.7976931348623157e+308` (DBL_MAX).
@@ -358,10 +326,8 @@ Related non-finite number handling inconsistencies:
 Three different strategies for three non-finite cases.
 
 ## jq: length(null) = 0 but length(bool) = error
-
-**Severity:** Low (inconsistent type handling)
-**Affected:** jq 1.7.1
-**Found by:** type-coercion probing (595 cells)
+Observed in: jq 1.7.1
+Method: type-coercion probing (595 cells)
 
 `null | length` returns 0, but `true | length` errors with "boolean
 (true) has no length." Both are scalar types, but null is treated as
@@ -383,23 +349,23 @@ precedence over `-P` (PCRE). This is a safety design — fixed string
 mode prevents accidental regex injection. A user with `-F` in an alias
 who adds `-P` gets the safer behavior.
 
-## Root Cause: OPT_INTEGER vs OPT_UNSIGNED misuse
+## Observation: Root cause pattern — OPT_INTEGER vs OPT_UNSIGNED misuse
 
 **Scope:** ~19 of 39 integer flag definitions across git's codebase
 **Source file:** `parse-options.h`, various `builtin/*.c`
-**Found by:** tracing bug class back to option parsing macros
+Method: tracing bug class back to option parsing macros
 
 Git's parse-options system has two numeric types:
 - `OPTION_INTEGER` — accepts any integer (positive, negative, zero)
 - `OPTION_UNSIGNED` — validates non-negative (rejects negative)
 
-The bugs we found all trace to flags using `OPT_INTEGER` when they
-should use `OPT_UNSIGNED`:
+These findings all trace to flags using `OPT_INTEGER` when they
+could use `OPT_UNSIGNED`:
 
 ```
 // parse-options.h — shared diff macros use INTEGER:
-#define OPT_DIFF_UNIFIED(v)             OPT_INTEGER_F(...)   // WRONG
-#define OPT_DIFF_INTERHUNK_CONTEXT(v)   OPT_INTEGER_F(...)   // WRONG
+#define OPT_DIFF_UNIFIED(v)             OPT_INTEGER_F(...)   // uses INTEGER
+#define OPT_DIFF_INTERHUNK_CONTEXT(v)   OPT_INTEGER_F(...)   // uses INTEGER
 
 // builtin/grep.c — -A and -B use UNSIGNED, but -C uses CALLBACK:
 OPT_UNSIGNED('B', "before-context", ...)    // CORRECT
@@ -412,22 +378,20 @@ prevents `--no-unified` (boolean negation) but does NOT prevent `-U-1`
 (negative numeric value). The flag name is misleading — developers
 likely added it thinking it guarded against negative values.
 
-**Proposed fix:** Change ~22 `OPT_INTEGER` declarations to `OPT_UNSIGNED`
+Possible fix: Change ~22 `OPT_INTEGER` declarations to `OPT_UNSIGNED`
 for flags where negative values are nonsensical (max-depth, max-count,
-jobs, timeout, width, padding, depth, etc.). Fix grep's -C callback to
+jobs, timeout, width, padding, depth, etc.). grep's -C callback could
 validate non-negative. Add upper-bound validation for flags used as
-allocation sizes (`--jobs` should clamp to actual work items, not
+allocation sizes (`--jobs` could clamp to actual work items, not
 calloc the raw user value). This is a mechanical, low-risk change
 using git's existing `OPTION_UNSIGNED` type.
 
 ---
 
 ## Git: inconsistent error messages for diff flags outside a repository
-
-**Severity:** Low (UX inconsistency)
-**Affected:** git diff
-**Reproduced on:** git 2.50.1
-**Found by:** automated exploration without a git repo context (2756 cells)
+Observed in: git diff
+Version: git 2.50.1
+Method: automated exploration without a git repo context (2756 cells)
 
 When `git diff` is run outside a repository, flags produce two different
 error messages depending on when they're registered in git's option parser:
@@ -451,6 +415,6 @@ Repo-specific flags (`--cached`, `--staged`, `--merge-base`, `--cc`,
 registered when a repository is detected, so outside a repo they appear
 as "unknown" — even though they are valid `git diff` flags.
 
-All flags should produce a consistent "not a git repository" message
+All flags could produce a consistent "not a git repository" message
 when run outside a repo.
 
