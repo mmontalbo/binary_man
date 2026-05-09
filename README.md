@@ -22,8 +22,10 @@ bgrid --dry-run <binary> <file.probe> show resolved grid without executing
 (varying file content, directory structure, permissions, timestamps),
 runs every flag across every context in parallel, analyzes behavioral
 groups, refines with cross-group interactions, and converges when no
-new flags are distinguished. Output is a distinguishability report
-with exemplar observations showing what each flag does.
+new flags are observed. Output is a report with exemplar
+observations showing what each flag does — base output vs flag output,
+mechanically selected from the context where the flag's behavior is
+most unique.
 
 For subcommands: `bgrid git diff` explores `git diff`.
 
@@ -52,11 +54,11 @@ See [LANGUAGE.md](LANGUAGE.md) for the probe language specification.
 4. **Refinement** generates new experiments targeting specific
    indistinguishable flag stems: cross-group flag pairing (modifier +
    mode flag), sensitivity-graduated contexts, untested flag pickup.
-   Converges when no new flags are distinguished.
-5. **Report** shows distinguishability rate: unique flags distinguished
-   vs total flags discovered, with solo/combination/indistinguishable
-   breakdown. Uses delta-based grouping (flags grouped by what they
-   change, not what the output looks like).
+   Converges when no new flags are observed.
+5. **Report** shows observed behavior rate: flags where the tool saw
+   the flag work (exit 0, non-trivial output or filesystem changes).
+   Each flag gets an exemplar showing base vs flag output in the context
+   that best demonstrates its unique behavior.
 
 ## Requirements
 
@@ -68,7 +70,7 @@ See [LANGUAGE.md](LANGUAGE.md) for the probe language specification.
 
 ```
 cargo test                    # unit tests
-./tests/coreutils.sh          # integration test (17 binaries, ~40s)
+./tests/coreutils.sh          # integration test (22 binaries, ~105s)
 ```
 
 Reference reports with exemplar observations for each binary are

@@ -20,7 +20,7 @@ Two observations are **identical** when stdout, stderr, exit_code, and fs_change
 
 A **behavioral group** is a set of runs that produce identical observations across ALL contexts. Runs in the same group are behaviorally indistinguishable given the experimental conditions.
 
-A flag is **distinguished** when at least one run containing that flag (solo or in combination with other flags) produces a unique behavioral fingerprint under the tested conditions.
+A flag has **observed behavior** when at least one run containing that flag exits 0 with non-trivial output or filesystem changes. This is the primary metric — the tool saw the flag work, not just fail distinctively.
 
 ## Experimental variables
 
@@ -71,7 +71,17 @@ Plus: empty_dir (nothing — error path exerciser), 9 single-factor perturbation
 
 Total: ~27 contexts per grid.
 
-For pattern-taking tools (grep, sed, awk), the pattern argument is also varied: literal match, case variant, regex metacharacter, non-matching. This exercises flags like -i (case sensitivity), -E/-F/-G (regex engine), -w (word boundary).
+## Behavioral discovery
+
+The discovery phase uses behavioral probing rather than help-text parsing to determine how to invoke the binary. Help text provides flag CANDIDATES; behavior determines which invocations WORK.
+
+**Arg pattern probing.** Seven candidate invocation patterns (no args, single file, directory, two files, file+directory, pattern+file, pattern+directory) are tried against the binary. Patterns that exit 0 or produce output become the target types for the full grid. This discovers that `cp input.txt other.txt` works without parsing `SOURCE DEST` from help text.
+
+**Stdin probing.** The binary is tested with piped content (with and without positional args). If stdin produces output, stdin runs are generated for each working arg pattern × each flag.
+
+**Value probing.** For flags that take values (detected by hint in `--help`), the default value is tested. If it fails, candidate values (`1`, `auto`, `,`, `:`, `input.txt`, `.`, `0`) are tried. The first value that exits 0 is used.
+
+**Subcommand discovery.** Common CLI verbs (`init`, `add`, `commit`, `build`, `run`, etc.) are probed as first positional args. Responses are classified: working (exit 0), state builder (exit 0 + filesystem changes), needs state (recognized error), not a subcommand (same error as unknown word).
 
 ## Observation and collapsing
 
@@ -105,22 +115,23 @@ Four refinement strategies:
 
 **Untested flag pickup.** Flags discovered from --help but not yet included in any run. Alias-deduplicated (if -b was tested, --ignore-leading-blanks is marked tested).
 
-**Convergence.** The loop stops when no new flags are distinguished in a round, or after a maximum number of rounds (default 3).
+**Convergence.** The loop stops when no new flags gain observed behavior in a round, or after a maximum number of rounds (default 3).
 
-**Accumulation.** Flags distinguished in any round stay distinguished. Unproductive runs (in large identical groups with the same target) are pruned from subsequent rounds to avoid wasted cells.
+**Accumulation.** Flags with observed behavior in any round keep that status. Unproductive runs (in large identical groups with the same target) and slow runs (near timeout) are pruned from subsequent rounds.
 
-## Distinguishability metric
+## Metric: observed behavior
 
-The primary metric is: **distinguished flags / total flags**.
+The primary metric is: **flags with observed behavior / total flags**.
 
-A flag is distinguished if any run containing it (solo or in combination) produces a unique behavioral fingerprint under the tested conditions. The report separates:
+A flag has observed behavior when any run containing it exits 0 with non-trivial output (non-empty stdout differing from base) or filesystem changes. The report separates:
 
-- **Solo**: the flag alone produces unique behavior across contexts
-- **Via combination**: the flag is distinguishable only when paired with another flag (proven by pairwise evidence from cross-group interaction)
-- **Indistinguishable**: the flag remains in an identical group — no tested condition separates it from other flags in the group. This is a statement about the tested conditions, not about the flag itself; more conditions might distinguish it.
+- **Solo observed**: the flag alone produces unique, observed behavior across contexts
+- **Combination observed**: the flag is observed working when paired with another flag
+- **Error-differentiated**: the flag produces a unique error message but was never seen working — supplementary information, not counted in the headline
+- **Indistinguishable**: the flag remains in an identical group with no observed behavioral difference
 - **Untested**: discovered from --help but not included in any run
 
-Combination-based evidence is weaker than solo: it proves the flag *modifies behavior differently than another flag* but the specific independent effect is only visible in combination. Solo evidence means the flag's independent behavioral surface has been directly observed.
+The headline metric is honest: `Observed: 10/10` means every flag was seen working. `Observed: 1/21` means the tool barely exercised the binary.
 
 **Behavioral aliases** are detected when two flags with different names produce identical behavior across all contexts. These are reported separately — they may be genuine aliases (same flag, different name) or genuinely different flags that are indistinguishable under tested conditions.
 
@@ -130,7 +141,7 @@ Combination-based evidence is weaker than solo: it proves the flag *modifies beh
 
 **Positional argument coverage.** Runs are generated with three target types: single file (`input.txt`), directory (`.`), and multi-file (`input.txt other.txt`). Pattern-taking tools also get four pattern variants. This covers most invocation patterns but not all — stdin piping, glob expansion, and recursive directory arguments are not yet generated.
 
-**Modifier flags require combination testing.** Flags like -h, -G, -k that modify another flag's output (e.g., -l) cannot be distinguished solo. Cross-group interaction addresses this but the evidence is weaker — it proves the flag modifies behavior differently, not what its independent effect is.
+**Modifier flags require combination testing.** Flags like -h, -G, -k that modify another flag's output (e.g., -l) cannot produce observed behavior solo. Cross-group interaction addresses this but the evidence is weaker — it proves the flag modifies behavior differently, not what its independent effect is.
 
 **Context diversity is binary-agnostic, not binary-optimal.** The same ~27 contexts are used for every binary. A sort-specific probe with carefully chosen content would distinguish more flags than the generic contexts. The trade-off is automation vs coverage.
 
@@ -148,4 +159,4 @@ Cells are grouped by context. For each context, all cell workspaces are created 
 
 Each cell gets its own workspace directory within the batch. The bwrap sandbox provides network isolation and a controlled mount namespace (read-only system paths, writable workspace). A 2-second per-command timeout kills runaway processes. Contexts are processed in parallel across 8 threads.
 
-The integration test verifies 17 coreutils binaries in ~40 seconds.
+The integration test verifies 22 binaries (coreutils + grep, sed, diff, find, xargs) in ~105 seconds.
