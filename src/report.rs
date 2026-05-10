@@ -14,11 +14,7 @@ use crate::output;
 /// `"--full-time" "-b" "."` → `"--full-time -b"` (combination)
 /// Returns None for runs with no flags (bare positional args).
 pub fn flag_stem(label: &str) -> Option<String> {
-    let args: Vec<&str> = label.split('"')
-        .enumerate()
-        .filter(|(i, _)| i % 2 == 1)
-        .map(|(_, s)| s)
-        .collect();
+    let args = output::parse_label(label);
     let flags: Vec<String> = args.iter()
         .filter(|a| a.starts_with('-'))
         .map(|a| {
@@ -134,14 +130,9 @@ pub fn format_run_report(
     let describe_run = |args_str: &str| -> String {
         if let Some(fi) = flag_info {
             // Parse args from the formatted string
-            let args: Vec<String> = args_str.split('"')
-                .enumerate()
-                .filter(|(i, _)| i % 2 == 1)
-                .map(|(_, s)| s.to_string())
-                .collect();
-            for arg in &args {
+            for arg in output::parse_label(args_str) {
                 if arg.starts_with('-') {
-                    let key = if let Some(eq) = arg.find('=') { &arg[..eq] } else { arg.as_str() };
+                    let key = if let Some(eq) = arg.find('=') { &arg[..eq] } else { arg };
                     if let Some(desc) = fi.descs.get(key) {
                         return format!("  # {}", desc);
                     }

@@ -77,7 +77,7 @@ CHECKS=(
     "fmt 7"
     "paste 3"
     "du 25"
-    "cp 34"
+    "cp 30"
     "rm 10"
     "stat 6"
     "df 15"

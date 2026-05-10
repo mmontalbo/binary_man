@@ -167,12 +167,9 @@ impl AnalysisMetrics {
         for group in &self.groups {
             if group.run_labels.len() < 5 { continue; }
             // Extract positional args from each run in the group
-            let positionals: Vec<Vec<String>> = group.run_labels.iter()
+            let positionals: Vec<Vec<&str>> = group.run_labels.iter()
                 .map(|label| {
-                    label.split('"')
-                        .enumerate()
-                        .filter(|(i, _)| i % 2 == 1)
-                        .map(|(_, s)| s.to_string())
+                    output::parse_label(label).into_iter()
                         .filter(|s| !s.starts_with('-'))
                         .collect()
                 })
@@ -209,14 +206,9 @@ impl AnalysisMetrics {
 
         for (gi, group) in self.groups.iter().enumerate() {
             for label in &group.run_labels {
-                let args: Vec<String> = label.split('"')
-                    .enumerate()
-                    .filter(|(i, _)| i % 2 == 1)
-                    .map(|(_, s)| s.to_string())
-                    .collect();
-
-                let flags: Vec<&String> = args.iter().filter(|a| a.starts_with('-')).collect();
-                let positionals: Vec<String> = args.iter().filter(|a| !a.starts_with('-')).cloned().collect();
+                let args = output::parse_label(label);
+                let flags: Vec<&&str> = args.iter().filter(|a| a.starts_with('-')).collect();
+                let positionals: Vec<String> = args.iter().filter(|a| !a.starts_with('-')).map(|s| s.to_string()).collect();
 
                 // For runs with 2+ flags, try each flag as the "modifier"
                 if flags.len() >= 2 {

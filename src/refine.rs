@@ -379,12 +379,9 @@ fn is_alias_pair(
         None => return false,
     };
 
-    let flags: Vec<Vec<String>> = group.run_labels.iter()
+    let flags: Vec<Vec<&str>> = group.run_labels.iter()
         .map(|label| {
-            label.split('"')
-                .enumerate()
-                .filter(|(i, _)| i % 2 == 1)
-                .map(|(_, s)| s.to_string())
+            crate::output::parse_label(label).into_iter()
                 .filter(|s| s.starts_with('-'))
                 .collect()
         })
@@ -393,8 +390,8 @@ fn is_alias_pair(
     if flags.len() != 2 { return false; }
     if flags[0].len() != 1 || flags[1].len() != 1 { return false; }
 
-    let f1 = &flags[0][0];
-    let f2 = &flags[1][0];
+    let f1 = flags[0][0];
+    let f2 = flags[1][0];
 
     aliases.get(f1).map(|a| a == f2).unwrap_or(false)
         || aliases.get(f2).map(|a| a == f1).unwrap_or(false)
@@ -448,10 +445,8 @@ fn build_run_args(prefix: &[Arg], flags: &[Arg], trailing: &[Arg]) -> Vec<Arg> {
 fn count_unique_flags(group: &crate::analyze::BehaviorGroup) -> usize {
     let mut flags = HashSet::new();
     for label in &group.run_labels {
-        for arg in label.split('"').enumerate().filter(|(i, _)| i % 2 == 1).map(|(_, s)| s) {
-            if arg.starts_with('-') {
-                flags.insert(arg.to_string());
-            }
+        for arg in crate::output::parse_label(label) {
+            if arg.starts_with('-') { flags.insert(arg); }
         }
     }
     flags.len()
@@ -462,8 +457,8 @@ fn extract_flags(group: &crate::analyze::BehaviorGroup) -> Vec<Arg> {
     let mut flags = Vec::new();
     let mut seen = HashSet::new();
     for label in &group.run_labels {
-        for arg in label.split('"').enumerate().filter(|(i, _)| i % 2 == 1).map(|(_, s)| s) {
-            if arg.starts_with('-') && seen.insert(arg.to_string()) {
+        for arg in crate::output::parse_label(label) {
+            if arg.starts_with('-') && seen.insert(arg) {
                 flags.push(Arg::Literal(arg.to_string()));
             }
         }

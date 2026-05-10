@@ -59,6 +59,15 @@ pub fn format_trace_summary(obs: &Observation) -> String {
 }
 
 
+/// Extract quoted strings from a formatted run label like `"-b" "input.txt"`.
+pub fn parse_label(label: &str) -> Vec<&str> {
+    label.split('"')
+        .enumerate()
+        .filter(|(i, _)| i % 2 == 1)
+        .map(|(_, s)| s)
+        .collect()
+}
+
 /// Format run arguments as quoted strings.
 pub fn format_args(args: &[crate::parse::Arg]) -> String {
     if args.is_empty() {
