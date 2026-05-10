@@ -47,7 +47,6 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
   -L  # print only names of FILEs with no selected lines
     exemplar: "-L" "$(head -n1 input.txt)" "input.txt" in numeric_standard / input.txt=empty (+1 lines, exit 0→1)
     base:
-      (no base)
     flag:
       input.txt
   -V  # display version information and exit
@@ -133,18 +132,18 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
   --colour  e.g. "-d" "--colour"
   --exclude  e.g. "--file=input.txt" "--exclude"
   --exclude-dir  e.g. "--file=input.txt" "--exclude-dir"
-  --exclude-from  e.g. "-d" "--exclude-from"
-  --group-separator  e.g. "-d" "--group-separator" "$(head -n1 input.txt)" "input.txt"
+  --exclude-from  e.g. "-d" "--exclude-from" "$(head -n1 input.txt)" "input.txt"
+  --group-separator  e.g. "-d" "--group-separator"
   --label  e.g. "-d" "--label" "$(head -n1 input.txt)" "input.txt"
   --line-buffered  e.g. "-d" "--line-buffered"
-  --no-group-separator  e.g. "-d" "--no-group-separator" "$(head -n1 input.txt)" "input.txt"
-  --no-ignore-case  e.g. "-d" "--no-ignore-case" "$(head -n1 input.txt)" "input.txt"
-  --quiet  e.g. "-d" "--quiet" "$(head -n1 input.txt)" "input.txt"
-  --silent  e.g. "-d" "--silent"
+  --no-group-separator  e.g. "-d" "--no-group-separator"
+  --no-ignore-case  e.g. "-d" "--no-ignore-case"
+  --quiet  e.g. "-d" "--quiet"
+  --silent  e.g. "-d" "--silent" "$(head -n1 input.txt)" "input.txt"
   -E  e.g. (pairwise evidence)
   -F  e.g. (pairwise evidence)
   -G  e.g. (pairwise evidence)
-  -I  e.g. "-d" "-I"
+  -I  e.g. "-d" "-I" "$(head -n1 input.txt)" "input.txt"
   -P  e.g. (pairwise evidence)
   -a  e.g. (pairwise evidence)
   -e  e.g. (pairwise evidence)

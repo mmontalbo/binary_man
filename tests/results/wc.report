@@ -13,16 +13,16 @@ Aliases: -L = --max-line-length, -c = --bytes, -l = --lines, -m = --chars, -w = 
 
 ## Solo (unique behavior)
   --files0-from  # read input from the files specified by
-    exemplar: "--files0-from=f" in many_files /remove env LC_ALL (different)
+    exemplar: "--files0-from=f" "input.txt" in many_files /remove env LC_ALL (different)
     base:
       (no base)
     flag:
   --total  # when to print a line with total counts;
-    exemplar: "--total=auto" "." in alpha_standard / content_case_upper (different)
+    exemplar: "--total=auto" in alpha_minimal (different)
     base:
-      (no base)
+            0       0       0
     flag:
-            0       0       0 .
+            2       3      19
 
 ## Via combination (distinguishable when paired)
   -L  e.g. (pairwise evidence)

@@ -89,7 +89,7 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, skeleton: bool)
 
     let grid = execute::run_grid(binary, &script, std::path::Path::new("."), sandbox)?;
     let metrics = analyze::analyze(&script, &grid, Some(&flag_info), None);
-    let mut all_metrics: Vec<analyze::AnalysisMetrics> = vec![];
+    let mut prior_runs: Vec<analyze::RunAnalysis> = Vec::new();
 
     // Track cumulative tested flags and isolation across rounds.
     let mut ever_tested: HashSet<String> = HashSet::new();
@@ -167,7 +167,7 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, skeleton: bool)
             &refine_state,
         );
 
-        let Some((delta_script, content_script)) = delta else {
+        let Some(delta_script) = delta else {
             eprintln!("[round {}] converged — no further refinement", round);
             break;
         };
@@ -177,25 +177,6 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, skeleton: bool)
             round, delta_script.contexts.len(), delta_script.runs.len(), delta_cells);
 
         let delta_grid = execute::run_grid(binary, &delta_script, std::path::Path::new("."), sandbox)?;
-
-        // Execute content perturbation as a separate grid if present
-        if let Some(ref cp_script) = content_script {
-            let cp_cells = execute::count_cells(cp_script);
-            eprintln!("[round {}] content perturbation: {} contexts, {} runs, {} cells",
-                round, cp_script.contexts.len(), cp_script.runs.len(), cp_cells);
-            let cp_grid = execute::run_grid(binary, cp_script, std::path::Path::new("."), sandbox)?;
-            let cp_metrics = analyze::analyze(cp_script, &cp_grid, Some(&flag_info), Some(&ever_tested));
-            // Accumulate isolations from content perturbation
-            for group in &cp_metrics.groups {
-                if group.isolated() {
-                    for label in &group.run_labels {
-                        ever_isolated.insert(label.clone());
-                    }
-                }
-            }
-            all_metrics.push(cp_metrics);
-        }
-
         // Accumulate tested flags from this round
         for run in &delta_script.runs {
             for arg in &run.args {
@@ -240,7 +221,7 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, skeleton: bool)
         eprintln!("[round {}] {} groups, {} cumulative isolated (+{}), {} identical in round",
             round, delta_metrics.groups.len(), ever_isolated.len(), newly_isolated, delta_metrics.identical_count());
 
-        all_metrics.push(current_metrics);
+        prior_runs.extend(current_metrics.runs);
         current_metrics = delta_metrics;
         current_script = delta_script;
 
@@ -251,9 +232,8 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, skeleton: bool)
 
     }
 
-    // Final report to stdout — collect runs from all rounds for observed-behavior check
-    let all_runs: Vec<&analyze::RunAnalysis> = all_metrics.iter()
-        .flat_map(|m| m.runs.iter())
+    // Final report — include runs from all rounds for observed-behavior check
+    let all_runs: Vec<&analyze::RunAnalysis> = prior_runs.iter()
         .chain(current_metrics.runs.iter())
         .collect();
     let report = report::format_exploration_report(

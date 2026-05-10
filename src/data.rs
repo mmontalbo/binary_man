@@ -152,56 +152,6 @@ pub fn perturbations() -> Vec<SetupCommand> {
     ]
 }
 
-/// Content perturbation catalog: transforms base content along one axis.
-/// Each perturbation returns (name, perturbed_lines) derived from the input.
-/// Used to distinguish flags that process content differently (e.g., -i vs -b).
-pub fn content_perturbations(base_lines: &[String]) -> Vec<(String, Vec<String>)> {
-    let mut result = Vec::new();
-
-    // Case: all lines uppercased
-    result.push(("case_upper".into(), base_lines.iter()
-        .map(|l| l.to_uppercase()).collect()));
-
-    // Whitespace: trailing spaces on non-empty lines
-    result.push(("ws_trailing".into(), base_lines.iter()
-        .map(|l| if l.is_empty() { l.clone() } else { format!("{}   ", l) }).collect()));
-
-    // Whitespace: leading spaces on non-empty lines
-    result.push(("ws_leading".into(), base_lines.iter()
-        .map(|l| if l.is_empty() { l.clone() } else { format!("  {}", l) }).collect()));
-
-    // Whitespace: double internal spaces between words
-    result.push(("ws_internal".into(), base_lines.iter()
-        .map(|l| l.replace(' ', "  ")).collect()));
-
-    // Blank lines: insert blank line after every line
-    result.push(("blanks_added".into(), base_lines.iter()
-        .flat_map(|l| vec![l.clone(), String::new()]).collect()));
-
-    // Blank lines: remove all blank lines
-    result.push(("blanks_removed".into(), base_lines.iter()
-        .filter(|l| !l.trim().is_empty())
-        .cloned().collect()));
-
-    // Tabs: expand tabs to spaces
-    result.push(("tabs_expanded".into(), base_lines.iter()
-        .map(|l| l.replace('\t', "        ")).collect()));
-
-    // Line endings: CRLF
-    result.push(("crlf".into(), base_lines.iter()
-        .map(|l| format!("{}\r", l)).collect()));
-
-    // Binary: inject NUL after first char
-    result.push(("binary_inject".into(), base_lines.iter()
-        .map(|l| if l.len() > 1 { format!("{}\0{}", &l[..1], &l[1..]) } else { l.clone() })
-        .collect()));
-
-    // Identical: exact copy (for -s / report-identical-files)
-    result.push(("identical".into(), base_lines.to_vec()));
-
-    result
-}
-
 /// Common subcommand verbs for behavioral subcommand discovery.
 /// Probed as first positional arg: `binary verb`. The ones that
 /// exit 0 or produce a recognized error are real subcommands.

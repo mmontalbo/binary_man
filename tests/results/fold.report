@@ -12,7 +12,7 @@ Aliases: -b = --bytes, -s = --spaces, -w = --width
 
 ## Solo (unique behavior)
   -w  # use WIDTH columns instead of 80
-    exemplar: "-w" "input.txt" in many_files /input.txt=size:1 (different)
+    exemplar: "-w" in many_files /input.txt=size:1 (different)
     base:
       (no base)
     flag:

@@ -15,7 +15,7 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
 
 ## Solo (unique behavior)
   --endian  # swap input bytes according the specified order
-    exemplar: "--endian" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
+    exemplar: "--endian" "input.txt" "other.txt" in many_files /remove env LC_ALL (different)
     base:
       (no base)
     flag:
@@ -25,19 +25,13 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       (no base)
     flag:
   --traditional  # accept arguments in third form above
-    exemplar: "--traditional" "input.txt" in alpha_standard / content_case_upper (reordered)
+    exemplar: "--traditional" in alpha_minimal (different)
     base:
-      0000000 044103 051105 054522 040412 050120 042514 041012 047101
-      0000020 047101 005101 040504 042524 042412 042114 051105 042502
-      0000040 051122 005131 040502 040516 040516 040412 050120 042514
-      0000060 000012
-      0000061
+      0000000
     flag:
-      0000000 044103 051105 054522 040412 050120 042514 041012 047101
-      0000020 047101 005101 040504 042524 042412 042114 051105 042502
-      0000040 051122 005131 040502 040516 040516 040412 050120 042514
-      0000060 000012
-      0000061
+      0000000 064143 071145 074562 060412 070160 062554 061012 067141
+      0000020 067141 000141
+      0000023
   -A  # output format for file offsets; RADIX is one
     exemplar: "-A" "$(head -n1 input.txt)" "input.txt" in tabular_minimal (+21 lines, exit 1→0)
     base:
@@ -64,7 +58,7 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000040 005071 005067 031064 030412 030060 005060 005065
       0000056
   -S
-    exemplar: "-S" "." in many_files /remove env LC_ALL (different)
+    exemplar: "-S" "input.txt" "other.txt" in many_files /remove env LC_ALL (different)
     base:
       (no base)
     flag:
@@ -156,7 +150,7 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000023
 
 ## Via combination (distinguishable when paired)
-  --width  e.g. "--skip-bytes=1" "--width" "input.txt" "subdir"
+  --width  e.g. "--skip-bytes=2147483647" "--width" "input.txt" "subdir"
   -o  e.g. (pairwise evidence)
 
 ## Indistinguishable under tested conditions

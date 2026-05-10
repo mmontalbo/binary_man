@@ -3,13 +3,12 @@
 ## Rounds
   round 0: 48 isolated cumulative, 68 identical in round (discovery)
   round 1: 76 isolated cumulative, 11 identical in round (refinement)
-  round 2: 77 isolated cumulative, 11 identical in round (refinement)
-  round 3: 77 isolated cumulative, 11 identical in round (refinement)
+  round 2: 76 isolated cumulative, 11 identical in round (refinement)
 
 ## Observed: 10/11 flags
-  10 solo, 0 via combination
+  9 solo, 1 via combination
   1 additional error-differentiated
-  3 behavioral aliases detected
+  2 behavioral aliases detected
 
 Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numbering, -h = --header-numbering, -i = --line-increment, -l = --join-blank-lines, -n = --number-format, -p = --no-renumber, -s = --number-separator, -v = --starting-line-number, -w = --number-width
 
@@ -38,15 +37,37 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
            1	other content
            2	second line
   -f  # use STYLE for numbering footer lines
-    exemplar: "-f" "input.txt" "subdir" in alpha_standard / content_case_upper (different)
+    exemplar: "-f" "$(head -n1 input.txt)" "input.txt" in tabular_minimal (+12 lines, exit 1→0)
     base:
-      (no base)
+           1	name	age	city
+           2	alice	30	new york
+           3	bob	25	san francisco
+           4	alice	30	new york
+           5	charlie	35	chicago
+            ...
     flag:
+           1	name	age	city
+           2	alice	30	new york
+           3	bob	25	san francisco
+           4	alice	30	new york
+           5	charlie	35	chicago
+            ...
   -h  # use STYLE for numbering header lines
-    exemplar: "-h" "input.txt" "subdir" in alpha_standard / content_case_upper (different)
+    exemplar: "-h" "$(head -n1 input.txt)" "input.txt" in tabular_minimal (+12 lines, exit 1→0)
     base:
-      (no base)
+           1	name	age	city
+           2	alice	30	new york
+           3	bob	25	san francisco
+           4	alice	30	new york
+           5	charlie	35	chicago
+            ...
     flag:
+           1	name	age	city
+           2	alice	30	new york
+           3	bob	25	san francisco
+           4	alice	30	new york
+           5	charlie	35	chicago
+            ...
   -i  # line number increment at each line
     exemplar: "-i" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
     base:
@@ -59,35 +80,30 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
          401	20
             ...
   -l  # group of NUMBER empty lines counted as one
-    exemplar: "-l" "input.txt" "subdir" in alpha_standard / content_case_upper (different)
+    exemplar: "-l" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
     base:
       (no base)
     flag:
+           1	100
+           2	2
+           3	30
+           4	1
+           5	20
+            ...
   -n  # insert line numbers according to FORMAT
-    exemplar: "-n" "input.txt" "subdir" in alpha_standard / content_case_upper (different)
+    exemplar: "-n" "input.txt" "subdir" in many_files /remove env LC_ALL (different)
     base:
       (no base)
     flag:
-  -p  # do not reset line numbers for each section
-    exemplar: "-p" "input.txt" in alpha_standard / content_case_upper (reordered)
-    base:
-           1	CHERRY
-           2	APPLE
-           3	BANANA
-           4	DATE
-           5	ELDERBERRY
-            ...
-    flag:
-           1	CHERRY
-           2	APPLE
-           3	BANANA
-           4	DATE
-           5	ELDERBERRY
-            ...
   -s  # add STRING after (possible) line number
     exemplar: "-s" "input.txt" in alpha_minimal (different)
     base:
-      (no base)
+           1	cherry
+           2	Apple
+           3	banana
+           4	Date
+           5	elderberry
+            ...
     flag:
            1input.txtcherry
            2input.txtapple
@@ -114,4 +130,7 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
                                                                                                          4	1
                                                                                                          5	20
             ...
+
+## Via combination (distinguishable when paired)
+  -p  e.g. "-s" "-p" "$(head -n1 input.txt)" "input.txt"
 

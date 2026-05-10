@@ -13,15 +13,27 @@ Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
 
 ## Solo (unique behavior)
   -c  # print the first NUM bytes of each file;
-    exemplar: "-c" "input.txt" "subdir" in alpha_standard / content_case_upper (different)
+    exemplar: "-c" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
     base:
       (no base)
     flag:
+      100
+      2
+      30
+      1
+      20
+            ...
   -n  # print the first NUM lines instead of the first 10;
-    exemplar: "-n" "input.txt" "subdir" in alpha_standard / content_case_upper (different)
+    exemplar: "-n" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
     base:
       (no base)
     flag:
+      100
+      2
+      30
+      1
+      20
+            ...
   -v  # always print headers giving file names
     exemplar: "-v" in alpha_minimal (different)
     base:
@@ -31,7 +43,7 @@ Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
       apple
       banana
   -z  # line delimiter is NUL, not newline
-    exemplar: "-z" "input.txt" "other.txt" in many_files /remove subdir (different)
+    exemplar: "-z" "input.txt" "subdir" in many_files /remove env LC_ALL (different)
     base:
       (no base)
     flag:
@@ -44,6 +56,6 @@ Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
 
 ## Via combination (distinguishable when paired)
   --quiet  e.g. (pairwise evidence)
-  --silent  e.g. "--bytes" "--silent" "input.txt" "other.txt"
+  --silent  e.g. "-c" "--silent" "input.txt"
   -q  e.g. (pairwise evidence)
 

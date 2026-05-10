@@ -27,15 +27,12 @@ pub struct RefineState<'a> {
 }
 
 /// Returns None if converged (no further refinement possible).
-/// Returns (main_script, optional_content_perturbation_script).
-/// Content perturbation is a separate script to prevent its contexts
-/// from leaking into the main grid and fragmenting unrelated groups.
 pub fn refine(
     base_script: &Script,
     metrics: &AnalysisMetrics,
     flag_info: Option<&FlagInfo>,
     state: &RefineState,
-) -> Option<(Script, Option<Script>)> {
+) -> Option<Script> {
     let ever_isolated = state.ever_isolated;
     let unproductive = state.unproductive;
     let indist_stems = state.indist_stems;
@@ -368,85 +365,7 @@ pub fn refine(
     eprintln!("[round {}] strategies: {}, {} runs, {} contexts",
         round + 1, strategies.join("+"), new_runs, contexts.len());
 
-    // --- Strategy 4: Content perturbation (separate script) ---
-    // Built as a separate script so perturbation contexts don't leak into
-    // the main grid and fragment groups that depend on file metadata.
-    let mut content_script: Option<Script> = None;
-    {
-        let indist_groups: Vec<&crate::analyze::BehaviorGroup> = metrics.groups.iter()
-            .filter(|g| !g.isolated() && count_unique_flags(g) >= 3)
-            .collect();
-
-        let mut cp_contexts: Vec<NamedContext> = Vec::new();
-        let mut cp_runs: Vec<Run> = Vec::new();
-
-        for group in &indist_groups {
-            let (prefix, trailing) = extract_positionals(group);
-            let target_files: Vec<&Arg> = trailing.iter()
-                .filter(|a| matches!(a, Arg::Literal(s) if !s.starts_with('-') && s.contains('.')))
-                .collect();
-            if target_files.is_empty() { continue; }
-
-            let base_ctx = base_script.contexts.iter()
-                .find(|c| c.name.contains("_deep") || c.name.contains("_standard"))
-                .or_else(|| base_script.contexts.first());
-            let Some(base_ctx) = base_ctx else { continue };
-
-            let base_content: Option<Vec<String>> = base_ctx.commands.iter()
-                .find_map(|cmd| match cmd {
-                    SetupCommand::CreateFile { path, content: FileContent::Lines(lines) }
-                        if path == "input.txt" => Some(lines.clone()),
-                    _ => None,
-                });
-            let Some(base_lines) = base_content else { continue };
-
-            let is_two_file = target_files.len() >= 2;
-            let perturbations = crate::data::content_perturbations(&base_lines);
-            let mut perturbation_ctx_names: Vec<String> = Vec::new();
-
-            for (name, perturbed_lines) in &perturbations {
-                let ctx_name = format!("{} / content_{}", base_ctx.name, name);
-                if cp_contexts.iter().any(|c| c.name == ctx_name) { continue; }
-
-                let mut cmds = base_ctx.commands.clone();
-                if is_two_file {
-                    cmds.push(SetupCommand::CreateFile {
-                        path: "other.txt".into(),
-                        content: FileContent::Lines(perturbed_lines.clone()),
-                    });
-                } else {
-                    cmds.push(SetupCommand::CreateFile {
-                        path: "input.txt".into(),
-                        content: FileContent::Lines(perturbed_lines.clone()),
-                    });
-                }
-
-                cp_contexts.push(NamedContext { name: ctx_name.clone(), extends: None, commands: cmds });
-                perturbation_ctx_names.push(ctx_name);
-            }
-
-            if perturbation_ctx_names.is_empty() { continue; }
-
-            let base_args = build_run_args(&prefix, &[], &trailing);
-            if !cp_runs.iter().any(|r| r.args == base_args) {
-                cp_runs.push(Run { args: base_args.clone(), in_contexts: None, stdin: None, diff_from: None });
-            }
-
-            for flag in &extract_flags(group) {
-                let args = build_run_args(&prefix, std::slice::from_ref(flag), &trailing);
-                if !cp_runs.iter().any(|r| r.args == args) {
-                    cp_runs.push(Run { args, in_contexts: None, stdin: None, diff_from: Some(base_args.clone()) });
-                }
-            }
-        }
-
-        if !cp_contexts.is_empty() {
-            strategies.push("content");
-            content_script = Some(Script { contexts: cp_contexts, runs: cp_runs });
-        }
-    }
-
-    Some((Script { contexts, runs }, content_script))
+    Some(Script { contexts, runs })
 }
 
 /// Check if a 2-run group is a known alias pair.
