@@ -1,15 +1,14 @@
 # Exploration: xargs
 
 ## Rounds
-  round 0: 7 isolated cumulative, 26 identical in round (discovery)
-  round 1: 33 isolated cumulative, 8 identical in round (refinement)
-  round 2: 34 isolated cumulative, 8 identical in round (refinement)
-  round 3: 36 isolated cumulative, 8 identical in round (refinement)
+  round 0: 7 isolated cumulative, 22 identical in round (discovery)
+  round 1: 31 isolated cumulative, 8 identical in round (refinement)
+  round 2: 32 isolated cumulative, 10 identical in round (refinement)
+  round 3: 33 isolated cumulative, 10 identical in round (refinement)
 
 ## Observed: 1/21 flags
   1 solo, 0 via combination
   20 additional error-differentiated
-  1 behavioral aliases detected
 
 Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = --delimiter, -n = --max-args, -o = --open-tty, -p = --interactive, -r = --no-run-if-empty, -s = --max-chars, -t = --verbose, -x = --exit
 
@@ -59,9 +58,14 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
     exemplar: "-t" in alpha_minimal (different)
     base:
     flag:
+  -x  # exit if the size (see -s) is exceeded
+    exemplar: "-x" in alpha_minimal (different)
+    base:
+      (no base)
+    flag:
 
 ## Via combination (distinguishable when paired)
-  --eof  e.g. "--show-limits" "--eof"
+  --eof  e.g. (pairwise evidence)
   --process-slot-var  e.g. "--show-limits" "--process-slot-var"
   --replace  e.g. "--show-limits" "--replace"
   -0  e.g. (pairwise evidence)
@@ -69,5 +73,4 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
   -i  e.g. (pairwise evidence)
   -l  e.g. (pairwise evidence)
   -r  e.g. (pairwise evidence)
-  -x  e.g. (pairwise evidence)
 

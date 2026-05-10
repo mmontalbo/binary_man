@@ -1,30 +1,60 @@
 # Exploration: grep
 
 ## Rounds
-  round 0: 13 isolated cumulative, 8 identical in round (discovery)
-  round 1: 35 isolated cumulative, 17 identical in round (refinement)
-  round 2: 39 isolated cumulative, 24 identical in round (refinement)
-  round 3: 46 isolated cumulative, 26 identical in round (refinement)
+  round 0: 35 isolated cumulative, 17 identical in round (discovery)
+  round 1: 45 isolated cumulative, 29 identical in round (refinement)
+  round 2: 53 isolated cumulative, 35 identical in round (refinement)
+  round 3: 63 isolated cumulative, 39 identical in round (refinement)
 
-## Observed: 2/49 flags
-  2 solo, 0 via combination
-  33 additional error-differentiated
+## Observed: 34/49 flags
+  15 solo, 19 via combination
+  6 additional error-differentiated
   1 behavioral aliases detected
-  14 indistinguishable under tested conditions
+  8 indistinguishable under tested conditions
 
 Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --devices, -E = --extended-regexp, -F = --fixed-strings, -G = --basic-regexp, -H = --with-filename, -L = --files-without-match, -P = --perl-regexp, -R = --dereference-recursive, -T = --initial-tab, -U = --binary, -Z = --null, -a = --text, -b = --byte-offset, -c = --count, -d = --directories, -e = --regexp, -f = --file, -h = --no-filename, -i = --ignore-case, -l = --files-with-matches, -m = --max-count, -n = --line-number, -o = --only-matching, -r = --recursive, -s = --no-messages, -v = --invert-match, -w = --word-regexp, -x = --line-regexp, -z = --null-data
 
 ## Solo (unique behavior)
   --binary-files  # assume that binary files are TYPE;
+  --include  # search only files that match GLOB (a file pattern)
+    exemplar: "--include=glob" "$(head -n1 input.txt)" "input.txt" in alpha_minimal (different)
+    base:
+      cherry
+    flag:
+  -A  # print NUM lines of trailing context
+    exemplar: "-A" "$(head -n1 input.txt)" "input.txt" in numeric_minimal (different)
+    base:
+      100
+      1000
+    flag:
+  -B  # print NUM lines of leading context
+    exemplar: "-B" "$(head -n1 input.txt)" "input.txt" in numeric_minimal (different)
+    base:
+      100
+      1000
+    flag:
+  -C  # print NUM lines of output context
+    exemplar: "-C" "$(head -n1 input.txt)" "input.txt" in numeric_minimal (different)
+    base:
+      100
+      1000
+    flag:
   -D  # how to handle devices, FIFOs and sockets;
+  -H  # print file name with output lines
+    exemplar: "-H" "$(head -n1 input.txt)" "input.txt" in alpha_minimal (-1 lines)
+    base:
+      cherry
+    flag:
+      input.txt:cherry
   -L  # print only names of FILEs with no selected lines
-    exemplar: "-L" "input.txt" in alpha_minimal (different)
+    exemplar: "-L" "$(head -n1 input.txt)" "input.txt" in numeric_standard / input.txt=empty (+1 lines, exit 0→1)
     base:
     flag:
-      (standard input)
+      input.txt
   -V  # display version information and exit
-    exemplar: "-V" "input.txt" in alpha_minimal (different)
+    exemplar: "-V" "$(head -n1 input.txt)" "input.txt" in alpha_minimal (different)
     base:
+      cherry
     flag:
       grep (GNU grep) 3.11
       Copyright (C) 2023 Free Software Foundation, Inc.
@@ -32,50 +62,97 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
       This is free software: you are free to change and redistribute it.
       There is NO WARRANTY, to the extent permitted by law.
             ...
-  -c  # print only a count of selected lines per FILE
-    exemplar: "-c" "input.txt" in alpha_minimal (different)
+  -b  # print the byte offset with output lines
+    exemplar: "-b" "$(head -n1 input.txt)" "input.txt" in alpha_minimal (-1 lines)
     base:
+      cherry
     flag:
-      0
-  -d  # how to handle directories;
-    exemplar: "-d" "input.txt" in tabular_minimal (different)
+      0:cherry
+  -c  # print only a count of selected lines per FILE
+    exemplar: "-c" "$(head -n1 input.txt)" "input.txt" in alpha_minimal (different)
     base:
+      cherry
+    flag:
+      1
+  -d  # how to handle directories;
+    exemplar: "-d" "$(head -n1 input.txt)" "input.txt" in alpha_minimal (different)
+    base:
+      cherry
     flag:
   -f  # take PATTERNS from FILE
-    exemplar: "-f" "input.txt" in tabular_minimal (different)
+  -l  # print only names of FILEs with selected lines
+    exemplar: "-l" "$(head -n1 input.txt)" "input.txt" in alpha_minimal (different)
     base:
+      cherry
     flag:
+      input.txt
   -m  # stop after NUM selected lines
+    exemplar: "-m" "$(head -n1 input.txt)" "input.txt" in numeric_minimal (different, exit 2→1)
+    base:
+      100
+      1000
+    flag:
+  -n  # print line number with output lines
+    exemplar: "-n" "$(head -n1 input.txt)" "input.txt" in alpha_minimal (-1 lines)
+    base:
+      cherry
+    flag:
+      1:cherry
+  -s  # suppress error messages
+    exemplar: "-s" "$(head -n1 input.txt)" "input.txt" in numeric_minimal (different)
+    base:
+      100
+      1000
+    flag:
+      100
+      1000
+  -v  # select non-matching lines
+    exemplar: "-v" "$(head -n1 input.txt)" "input.txt" in alpha_minimal (+6 lines, exit 1→0)
+    base:
+      cherry
+    flag:
+      Apple
+      banana
+      Date
+      elderberry
+      BANANA
+            ...
+  -z  # a data line ends in 0 byte, not newline
+    exemplar: "-z" "$(head -n1 input.txt)" "input.txt" in alpha_minimal (-9 lines)
+    base:
+      cherry
+    flag:
+      cherry
+      Apple
+      banana
+      Date
+      elderberry
+            ...
 
 ## Via combination (distinguishable when paired)
-  --color  e.g. "-f" "--color"
-  --colour  e.g. "-d" "--colour" "input.txt"
-  --exclude  e.g. "-d" "--exclude" "input.txt"
-  --exclude-dir  e.g. "-f" "--exclude-dir"
-  --exclude-from  e.g. "-e" "-w" "--exclude-from" "--silent" "input.txt"
-  --group-separator  e.g. "-e" "-w" "--group-separator"
-  --include  e.g. "-e" "-w" "--include"
-  --label  e.g. "-e" "-w" "--label"
-  --line-buffered  e.g. (pairwise evidence)
-  --no-group-separator  e.g. "-e" "-w" "--exclude-from" "--no-group-separator" "input.txt"
-  --no-ignore-case  e.g. "-e" "-w" "--exclude-from" "--no-ignore-case" "input.txt"
-  --quiet  e.g. "-e" "-w" "--exclude-from" "--quiet" "input.txt"
-  --silent  e.g. "-e" "-w" "--exclude-from" "--silent" "input.txt"
-  -A  e.g. "-B" "-A" "input.txt"
-  -B  e.g. "-B" "-A" "input.txt"
-  -C  e.g. (pairwise evidence)
+  --color  e.g. "-d" "--color"
+  --colour  e.g. "-d" "--colour" "$(head -n1 input.txt)" "input.txt"
+  --exclude  e.g. "-d" "--exclude"
+  --exclude-dir  e.g. "-d" "--exclude-dir"
+  --exclude-from  e.g. "-d" "--exclude-from" "$(head -n1 input.txt)" "input.txt"
+  --group-separator  e.g. "-d" "--group-separator" "$(head -n1 input.txt)" "input.txt"
+  --label  e.g. "-d" "--label" "$(head -n1 input.txt)" "input.txt"
+  --line-buffered  e.g. "-d" "--line-buffered" "$(head -n1 input.txt)" "input.txt"
+  --no-group-separator  e.g. "-d" "--no-group-separator"
+  --no-ignore-case  e.g. "-d" "--no-ignore-case" "$(head -n1 input.txt)" "input.txt"
+  --quiet  e.g. "-d" "--quiet"
+  --silent  e.g. "-d" "--silent"
   -E  e.g. (pairwise evidence)
   -F  e.g. (pairwise evidence)
   -G  e.g. (pairwise evidence)
-  -H  e.g. "-e" "-w" "--exclude-from" "-H" "input.txt"
-  -I  e.g. "-e" "-w" "--exclude-from" "-I" "input.txt"
+  -I  e.g. "-d" "-I"
   -P  e.g. (pairwise evidence)
-  -R  e.g. "-e" "-w" "--exclude-from" "-R" "input.txt"
-  -e  e.g. "-e" "-w" "--exclude-from" "--silent" "input.txt"
+  -a  e.g. (pairwise evidence)
+  -e  e.g. (pairwise evidence)
+  -h  e.g. (pairwise evidence)
   -i  e.g. (pairwise evidence)
-  -w  e.g. "-e" "-w" "--exclude-from" "--silent" "input.txt"
-  -x  e.g. (pairwise evidence)
 
 ## Indistinguishable under tested conditions
-  UNEXPLAINED (14): -T, -U, -Z, -a, -b, -h, -l, -n, -o, -q, -r, -s, -v, -z
+  UNEXPLAINED (5): -R, -T, -U, -Z, -r
+  UNEXPLAINED (3): -o, -w, -x
 

@@ -60,11 +60,11 @@ pub fn format_trace_summary(obs: &Observation) -> String {
 
 
 /// Format run arguments as quoted strings.
-pub fn format_args(args: &[String]) -> String {
+pub fn format_args(args: &[crate::parse::Arg]) -> String {
     if args.is_empty() {
         "(no args)".into()
     } else {
-        args.iter().map(|a| format!("\"{}\"", a)).collect::<Vec<_>>().join(" ")
+        args.iter().map(|a| a.display()).collect::<Vec<_>>().join(" ")
     }
 }
 

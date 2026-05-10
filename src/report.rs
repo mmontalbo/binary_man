@@ -339,8 +339,30 @@ pub fn format_exploration_report(
     }
     out.push('\n');
 
+    // Compute operational exit codes from base runs (no flags).
+    // If the binary itself exits with code 1 in normal operation (e.g. diff
+    // when files differ, grep when no match), then exit 1 is "operational"
+    // for this binary, not an error.
+    let operational_exit_codes: HashSet<i32> = {
+        let mut codes = HashSet::new();
+        codes.insert(0); // exit 0 is always operational
+        for run in &final_metrics.runs {
+            // Base runs: no flag args (all args are positional/extract)
+            let has_flag = run.args.iter().any(|a| a.is_flag());
+            if !has_flag {
+                for (_, obs) in &run.context_groups {
+                    if let Some(code) = obs.exit_code {
+                        codes.insert(code);
+                    }
+                }
+            }
+        }
+        codes
+    };
+
     // Classify evidence quality: did we actually see the flag work?
-    // A flag has "observed behavior" if any of its runs exited 0 with either:
+    // A flag has "observed behavior" if any of its runs exited with an
+    // operational exit code (matching the base run's behavior) with either:
     // - non-empty stdout (the flag produced visible output), OR
     // - filesystem changes (the flag modified files — silent tools like cp, mv, rm)
     let has_observed_behavior = |stem: &str| -> bool {
@@ -348,7 +370,7 @@ pub fn format_exploration_report(
             let run_stem = flag_stem(&run.args_str);
             if run_stem.as_deref() == Some(stem) || run_stem.as_ref().map(|s| canonical_flag(s, aliases)) == Some(stem.to_string()) {
                 for (_, obs) in &run.context_groups {
-                    if obs.exit_code == Some(0)
+                    if obs.exit_code.is_some_and(|c| operational_exit_codes.contains(&c))
                         && (!obs.stdout.trim().is_empty() || !obs.fs_changes.is_empty())
                     {
                         return true;

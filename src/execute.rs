@@ -264,10 +264,41 @@ pub fn run_grid(
                     let script_path = batch_dir.path().join("run.sh");
                     {
                         let mut script_content = String::new();
+
+                        // Hoist Extract expressions to variables at the top of the
+                        // batch script. All cells in a batch share the same context,
+                        // so the expression result is constant — evaluate once.
+                        let mut extract_vars: HashMap<String, String> = HashMap::new();
+                        let mut extract_counter = 0usize;
+                        for &ri in &batch.run_indices {
+                            for arg in &script.runs[ri].args {
+                                if let crate::parse::Arg::Extract(e) = arg {
+                                    if !extract_vars.contains_key(e) {
+                                        let var = format!("_E{}", extract_counter);
+                                        extract_counter += 1;
+                                        extract_vars.insert(e.clone(), var);
+                                    }
+                                }
+                            }
+                        }
+                        if !extract_vars.is_empty() {
+                            // Evaluate in the first cell's working directory
+                            script_content.push_str("cd /batch/c0\n");
+                            for (expr, var) in &extract_vars {
+                                script_content.push_str(&format!("{}=$({})\n", var, expr));
+                            }
+                        }
+
                         for (cell_idx, &ri) in batch.run_indices.iter().enumerate() {
                             let run = &script.runs[ri];
                             let args_str: String = run.args.iter()
-                                .map(|a| shell_escape(a))
+                                .map(|a| match a {
+                                    crate::parse::Arg::Literal(s) => shell_escape(s),
+                                    crate::parse::Arg::Extract(e) => {
+                                        let var = &extract_vars[e];
+                                        format!("\"${}\"", var)
+                                    }
+                                })
                                 .collect::<Vec<_>>()
                                 .join(" ");
 
@@ -549,7 +580,7 @@ pub fn validate_from_references(script: &Script) {
         if let Some(ref ref_args) = run.diff_from {
             let has_match = script.runs.iter().any(|r| r.args == *ref_args && r.diff_from.is_none());
             if !has_match {
-                let args_str = ref_args.iter().map(|a| format!("\"{}\"", a)).collect::<Vec<_>>().join(" ");
+                let args_str = ref_args.iter().map(|a| a.display()).collect::<Vec<_>>().join(" ");
                 eprintln!("warning: from {} has no matching standalone run (add `run {}` outside any from block)", args_str, args_str);
             }
         }

@@ -13,17 +13,19 @@ Aliases: -L = --max-line-length, -c = --bytes, -l = --lines, -m = --chars, -w = 
 
 ## Solo (unique behavior)
   --files0-from  # read input from the files specified by
-    exemplar: "--files0-from=f" "input.txt" "subdir" in alpha_minimal (different)
+    exemplar: "--files0-from=f" "$(head -n1 input.txt)" "." in alpha_minimal (different)
+    base:
+            0       0       0 .
+            0       0       0 total
+    flag:
+  --total  # when to print a line with total counts;
+    exemplar: "--total=auto" "$(head -n1 input.txt)" "input.txt" in alpha_standard (reordered)
     base:
        7  7 49 input.txt
        7  7 49 total
     flag:
-  --total  # when to print a line with total counts;
-    exemplar: "--total=auto" "." in alpha_minimal (different)
-    base:
-            0       0       0 .
-    flag:
-            0       0       0 .
+       7  7 49 input.txt
+       7  7 49 total
 
 ## Via combination (distinguishable when paired)
   -L  e.g. (pairwise evidence)

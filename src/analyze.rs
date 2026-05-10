@@ -8,12 +8,12 @@ use std::collections::{HashMap, HashSet};
 use crate::discover::FlagInfo;
 use crate::execute::{self, GridResult, Observation};
 use crate::output;
-use crate::parse::Script;
+use crate::parse::{Arg, Script};
 
 /// Per-run analysis (used by per-run output modes).
 pub struct RunAnalysis {
     pub run_index: usize,
-    pub args: Vec<String>,
+    pub args: Vec<Arg>,
     pub args_str: String,
     /// Representative observation from the majority context group.
     pub majority_obs: Observation,
@@ -22,7 +22,7 @@ pub struct RunAnalysis {
     pub context_groups: Vec<(Vec<String>, Observation)>,
     pub sensitivity: Vec<String>,
     pub universals: Vec<String>,
-    pub from_ref: Option<Vec<String>>,
+    pub from_ref: Option<Vec<Arg>>,
     pub vs_diff: Option<String>,
     pub has_anomaly: bool,
     pub obs_count: usize,
@@ -36,7 +36,7 @@ pub struct BehaviorGroup {
     pub majority_contexts: Vec<String>,
     pub sensitivity: Vec<String>,
     pub universals: Vec<String>,
-    pub from_ref: Option<Vec<String>>,
+    pub from_ref: Option<Vec<Arg>>,
     pub vs_diffs: Vec<(String, String)>,
     /// Per-context observations for the first run in this group.
     /// Used for grouping comparisons during refinement.
@@ -270,7 +270,7 @@ pub fn analyze(
     prior_tested: Option<&HashSet<String>>,
 ) -> AnalysisMetrics {
     // Build obs_by_args for vs-diff lookups
-    let obs_by_args: HashMap<(&[String], &str), &Observation> = grid.cells.iter()
+    let obs_by_args: HashMap<(&[Arg], &str), &Observation> = grid.cells.iter()
         .map(|((ctx, ri), obs)| {
             let args = &script.runs[*ri].args;
             ((args.as_slice(), ctx.as_str()), obs)
@@ -503,8 +503,7 @@ pub fn analyze(
         let mut tested: HashSet<String> = prior_tested.cloned().unwrap_or_default();
         for run in &script.runs {
             for arg in &run.args {
-                if arg.starts_with('-') {
-                    let key = if let Some(eq) = arg.find('=') { &arg[..eq] } else { arg.as_str() };
+                if let Some(key) = arg.flag_key() {
                     tested.insert(key.to_string());
                     if let Some(alias) = fi.aliases.get(key) {
                         tested.insert(alias.clone());

@@ -65,14 +65,68 @@ pub struct StressBlock {
     pub file: String,
 }
 
+/// A run argument — either a literal string or a shell expression
+/// evaluated at runtime in the context's working directory.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Arg {
+    /// A literal string argument, shell-escaped at execution time.
+    Literal(String),
+    /// A shell expression whose stdout (trimmed) becomes the argument value.
+    /// Evaluated inside the context's working directory at runtime.
+    Extract(String),
+}
+
+impl Arg {
+    /// True if this is a flag argument (starts with '-'). Extracts are never flags.
+    pub fn is_flag(&self) -> bool {
+        matches!(self, Arg::Literal(s) if s.starts_with('-'))
+    }
+
+    /// For flag args like "--foo=bar", return the key "--foo". Returns None for non-flags.
+    pub fn flag_key(&self) -> Option<&str> {
+        match self {
+            Arg::Literal(s) if s.starts_with('-') => {
+                Some(if let Some(eq) = s.find('=') { &s[..eq] } else { s.as_str() })
+            }
+            _ => None,
+        }
+    }
+
+    /// Format for display in labels: `"value"` or `"$(expr)"`.
+    pub fn display(&self) -> String {
+        match self {
+            Arg::Literal(s) => format!("\"{}\"", s),
+            Arg::Extract(e) => format!("\"$({})\"", e),
+        }
+    }
+}
+
+impl From<String> for Arg {
+    fn from(s: String) -> Self { Arg::Literal(s) }
+}
+
+impl From<&str> for Arg {
+    fn from(s: &str) -> Self { Arg::Literal(s.to_string()) }
+}
+
+/// Convert a Vec<String> to Vec<Arg> (all Literal).
+pub fn lit_args(strings: Vec<String>) -> Vec<Arg> {
+    strings.into_iter().map(Arg::Literal).collect()
+}
+
+/// Convert a &[String] to Vec<Arg> (all Literal, cloned).
+pub fn lit_args_ref(strings: &[String]) -> Vec<Arg> {
+    strings.iter().map(|s| Arg::Literal(s.clone())).collect()
+}
+
 /// A run invocation with optional diff reference and scoping.
 #[derive(Debug)]
 pub struct Run {
-    pub args: Vec<String>,
+    pub args: Vec<Arg>,
     pub in_contexts: Option<Vec<String>>,
     pub stdin: Option<StdinSource>,
     /// If set, diff this run's results from the reference run.
-    pub diff_from: Option<Vec<String>>,
+    pub diff_from: Option<Vec<Arg>>,
 }
 
 #[derive(Debug, Clone)]
@@ -91,9 +145,9 @@ pub fn parse_script(source: &str) -> Result<Script> {
     let mut current_context: Option<NamedContext> = None;
     let mut current_vary: Option<VaryBlock> = None;
     let mut current_run: Option<Run> = None;
-    let mut current_from: Option<Vec<String>> = None; // args of the from-reference
+    let mut current_from: Option<Vec<Arg>> = None; // args of the from-reference
     let mut current_in: Option<Vec<String>> = None; // block-level in scope
-    let mut current_combine: Option<(Vec<String>, Vec<Vec<String>>)> = None; // (base_args, flag_lists)
+    let mut current_combine: Option<(Vec<Arg>, Vec<Vec<Arg>>)> = None; // (base_args, flag_lists)
 
     for (line_num, raw_line) in source.lines().enumerate() {
         let is_indented = raw_line.starts_with(' ') || raw_line.starts_with('\t');
@@ -167,7 +221,7 @@ pub fn parse_script(source: &str) -> Result<Script> {
             flush_run(&mut current_run, &mut runs);
             flush_context(&mut current_context, &mut contexts);
             flush_vary(&mut current_vary, &mut vary_blocks);
-            let ref_args = tokenize(rest.trim(), line_num)?;
+            let ref_args = lit_args(tokenize(rest.trim(), line_num)?);
             if ref_args.is_empty() {
                 bail!("line {}: from requires reference args", line_num);
             }
@@ -183,7 +237,7 @@ pub fn parse_script(source: &str) -> Result<Script> {
                 current_from = None;
             }
 
-            let args = tokenize(rest.trim(), line_num)?;
+            let args = lit_args(tokenize(rest.trim(), line_num)?);
             current_run = Some(Run {
                 args,
                 in_contexts: current_in.clone(),
@@ -202,7 +256,7 @@ pub fn parse_script(source: &str) -> Result<Script> {
             flush_combine(&mut current_combine, &mut runs, &current_in, &current_from);
             flush_context(&mut current_context, &mut contexts);
             flush_vary(&mut current_vary, &mut vary_blocks);
-            let base_args = tokenize(rest.trim(), line_num)?;
+            let base_args = lit_args(tokenize(rest.trim(), line_num)?);
             if base_args.is_empty() {
                 bail!("line {}: combine requires base args", line_num);
             }
@@ -213,7 +267,7 @@ pub fn parse_script(source: &str) -> Result<Script> {
             && !line.starts_with("combine ")
         {
             // Flag line inside a combine block
-            let flags = tokenize(line, line_num)?;
+            let flags = lit_args(tokenize(line, line_num)?);
             if let Some((_, ref mut flag_lists)) = current_combine {
                 flag_lists.push(flags);
             }
@@ -272,10 +326,10 @@ fn flush_run(run: &mut Option<Run>, runs: &mut Vec<Run>) {
 }
 
 fn flush_combine(
-    combine: &mut Option<(Vec<String>, Vec<Vec<String>>)>,
+    combine: &mut Option<(Vec<Arg>, Vec<Vec<Arg>>)>,
     runs: &mut Vec<Run>,
     current_in: &Option<Vec<String>>,
-    current_from: &Option<Vec<String>>,
+    current_from: &Option<Vec<Arg>>,
 ) {
     if let Some((base_args, flag_lists)) = combine.take() {
         if flag_lists.is_empty() { return; }
@@ -286,7 +340,7 @@ fn flush_combine(
 
         // Singles: each flag group alone
         for flags in &flag_lists {
-            let mut args: Vec<String> = prefix.to_vec();
+            let mut args: Vec<Arg> = prefix.to_vec();
             args.extend(flags.iter().cloned());
             args.extend(trailing.iter().cloned());
             runs.push(Run {
@@ -300,7 +354,7 @@ fn flush_combine(
         // Pairs: every combination of two flag groups
         for i in 0..flag_lists.len() {
             for j in (i + 1)..flag_lists.len() {
-                let mut args: Vec<String> = prefix.to_vec();
+                let mut args: Vec<Arg> = prefix.to_vec();
                 args.extend(flag_lists[i].iter().cloned());
                 args.extend(flag_lists[j].iter().cloned());
                 args.extend(trailing.iter().cloned());
@@ -725,8 +779,8 @@ from "."
         let script = parse_script(source).unwrap();
         assert_eq!(script.runs.len(), 3);
         assert!(script.runs[0].diff_from.is_none()); // standalone run "."
-        assert_eq!(script.runs[1].diff_from, Some(vec![".".to_string()])); // from "."
-        assert_eq!(script.runs[2].diff_from, Some(vec![".".to_string()])); // from "."
+        assert_eq!(script.runs[1].diff_from, Some(vec![Arg::from(".")])); // from "."
+        assert_eq!(script.runs[2].diff_from, Some(vec![Arg::from(".")])); // from "."
     }
 
     #[test]
@@ -787,8 +841,8 @@ in "base"
         }
         // from-block runs have diff_from
         assert!(script.runs[0].diff_from.is_none());
-        assert_eq!(script.runs[1].diff_from, Some(vec![".".to_string()]));
-        assert_eq!(script.runs[2].diff_from, Some(vec![".".to_string()]));
+        assert_eq!(script.runs[1].diff_from, Some(vec![Arg::from(".")]));
+        assert_eq!(script.runs[2].diff_from, Some(vec![Arg::from(".")]));
     }
 
     #[test]
@@ -855,10 +909,10 @@ run "." "-1"
         let script = parse_script(source).unwrap();
         assert_eq!(script.runs.len(), 6);
         assert!(script.runs[0].diff_from.is_none()); // run "." — standalone
-        assert_eq!(script.runs[1].diff_from, Some(vec![".".to_string()])); // from "."
-        assert_eq!(script.runs[2].diff_from, Some(vec![".".to_string()])); // from "."
+        assert_eq!(script.runs[1].diff_from, Some(vec![Arg::from(".")])); // from "."
+        assert_eq!(script.runs[2].diff_from, Some(vec![Arg::from(".")])); // from "."
         assert!(script.runs[3].diff_from.is_none()); // run "." "-x" — unindented, clears from
-        assert_eq!(script.runs[4].diff_from, Some(vec![".".to_string()])); // from "."
+        assert_eq!(script.runs[4].diff_from, Some(vec![Arg::from(".")])); // from "."
         assert!(script.runs[5].diff_from.is_none()); // run "." "-1" — unindented, clears from
     }
 

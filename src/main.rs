@@ -94,8 +94,7 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, skeleton: bool)
     let mut ever_tested: HashSet<String> = HashSet::new();
     for run in &script.runs {
         for arg in &run.args {
-            if arg.starts_with('-') {
-                let key = if let Some(eq) = arg.find('=') { &arg[..eq] } else { arg.as_str() };
+            if let Some(key) = arg.flag_key() {
                 ever_tested.insert(key.to_string());
                 if let Some(alias) = flag_info.aliases.get(key) {
                     ever_tested.insert(alias.clone());
@@ -180,8 +179,7 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, skeleton: bool)
         // Accumulate tested flags from this round
         for run in &delta_script.runs {
             for arg in &run.args {
-                if arg.starts_with('-') {
-                    let key = if let Some(eq) = arg.find('=') { &arg[..eq] } else { arg.as_str() };
+                if let Some(key) = arg.flag_key() {
                     ever_tested.insert(key.to_string());
                     if let Some(alias) = flag_info.aliases.get(key) {
                         ever_tested.insert(alias.clone());
@@ -229,6 +227,7 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, skeleton: bool)
             eprintln!("[round {}] no new isolations — converged", round);
             break;
         }
+
     }
 
     // Final report to stdout

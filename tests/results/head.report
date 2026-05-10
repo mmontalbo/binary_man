@@ -3,60 +3,71 @@
 ## Rounds
   round 0: 4 isolated cumulative, 35 identical in round (discovery)
   round 1: 37 isolated cumulative, 23 identical in round (refinement)
-  round 2: 41 isolated cumulative, 31 identical in round (refinement)
-  round 3: 41 isolated cumulative, 31 identical in round (refinement)
+  round 2: 38 isolated cumulative, 33 identical in round (refinement)
+  round 3: 38 isolated cumulative, 33 identical in round (refinement)
 
-## Observed: 5/7 flags
-  2 solo, 3 via combination
-  2 additional error-differentiated
+## Observed: 7/7 flags
+  4 solo, 3 via combination
 
 Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
 
 ## Solo (unique behavior)
   -c  # print the first NUM bytes of each file;
-    exemplar: "-c" "input.txt" "subdir" in alpha_minimal (different)
+    exemplar: "-c" "$(head -n1 input.txt)" "input.txt" in numeric_minimal (different)
     base:
       ==> input.txt <==
-      cherry
-      Apple
-      banana
-      Date
+      100
+      2
+      30
+      1
             ...
     flag:
+      100
+      2
+      30
+      1
+      20
+            ...
   -n  # print the first NUM lines instead of the first 10;
-    exemplar: "-n" "input.txt" "subdir" in alpha_minimal (different)
+    exemplar: "-n" "$(head -n1 input.txt)" "input.txt" in numeric_minimal (different)
     base:
       ==> input.txt <==
-      cherry
-      Apple
-      banana
-      Date
+      100
+      2
+      30
+      1
             ...
     flag:
+      100
+      2
+      30
+      1
+      20
+            ...
   -v  # always print headers giving file names
     exemplar: "-v" in alpha_minimal (different)
     base:
     flag:
       ==> standard input <==
   -z  # line delimiter is NUL, not newline
-    exemplar: "-z" "input.txt" "subdir" in numeric_standard (different)
+    exemplar: "-z" "input.txt" in formatted_minimal (-3 lines)
     base:
-      ==> input.txt <==
-      100
-      2
-      30
-      1
+      first line
+      
+      
+      	indented with tab
+      trailing spaces   
             ...
     flag:
-      ==> input.txt <==
-      100
-      2
-      30
-      1
+      first line
+      
+      
+      	indented with tab
+      trailing spaces   
             ...
 
 ## Via combination (distinguishable when paired)
   --quiet  e.g. (pairwise evidence)
-  --silent  e.g. "--bytes" "--silent" "input.txt"
+  --silent  e.g. "-n" "--silent"
   -q  e.g. (pairwise evidence)
 

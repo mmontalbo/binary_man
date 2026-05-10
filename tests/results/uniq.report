@@ -1,14 +1,13 @@
 # Exploration: uniq
 
 ## Rounds
-  round 0: 18 isolated cumulative, 35 identical in round (discovery)
-  round 1: 40 isolated cumulative, 20 identical in round (refinement)
-  round 2: 51 isolated cumulative, 20 identical in round (refinement)
-  round 3: 51 isolated cumulative, 22 identical in round (refinement)
+  round 0: 30 isolated cumulative, 32 identical in round (discovery)
+  round 1: 42 isolated cumulative, 9 identical in round (refinement)
+  round 2: 43 isolated cumulative, 14 identical in round (refinement)
+  round 3: 43 isolated cumulative, 8 identical in round (refinement)
 
 ## Observed: 11/11 flags
   11 solo, 0 via combination
-  1 behavioral aliases detected
 
 Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, -s = --skip-chars, -u = --unique, -w = --check-chars, -z = --zero-terminated
 
@@ -78,14 +77,8 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
             ...
     flag:
   -f  # avoid comparing the first N fields
-    exemplar: "-f" "input.txt" in formatted_minimal (different)
+    exemplar: "-f" "input.txt" "other.txt" in formatted_minimal (different)
     base:
-      first line
-      
-      	indented with tab
-      trailing spaces   
-      
-            ...
     flag:
   -i  # ignore differences in case when comparing
     exemplar: "-i" "input.txt" in formatted_minimal (-4 lines)
@@ -104,7 +97,7 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
       
             ...
   -s  # avoid comparing the first N characters
-    exemplar: "-s" "input.txt" "other.txt" in formatted_minimal (different)
+    exemplar: "-s" in formatted_minimal (different)
     base:
     flag:
   -u  # only print unique lines
@@ -124,14 +117,8 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
         leading spaces
             ...
   -w  # compare no more than N characters in lines
-    exemplar: "-w" "input.txt" in formatted_minimal (different)
+    exemplar: "-w" in formatted_minimal (different)
     base:
-      first line
-      
-      	indented with tab
-      trailing spaces   
-      
-            ...
     flag:
   -z  # line delimiter is NUL, not newline
     exemplar: "-z" "input.txt" in alpha_minimal (-9 lines)

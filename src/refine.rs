@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use crate::analyze::AnalysisMetrics;
 use crate::discover::FlagInfo;
 use crate::parse::{
-    FileContent, NamedContext, Property, Run, Script, SetupCommand,
+    Arg, FileContent, NamedContext, Property, Run, Script, SetupCommand,
 };
 
 const MAX_INTERACTION_GROUPS: usize = 2;
@@ -84,7 +84,7 @@ pub fn refine(
         if flags.len() < 2 { continue; }
 
         // Build args as: [prefix (subcommand)..., flags..., trailing (targets)...]
-        let build_interaction_args = |flag_args: &[String]| -> Vec<String> {
+        let build_interaction_args = |flag_args: &[Arg]| -> Vec<Arg> {
             let mut args = prefix.clone();
             args.extend(flag_args.iter().cloned());
             args.extend(trailing.iter().cloned());
@@ -142,8 +142,8 @@ pub fn refine(
     if !isolated_groups.is_empty() && !indist_stems.is_empty() {
         // Build isolated candidates with their positionals
         struct IsolatedCandidate {
-            flags: Vec<String>,
-            positionals: Vec<String>,
+            flags: Vec<Arg>,
+            positionals: Vec<Arg>,
             dimensions: HashSet<String>,
         }
         let isolated_candidates: Vec<IsolatedCandidate> = isolated_groups.iter()
@@ -154,8 +154,8 @@ pub fn refine(
                     .map(|s| parse_sensitivity_label(s).0)
                     .collect();
                 IsolatedCandidate {
-                    flags: args.iter().filter(|a| a.starts_with('-')).cloned().collect(),
-                    positionals: args.iter().filter(|a| !a.starts_with('-')).cloned().collect(),
+                    flags: args.iter().filter(|a| a.is_flag()).cloned().collect(),
+                    positionals: args.iter().filter(|a| !a.is_flag()).cloned().collect(),
                     dimensions: dims,
                 }
             })
@@ -169,7 +169,7 @@ pub fn refine(
 
         // Collect prefix + trailing for each indistinguishable stem's runs
         // Skip stems whose runs were slow (near timeout)
-        struct StemVariant { prefix: Vec<String>, trailing: Vec<String> }
+        struct StemVariant { prefix: Vec<Arg>, trailing: Vec<Arg> }
         let mut stem_variants: HashMap<String, Vec<StemVariant>> = HashMap::new();
         for group in &metrics.groups {
             for label in &group.run_labels {
@@ -198,8 +198,8 @@ pub fn refine(
             for candidate in &top_isolated {
                 for variant in variants {
                     // Build: [prefix..., iso_flags..., stem, trailing...]
-                    let mut all_flags: Vec<String> = candidate.flags.clone();
-                    all_flags.push(stem.clone());
+                    let mut all_flags: Vec<Arg> = candidate.flags.clone();
+                    all_flags.push(Arg::Literal(stem.clone()));
                     let args = build_run_args(&variant.prefix, &all_flags, &variant.trailing);
                     let base = build_run_args(&variant.prefix, &[], &variant.trailing);
 
@@ -219,8 +219,8 @@ pub fn refine(
                 if !candidate.positionals.is_empty() {
                     let (iso_prefix, _, iso_trailing) = split_args(&candidate.positionals);
                     let prefix = if let Some(v) = variants.first() { &v.prefix } else { &iso_prefix };
-                    let mut all_flags: Vec<String> = candidate.flags.clone();
-                    all_flags.push(stem.clone());
+                    let mut all_flags: Vec<Arg> = candidate.flags.clone();
+                    all_flags.push(Arg::Literal(stem.clone()));
                     let args = build_run_args(prefix, &all_flags, &iso_trailing);
                     let base = build_run_args(prefix, &[], &iso_trailing);
 
@@ -299,7 +299,7 @@ pub fn refine(
 
         for flag in deduplicated.iter().take(MAX_UNTESTED_PER_ROUND) {
             if flag == "--help" || flag == "--version" { continue; }
-            let args = build_run_args(&unt_prefix, std::slice::from_ref(flag), &unt_trailing);
+            let args = build_run_args(&unt_prefix, &[Arg::Literal(flag.clone())], &unt_trailing);
             let base = build_run_args(&unt_prefix, &[], &unt_trailing);
             let already_present = runs.iter().any(|r| r.args == args);
             if !already_present {
@@ -329,11 +329,11 @@ pub fn refine(
             let already_present = runs.iter().any(|r| r.args == args);
             if !already_present {
                 // Infer from_ref: if the run has positional args, use them as the base
-                let positionals: Vec<String> = args.iter()
-                    .filter(|a| !a.starts_with('-'))
+                let positionals: Vec<Arg> = args.iter()
+                    .filter(|a| !a.is_flag())
                     .cloned()
                     .collect();
-                let from_ref = if positionals.is_empty() || args.iter().all(|a| !a.starts_with('-')) {
+                let from_ref = if positionals.is_empty() || args.iter().all(|a| !a.is_flag()) {
                     None
                 } else {
                     Some(positionals)
@@ -401,23 +401,30 @@ fn is_alias_pair(
 }
 
 /// Parse a formatted run label like `"-b" "input.txt"` back to args.
-fn parse_run_label(label: &str) -> Vec<String> {
+/// Detects `$(...)` expressions and wraps them as Arg::Extract.
+fn parse_run_label(label: &str) -> Vec<Arg> {
     label.split('"')
         .enumerate()
         .filter(|(i, _)| i % 2 == 1)
-        .map(|(_, s)| s.to_string())
+        .map(|(_, s)| {
+            if s.starts_with("$(") && s.ends_with(')') {
+                Arg::Extract(s[2..s.len()-1].to_string())
+            } else {
+                Arg::Literal(s.to_string())
+            }
+        })
         .collect()
 }
 
 /// Split args into (prefix, flags, trailing).
 /// Prefix = leading non-flag args (subcommand). Trailing = non-flag args after first flag.
-fn split_args(args: &[String]) -> (Vec<String>, Vec<String>, Vec<String>) {
+fn split_args(args: &[Arg]) -> (Vec<Arg>, Vec<Arg>, Vec<Arg>) {
     let mut prefix = Vec::new();
     let mut flags = Vec::new();
     let mut trailing = Vec::new();
     let mut seen_flag = false;
     for arg in args {
-        if arg.starts_with('-') {
+        if arg.is_flag() {
             seen_flag = true;
             flags.push(arg.clone());
         } else if seen_flag {
@@ -430,7 +437,7 @@ fn split_args(args: &[String]) -> (Vec<String>, Vec<String>, Vec<String>) {
 }
 
 /// Build run args preserving subcommand position: [prefix..., flags..., trailing...].
-fn build_run_args(prefix: &[String], flags: &[String], trailing: &[String]) -> Vec<String> {
+fn build_run_args(prefix: &[Arg], flags: &[Arg], trailing: &[Arg]) -> Vec<Arg> {
     let mut args = prefix.to_vec();
     args.extend(flags.iter().cloned());
     args.extend(trailing.iter().cloned());
@@ -451,13 +458,13 @@ fn count_unique_flags(group: &crate::analyze::BehaviorGroup) -> usize {
 }
 
 /// Extract unique flag args from a group's run labels.
-fn extract_flags(group: &crate::analyze::BehaviorGroup) -> Vec<String> {
+fn extract_flags(group: &crate::analyze::BehaviorGroup) -> Vec<Arg> {
     let mut flags = Vec::new();
     let mut seen = HashSet::new();
     for label in &group.run_labels {
         for arg in label.split('"').enumerate().filter(|(i, _)| i % 2 == 1).map(|(_, s)| s) {
             if arg.starts_with('-') && seen.insert(arg.to_string()) {
-                flags.push(arg.to_string());
+                flags.push(Arg::Literal(arg.to_string()));
             }
         }
     }
@@ -468,20 +475,16 @@ fn extract_flags(group: &crate::analyze::BehaviorGroup) -> Vec<String> {
 /// Extract positional args from a run label, split into (prefix, trailing).
 /// Prefix = leading non-flag args before the first flag (subcommand args).
 /// Trailing = non-flag args after the first flag (file targets).
-fn extract_positionals(group: &crate::analyze::BehaviorGroup) -> (Vec<String>, Vec<String>) {
+fn extract_positionals(group: &crate::analyze::BehaviorGroup) -> (Vec<Arg>, Vec<Arg>) {
     if group.run_labels.is_empty() { return (Vec::new(), Vec::new()); }
     let label = &group.run_labels[0];
-    let args: Vec<String> = label.split('"')
-        .enumerate()
-        .filter(|(i, _)| i % 2 == 1)
-        .map(|(_, s)| s.to_string())
-        .collect();
+    let args = parse_run_label(label);
 
     let mut prefix = Vec::new();
     let mut trailing = Vec::new();
     let mut seen_flag = false;
     for arg in &args {
-        if arg.starts_with('-') {
+        if arg.is_flag() {
             seen_flag = true;
         } else if seen_flag {
             trailing.push(arg.clone());
@@ -538,7 +541,7 @@ fn generate_graduated_variants(
 
     match dimension {
         "size" => {
-            for size in [1, 100, 1000, 10000, 100000] {
+            for size in [1, 100, 1000] {
                 let mut cmds = base.commands.clone();
                 cmds.push(SetupCommand::CreateFile {
                     path: target.to_string(),
@@ -686,7 +689,7 @@ fn deduplicate_aliases(
 
 /// Infer common positional args from the base script's runs.
 /// Infer (prefix, trailing) from the script's runs.
-fn infer_positionals(script: &Script) -> (Vec<String>, Vec<String>) {
+fn infer_positionals(script: &Script) -> (Vec<Arg>, Vec<Arg>) {
     for run in &script.runs {
         let (prefix, _, trailing) = split_args(&run.args);
         if !prefix.is_empty() || !trailing.is_empty() {

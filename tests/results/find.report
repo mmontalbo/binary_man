@@ -20,17 +20,17 @@
       subdir
       subdir/nested.txt
   -N
-    exemplar: "-N" "alpha" "input.txt" in alpha_standard (different)
+    exemplar: "-N" "$(head -n1 input.txt)" "input.txt" in alpha_standard (different)
     base:
       input.txt
     flag:
   -a
-    exemplar: "-a" "alpha" "input.txt" in alpha_standard (different)
+    exemplar: "-a" "$(head -n1 input.txt)" "input.txt" in alpha_standard (different)
     base:
       input.txt
     flag:
   -o
-    exemplar: "-o" "alpha" "input.txt" in alpha_standard (different)
+    exemplar: "-o" "$(head -n1 input.txt)" "input.txt" in alpha_standard (different)
     base:
       input.txt
     flag:

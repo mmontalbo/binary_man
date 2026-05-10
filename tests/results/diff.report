@@ -6,9 +6,9 @@
   round 2: 58 isolated cumulative, 27 identical in round (refinement)
   round 3: 72 isolated cumulative, 30 identical in round (refinement)
 
-## Observed: 1/53 flags
-  1 solo, 0 via combination
-  35 additional error-differentiated
+## Observed: 34/53 flags
+  17 solo, 17 via combination
+  2 additional error-differentiated
   2 behavioral aliases detected
   17 indistinguishable under tested conditions
 
@@ -18,7 +18,7 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
   --GTYPE-group-format  # format GTYPE input groups with GFMT
   --LTYPE-line-format  # format LTYPE input lines with LFMT
   --horizon-lines  # keep NUM lines of the common prefix and suffix
-    exemplar: "--horizon-lines=0" "input.txt" "other.txt" in formatted_minimal (-4 lines)
+    exemplar: "--horizon-lines=10" "input.txt" "other.txt" in formatted_minimal (-4 lines)
     base:
       1,13c1
       < first line
@@ -61,7 +61,7 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       < 	indented with tab
             ...
   --tabsize  # tab stops every NUM (default 8) print columns
-    exemplar: "--tabsize=10" "input.txt" "other.txt" in formatted_minimal (-4 lines)
+    exemplar: "--tabsize=2147483647" "input.txt" "other.txt" in formatted_minimal (-4 lines)
     base:
       1,13c1
       < first line
@@ -102,8 +102,8 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       < Date
             ...
     flag:
-      --- input.txt	2026-05-09 11:30:06.712233513 -0700
-      +++ other.txt	2026-05-09 11:30:06.712233513 -0700
+      --- input.txt	2026-05-09 16:59:07.141296600 -0700
+      +++ other.txt	2026-05-09 16:59:07.141296600 -0700
       @@ -1,7 +1 @@
       -cherry
       -Apple
@@ -151,7 +151,7 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
     flag:
       
       
-      2026-05-09 11:30           diff -l input.txt other.txt            Page 1
+      2026-05-09 16:59           diff -l input.txt other.txt            Page 1
       
       
             ...
@@ -205,8 +205,8 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       < Date
             ...
     flag:
-      --- input.txt	2026-05-09 11:30:06.710013977 -0700
-      +++ other.txt	2026-05-09 11:30:06.710018205 -0700
+      --- input.txt	2026-05-09 16:59:07.122135174 -0700
+      +++ other.txt	2026-05-09 16:59:07.122165112 -0700
       @@ -1,7 +1 @@
       -cherry
       -Apple
@@ -228,7 +228,7 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       There is NO WARRANTY, to the extent permitted by law.
             ...
   -y  # output in two columns
-    exemplar: "-y" "input.txt" "other.txt" in alpha_minimal (+5 lines)
+    exemplar: "-y" "input.txt" "other.txt" in alpha_minimal (-9 lines)
     base:
       1,7c1
       < cherry
@@ -245,22 +245,22 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
             ...
 
 ## Via combination (distinguishable when paired)
-  --color  e.g. "--unified" "--color" "--left-column" "--speed-large-files" "input.txt" "other.txt"
+  --color  e.g. "--unified" "--color" "--left-column" "input.txt" "other.txt"
   --context  e.g. "--paginate" "--context" "input.txt" "other.txt"
-  --from-file  e.g. "-u" "--from-file" "input.txt" "other.txt"
-  --ignore-file-name-case  e.g. "--paginate" "--ignore-file-name-case" "input.txt" "other.txt"
+  --from-file  e.g. "-l" "--from-file" "input.txt" "other.txt"
+  --ignore-file-name-case  e.g. "-u" "--ignore-file-name-case" "--left-column" "input.txt" "other.txt"
   --label  e.g. (pairwise evidence)
-  --left-column  e.g. "--unified" "--color" "--left-column" "--speed-large-files" "input.txt" "other.txt"
+  --left-column  e.g. "--unified" "--color" "--left-column" "input.txt" "other.txt"
   --no-dereference  e.g. "-u" "--color" "--no-dereference" "--speed-large-files" "input.txt" "other.txt"
-  --no-ignore-file-name-case  e.g. "-u" "--ignore-file-name-case" "--no-ignore-file-name-case" "input.txt" "other.txt"
+  --no-ignore-file-name-case  e.g. "--unified" "--color" "--no-ignore-file-name-case" "input.txt" "other.txt"
   --normal  e.g. (pairwise evidence)
   --palette  e.g. (pairwise evidence)
-  --speed-large-files  e.g. "--unified" "--color" "--left-column" "--speed-large-files" "input.txt" "other.txt"
-  --strip-trailing-cr  e.g. "-u" "--color" "--left-column" "--strip-trailing-cr" "input.txt" "other.txt"
+  --speed-large-files  e.g. "-u" "--color" "--no-dereference" "--speed-large-files" "input.txt" "other.txt"
+  --strip-trailing-cr  e.g. "-u" "--color" "--no-dereference" "--strip-trailing-cr" "input.txt" "other.txt"
   -F  e.g. (pairwise evidence)
   -I  e.g. "-X" "-I" "input.txt" "other.txt"
   -S  e.g. "-X" "-S" "input.txt" "other.txt"
-  -X  e.g. "-X" "--color" "input.txt" "other.txt"
+  -X  e.g. "-X" "-S" "input.txt" "other.txt"
   -x  e.g. (pairwise evidence)
 
 ## Indistinguishable under tested conditions

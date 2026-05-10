@@ -5,7 +5,7 @@ use regex::Regex;
 use std::collections::{HashMap, HashSet};
 
 use crate::parse::{
-    self, FileContent, NamedContext, Property, Run, Script, SetupCommand,
+    self, Arg, FileContent, NamedContext, Property, Run, Script, SetupCommand,
 };
 use crate::sandbox::Sandbox;
 
@@ -86,88 +86,60 @@ pub fn try_help(binary: &str, sub_args: &[&str], sandbox: &Sandbox) -> Result<St
     anyhow::bail!("could not get help text from {} (tried --help and -h)", binary)
 }
 
-/// Infer positional arguments from usage line.
-/// Returns (pattern_arg, file_arg) — pattern_arg is Some for tools like grep/awk/sed.
-pub fn infer_base_args(help_text: &str) -> (Option<String>, Option<String>) {
-    let pattern_words = ["PATTERN", "PATTERNS", "EXPRESSION", "REGEX", "REGEXP",
-                         "BRE", "ERE", "SCRIPT", "PROGRAM"];
-
-    for line in help_text.lines().take(10) {
-        let upper = line.to_uppercase();
-
-        // Check for pattern-before-file: "PATTERN [FILE]", "PATTERNS [FILE]..."
-        let has_pattern = pattern_words.iter().any(|p| {
-            upper.contains(&format!(" {} ", p))
-            || upper.contains(&format!(" {}...", p))
-            || upper.contains(&format!("] {} ", p))
-            || upper.ends_with(&format!(" {}", p))
-        });
-
-        // Also detect quoted program patterns: 'program' file, {script} [file]
-        let has_quoted_program = line.contains("'program'")
-            || line.contains("{script")
-            || line.contains("'script");
-
-        let has_file = {
-            let lower = line.to_lowercase();
-            lower.contains("[file]") || lower.contains("<file>")
-                || lower.contains("[file ...]") || lower.contains("[file]...")
-                || lower.contains("file ...") || lower.contains("[input-file]")
-        };
-        let has_dir = {
-            let lower = line.to_lowercase();
-            lower.contains("[dir]") || lower.contains("[directory]") || lower.contains("<dir>")
-        };
-
-        if has_pattern || has_quoted_program {
-            let file_arg = if has_file {
-                Some("input.txt".into())
-            } else if has_dir {
-                Some(".".into())
-            } else {
-                Some("input.txt".into()) // assume file if pattern tool
-            };
-            return (Some("alpha".into()), file_arg);
-        }
-
-        if has_file {
-            return (None, Some("input.txt".into()));
-        }
-        if has_dir {
-            return (None, Some(".".into()));
-        }
-    }
-    (None, None)
-}
 
 /// Probe the binary with candidate arg patterns to discover which invocation
 /// patterns succeed. Returns the list of working arg patterns (each is a vec
 /// of positional args). Replaces help-text parsing with behavioral observation.
-/// Returns (working_arg_patterns, stdin_works).
+/// Returns (working_arg_patterns, stdin_works, probe_pattern).
+/// `probe_pattern` is Some if a pattern-taking candidate (e.g. grep PATTERN FILE)
+/// worked. The value is the concrete pattern string used during probing, which
+/// callers should replace with `Arg::Extract` for context-derived matching.
 pub fn probe_arg_patterns(
     binary: &str,
     sub_args: &[&str],
     sandbox: &Sandbox,
-) -> (Vec<Vec<String>>, bool) {
-    use crate::data;
-
+) -> (Vec<Vec<String>>, bool, Option<String>) {
     // Create a minimal workspace for probing
     let probe_dir = match tempfile::Builder::new().prefix("bgrid_probe_").tempdir() {
         Ok(d) => d,
-        Err(_) => return (vec![vec!["input.txt".into()]], false), // fallback
+        Err(_) => return (vec![vec!["input.txt".into()]], false, None), // fallback
     };
     let work_dir = probe_dir.path();
 
     // Set up minimal files for probing
-    let _ = std::fs::write(work_dir.join("input.txt"), "cherry\napple\nbanana\n");
+    let probe_content = "cherry\napple\nbanana\n";
+    let _ = std::fs::write(work_dir.join("input.txt"), probe_content);
     let _ = std::fs::write(work_dir.join("other.txt"), "hello world\n");
     let _ = std::fs::create_dir(work_dir.join("subdir"));
     let _ = std::fs::write(work_dir.join("subdir/nested.txt"), "nested\n");
 
+    // Extract pattern from probe content — guaranteed to match input.txt
+    let probe_pattern = probe_content.lines().next().unwrap_or("test").to_string();
+
+    // Build candidates dynamically: replace the hardcoded "alpha" placeholder
+    // with the actual first line of input.txt so pattern-taking tools (grep, sed)
+    // get a pattern that matches their input.
+    let candidates: Vec<Vec<&str>> = vec![
+        vec![],                                       // no args
+        vec!["input.txt"],                            // single file
+        vec!["."],                                    // directory
+        vec!["input.txt", "other.txt"],               // two files (diff, paste)
+        vec!["input.txt", "subdir"],                  // file to directory
+    ];
+    // Pattern candidates use the probe_pattern (which matches content)
+    let pattern_str = probe_pattern.as_str();
+    let pattern_candidates: Vec<Vec<&str>> = vec![
+        vec![pattern_str, "input.txt"],               // pattern + file (grep, sed)
+        vec![pattern_str, "."],                       // pattern + directory (grep -r)
+    ];
+
     let env = std::collections::HashMap::new();
     let mut working = Vec::new();
+    let mut found_pattern_candidate = false;
 
-    for candidate in data::ARG_CANDIDATES {
+    let all_candidates: Vec<&Vec<&str>> = candidates.iter().chain(pattern_candidates.iter()).collect();
+
+    for candidate in &all_candidates {
         let mut args: Vec<&str> = sub_args.to_vec();
         args.extend(candidate.iter());
 
@@ -192,11 +164,15 @@ pub fn probe_arg_patterns(
             // Also accept exit 1 with output (grep no-match, diff differences-found)
             if exit == 0 || (exit <= 1 && has_output) || has_fs_effect {
                 let pattern: Vec<String> = candidate.iter().map(|s| s.to_string()).collect();
+                // Track whether this was a pattern-taking candidate
+                if candidate.first() == Some(&pattern_str) {
+                    found_pattern_candidate = true;
+                }
                 working.push(pattern);
             }
 
             // Reset workspace for next probe (in case a command modified files)
-            let _ = std::fs::write(work_dir.join("input.txt"), "cherry\napple\nbanana\n");
+            let _ = std::fs::write(work_dir.join("input.txt"), probe_content);
             let _ = std::fs::write(work_dir.join("other.txt"), "hello world\n");
         }
     }
@@ -256,7 +232,8 @@ pub fn probe_arg_patterns(
         working.push(vec!["input.txt".into()]);
     }
 
-    (working, stdin_works)
+    let probe_pat = if found_pattern_candidate { Some(probe_pattern) } else { None };
+    (working, stdin_works, probe_pat)
 }
 
 /// Discovered subcommand with its behavioral classification.
@@ -360,18 +337,31 @@ fn walkdir_count(dir: &std::path::Path) -> Option<usize> {
 
 /// Map a value hint from --help to a reasonable default.
 pub fn default_value(hint: &str) -> String {
-    match hint.to_uppercase().as_str() {
-        "NUM" | "NUMBER" | "N" | "SIZE" | "COLS" | "WIDTH" | "COUNT" | "LINES" | "BYTES" => "10".into(),
+    let upper = hint.to_uppercase();
+    let upper = upper.as_str();
+    match upper {
+        "NUM" | "NUMBER" | "N" | "SIZE" | "COLS" | "WIDTH" | "COUNT" | "LINES" | "BYTES"
+        | "MAX" | "PROCS" | "DEPTH" | "JOBS" | "LEVEL" => "10".into(),
         "FILE" | "PATH" | "FILENAME" => "input.txt".into(),
         "DIR" | "DIRECTORY" => ".".into(),
         "PATTERN" | "PAT" | "REGEX" => ".*".into(),
         "LIST" | "FIELDS" | "FIELD_LIST" => "1".into(),
         "RANGE" | "SET1" | "SET2" | "CHARS" => "1-3".into(),
-        "CHAR" | "DELIM" | "SEP" => ",".into(),
+        "CHAR" | "DELIM" | "SEP" | "CHARACTER" => ",".into(),
         "FORMAT" | "FMT" => "%s".into(),
         "MODE" => "644".into(),
         "WORD" | "STYLE" | "TYPE" | "METHOD" | "WHEN" => "auto".into(),
-        _ => hint.to_lowercase(),
+        "VAR" | "NAME" | "PREFIX" | "SUFFIX" | "STRING" | "STR" | "LABEL" | "TAG" => "test".into(),
+        _ => {
+            // Handle compound hints like "MAX-LINES", "MAX-PROCS", "MAX-CHARS"
+            // by checking if any component is a known numeric keyword
+            let numeric_words = ["MAX", "NUM", "COUNT", "SIZE", "LINES", "BYTES",
+                                 "PROCS", "ARGS", "CHARS", "DEPTH", "JOBS", "WIDTH"];
+            if upper.split('-').any(|part| numeric_words.contains(&part)) {
+                return "10".into();
+            }
+            hint.to_lowercase()
+        }
     }
 }
 
@@ -422,9 +412,9 @@ pub fn print_skeleton(
     }
 
     // Serialize runs
-    let mut current_from: Option<&Vec<String>> = None;
+    let mut current_from: Option<&Vec<Arg>> = None;
     for run in &script.runs {
-        let args_str = run.args.iter().map(|a| format!("\"{}\"", a)).collect::<Vec<_>>().join(" ");
+        let args_str = run.args.iter().map(|a| a.display()).collect::<Vec<_>>().join(" ");
 
         match (&run.diff_from, current_from) {
             (Some(ref from), Some(prev)) if from == prev => {
@@ -433,7 +423,7 @@ pub fn print_skeleton(
             }
             (Some(ref from), _) => {
                 // New from block
-                let from_str = from.iter().map(|a| format!("\"{}\"", a)).collect::<Vec<_>>().join(" ");
+                let from_str = from.iter().map(|a| a.display()).collect::<Vec<_>>().join(" ");
                 println!();
                 println!("from {}", from_str);
                 println!("  run {}", args_str);
@@ -522,10 +512,16 @@ pub fn generate_initial_script(
     let mut flag_info = flag_info;
     flag_info.all_flags = seen.clone();
 
-    // Discover which invocation patterns work by probing the binary
-    let (working_patterns, stdin_works) = probe_arg_patterns(binary, sub_args, sandbox);
+    // Discover which invocation patterns work by probing the binary.
+    // probe_pattern is Some("cherry") if the binary accepts pattern+file args
+    // (e.g. grep, sed). In the grid, we replace this with Arg::Extract so the
+    // pattern is derived from each context's input.txt at runtime.
+    let (working_patterns, stdin_works, probe_pattern) = probe_arg_patterns(binary, sub_args, sandbox);
     if stdin_works {
         eprintln!("  stdin: accepted");
+    }
+    if probe_pattern.is_some() {
+        eprintln!("  pattern: context-derived");
     }
 
     // Probe values for value-taking flags: try candidates and keep what works
@@ -663,14 +659,25 @@ pub fn generate_initial_script(
 
     // --- Build runs from behaviorally-discovered arg patterns ---
     let mut runs: Vec<Run> = Vec::new();
-    let sub_prefix: Vec<String> = sub_args.iter().map(|s| s.to_string()).collect();
+    let sub_prefix: Vec<Arg> = sub_args.iter().map(|s| Arg::Literal(s.to_string())).collect();
+
+    // Convert a positional arg string to Arg. If it matches the probe_pattern,
+    // replace it with a context-derived extraction so the pattern comes from
+    // each context's input.txt at runtime (guaranteed to match).
+    let to_arg = |s: &String| -> Arg {
+        if probe_pattern.as_ref() == Some(s) {
+            Arg::Extract("head -n1 input.txt".into())
+        } else {
+            Arg::Literal(s.clone())
+        }
+    };
 
     // For each working arg pattern, generate a base run + flag runs
     for pattern in &working_patterns {
         // Build base args: sub_prefix + positional args
-        let base_args: Vec<String> = sub_prefix.iter()
-            .chain(pattern.iter())
-            .cloned().collect();
+        let base_args: Vec<Arg> = sub_prefix.iter().cloned()
+            .chain(pattern.iter().map(&to_arg))
+            .collect();
 
         // Base run (no flags)
         runs.push(Run { args: base_args.clone(), in_contexts: None, stdin: None, diff_from: None });
@@ -678,8 +685,8 @@ pub fn generate_initial_script(
         // Flag runs with from-reference to base
         for flag in &short_flags {
             let mut args = sub_prefix.clone();
-            args.push(flag.clone());
-            args.extend(pattern.iter().cloned());
+            args.push(Arg::Literal(flag.clone()));
+            args.extend(pattern.iter().map(&to_arg));
             runs.push(Run {
                 args,
                 in_contexts: None, stdin: None,
@@ -690,11 +697,11 @@ pub fn generate_initial_script(
             let mut args = sub_prefix.clone();
             let val = hint.as_ref().map(|h| default_value(h));
             if let Some(v) = val {
-                args.push(format!("{}={}", flag, v));
+                args.push(Arg::Literal(format!("{}={}", flag, v)));
             } else {
-                args.push(flag.clone());
+                args.push(Arg::Literal(flag.clone()));
             }
-            args.extend(pattern.iter().cloned());
+            args.extend(pattern.iter().map(&to_arg));
             runs.push(Run {
                 args,
                 in_contexts: None, stdin: None,
@@ -712,9 +719,9 @@ pub fn generate_initial_script(
 
         // Stdin with each working arg pattern
         for pattern in &working_patterns {
-            let base_args: Vec<String> = sub_prefix.iter()
-                .chain(pattern.iter())
-                .cloned().collect();
+            let base_args: Vec<Arg> = sub_prefix.iter().cloned()
+                .chain(pattern.iter().map(&to_arg))
+                .collect();
 
             runs.push(Run {
                 args: base_args.clone(),
@@ -725,8 +732,8 @@ pub fn generate_initial_script(
 
             for flag in &short_flags {
                 let mut args = sub_prefix.clone();
-                args.push(flag.clone());
-                args.extend(pattern.iter().cloned());
+                args.push(Arg::Literal(flag.clone()));
+                args.extend(pattern.iter().map(&to_arg));
                 runs.push(Run {
                     args,
                     in_contexts: None,
@@ -738,11 +745,11 @@ pub fn generate_initial_script(
                 let mut args = sub_prefix.clone();
                 let val = hint.as_ref().map(|h| default_value(h));
                 if let Some(v) = val {
-                    args.push(format!("{}={}", flag, v));
+                    args.push(Arg::Literal(format!("{}={}", flag, v)));
                 } else {
-                    args.push(flag.clone());
+                    args.push(Arg::Literal(flag.clone()));
                 }
-                args.extend(pattern.iter().cloned());
+                args.extend(pattern.iter().map(&to_arg));
                 runs.push(Run {
                     args,
                     in_contexts: None,
@@ -753,7 +760,7 @@ pub fn generate_initial_script(
         }
 
         // Also stdin with no positional args (bare stdin)
-        let bare_args: Vec<String> = sub_prefix.clone();
+        let bare_args: Vec<Arg> = sub_prefix.clone();
         runs.push(Run {
             args: bare_args.clone(),
             in_contexts: None,
@@ -762,7 +769,7 @@ pub fn generate_initial_script(
         });
         for flag in &short_flags {
             let mut args = sub_prefix.clone();
-            args.push(flag.clone());
+            args.push(Arg::Literal(flag.clone()));
             runs.push(Run {
                 args,
                 in_contexts: None,
@@ -774,9 +781,9 @@ pub fn generate_initial_script(
             let mut args = sub_prefix.clone();
             let val = hint.as_ref().map(|h| default_value(h));
             if let Some(v) = val {
-                args.push(format!("{}={}", flag, v));
+                args.push(Arg::Literal(format!("{}={}", flag, v)));
             } else {
-                args.push(flag.clone());
+                args.push(Arg::Literal(flag.clone()));
             }
             runs.push(Run {
                 args,
@@ -794,13 +801,13 @@ pub fn generate_initial_script(
             .filter(|(_, hint)| hint.as_ref().is_some_and(|h| numeric_hints.contains(&h.to_uppercase().as_str())))
             .collect();
         if !zero_flags.is_empty() {
-            let base_args: Vec<String> = sub_prefix.iter()
-                .chain(first_pattern.iter())
-                .cloned().collect();
+            let base_args: Vec<Arg> = sub_prefix.iter().cloned()
+                .chain(first_pattern.iter().map(&to_arg))
+                .collect();
             for (flag, _) in &zero_flags {
                 let mut args = sub_prefix.clone();
-                args.push(format!("{}=0", flag));
-                args.extend(first_pattern.iter().cloned());
+                args.push(Arg::Literal(format!("{}=0", flag)));
+                args.extend(first_pattern.iter().map(&to_arg));
                 runs.push(Run {
                     args, in_contexts: None, stdin: None,
                     diff_from: Some(base_args.clone()),
@@ -808,15 +815,15 @@ pub fn generate_initial_script(
             }
             for (flag, _) in zero_flags.iter().take(3) {
                 let mut args1 = sub_prefix.clone();
-                args1.push(format!("{}=-1", flag));
-                args1.extend(first_pattern.iter().cloned());
+                args1.push(Arg::Literal(format!("{}=-1", flag)));
+                args1.extend(first_pattern.iter().map(&to_arg));
                 runs.push(Run {
                     args: args1, in_contexts: None, stdin: None,
                     diff_from: Some(base_args.clone()),
                 });
                 let mut args2 = sub_prefix.clone();
-                args2.push(format!("{}=2147483647", flag));
-                args2.extend(first_pattern.iter().cloned());
+                args2.push(Arg::Literal(format!("{}=2147483647", flag)));
+                args2.extend(first_pattern.iter().map(&to_arg));
                 runs.push(Run {
                     args: args2, in_contexts: None, stdin: None,
                     diff_from: Some(base_args.clone()),
@@ -828,7 +835,7 @@ pub fn generate_initial_script(
     // Error provocation: nonexistent file
     {
         let mut err_args = sub_prefix.clone();
-        err_args.push("nonexistent-file.txt".into());
+        err_args.push(Arg::Literal("nonexistent-file.txt".into()));
         runs.push(Run { args: err_args, in_contexts: None, stdin: None, diff_from: None });
     }
 

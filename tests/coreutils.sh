@@ -11,18 +11,17 @@
 set -euo pipefail
 
 BGRID="${1:-./target/release/bgrid}"
-TIMEOUT=60
+TIMEOUT=${TIMEOUT:-180}
 RESULTS_DIR="tests/results"
-PASS=0
-FAIL=0
-TOTAL=0
+JOBS=${JOBS:-4}
 
 mkdir -p "$RESULTS_DIR"
 
-check() {
+# Run a single binary and write result to a temp file for later collection.
+run_one() {
     local binary="$1"
     local min_distinguished="$2"
-    TOTAL=$((TOTAL + 1))
+    local result_file="$RESULTS_DIR/$binary.result"
 
     local report_file="$RESULTS_DIR/$binary.report"
     local stderr_file="$RESULTS_DIR/$binary.stderr"
@@ -34,8 +33,7 @@ check() {
     result=$(grep -a "^## Observed:" "$report_file" 2>/dev/null || echo "FAILED")
 
     if [ "$result" = "FAILED" ]; then
-        echo "FAIL  $binary: timed out or errored (see $stderr_file)"
-        FAIL=$((FAIL + 1))
+        echo "FAIL  $binary: timed out or errored (see $stderr_file)" >"$result_file"
         return
     fi
 
@@ -44,53 +42,79 @@ check() {
     denominator=$(echo "$result" | grep -oP '(?<=/)\d+')
 
     if [ -z "$distinguished" ] || [ -z "$denominator" ]; then
-        echo "FAIL  $binary: could not parse result: $result"
-        FAIL=$((FAIL + 1))
+        echo "FAIL  $binary: could not parse result: $result" >"$result_file"
         return
     fi
 
     if [ "$distinguished" -ge "$min_distinguished" ]; then
-        echo "PASS  $binary: $distinguished/$denominator (expected >=$min_distinguished)"
-        PASS=$((PASS + 1))
+        echo "PASS  $binary: $distinguished/$denominator (expected >=$min_distinguished)" >"$result_file"
     else
-        echo "FAIL  $binary: $distinguished/$denominator (expected >=$min_distinguished)"
-        FAIL=$((FAIL + 1))
+        echo "FAIL  $binary: $distinguished/$denominator (expected >=$min_distinguished)" >"$result_file"
     fi
 }
 
 echo "=== bgrid coreutils integration test ==="
 echo "binary: $BGRID"
 echo "results: $RESULTS_DIR/"
+echo "parallel: $JOBS"
 echo ""
 
 START=$(date +%s)
 
 # Expected lower bounds for observed behavior count.
 # These are the minimum acceptable — improvements raise them.
-check sort   20
-check ls     50
-check cat    10
-check cut     3
-check head    4
-check wc      6
-check uniq    9
-check nl     10
-check od     12
-check fold    3
-check fmt     6
-check paste   3
-check du     24
-check cp     28
-check rm      7
-check stat    6
-check df     14
+CHECKS=(
+    "sort 20"
+    "ls 50"
+    "cat 10"
+    "cut 3"
+    "head 4"
+    "wc 6"
+    "uniq 9"
+    "nl 10"
+    "od 12"
+    "fold 3"
+    "fmt 6"
+    "paste 3"
+    "du 24"
+    "cp 28"
+    "rm 7"
+    "stat 6"
+    "df 14"
+    "sed 20"
+    "xargs 1"
+    "diff 30"
+    "find 1"
+    "grep 12"
+)
 
-# Non-coreutils tools
-check sed    18
-check xargs   1
-check diff    1
-check find    1
-check grep    1
+# Run all checks in parallel, limited to $JOBS at a time
+export -f run_one
+export BGRID TIMEOUT RESULTS_DIR
+printf '%s\n' "${CHECKS[@]}" | xargs -P "$JOBS" -I{} bash -c 'run_one {}'
+
+# Collect results
+PASS=0
+FAIL=0
+TOTAL=0
+
+for entry in "${CHECKS[@]}"; do
+    binary="${entry%% *}"
+    TOTAL=$((TOTAL + 1))
+    result_file="$RESULTS_DIR/$binary.result"
+    if [ -f "$result_file" ]; then
+        cat "$result_file"
+        if grep -q "^PASS" "$result_file"; then
+            PASS=$((PASS + 1))
+        else
+            FAIL=$((FAIL + 1))
+        fi
+        rm -f "$result_file"
+    else
+        echo "FAIL  $binary: no result file"
+        FAIL=$((FAIL + 1))
+    fi
+done
 
 END=$(date +%s)
 ELAPSED=$((END - START))
