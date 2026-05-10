@@ -18,11 +18,11 @@ Aliases: -L = --max-line-length, -c = --bytes, -l = --lines, -m = --chars, -w = 
       (no base)
     flag:
   --total  # when to print a line with total counts;
-    exemplar: "--total=auto" in alpha_minimal (different)
+    exemplar: "--total=auto" "." in alpha_standard / content_case_upper (different)
     base:
-            0       0       0
+      (no base)
     flag:
-            2       3      19
+            0       0       0 .
 
 ## Via combination (distinguishable when paired)
   -L  e.g. (pairwise evidence)

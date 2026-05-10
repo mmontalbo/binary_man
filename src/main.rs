@@ -167,7 +167,7 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, skeleton: bool)
             &refine_state,
         );
 
-        let Some(delta_script) = delta else {
+        let Some((delta_script, content_script)) = delta else {
             eprintln!("[round {}] converged — no further refinement", round);
             break;
         };
@@ -177,6 +177,25 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, skeleton: bool)
             round, delta_script.contexts.len(), delta_script.runs.len(), delta_cells);
 
         let delta_grid = execute::run_grid(binary, &delta_script, std::path::Path::new("."), sandbox)?;
+
+        // Execute content perturbation as a separate grid if present
+        if let Some(ref cp_script) = content_script {
+            let cp_cells = execute::count_cells(cp_script);
+            eprintln!("[round {}] content perturbation: {} contexts, {} runs, {} cells",
+                round, cp_script.contexts.len(), cp_script.runs.len(), cp_cells);
+            let cp_grid = execute::run_grid(binary, cp_script, std::path::Path::new("."), sandbox)?;
+            let cp_metrics = analyze::analyze(cp_script, &cp_grid, Some(&flag_info), Some(&ever_tested));
+            // Accumulate isolations from content perturbation
+            for group in &cp_metrics.groups {
+                if group.isolated() {
+                    for label in &group.run_labels {
+                        ever_isolated.insert(label.clone());
+                    }
+                }
+            }
+            all_metrics.push(cp_metrics);
+        }
+
         // Accumulate tested flags from this round
         for run in &delta_script.runs {
             for arg in &run.args {

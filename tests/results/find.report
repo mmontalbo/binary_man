@@ -17,18 +17,18 @@
     flag:
       other.txt
   -N
-    exemplar: "-N" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
+    exemplar: "-N" "$(head -n1 input.txt)" "input.txt" in alpha_standard / content_case_upper (different)
     base:
-      (no base)
+      input.txt
     flag:
   -a
-    exemplar: "-a" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
+    exemplar: "-a" "$(head -n1 input.txt)" "input.txt" in alpha_standard / content_case_upper (different)
     base:
-      (no base)
+      input.txt
     flag:
   -o
-    exemplar: "-o" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
+    exemplar: "-o" "$(head -n1 input.txt)" "input.txt" in alpha_standard / content_case_upper (different)
     base:
-      (no base)
+      input.txt
     flag:
 

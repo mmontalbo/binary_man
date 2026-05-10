@@ -13,38 +13,38 @@ Aliases: -L = --dereference, -f = --file-system, -t = --terse
 
 ## Solo (unique behavior)
   --cached  # specify how to use cached attributes;
-    exemplar: "--cached=644" in many_files /remove .hidden (different)
+    exemplar: "--cached=644" "input.txt" "subdir" in many_files /remove .hidden (different)
     base:
       (no base)
     flag:
   --format
-    exemplar: "--format=%s" "input.txt" "other.txt" in many_files /remove .hidden (different)
+    exemplar: "--format=%s" "input.txt" "subdir" in many_files /remove .hidden (different)
     base:
       (no base)
     flag:
       46
-      26
+      4096
   --printf  # like --format, but interpret backslash escapes,
-    exemplar: "--printf=%s" "input.txt" "subdir" in many_files /remove .hidden (different)
+    exemplar: "--printf=%s" "input.txt" "other.txt" in many_files /remove .hidden (different)
     base:
       (no base)
     flag:
-      464096
+      4626
   -L  # follow links
     exemplar: "-L" "input.txt" in alpha_minimal (+8 lines, exit 127→0)
     base:
         File: input.txt
         Size: 49        	Blocks: 8          IO Block: 4096   regular file
-      Device: 254,0	Inode: 152569099   Links: 1
+      Device: 254,0	Inode: 152453653   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-09 18:05:03.631584958 -0700
+      Access: 2026-05-10 11:08:14.285428053 -0700
             ...
     flag:
         File: input.txt
         Size: 49        	Blocks: 8          IO Block: 4096   regular file
-      Device: 254,0	Inode: 152569107   Links: 1
+      Device: 254,0	Inode: 152453667   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-09 18:05:03.621060670 -0700
+      Access: 2026-05-10 11:08:14.274721683 -0700
             ...
   -c  # --format=FORMAT   use the specified FORMAT instead of the default;
     exemplar: "-c" "input.txt" "other.txt" in many_files /remove subdir (different)
@@ -57,25 +57,25 @@ Aliases: -L = --dereference, -f = --file-system, -t = --terse
     base:
         File: input.txt
         Size: 49        	Blocks: 8          IO Block: 4096   regular file
-      Device: 254,0	Inode: 152569099   Links: 1
+      Device: 254,0	Inode: 152453653   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-09 18:05:03.631584958 -0700
+      Access: 2026-05-10 11:08:14.285428053 -0700
             ...
     flag:
         File: "input.txt"
           ID: c63eb3646de0a34 Namelen: 255     Type: ext2/ext3
       Block size: 4096       Fundamental block size: 4096
-      Blocks: Total: 1937552970 Free: 1610412670 Available: 1512746612
-      Inodes: Total: 244158464  Free: 240735990
+      Blocks: Total: 1937552970 Free: 1610312928 Available: 1512646870
+      Inodes: Total: 244158464  Free: 240677585
   -t  # print the information in terse form
     exemplar: "-t" "input.txt" in alpha_minimal (+1 lines, exit 127→0)
     base:
         File: input.txt
         Size: 49        	Blocks: 8          IO Block: 4096   regular file
-      Device: 254,0	Inode: 152569099   Links: 1
+      Device: 254,0	Inode: 152453653   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-09 18:05:03.631584958 -0700
+      Access: 2026-05-10 11:08:14.285428053 -0700
             ...
     flag:
-      input.txt 49 8 81a4 1000 100 fe00 152569125 1 0 0 1778375103 1778375103 1778375103 1778375103 4096
+      input.txt 49 8 81a4 1000 100 fe00 152453706 1 0 0 1778436494 1778436494 1778436494 1778436494 4096
 

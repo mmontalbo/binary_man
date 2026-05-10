@@ -1,36 +1,25 @@
 # Exploration: cp
 
 ## Rounds
-  round 0: 40 isolated cumulative, 10 identical in round (discovery)
-  round 1: 49 isolated cumulative, 16 identical in round (refinement)
-  round 2: 53 isolated cumulative, 22 identical in round (refinement)
-  round 3: 58 isolated cumulative, 29 identical in round (refinement)
+  round 0: 34 isolated cumulative, 11 identical in round (discovery)
+  round 1: 39 isolated cumulative, 19 identical in round (refinement)
+  round 2: 54 isolated cumulative, 25 identical in round (refinement)
+  round 3: 66 isolated cumulative, 26 identical in round (refinement)
 
 ## Observed: 34/36 flags
   20 solo, 14 via combination
   2 additional error-differentiated
-  1 behavioral aliases detected
 
 Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-target-directory, -a = --archive, -f = --force, -i = --interactive, -l = --link, -n = --no-clobber, -s = --symbolic-link, -t = --target-directory, -v = --verbose, -x = --one-file-system
 
 ## Solo (unique behavior)
   --attributes-only  # don't copy the file data, just the attributes
-    exemplar: "--attributes-only" "input.txt" "subdir" in many_files /remove subdir (different)
+    exemplar: "--attributes-only" "input.txt" "other.txt" in many_files /remove subdir (different)
     base:
       (no base)
     flag:
   --backup
-    exemplar: "--backup" "input.txt" "subdir" in many_files /remove subdir (different)
-    base:
-      (no base)
-    flag:
-  --context
-    exemplar: "--context" "input.txt" "subdir" in many_files /remove subdir (different)
-    base:
-      (no base)
-    flag:
-  --copy-contents  # copy contents of special files when recursive
-    exemplar: "--copy-contents" "input.txt" "other.txt" in many_files /remove subdir (different)
+    exemplar: "--backup" "input.txt" "subdir" in alpha_standard / content_case_upper (different)
     base:
       (no base)
     flag:
@@ -42,22 +31,22 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
       'input.txt' -> 'other.txt'
       copy offload: yes, reflink: unsupported, sparse detection: no
   --keep-directory-symlink  # follow existing symlinks to directories
-    exemplar: "--keep-directory-symlink" "input.txt" "subdir" in many_files /remove subdir (different)
+    exemplar: "--keep-directory-symlink" "input.txt" "subdir" in alpha_standard / content_case_upper (different)
     base:
       (no base)
     flag:
   --no-preserve  # don't preserve the specified attributes
-    exemplar: "--no-preserve=attr_list" "input.txt" "subdir" in many_files /remove subdir (different)
+    exemplar: "--no-preserve=attr_list" "input.txt" "other.txt" in many_files /remove subdir (different)
     base:
       (no base)
     flag:
   --parents  # use full source file name under DIRECTORY
-    exemplar: "--parents" "input.txt" "subdir" in many_files /remove subdir (different)
+    exemplar: "--parents" "input.txt" "other.txt" in many_files /remove subdir (different)
     base:
       (no base)
     flag:
   --recursive
-    exemplar: "--recursive" "input.txt" "subdir" in many_files /remove subdir (different)
+    exemplar: "--recursive" "input.txt" "subdir" in alpha_standard / content_case_upper (different)
     base:
       (no base)
     flag:
@@ -67,12 +56,22 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
       (no base)
     flag:
   --remove-destination  # remove each existing destination file before
-    exemplar: "--remove-destination" "input.txt" "other.txt" in many_files /remove subdir (different)
+    exemplar: "--remove-destination" "input.txt" "subdir" in alpha_standard / content_case_upper (different)
     base:
       (no base)
     flag:
-  -P  # never follow symbolic links in SOURCE
-    exemplar: "-P" "input.txt" "other.txt" in many_files /remove subdir (different)
+  --sparse  # control creation of sparse files. See below
+    exemplar: "--sparse=auto" "input.txt" "subdir" in alpha_standard / content_case_upper (different)
+    base:
+      (no base)
+    flag:
+  --update
+    exemplar: "--update" "input.txt" "subdir" in alpha_standard / content_case_upper (different)
+    base:
+      (no base)
+    flag:
+  -L  # always follow symbolic links in SOURCE
+    exemplar: "-L" "input.txt" "subdir" in alpha_standard / content_case_upper (different)
     base:
       (no base)
     flag:
@@ -87,22 +86,27 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
       (no base)
     flag:
   -Z  # set SELinux security context of destination
-    exemplar: "-Z" "input.txt" "subdir" in many_files /remove subdir (different)
+    exemplar: "-Z" "input.txt" "subdir" in alpha_standard / content_case_upper (different)
     base:
       (no base)
     flag:
   -b  # like --backup but does not accept an argument
-    exemplar: "-b" "input.txt" "subdir" in many_files /remove subdir (different)
+    exemplar: "-b" "input.txt" "subdir" in alpha_standard / content_case_upper (different)
+    base:
+      (no base)
+    flag:
+  -f  # if an existing destination file cannot be
+    exemplar: "-f" "input.txt" "subdir" in alpha_standard / content_case_upper (different)
     base:
       (no base)
     flag:
   -i  # prompt before overwrite (overrides a previous -n
-    exemplar: "-i" "input.txt" "subdir" in many_files /remove subdir (different)
+    exemplar: "-i" "input.txt" "subdir" in alpha_standard / content_case_upper (different)
     base:
       (no base)
     flag:
   -l  # hard link files instead of copying
-    exemplar: "-l" "input.txt" "subdir" in many_files /remove subdir (different)
+    exemplar: "-l" "input.txt" "subdir" in alpha_standard / content_case_upper (different)
     base:
       (no base)
     flag:
@@ -122,25 +126,20 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
       (no base)
     flag:
       'input.txt' -> 'other.txt'
-  -x  # stay on this file system
-    exemplar: "-x" "input.txt" "subdir" in many_files /remove subdir (different)
-    base:
-      (no base)
-    flag:
 
 ## Via combination (distinguishable when paired)
-  --preserve  e.g. "--backup" "--preserve" "input.txt" "other.txt"
-  --sparse  e.g. (pairwise evidence)
-  --strip-trailing-slashes  e.g. "--remove-destination" "--strip-trailing-slashes" "input.txt" "other.txt"
-  --update  e.g. (pairwise evidence)
+  --context  e.g. "--debug" "--context" "input.txt" "other.txt"
+  --copy-contents  e.g. "--remove-destination" "--copy-contents" "input.txt" "other.txt"
+  --preserve  e.g. "--backup" "--preserve" "-u" "input.txt" "other.txt"
+  --strip-trailing-slashes  e.g. "--backup" "--strip-trailing-slashes" "input.txt" "other.txt"
   -H  e.g. (pairwise evidence)
-  -L  e.g. (pairwise evidence)
+  -P  e.g. (pairwise evidence)
   -R  e.g. (pairwise evidence)
   -a  e.g. (pairwise evidence)
   -d  e.g. (pairwise evidence)
-  -f  e.g. (pairwise evidence)
   -n  e.g. "-b" "-n" "input.txt" "subdir"
-  -p  e.g. (pairwise evidence)
+  -p  e.g. "--debug" "--backup" "-p" "input.txt" "other.txt"
   -r  e.g. (pairwise evidence)
-  -u  e.g. (pairwise evidence)
+  -u  e.g. "--backup" "--preserve" "-u" "input.txt" "other.txt"
+  -x  e.g. (pairwise evidence)
 
