@@ -17,44 +17,42 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
 ## Solo (unique behavior)
   --binary-files  # assume that binary files are TYPE;
   --include  # search only files that match GLOB (a file pattern)
-    exemplar: "--include=glob" "$(head -n1 input.txt)" "input.txt" in alpha_minimal (different)
+    exemplar: "--include=glob" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
     base:
-      cherry
+      (no base)
     flag:
   -A  # print NUM lines of trailing context
-    exemplar: "-A" "$(head -n1 input.txt)" "input.txt" in numeric_minimal (different)
+    exemplar: "-A" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
     base:
-      100
-      1000
+      (no base)
     flag:
   -B  # print NUM lines of leading context
-    exemplar: "-B" "$(head -n1 input.txt)" "input.txt" in numeric_minimal (different)
+    exemplar: "-B" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
     base:
-      100
-      1000
+      (no base)
     flag:
   -C  # print NUM lines of output context
-    exemplar: "-C" "$(head -n1 input.txt)" "input.txt" in numeric_minimal (different)
+    exemplar: "-C" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
     base:
-      100
-      1000
+      (no base)
     flag:
   -D  # how to handle devices, FIFOs and sockets;
   -H  # print file name with output lines
-    exemplar: "-H" "$(head -n1 input.txt)" "input.txt" in alpha_minimal (-1 lines)
+    exemplar: "-H" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
     base:
-      cherry
+      (no base)
     flag:
-      input.txt:cherry
+      input.txt:100
+      input.txt:1000
   -L  # print only names of FILEs with no selected lines
     exemplar: "-L" "$(head -n1 input.txt)" "input.txt" in numeric_standard / input.txt=empty (+1 lines, exit 0→1)
     base:
     flag:
       input.txt
   -V  # display version information and exit
-    exemplar: "-V" "$(head -n1 input.txt)" "input.txt" in alpha_minimal (different)
+    exemplar: "-V" "$(head -n1 input.txt)" "input.txt" in many_files /input.txt=size:1 (different)
     base:
-      cherry
+      (no base)
     flag:
       grep (GNU grep) 3.11
       Copyright (C) 2023 Free Software Foundation, Inc.
@@ -63,89 +61,89 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
       There is NO WARRANTY, to the extent permitted by law.
             ...
   -b  # print the byte offset with output lines
-    exemplar: "-b" "$(head -n1 input.txt)" "input.txt" in alpha_minimal (-1 lines)
+    exemplar: "-b" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
     base:
-      cherry
+      (no base)
     flag:
-      0:cherry
+      0:100
+      39:1000
   -c  # print only a count of selected lines per FILE
-    exemplar: "-c" "$(head -n1 input.txt)" "input.txt" in alpha_minimal (different)
+    exemplar: "-c" "$(head -n1 input.txt)" "input.txt" in many_files /input.txt=size:1 (different)
     base:
-      cherry
+      (no base)
     flag:
       1
   -d  # how to handle directories;
-    exemplar: "-d" "$(head -n1 input.txt)" "input.txt" in alpha_minimal (different)
+    exemplar: "-d" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
     base:
-      cherry
+      (no base)
     flag:
   -f  # take PATTERNS from FILE
   -l  # print only names of FILEs with selected lines
-    exemplar: "-l" "$(head -n1 input.txt)" "input.txt" in alpha_minimal (different)
+    exemplar: "-l" "$(head -n1 input.txt)" "input.txt" in many_files /input.txt=size:1 (different)
     base:
-      cherry
+      (no base)
     flag:
       input.txt
   -m  # stop after NUM selected lines
-    exemplar: "-m" "$(head -n1 input.txt)" "input.txt" in numeric_minimal (different, exit 2→1)
+    exemplar: "-m" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different, exit 2→1)
     base:
-      100
-      1000
+      (no base)
     flag:
   -n  # print line number with output lines
-    exemplar: "-n" "$(head -n1 input.txt)" "input.txt" in alpha_minimal (-1 lines)
+    exemplar: "-n" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
     base:
-      cherry
+      (no base)
     flag:
-      1:cherry
+      1:100
+      15:1000
   -s  # suppress error messages
-    exemplar: "-s" "$(head -n1 input.txt)" "input.txt" in numeric_minimal (different)
+    exemplar: "-s" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
     base:
-      100
-      1000
+      (no base)
     flag:
       100
       1000
   -v  # select non-matching lines
-    exemplar: "-v" "$(head -n1 input.txt)" "input.txt" in alpha_minimal (+6 lines, exit 1→0)
+    exemplar: "-v" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
     base:
-      cherry
+      (no base)
     flag:
-      Apple
-      banana
-      Date
-      elderberry
-      BANANA
+      2
+      30
+      1
+      20
+      3
             ...
   -z  # a data line ends in 0 byte, not newline
-    exemplar: "-z" "$(head -n1 input.txt)" "input.txt" in alpha_minimal (-9 lines)
+    exemplar: "-z" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
     base:
-      cherry
+      (no base)
     flag:
-      cherry
-      Apple
-      banana
-      Date
-      elderberry
+      100
+      2
+      30
+      1
+      20
             ...
 
 ## Via combination (distinguishable when paired)
   --color  e.g. "-d" "--color"
-  --colour  e.g. "-d" "--colour" "$(head -n1 input.txt)" "input.txt"
+  --colour  e.g. "-d" "--colour"
   --exclude  e.g. "-d" "--exclude"
-  --exclude-dir  e.g. "-d" "--exclude-dir"
-  --exclude-from  e.g. "-d" "--exclude-from" "$(head -n1 input.txt)" "input.txt"
+  --exclude-dir  e.g. "--file=input.txt" "--exclude-dir"
+  --exclude-from  e.g. "-d" "--exclude-from"
   --group-separator  e.g. "-d" "--group-separator" "$(head -n1 input.txt)" "input.txt"
-  --label  e.g. "-d" "--label" "$(head -n1 input.txt)" "input.txt"
+  --label  e.g. "-d" "--label"
   --line-buffered  e.g. "-d" "--line-buffered" "$(head -n1 input.txt)" "input.txt"
-  --no-group-separator  e.g. "-d" "--no-group-separator"
+  --no-group-separator  e.g. "-d" "--no-group-separator" "$(head -n1 input.txt)" "input.txt"
   --no-ignore-case  e.g. "-d" "--no-ignore-case" "$(head -n1 input.txt)" "input.txt"
   --quiet  e.g. "-d" "--quiet"
-  --silent  e.g. "-d" "--silent"
+  --silent  e.g. "-d" "--silent" "$(head -n1 input.txt)" "input.txt"
   -E  e.g. (pairwise evidence)
   -F  e.g. (pairwise evidence)
   -G  e.g. (pairwise evidence)
-  -I  e.g. "-d" "-I"
+  -I  e.g. "-d" "-I" "$(head -n1 input.txt)" "input.txt"
   -P  e.g. (pairwise evidence)
   -a  e.g. (pairwise evidence)
   -e  e.g. (pairwise evidence)

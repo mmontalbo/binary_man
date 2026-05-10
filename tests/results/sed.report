@@ -3,8 +3,8 @@
 ## Rounds
   round 0: 15 isolated cumulative, 13 identical in round (discovery)
   round 1: 24 isolated cumulative, 26 identical in round (refinement)
-  round 2: 34 isolated cumulative, 39 identical in round (refinement)
-  round 3: 45 isolated cumulative, 44 identical in round (refinement)
+  round 2: 32 isolated cumulative, 40 identical in round (refinement)
+  round 3: 44 isolated cumulative, 51 identical in round (refinement)
 
 ## Observed: 22/24 flags
   4 solo, 18 via combination
@@ -13,60 +13,59 @@
 
 ## Solo (unique behavior)
   --debug
-    exemplar: "--debug" "input.txt" "other.txt" in alpha_minimal (-7 lines)
+    exemplar: "--debug" "input.txt" "other.txt" in many_files /input.txt readonly (different)
     base:
-      nput.txt
-      hello world
+      (no base)
     flag:
       SED PROGRAM:
         i\nput.txt
       
       INPUT:   'other.txt' line 1
-      PATTERN: hello world
+      PATTERN: other content
             ...
   --follow-symlinks
-    exemplar: "--follow-symlinks" "$(head -n1 input.txt)" "input.txt" in numeric_standard / input.txt=size:1 (+1 lines, exit 1→0)
+    exemplar: "--follow-symlinks" "input.txt" "other.txt" in many_files /input.txt readonly (different)
     base:
+      (no base)
     flag:
-  --in-place
-    exemplar: "--in-place" "input.txt" "other.txt" in numeric_standard / input.txt=size:1 (different)
-    base:
       nput.txt
       other content
       nput.txt
       second line
+  --in-place
+    exemplar: "--in-place" "$(head -n1 input.txt)" "input.txt" in many_files /input.txt readonly (different)
+    base:
+      (no base)
     flag:
   --posix
     exemplar: "--posix" "$(head -n1 input.txt)" "input.txt" in numeric_standard / input.txt=size:1 (+1 lines, exit 1→0)
     base:
     flag:
   -i
-    exemplar: "-i" "input.txt" "other.txt" in numeric_standard / input.txt=size:1 (different)
+    exemplar: "-i" "input.txt" "other.txt" in many_files /input.txt readonly (different)
     base:
-      nput.txt
-      other content
-      nput.txt
-      second line
+      (no base)
     flag:
   -l
-    exemplar: "-l" "$(head -n1 input.txt)" "input.txt" in numeric_standard / input.txt=size:1 (different)
+    exemplar: "-l" "$(head -n1 input.txt)" "input.txt" in many_files /input.txt readonly (different)
     base:
+      (no base)
     flag:
 
 ## Via combination (distinguishable when paired)
   --expression  e.g. (pairwise evidence)
-  --file  e.g. "--debug" "--file" "--silent" "input.txt" "other.txt"
+  --file  e.g. "--debug" "--file" "-i" "$(head -n1 input.txt)" "input.txt"
   --line-length  e.g. (pairwise evidence)
-  --null-data  e.g. "--debug" "--in-place" "--null-data" "--unbuffered" "$(head -n1 input.txt)" "input.txt"
+  --null-data  e.g. "--debug" "--in-place" "--null-data" "input.txt" "other.txt"
   --quiet  e.g. (pairwise evidence)
   --regexp-extended  e.g. (pairwise evidence)
   --sandbox  e.g. "--debug" "--in-place" "--sandbox" "input.txt" "other.txt"
   --separate  e.g. "--debug" "--in-place" "--separate" "input.txt" "other.txt"
   --silent  e.g. "--debug" "--file" "--silent" "input.txt" "other.txt"
-  --unbuffered  e.g. "--debug" "--in-place" "--unbuffered" "input.txt" "other.txt"
+  --unbuffered  e.g. "--follow-symlinks" "--in-place" "--unbuffered" "input.txt" "other.txt"
   -E  e.g. (pairwise evidence)
   -e  e.g. (pairwise evidence)
-  -f  e.g. "--debug" "--in-place" "-f" "input.txt" "other.txt"
+  -f  e.g. "--follow-symlinks" "--in-place" "-f" "input.txt" "other.txt"
   -n  e.g. (pairwise evidence)
   -r  e.g. (pairwise evidence)
   -s  e.g. (pairwise evidence)

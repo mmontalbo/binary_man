@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::analyze::AnalysisMetrics;
+use crate::analyze::{AnalysisMetrics, RunAnalysis};
 use crate::discover::FlagInfo;
 use crate::output;
 
@@ -236,6 +236,7 @@ pub fn format_exploration_report(
     flag_info: Option<&FlagInfo>,
     ever_isolated: &HashSet<String>,
     binary_label: &str,
+    all_runs: &[&RunAnalysis],
 ) -> String {
     let mut out = String::new();
     let aliases = flag_info.map(|fi| &fi.aliases);
@@ -366,7 +367,7 @@ pub fn format_exploration_report(
     // - non-empty stdout (the flag produced visible output), OR
     // - filesystem changes (the flag modified files — silent tools like cp, mv, rm)
     let has_observed_behavior = |stem: &str| -> bool {
-        for run in &final_metrics.runs {
+        for run in all_runs {
             let run_stem = flag_stem(&run.args_str);
             if run_stem.as_deref() == Some(stem) || run_stem.as_ref().map(|s| canonical_flag(s, aliases)) == Some(stem.to_string()) {
                 for (_, obs) in &run.context_groups {
@@ -435,7 +436,7 @@ pub fn format_exploration_report(
         out.push_str(&format!("  {}{}\n", flag, desc));
 
         // Find the exemplar: the context where this flag's output is most distinctive
-        if let Some(ex) = find_exemplar(flag, final_metrics) {
+        if let Some(ex) = find_exemplar(flag, all_runs) {
             out.push_str(&format!("    exemplar: {} in {} ({})\n", ex.run_label, ex.context_name, ex.delta_summary));
             out.push_str("    base:\n");
             for line in ex.base_preview.lines() {
@@ -506,9 +507,9 @@ struct Exemplar {
 /// Find the most distinctive observation for a flag.
 /// Picks the context where this flag's output is shared by the fewest other flags —
 /// the context that most clearly demonstrates what makes this flag unique.
-fn find_exemplar(target_stem: &str, metrics: &AnalysisMetrics) -> Option<Exemplar> {
-    // Find all solo runs for this flag (not combinations)
-    let target_runs: Vec<&crate::analyze::RunAnalysis> = metrics.runs.iter()
+fn find_exemplar(target_stem: &str, all_runs: &[&RunAnalysis]) -> Option<Exemplar> {
+    // Find all solo runs for this flag (not combinations) across all rounds
+    let target_runs: Vec<&&RunAnalysis> = all_runs.iter()
         .filter(|run| {
             let stem = flag_stem(&run.args_str);
             stem.as_ref().map(|s| !is_combination(s) && canonical_flag(s, None) == *target_stem)
@@ -520,7 +521,7 @@ fn find_exemplar(target_stem: &str, metrics: &AnalysisMetrics) -> Option<Exempla
 
     // Collect all solo run outputs per context for comparison
     // For each context name, how many OTHER runs produce the same stdout?
-    let mut best_context: Option<(&str, &crate::analyze::RunAnalysis, &crate::execute::Observation)> = None;
+    let mut best_context: Option<(&str, &&RunAnalysis, &crate::execute::Observation)> = None;
     let mut best_uniqueness = usize::MAX; // lower = more unique
 
     for run in &target_runs {
@@ -532,8 +533,8 @@ fn find_exemplar(target_stem: &str, metrics: &AnalysisMetrics) -> Option<Exempla
 
             for ctx_name in ctx_names {
                 // Count how many other runs produce the same stdout in this context
-                let same_output_count = metrics.runs.iter()
-                    .filter(|other| !std::ptr::eq(*other, *run))
+                let same_output_count = all_runs.iter()
+                    .filter(|other| !std::ptr::eq(**other, **run))
                     .filter(|other| {
                         other.context_groups.iter()
                             .any(|(names, other_obs)| {
@@ -555,7 +556,7 @@ fn find_exemplar(target_stem: &str, metrics: &AnalysisMetrics) -> Option<Exempla
     // Find the base run's output in the same context for comparison
     let base_output = if let Some(ref from_ref) = run.from_ref {
         let base_label = crate::output::format_args(from_ref);
-        metrics.runs.iter()
+        all_runs.iter()
             .find(|r| r.args_str == base_label)
             .and_then(|base_run| {
                 base_run.context_groups.iter()

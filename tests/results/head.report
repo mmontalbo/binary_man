@@ -3,8 +3,8 @@
 ## Rounds
   round 0: 4 isolated cumulative, 35 identical in round (discovery)
   round 1: 37 isolated cumulative, 23 identical in round (refinement)
-  round 2: 38 isolated cumulative, 33 identical in round (refinement)
-  round 3: 38 isolated cumulative, 33 identical in round (refinement)
+  round 2: 40 isolated cumulative, 33 identical in round (refinement)
+  round 3: 40 isolated cumulative, 33 identical in round (refinement)
 
 ## Observed: 7/7 flags
   4 solo, 3 via combination
@@ -13,14 +13,9 @@ Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
 
 ## Solo (unique behavior)
   -c  # print the first NUM bytes of each file;
-    exemplar: "-c" "$(head -n1 input.txt)" "input.txt" in numeric_minimal (different)
+    exemplar: "-c" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
     base:
-      ==> input.txt <==
-      100
-      2
-      30
-      1
-            ...
+      (no base)
     flag:
       100
       2
@@ -29,14 +24,9 @@ Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
       20
             ...
   -n  # print the first NUM lines instead of the first 10;
-    exemplar: "-n" "$(head -n1 input.txt)" "input.txt" in numeric_minimal (different)
+    exemplar: "-n" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
     base:
-      ==> input.txt <==
-      100
-      2
-      30
-      1
-            ...
+      (no base)
     flag:
       100
       2
@@ -49,25 +39,23 @@ Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
     base:
     flag:
       ==> standard input <==
+      cherry
+      apple
+      banana
   -z  # line delimiter is NUL, not newline
-    exemplar: "-z" "input.txt" in formatted_minimal (-3 lines)
+    exemplar: "-z" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
     base:
-      first line
-      
-      
-      	indented with tab
-      trailing spaces   
-            ...
+      (no base)
     flag:
-      first line
-      
-      
-      	indented with tab
-      trailing spaces   
+      ==> input.txt <==
+      100
+      2
+      30
+      1
             ...
 
 ## Via combination (distinguishable when paired)
   --quiet  e.g. (pairwise evidence)
-  --silent  e.g. "-n" "--silent"
+  --silent  e.g. "--bytes" "--silent" "input.txt"
   -q  e.g. (pairwise evidence)
 

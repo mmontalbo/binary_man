@@ -13,12 +13,14 @@ Aliases: -d = --dir, -f = --force, -v = --verbose
 
 ## Solo (unique behavior)
   -f  # ignore nonexistent files and arguments, never prompt
-    exemplar: "-f" "input.txt" in alpha_minimal (different)
+    exemplar: "-f" "input.txt" in many_files /remove env LC_ALL (different)
     base:
+      (no base)
     flag:
   -v  # explain what is being done
-    exemplar: "-v" "input.txt" in alpha_minimal (different)
+    exemplar: "-v" "input.txt" in many_files /remove env LC_ALL (different)
     base:
+      (no base)
     flag:
       removed 'input.txt'
 

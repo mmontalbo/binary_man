@@ -341,7 +341,7 @@ pub fn default_value(hint: &str) -> String {
     let upper = upper.as_str();
     match upper {
         "NUM" | "NUMBER" | "N" | "SIZE" | "COLS" | "WIDTH" | "COUNT" | "LINES" | "BYTES"
-        | "MAX" | "PROCS" | "DEPTH" | "JOBS" | "LEVEL" => "10".into(),
+        | "MAX" | "PROCS" | "DEPTH" | "JOBS" | "LEVEL" => "1".into(),
         "FILE" | "PATH" | "FILENAME" => "input.txt".into(),
         "DIR" | "DIRECTORY" => ".".into(),
         "PATTERN" | "PAT" | "REGEX" => ".*".into(),
@@ -358,7 +358,7 @@ pub fn default_value(hint: &str) -> String {
             let numeric_words = ["MAX", "NUM", "COUNT", "SIZE", "LINES", "BYTES",
                                  "PROCS", "ARGS", "CHARS", "DEPTH", "JOBS", "WIDTH"];
             if upper.split('-').any(|part| numeric_words.contains(&part)) {
-                return "10".into();
+                return "1".into();
             }
             hint.to_lowercase()
         }

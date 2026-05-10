@@ -89,6 +89,7 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, skeleton: bool)
 
     let grid = execute::run_grid(binary, &script, std::path::Path::new("."), sandbox)?;
     let metrics = analyze::analyze(&script, &grid, Some(&flag_info), None);
+    let mut all_metrics: Vec<analyze::AnalysisMetrics> = vec![];
 
     // Track cumulative tested flags and isolation across rounds.
     let mut ever_tested: HashSet<String> = HashSet::new();
@@ -220,6 +221,7 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, skeleton: bool)
         eprintln!("[round {}] {} groups, {} cumulative isolated (+{}), {} identical in round",
             round, delta_metrics.groups.len(), ever_isolated.len(), newly_isolated, delta_metrics.identical_count());
 
+        all_metrics.push(current_metrics);
         current_metrics = delta_metrics;
         current_script = delta_script;
 
@@ -230,13 +232,18 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, skeleton: bool)
 
     }
 
-    // Final report to stdout
+    // Final report to stdout — collect runs from all rounds for observed-behavior check
+    let all_runs: Vec<&analyze::RunAnalysis> = all_metrics.iter()
+        .flat_map(|m| m.runs.iter())
+        .chain(current_metrics.runs.iter())
+        .collect();
     let report = report::format_exploration_report(
         &rounds,
         &current_metrics,
         Some(&flag_info),
         &ever_isolated,
         &cmd_label,
+        &all_runs,
     );
     print!("{}", report);
 

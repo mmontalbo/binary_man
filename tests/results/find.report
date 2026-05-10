@@ -11,27 +11,24 @@
 
 ## Solo (unique behavior)
   -D
-    exemplar: "-D" "input.txt" "subdir" in alpha_standard (different)
+    exemplar: "-D" "input.txt" "other.txt" in many_files /remove env LC_ALL (different)
     base:
-      input.txt
-      subdir
-      subdir/nested.txt
+      (no base)
     flag:
-      subdir
-      subdir/nested.txt
+      other.txt
   -N
-    exemplar: "-N" "$(head -n1 input.txt)" "input.txt" in alpha_standard (different)
+    exemplar: "-N" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
     base:
-      input.txt
+      (no base)
     flag:
   -a
-    exemplar: "-a" "$(head -n1 input.txt)" "input.txt" in alpha_standard (different)
+    exemplar: "-a" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
     base:
-      input.txt
+      (no base)
     flag:
   -o
-    exemplar: "-o" "$(head -n1 input.txt)" "input.txt" in alpha_standard (different)
+    exemplar: "-o" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
     base:
-      input.txt
+      (no base)
     flag:
 

@@ -2,13 +2,14 @@
 
 ## Rounds
   round 0: 7 isolated cumulative, 22 identical in round (discovery)
-  round 1: 31 isolated cumulative, 8 identical in round (refinement)
-  round 2: 32 isolated cumulative, 10 identical in round (refinement)
-  round 3: 33 isolated cumulative, 10 identical in round (refinement)
+  round 1: 30 isolated cumulative, 8 identical in round (refinement)
+  round 2: 31 isolated cumulative, 8 identical in round (refinement)
+  round 3: 31 isolated cumulative, 8 identical in round (refinement)
 
-## Observed: 1/21 flags
-  1 solo, 0 via combination
-  20 additional error-differentiated
+## Observed: 14/21 flags
+  7 solo, 7 via combination
+  7 additional error-differentiated
+  1 behavioral aliases detected
 
 Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = --delimiter, -n = --max-args, -o = --open-tty, -p = --interactive, -r = --no-run-if-empty, -s = --max-chars, -t = --verbose, -x = --exit
 
@@ -17,60 +18,67 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
     exemplar: "--show-limits" in alpha_minimal (different)
     base:
     flag:
+      cherry apple banana
   -E
-    exemplar: "-E" in alpha_minimal (different)
+    exemplar: "-E" in many_files /remove env LC_ALL (different)
     base:
+      (no base)
     flag:
   -I
-    exemplar: "-I" in alpha_minimal (different)
+    exemplar: "-I" in many_files /remove env LC_ALL (different)
     base:
+      (no base)
     flag:
   -L  # use at most MAX-LINES non-blank input lines per
-    exemplar: "-L" in alpha_minimal (different)
+    exemplar: "-L" in many_files /remove env LC_ALL (different)
     base:
+      (no base)
     flag:
   -P  # run at most MAX-PROCS processes at a time
-    exemplar: "-P" in alpha_minimal (different)
+    exemplar: "-P" in many_files /remove env LC_ALL (different)
     base:
+      (no base)
     flag:
   -a  # read arguments from FILE, not standard input
-    exemplar: "-a" in alpha_minimal (different)
+    exemplar: "-a" in many_files /remove env LC_ALL (different)
     base:
+      (no base)
     flag:
   -d  # items in input stream are separated by CHARACTER,
-    exemplar: "-d" in alpha_minimal (different)
+    exemplar: "-d" in many_files /remove env LC_ALL (different)
     base:
+      (no base)
     flag:
   -n  # use at most MAX-ARGS arguments per command line
-    exemplar: "-n" in alpha_minimal (different)
+    exemplar: "-n" in many_files /remove env LC_ALL (different)
     base:
+      (no base)
     flag:
   -o  # Reopen stdin as /dev/tty in the child process
   -p  # prompt before running commands
-    exemplar: "-p" in alpha_minimal (different)
+    exemplar: "-p" in many_files /remove env LC_ALL (different)
     base:
+      (no base)
     flag:
   -s  # limit length of command line to MAX-CHARS
-    exemplar: "-s" in alpha_minimal (different)
+    exemplar: "-s" in many_files /remove env LC_ALL (different)
     base:
+      (no base)
     flag:
   -t  # print commands before executing them
     exemplar: "-t" in alpha_minimal (different)
     base:
     flag:
-  -x  # exit if the size (see -s) is exceeded
-    exemplar: "-x" in alpha_minimal (different)
-    base:
-      (no base)
-    flag:
+      cherry apple banana
 
 ## Via combination (distinguishable when paired)
   --eof  e.g. (pairwise evidence)
   --process-slot-var  e.g. "--show-limits" "--process-slot-var"
-  --replace  e.g. "--show-limits" "--replace"
+  --replace  e.g. (pairwise evidence)
   -0  e.g. (pairwise evidence)
-  -e  e.g. "--show-limits" "-e"
+  -e  e.g. (pairwise evidence)
   -i  e.g. (pairwise evidence)
   -l  e.g. (pairwise evidence)
-  -r  e.g. (pairwise evidence)
+  -r  e.g. "--show-limits" "-r"
+  -x  e.g. (pairwise evidence)
 
