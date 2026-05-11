@@ -1,13 +1,13 @@
 # Exploration: grep
 
 ## Rounds
-  round 0: 35 isolated cumulative, 17 identical in round (discovery)
-  round 1: 45 isolated cumulative, 29 identical in round (refinement)
-  round 2: 53 isolated cumulative, 35 identical in round (refinement)
-  round 3: 63 isolated cumulative, 39 identical in round (refinement)
+  round 0: 39 isolated cumulative, 17 identical in round (discovery)
+  round 1: 59 isolated cumulative, 26 identical in round (refinement)
+  round 2: 67 isolated cumulative, 35 identical in round (refinement)
+  round 3: 75 isolated cumulative, 39 identical in round (refinement)
 
 ## Observed: 34/49 flags
-  15 solo, 19 via combination
+  17 solo, 17 via combination
   6 additional error-differentiated
   1 behavioral aliases detected
   8 indistinguishable under tested conditions
@@ -78,6 +78,13 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
     base:
       (no base)
     flag:
+  -e  # use PATTERNS for matching
+    exemplar: "-e" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
+    base:
+      (no base)
+    flag:
+      100
+      1000
   -f  # take PATTERNS from FILE
   -l  # print only names of FILEs with selected lines
     exemplar: "-l" "$(head -n1 input.txt)" "input.txt" in many_files /input.txt=size:1 (different)
@@ -97,6 +104,13 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
     flag:
       1:100
       15:1000
+  -o  # show only nonempty parts of lines that match
+    exemplar: "-o" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
+    base:
+      (no base)
+    flag:
+      100
+      100
   -s  # suppress error messages
     exemplar: "-s" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
     base:
@@ -128,29 +142,27 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
             ...
 
 ## Via combination (distinguishable when paired)
-  --color  e.g. "-d" "--color" "$(head -n1 input.txt)" "input.txt"
-  --colour  e.g. "-d" "--colour"
+  --color  e.g. "-d" "--color"
+  --colour  e.g. "-f" "--colour" "$(head -n1 input.txt)" "input.txt"
   --exclude  e.g. "--file=input.txt" "--exclude"
-  --exclude-dir  e.g. "--file=input.txt" "--exclude-dir"
+  --exclude-dir  e.g. "--regexp=patterns" "--exclude-dir"
   --exclude-from  e.g. "-d" "--exclude-from" "$(head -n1 input.txt)" "input.txt"
-  --group-separator  e.g. "-d" "--group-separator"
+  --group-separator  e.g. "-d" "--group-separator" "$(head -n1 input.txt)" "input.txt"
   --label  e.g. "-d" "--label" "$(head -n1 input.txt)" "input.txt"
   --line-buffered  e.g. "-d" "--line-buffered"
-  --no-group-separator  e.g. "-d" "--no-group-separator"
+  --no-group-separator  e.g. "-d" "--no-group-separator" "$(head -n1 input.txt)" "input.txt"
   --no-ignore-case  e.g. "-d" "--no-ignore-case"
   --quiet  e.g. "-d" "--quiet"
-  --silent  e.g. "-d" "--silent" "$(head -n1 input.txt)" "input.txt"
+  --silent  e.g. "-d" "--silent"
   -E  e.g. (pairwise evidence)
   -F  e.g. (pairwise evidence)
   -G  e.g. (pairwise evidence)
-  -I  e.g. "-d" "-I" "$(head -n1 input.txt)" "input.txt"
   -P  e.g. (pairwise evidence)
   -a  e.g. (pairwise evidence)
-  -e  e.g. (pairwise evidence)
   -h  e.g. (pairwise evidence)
   -i  e.g. (pairwise evidence)
 
 ## Indistinguishable under tested conditions
-  UNEXPLAINED (5): -R, -T, -U, -Z, -r
-  UNEXPLAINED (3): -o, -w, -x
+  UNEXPLAINED (6): -I, -R, -T, -U, -Z, -r
+  UNEXPLAINED (2): -w, -x
 

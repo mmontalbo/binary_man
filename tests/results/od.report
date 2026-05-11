@@ -1,26 +1,26 @@
 # Exploration: od
 
 ## Rounds
-  round 0: 93 isolated cumulative, 121 identical in round (discovery)
-  round 1: 122 isolated cumulative, 25 identical in round (refinement)
-  round 2: 122 isolated cumulative, 46 identical in round (refinement)
+  round 0: 108 isolated cumulative, 133 identical in round (discovery)
+  round 1: 123 isolated cumulative, 31 identical in round (refinement)
+  round 2: 143 isolated cumulative, 32 identical in round (refinement)
+  round 3: 143 isolated cumulative, 32 identical in round (refinement)
 
-## Observed: 16/21 flags
-  14 solo, 2 via combination
+## Observed: 18/21 flags
+  12 solo, 6 via combination
   3 additional error-differentiated
-  1 behavioral aliases detected
-  2 indistinguishable under tested conditions
+  3 behavioral aliases detected
 
 Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --format, -v = --output-duplicates
 
 ## Solo (unique behavior)
   --endian  # swap input bytes according the specified order
-    exemplar: "--endian" "input.txt" "other.txt" in many_files /remove env LC_ALL (different)
+    exemplar: "--endian" in many_files /remove env LC_ALL (different)
     base:
       (no base)
     flag:
   --strings
-    exemplar: "--strings" "input.txt" in many_files /remove env LC_ALL (different)
+    exemplar: "--strings" in many_files /remove env LC_ALL (different)
     base:
       (no base)
     flag:
@@ -86,14 +86,6 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000000   c   h   e   r   r   y  \n   a   p   p   l   e  \n   b   a   n
       0000020   a   n   a
       0000023
-  -d  # same as -t u2, select unsigned decimal 2-byte units
-    exemplar: "-d" in alpha_minimal (different)
-    base:
-      0000000
-    flag:
-      0000000 26723 29285 31090 24842 28784 25964 25098 28257
-      0000020 28257    97
-      0000023
   -f  # same as -t fF, select floats
     exemplar: "-f" in alpha_minimal (different)
     base:
@@ -124,14 +116,6 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000000  6992534903898597475  7953746213703807088
       0000020              6385249
       0000023
-  -s  # same as -t d2, select decimal 2-byte units
-    exemplar: "-s" in alpha_minimal (different)
-    base:
-      0000000
-    flag:
-      0000000  26723  29285  31090  24842  28784  25964  25098  28257
-      0000020  28257     97
-      0000023
   -t  # select output format or formats
     exemplar: "-t" "$(head -n1 input.txt)" "input.txt" in numeric_standard / input.txt=size:1 (+2 lines, exit 1→0)
     base:
@@ -150,11 +134,10 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000023
 
 ## Via combination (distinguishable when paired)
-  --width  e.g. "--skip-bytes=2147483647" "--width" "input.txt" "subdir"
+  --width  e.g. "--skip-bytes=1" "--width" "-s" "$(head -n1 input.txt)" "input.txt"
+  -d  e.g. "--skip-bytes=1" "-d" "-s" "input.txt" "subdir"
   -o  e.g. (pairwise evidence)
-
-## Indistinguishable under tested conditions
-  UNEXPLAINED (2): -v, -w
-  UNEXPLAINED (2): -v, -w
-  UNEXPLAINED (2): -v, -w
+  -s  e.g. "--skip-bytes=1" "--width" "-s" "$(head -n1 input.txt)" "input.txt"
+  -v  e.g. (pairwise evidence)
+  -w  e.g. (pairwise evidence)
 

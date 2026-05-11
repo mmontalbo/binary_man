@@ -13,7 +13,7 @@ Aliases: -L = --max-line-length, -c = --bytes, -l = --lines, -m = --chars, -w = 
 
 ## Solo (unique behavior)
   --files0-from  # read input from the files specified by
-    exemplar: "--files0-from=f" "input.txt" in many_files /remove env LC_ALL (different)
+    exemplar: "--files0-from=f" "input.txt" "other.txt" in many_files /remove env LC_ALL (different)
     base:
       (no base)
     flag:

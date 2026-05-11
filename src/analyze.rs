@@ -1,7 +1,17 @@
 //! Analysis pipeline: Script + GridResult → AnalysisMetrics.
 //!
-//! Collapses observations across contexts, computes sensitivity and universals,
-//! groups behaviorally equivalent runs, and identifies untested flags.
+//! Compares observations using structural tree diff: stdout/stderr are tokenized
+//! into content-hashed label trees and aligned via two-level Needleman-Wunsch
+//! (line-level, then token-level within matched lines). This correctly matches
+//! modified lines through shared tokens (e.g., "a.txt" in `ls` output anchors
+//! the match with `ls -l` output where 8 tokens are prepended).
+//!
+//! The delta between a reference (baseline) and observation (flagged run) is an
+//! edit script of structural operations (Insert/Delete/Keep/Replace), not raw
+//! content. Two flags applying the same transformation produce the same edit
+//! script regardless of per-cell nondeterminism.
+//!
+//! Groups behaviorally equivalent runs and identifies untested flags.
 
 use std::collections::{HashMap, HashSet};
 
@@ -43,90 +53,235 @@ pub struct BehaviorGroup {
     obs_list: Vec<(String, ObsKey)>,
 }
 
-/// Lightweight observation key for grouping comparisons.
-/// For runs without a from-reference, this is the absolute observation.
-/// For runs with a from-reference, this is the delta (what changed vs base).
+// --- Structural diff types ---
+//
+// Stdout/stderr comparison uses a two-level Needleman-Wunsch alignment:
+//   1. Tokenize both ref and obs into lines of content-hashed labels
+//   2. Align lines (match cost = token edit distance, gap cost = token count)
+//   3. Within matched lines, align tokens (unit cost per insert/delete/replace)
+//   4. Produce a structural edit script: sequence of LineEdits, each containing TokenEdits
+//
+// Token values are raw strings — same string matches across ref and obs naturally.
+// No hashing, no label pools, no canonicalization. Shared tokens (filenames, keywords)
+// are natural alignment anchors. Value-level precision: "root" ≠ "0" → ls -l vs ls -n.
+
+/// Token-level edit operation. Values are the raw token strings.
+#[derive(PartialEq, Eq, Clone, Debug)]
+enum TokenEdit {
+    Keep(String),
+    Insert(String),
+    Delete(String),
+    Replace(String, String), // (old, new)
+}
+
+/// Line-level edit operation.
+#[derive(PartialEq, Eq, Clone, Debug)]
+enum LineEdit {
+    Same,
+    Modified(Vec<TokenEdit>),
+    Inserted,
+    Deleted,
+}
+
+/// Structural delta for an output channel (stdout or stderr).
+#[derive(PartialEq, Eq, Clone, Debug)]
+enum OutputDelta {
+    Identical,
+    Permutation(Vec<usize>),
+    Edited(Vec<LineEdit>),
+}
+
+/// Tokenize text into lines of whitespace-split tokens.
+fn tokenize(text: &str) -> Vec<Vec<String>> {
+    text.lines()
+        .map(|line| line.split_whitespace().map(|s| s.to_string()).collect())
+        .collect()
+}
+
+/// Token-level Needleman-Wunsch: compute edit distance and optionally the edit script.
+/// Returns (cost, edits). Pass `true` for `need_edits` to get the backtrace.
+fn token_nw(a: &[String], b: &[String], need_edits: bool) -> (usize, Vec<TokenEdit>) {
+    let n = a.len();
+    let m = b.len();
+    let mut dp = vec![vec![0usize; m + 1]; n + 1];
+    #[allow(clippy::needless_range_loop)]
+    for i in 1..=n { dp[i][0] = i; }
+    #[allow(clippy::needless_range_loop)]
+    for j in 1..=m { dp[0][j] = j; }
+    for i in 1..=n {
+        for j in 1..=m {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            dp[i][j] = (dp[i - 1][j] + 1)
+                .min(dp[i][j - 1] + 1)
+                .min(dp[i - 1][j - 1] + cost);
+        }
+    }
+    let cost = dp[n][m];
+    if !need_edits {
+        return (cost, Vec::new());
+    }
+    let mut edits = Vec::new();
+    let (mut i, mut j) = (n, m);
+    while i > 0 || j > 0 {
+        if i > 0 && j > 0 && dp[i][j] == dp[i - 1][j - 1] + if a[i-1] == b[j-1] { 0 } else { 1 } {
+            if a[i - 1] == b[j - 1] {
+                edits.push(TokenEdit::Keep(a[i - 1].clone()));
+            } else {
+                edits.push(TokenEdit::Replace(a[i - 1].clone(), b[j - 1].clone()));
+            }
+            i -= 1; j -= 1;
+        } else if j > 0 && dp[i][j] == dp[i][j - 1] + 1 {
+            edits.push(TokenEdit::Insert(b[j - 1].clone()));
+            j -= 1;
+        } else {
+            edits.push(TokenEdit::Delete(a[i - 1].clone()));
+            i -= 1;
+        }
+    }
+    edits.reverse();
+    (cost, edits)
+}
+
+/// Line-level NW alignment. Match cost = token edit distance (unit leaf costs).
+/// Delete/insert cost = token count of the line.
+fn align_lines(ref_lines: &[Vec<String>], obs_lines: &[Vec<String>]) -> Vec<LineEdit> {
+    let n = ref_lines.len();
+    let m = obs_lines.len();
+
+    // Precompute token-level match costs for all line pairs
+    let match_costs: Vec<Vec<usize>> = (0..n).map(|i|
+        (0..m).map(|j| token_nw(&ref_lines[i], &obs_lines[j], false).0).collect()
+    ).collect();
+
+    let mut dp = vec![vec![0usize; m + 1]; n + 1];
+    for i in 1..=n { dp[i][0] = dp[i - 1][0] + ref_lines[i - 1].len().max(1); }
+    for j in 1..=m { dp[0][j] = dp[0][j - 1] + obs_lines[j - 1].len().max(1); }
+    for i in 1..=n {
+        for j in 1..=m {
+            dp[i][j] = (dp[i - 1][j] + ref_lines[i - 1].len().max(1))
+                .min(dp[i][j - 1] + obs_lines[j - 1].len().max(1))
+                .min(dp[i - 1][j - 1] + match_costs[i - 1][j - 1]);
+        }
+    }
+
+    // Backtrace — use cached match_costs, only compute edits for matched pairs
+    let mut edits = Vec::new();
+    let (mut i, mut j) = (n, m);
+    while i > 0 || j > 0 {
+        if i > 0 && j > 0 && dp[i][j] == dp[i - 1][j - 1] + match_costs[i - 1][j - 1] {
+            if match_costs[i - 1][j - 1] == 0 {
+                edits.push(LineEdit::Same);
+            } else {
+                let (_, tok_edits) = token_nw(&ref_lines[i - 1], &obs_lines[j - 1], true);
+                edits.push(LineEdit::Modified(tok_edits));
+            }
+            i -= 1; j -= 1;
+        } else if j > 0 && dp[i][j] == dp[i][j - 1] + obs_lines[j - 1].len().max(1) {
+            edits.push(LineEdit::Inserted);
+            j -= 1;
+        } else {
+            edits.push(LineEdit::Deleted);
+            i -= 1;
+        }
+    }
+    edits.reverse();
+    edits
+}
+
+/// Compute structural delta for an output channel (stdout or stderr).
+fn compute_output_delta(ref_out: &str, obs_out: &str) -> OutputDelta {
+    if ref_out == obs_out {
+        return OutputDelta::Identical;
+    }
+
+    let ref_labels = tokenize(ref_out);
+    let obs_labels = tokenize(obs_out);
+
+    // Check for pure reorder: same line multiset by canonical label pattern
+    if ref_labels.len() == obs_labels.len() {
+        let mut ref_sorted = ref_labels.clone();
+        let mut obs_sorted = obs_labels.clone();
+        ref_sorted.sort();
+        obs_sorted.sort();
+        if ref_sorted == obs_sorted {
+            let perm: Vec<usize> = obs_labels.iter().map(|obs_line| {
+                ref_labels.iter().position(|r| r == obs_line).unwrap_or(usize::MAX)
+            }).collect();
+            return OutputDelta::Permutation(perm);
+        }
+    }
+
+    OutputDelta::Edited(align_lines(&ref_labels, &obs_labels))
+}
+
+// --- Observation key for grouping ---
+
+/// Observation key for grouping comparisons.
+///
+/// For runs with a from-reference (flagged runs), this is the structural edit
+/// script produced by two-level NW alignment of ref vs obs stdout/stderr.
+/// For runs without a from-reference (baselines), this is the content-hashed
+/// token pattern of the raw observation.
+///
+/// Two runs group together when their ObsKeys match across all contexts.
 #[derive(PartialEq, Eq)]
 struct ObsKey {
-    stdout: String,
-    stderr: String,
+    stdout: OutputDelta,
+    stderr: OutputDelta,
     exit_code: Option<i32>,
     fs_changes: Vec<execute::FsChange>,
 }
 
 impl ObsKey {
     fn from_obs(obs: &Observation) -> Self {
+        fn output_key(text: &str) -> OutputDelta {
+            if text.is_empty() {
+                return OutputDelta::Identical;
+            }
+            let labels = tokenize(text);
+            OutputDelta::Edited(labels.iter().map(|line| {
+                if line.is_empty() { LineEdit::Same }
+                else { LineEdit::Modified(line.iter().map(|l| TokenEdit::Keep(l.clone())).collect()) }
+            }).collect())
+        }
         ObsKey {
-            stdout: obs.stdout.clone(),
-            stderr: obs.stderr.clone(),
+            stdout: output_key(&obs.stdout),
+            stderr: output_key(&obs.stderr),
             exit_code: obs.exit_code,
-            fs_changes: obs.fs_changes.clone(),
+            fs_changes: obs.fs_changes.iter()
+                .filter(|c| !matches!(c, execute::FsChange::Modified { detail, .. } if detail == "mtime changed"))
+                .cloned().collect(),
         }
     }
 
-    /// Compute a delta key: what did this observation change relative to the reference?
-    /// Two flags that apply the same transformation to the base produce the same delta.
+    /// Compute a structural delta: what transformation did this flag apply to the base?
+    ///
+    /// Uses two-level NW alignment on content-hashed tokens. The resulting edit
+    /// script captures the shape of the transformation (which lines were inserted,
+    /// deleted, or modified, and within modified lines, which tokens changed).
+    /// Shared tokens (filenames, keywords) serve as natural anchors for alignment.
     fn from_delta(reference: &Observation, obs: &Observation) -> Self {
-        // Lines only in obs (added by the flag)
-        let ref_lines: HashSet<&str> = reference.stdout.lines().collect();
-        let obs_lines: HashSet<&str> = obs.stdout.lines().collect();
-        let mut added: Vec<&str> = obs_lines.difference(&ref_lines).copied().collect();
-        let mut removed: Vec<&str> = ref_lines.difference(&obs_lines).copied().collect();
-        added.sort();
-        removed.sort();
+        let stdout = compute_output_delta(&reference.stdout, &obs.stdout);
+        let stderr = compute_output_delta(&reference.stderr, &obs.stderr);
 
-        // Encode the delta as a canonical string
-        let stdout_delta = if reference.stdout == obs.stdout {
-            "=".to_string()
-        } else if added.is_empty() && removed.is_empty() {
-            // Same lines, different order — encode as permutation vector.
-            // Map each output line to its position in the reference.
-            // Different reorderings (reverse vs size-sort) produce different vectors.
-            let ref_vec: Vec<&str> = reference.stdout.lines().collect();
-            let obs_vec: Vec<&str> = obs.stdout.lines().collect();
-            let permutation: Vec<String> = obs_vec.iter().map(|line| {
-                // Find position in reference (first match for duplicate handling)
-                ref_vec.iter().position(|r| r == line)
-                    .map(|p| p.to_string())
-                    .unwrap_or_else(|| "?".to_string())
-            }).collect();
-            format!("perm[{}]", permutation.join(","))
-        } else {
-            format!("+[{}] -[{}]", added.join("|"), removed.join("|"))
-        };
-
-        let stderr_delta = if reference.stderr == obs.stderr {
-            "=".to_string()
-        } else if reference.stderr.is_empty() {
-            format!("+{}", obs.stderr.trim())
-        } else if obs.stderr.is_empty() {
-            "-stderr".to_string()
-        } else {
-            "changed".to_string()
-        };
-
-        let exit_delta = if reference.exit_code == obs.exit_code {
+        let exit_code = if reference.exit_code == obs.exit_code {
             reference.exit_code
         } else {
-            // Encode the transition as a synthetic exit code
-            // (we just need equality comparison, not the actual value)
             Some(reference.exit_code.unwrap_or(0) * 1000 + obs.exit_code.unwrap_or(0))
         };
 
-        // FS changes delta: what's new vs reference
+        // FS changes: set difference, filtering mtime-only modifications.
+        // Mtime changes from directory entry creation are timing-dependent
+        // (second-level granularity makes detection a coin flip), not behavioral signal.
         let ref_fs: HashSet<&execute::FsChange> = reference.fs_changes.iter().collect();
         let obs_fs: HashSet<&execute::FsChange> = obs.fs_changes.iter().collect();
-        let mut fs_delta: Vec<execute::FsChange> = obs_fs.difference(&ref_fs)
+        let mut fs_changes: Vec<execute::FsChange> = obs_fs.difference(&ref_fs)
+            .filter(|c| !matches!(c, execute::FsChange::Modified { detail, .. } if detail == "mtime changed"))
             .map(|c| (*c).clone())
             .collect();
-        fs_delta.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
+        fs_changes.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
 
-        ObsKey {
-            stdout: stdout_delta,
-            stderr: stderr_delta,
-            exit_code: exit_delta,
-            fs_changes: fs_delta,
-        }
+        ObsKey { stdout, stderr, exit_code, fs_changes }
     }
 }
 
@@ -442,14 +597,9 @@ pub fn analyze(
 
         // Try to find an existing group with identical per-context observations
         let found = behavior_groups.iter_mut().find(|g| {
-            if g.from_ref.as_ref() != analysis.from_ref.as_ref() { return false; }
-            if g.obs_list.len() != keys.len() { return false; }
-            g.obs_list.iter().zip(keys.iter()).all(|((_, a), (_, b))| {
-                a.stdout == b.stdout
-                && a.stderr == b.stderr
-                && a.exit_code == b.exit_code
-                && a.fs_changes == b.fs_changes
-            })
+            g.from_ref.as_ref() == analysis.from_ref.as_ref()
+            && g.obs_list.len() == keys.len()
+            && g.obs_list.iter().zip(keys.iter()).all(|((_, a), (_, b))| a == b)
         });
 
         if let Some(group) = found {

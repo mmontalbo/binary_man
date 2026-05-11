@@ -1,13 +1,13 @@
 # Exploration: xargs
 
 ## Rounds
-  round 0: 7 isolated cumulative, 22 identical in round (discovery)
-  round 1: 30 isolated cumulative, 8 identical in round (refinement)
-  round 2: 31 isolated cumulative, 9 identical in round (refinement)
-  round 3: 32 isolated cumulative, 8 identical in round (refinement)
+  round 0: 5 isolated cumulative, 13 identical in round (discovery)
+  round 1: 30 isolated cumulative, 17 identical in round (refinement)
+  round 2: 47 isolated cumulative, 27 identical in round (refinement)
+  round 3: 47 isolated cumulative, 23 identical in round (refinement)
 
 ## Observed: 14/21 flags
-  7 solo, 7 via combination
+  3 solo, 11 via combination
   7 additional error-differentiated
   1 behavioral aliases detected
 
@@ -19,52 +19,12 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
     base:
     flag:
       cherry apple banana
-  -E
-    exemplar: "-E" in many_files /remove env LC_ALL (different)
-    base:
-      (no base)
-    flag:
-  -I
-    exemplar: "-I" in many_files /remove env LC_ALL (different)
-    base:
-      (no base)
-    flag:
-  -L  # use at most MAX-LINES non-blank input lines per
-    exemplar: "-L" in many_files /remove env LC_ALL (different)
-    base:
-      (no base)
-    flag:
-  -P  # run at most MAX-PROCS processes at a time
-    exemplar: "-P" in many_files /remove env LC_ALL (different)
-    base:
-      (no base)
-    flag:
   -a  # read arguments from FILE, not standard input
     exemplar: "-a" in many_files /remove env LC_ALL (different)
     base:
       (no base)
     flag:
-  -d  # items in input stream are separated by CHARACTER,
-    exemplar: "-d" in many_files /remove env LC_ALL (different)
-    base:
-      (no base)
-    flag:
-  -n  # use at most MAX-ARGS arguments per command line
-    exemplar: "-n" in many_files /remove env LC_ALL (different)
-    base:
-      (no base)
-    flag:
   -o  # Reopen stdin as /dev/tty in the child process
-  -p  # prompt before running commands
-    exemplar: "-p" in many_files /remove env LC_ALL (different)
-    base:
-      (no base)
-    flag:
-  -s  # limit length of command line to MAX-CHARS
-    exemplar: "-s" in many_files /remove env LC_ALL (different)
-    base:
-      (no base)
-    flag:
   -t  # print commands before executing them
     exemplar: "-t" in alpha_minimal (different)
     base:
@@ -74,11 +34,19 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
 ## Via combination (distinguishable when paired)
   --eof  e.g. (pairwise evidence)
   --process-slot-var  e.g. "--show-limits" "--process-slot-var"
-  --replace  e.g. "--show-limits" "--replace"
+  --replace  e.g. (pairwise evidence)
   -0  e.g. (pairwise evidence)
-  -e  e.g. (pairwise evidence)
+  -E  e.g. "-a" "-E"
+  -I  e.g. "-a" "-I"
+  -L  e.g. "-L" "-s"
+  -P  e.g. "-a" "-P"
+  -d  e.g. "-d" "-E"
+  -e  e.g. "-L" "-e"
   -i  e.g. "--show-limits" "-i"
   -l  e.g. (pairwise evidence)
-  -r  e.g. (pairwise evidence)
-  -x  e.g. (pairwise evidence)
+  -n  e.g. "-a" "-n"
+  -p  e.g. "--show-limits" "-p"
+  -r  e.g. "-L" "-r"
+  -s  e.g. "-L" "-s"
+  -x  e.g. "-n" "-x"
 

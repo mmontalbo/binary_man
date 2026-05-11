@@ -1,18 +1,28 @@
 # Exploration: cut
 
 ## Rounds
-  round 0: 1 isolated cumulative, 4 identical in round (discovery)
-  round 1: 10 isolated cumulative, 6 identical in round (refinement)
-  round 2: 10 isolated cumulative, 6 identical in round (refinement)
+  round 0: 3 isolated cumulative, 4 identical in round (discovery)
+  round 1: 13 isolated cumulative, 11 identical in round (refinement)
+  round 2: 14 isolated cumulative, 14 identical in round (refinement)
+  round 3: 14 isolated cumulative, 14 identical in round (refinement)
 
 ## Observed: 3/10 flags
   1 solo, 2 via combination
   7 additional error-differentiated
-  1 behavioral aliases detected
 
 Aliases: -b = --bytes, -c = --characters, -d = --delimiter, -f = --fields, -s = --only-delimited, -z = --zero-terminated
 
 ## Solo (unique behavior)
+  -M  # from first to M'th (included) byte, character or field
+    exemplar: "-M" "input.txt" in many_files /remove env LC_ALL (different)
+    base:
+      (no base)
+    flag:
+  -d  # use DELIM instead of TAB for field delimiter
+    exemplar: "-d" "input.txt" in many_files /remove env LC_ALL (different)
+    base:
+      (no base)
+    flag:
   -f  # select only these fields;  also print any line
     exemplar: "-f" "input.txt" in many_files /remove env LC_ALL (different)
     base:
@@ -20,13 +30,11 @@ Aliases: -b = --bytes, -c = --characters, -d = --delimiter, -f = --fields, -s = 
     flag:
 
 ## Via combination (distinguishable when paired)
-  --complement  e.g. "--fields=1" "--complement" "input.txt"
-  --output-delimiter  e.g. "--fields=1" "--output-delimiter"
-  -M  e.g. "--fields=1" "-M"
-  -b  e.g. "--fields=1" "-b"
-  -c  e.g. "--fields=1" "-c"
-  -d  e.g. "--fields=1" "-d"
-  -n  e.g. (pairwise evidence)
-  -s  e.g. "--fields=1" "-s" "input.txt"
-  -z  e.g. "--fields=1" "-z" "input.txt"
+  --complement  e.g. (pairwise evidence)
+  --output-delimiter  e.g. (pairwise evidence)
+  -b  e.g. "-b" "-c" "input.txt"
+  -c  e.g. "-b" "-c" "input.txt"
+  -n  e.g. "-f" "-n" "input.txt"
+  -s  e.g. "-f" "-s"
+  -z  e.g. "-f" "-z" "input.txt"
 

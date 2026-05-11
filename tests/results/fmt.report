@@ -1,13 +1,14 @@
 # Exploration: fmt
 
 ## Rounds
-  round 0: 19 isolated cumulative, 46 identical in round (discovery)
-  round 1: 59 isolated cumulative, 32 identical in round (refinement)
-  round 2: 59 isolated cumulative, 32 identical in round (refinement)
+  round 0: 20 isolated cumulative, 46 identical in round (discovery)
+  round 1: 56 isolated cumulative, 27 identical in round (refinement)
+  round 2: 57 isolated cumulative, 27 identical in round (refinement)
+  round 3: 57 isolated cumulative, 28 identical in round (refinement)
 
 ## Observed: 7/7 flags
   7 solo, 0 via combination
-  1 behavioral aliases detected
+  2 behavioral aliases detected
 
 Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t = --tagged-paragraph, -u = --uniform-spacing, -w = --width
 
@@ -29,17 +30,18 @@ Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t 
       
             ...
   -g  # goal width (default of 93% of width)
-    exemplar: "-g" in many_files /remove env LC_ALL (different)
+    exemplar: "-g" "input.txt" "subdir" in many_files /remove env LC_ALL (different)
     base:
       (no base)
     flag:
   -p  # reformat only lines beginning with STRING,
-    exemplar: "-p" "input.txt" "other.txt" in many_files /remove env LC_ALL (different)
+    exemplar: "-p" "input.txt" in alpha_minimal (different)
     base:
-      (no base)
+      cherry Apple banana Date elderberry BANANA apple
     flag:
-      other content
-      second line
+      cherry
+      apple
+      banana
   -s  # split long lines, but do not refill
     exemplar: "-s" "input.txt" "other.txt" in formatted_minimal (-4 lines)
     base:

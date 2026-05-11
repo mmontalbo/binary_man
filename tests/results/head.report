@@ -2,12 +2,13 @@
 
 ## Rounds
   round 0: 4 isolated cumulative, 35 identical in round (discovery)
-  round 1: 37 isolated cumulative, 23 identical in round (refinement)
-  round 2: 40 isolated cumulative, 33 identical in round (refinement)
-  round 3: 40 isolated cumulative, 33 identical in round (refinement)
+  round 1: 53 isolated cumulative, 27 identical in round (refinement)
+  round 2: 60 isolated cumulative, 44 identical in round (refinement)
+  round 3: 60 isolated cumulative, 51 identical in round (refinement)
 
-## Observed: 7/7 flags
-  4 solo, 3 via combination
+## Observed: 5/7 flags
+  4 solo, 1 via combination
+  2 indistinguishable under tested conditions
 
 Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
 
@@ -43,7 +44,7 @@ Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
       apple
       banana
   -z  # line delimiter is NUL, not newline
-    exemplar: "-z" "input.txt" "subdir" in many_files /remove env LC_ALL (different)
+    exemplar: "-z" "input.txt" "other.txt" in many_files /remove env LC_ALL (different)
     base:
       (no base)
     flag:
@@ -55,7 +56,13 @@ Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
             ...
 
 ## Via combination (distinguishable when paired)
-  --quiet  e.g. (pairwise evidence)
-  --silent  e.g. "-c" "--silent" "input.txt"
-  -q  e.g. (pairwise evidence)
+  --quiet  e.g. "-n" "--lines" "--quiet" "input.txt" "subdir"
+
+## Indistinguishable under tested conditions
+  UNEXPLAINED (2): --silent, -q
+  UNEXPLAINED (2): --silent, -q
+  UNEXPLAINED (2): --silent, -q
+  UNEXPLAINED (2): --silent, -q
+  UNEXPLAINED (2): --silent, -q
+  UNEXPLAINED (2): --silent, -q
 

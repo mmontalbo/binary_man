@@ -48,9 +48,13 @@ See [LANGUAGE.md](LANGUAGE.md) for the probe language specification.
    environment variables, and setup commands.
 2. **Runs** declare invocations to observe. Each run executes in every
    applicable context inside a bwrap sandbox.
-3. **Analysis** groups runs by identical per-context observations.
-   Runs in the same group are behaviorally equivalent. Singleton
-   groups are isolated — that flag has unique behavior.
+3. **Analysis** compares observations using structural tree diff:
+   stdout/stderr are tokenized and aligned via two-level
+   Needleman-Wunsch, producing edit scripts that describe the
+   transformation each flag applies (e.g., "insert 8 tokens per
+   line", "reverse line order"). Runs with identical edit scripts
+   across all contexts are behaviorally equivalent. Singleton groups
+   are isolated — that flag has unique behavior.
 4. **Refinement** generates new experiments targeting specific
    indistinguishable flag stems: cross-group flag pairing (modifier +
    mode flag), sensitivity-graduated contexts, untested flag pickup.
@@ -70,7 +74,7 @@ See [LANGUAGE.md](LANGUAGE.md) for the probe language specification.
 
 ```
 cargo test                    # unit tests
-./tests/coreutils.sh          # integration test (22 binaries, ~105s)
+./tests/coreutils.sh          # integration test (22 binaries, ~64s)
 ```
 
 Reference reports with exemplar observations for each binary are

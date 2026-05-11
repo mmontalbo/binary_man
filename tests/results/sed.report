@@ -2,9 +2,9 @@
 
 ## Rounds
   round 0: 15 isolated cumulative, 13 identical in round (discovery)
-  round 1: 24 isolated cumulative, 26 identical in round (refinement)
-  round 2: 36 isolated cumulative, 38 identical in round (refinement)
-  round 3: 54 isolated cumulative, 41 identical in round (refinement)
+  round 1: 24 isolated cumulative, 25 identical in round (refinement)
+  round 2: 28 isolated cumulative, 36 identical in round (refinement)
+  round 3: 54 isolated cumulative, 36 identical in round (refinement)
 
 ## Observed: 22/24 flags
   4 solo, 18 via combination
@@ -13,7 +13,7 @@
 
 ## Solo (unique behavior)
   --debug
-    exemplar: "--debug" "input.txt" "other.txt" in many_files /remove env LC_ALL (different)
+    exemplar: "--debug" "input.txt" "other.txt" in many_files /remove subdir (different)
     base:
       (no base)
     flag:
@@ -24,48 +24,48 @@
       PATTERN: other content
             ...
   --follow-symlinks
-    exemplar: "--follow-symlinks" "$(head -n1 input.txt)" "input.txt" in numeric_standard / input.txt=size:1 (+1 lines, exit 1→0)
+    exemplar: "--follow-symlinks" "input.txt" "other.txt" in many_files /remove subdir (different)
     base:
+      (no base)
     flag:
-  --in-place
-    exemplar: "--in-place" "input.txt" "other.txt" in numeric_standard / input.txt=size:1 (different)
-    base:
       nput.txt
       other content
       nput.txt
       second line
+  --in-place
+    exemplar: "--in-place" "$(head -n1 input.txt)" "input.txt" in many_files /remove subdir (different)
+    base:
+      (no base)
     flag:
   --posix
     exemplar: "--posix" "$(head -n1 input.txt)" "input.txt" in numeric_standard / input.txt=size:1 (+1 lines, exit 1→0)
     base:
     flag:
   -i
-    exemplar: "-i" "input.txt" "other.txt" in numeric_standard / input.txt=size:1 (different)
+    exemplar: "-i" "input.txt" "other.txt" in many_files /remove subdir (different)
     base:
-      nput.txt
-      other content
-      nput.txt
-      second line
+      (no base)
     flag:
   -l
-    exemplar: "-l" "input.txt" in numeric_standard / input.txt=size:1 (different)
+    exemplar: "-l" "input.txt" "other.txt" in many_files /remove subdir (different)
     base:
+      (no base)
     flag:
 
 ## Via combination (distinguishable when paired)
   --expression  e.g. (pairwise evidence)
-  --file  e.g. "--posix" "--file" "input.txt"
+  --file  e.g. "--debug" "--file" "--silent" "$(head -n1 input.txt)" "input.txt"
   --line-length  e.g. (pairwise evidence)
-  --null-data  e.g. "--debug" "--in-place" "--null-data" "-f" "input.txt" "other.txt"
+  --null-data  e.g. "--follow-symlinks" "--in-place" "--null-data" "--silent" "$(head -n1 input.txt)" "input.txt"
   --quiet  e.g. (pairwise evidence)
   --regexp-extended  e.g. (pairwise evidence)
   --sandbox  e.g. "--debug" "--in-place" "--sandbox" "input.txt" "other.txt"
   --separate  e.g. "--debug" "--in-place" "--separate" "input.txt" "other.txt"
-  --silent  e.g. "--debug" "--file" "--silent" "input.txt" "other.txt"
-  --unbuffered  e.g. "--debug" "--file" "--unbuffered" "input.txt" "other.txt"
+  --silent  e.g. "--debug" "--file" "--silent" "$(head -n1 input.txt)" "input.txt"
+  --unbuffered  e.g. "--follow-symlinks" "--in-place" "--null-data" "--unbuffered" "input.txt" "other.txt"
   -E  e.g. (pairwise evidence)
   -e  e.g. (pairwise evidence)
-  -f  e.g. "--debug" "--in-place" "--null-data" "-f" "input.txt" "other.txt"
+  -f  e.g. "--follow-symlinks" "--in-place" "--null-data" "-f" "input.txt" "other.txt"
   -n  e.g. (pairwise evidence)
   -r  e.g. (pairwise evidence)
   -s  e.g. (pairwise evidence)
