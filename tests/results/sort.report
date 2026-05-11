@@ -1,7 +1,7 @@
 # Exploration: sort
 
 ## Rounds
-  round 0: 155 isolated cumulative, 66 identical in round (single-phase)
+  round 0: 183 isolated cumulative, 71 identical in round (single-phase)
 
 ## Observed: 24/30 flags
   7 solo, 17 via combination
@@ -12,55 +12,55 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
 ## Solo (unique behavior)
   --batch-size  # merge at most NMERGE inputs at once;
   --debug  # annotate the part of the line used to sort,
-    exemplar: "--debug" "input.txt" in alpha_minimal (-18 lines)
+    exemplar: "--debug" "input.txt" in words_minimal (+2882 lines)
     base:
-      Apple
-      BANANA
-      Date
-      apple
-      banana
+      Africa
+      Alice
+      Amazon
+      American
+      Apache
             ...
     flag:
-      Apple
-      _____
-      BANANA
+      Africa
       ______
-      Date
+      Alice
+      _____
+      Amazon
             ...
   --files0-from  # read input from the files specified by
   --sort  # sort according to WORD:
-    exemplar: "--sort=auto" in alpha_minimal (different)
+    exemplar: "--sort=auto" in words_minimal (different)
     base:
     flag:
   -C
-    exemplar: "-C" in alpha_minimal (different)
+    exemplar: "-C" in words_minimal (different)
     base:
     flag:
   -R  # shuffle, but group identical keys.  See shuf(1)
-    exemplar: "-R" "input.txt" in alpha_minimal (+7 lines, exit 127→0)
+    exemplar: "-R" "input.txt" in words_minimal (+1512 lines, exit 127→0)
     base:
-      Apple
-      BANANA
-      Date
-      apple
-      banana
+      Africa
+      Alice
+      Amazon
+      American
+      Apache
             ...
     flag:
-      cherry
-      apple
-      elderberry
-      banana
-      Date
+      strategy
+      Wednesday
+      wise
+      depend
+      didn't
             ...
   -S  # use SIZE for main memory buffer
   -T  # use DIR for temporaries, not $TMPDIR or /tmp;
-    exemplar: "-T" "input.txt" "other.txt" in alpha_deep (+1 lines)
+    exemplar: "-T" "input.txt" "other.txt" in words_deep (+1 lines)
     base:
-      Apple
-      BANANA
-      Date
-      apple
-      banana
+      Africa
+      Alice
+      Amazon
+      American
+      Apache
             ...
     flag:
       deep other
@@ -68,35 +68,35 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       line two
   -k  # sort via a key; KEYDEF gives location and type
   -o  # write result to FILE instead of standard output
-    exemplar: "-o" "input.txt" in alpha_minimal (different)
+    exemplar: "-o" "input.txt" in words_minimal (different)
     base:
-      Apple
-      BANANA
-      Date
-      apple
-      banana
+      Africa
+      Alice
+      Amazon
+      American
+      Apache
             ...
     flag:
   -t  # use SEP instead of non-blank to blank transition
 
 ## Via combination (distinguishable when paired)
-  --check  e.g. "-o" "--check" "input.txt" "other.txt"
-  --compress-program  e.g. "-o" "--compress-program=prog" "input.txt" "other.txt"
-  --parallel  e.g. "-k" "--parallel=1" "input.txt" "other.txt"
+  --check  e.g. "-k" "--check" "input.txt" "other.txt"
+  --compress-program  e.g. "-k" "--compress-program=prog" "input.txt" "other.txt"
+  --parallel  e.g. "-o" "--parallel=1" "input.txt" "other.txt"
   --random-source  e.g. "-o" "--random-source=input.txt" "input.txt" "other.txt"
-  -M  e.g. "-d" "-M" "input.txt" "other.txt"
-  -V  e.g. "-h" "-V" "input.txt" "other.txt"
-  -b  e.g. "-b" "-f" "input.txt" "other.txt"
+  -M  e.g. "-M" "-V" "input.txt" "other.txt"
+  -V  e.g. "-M" "-V" "input.txt" "other.txt"
+  -b  e.g. "-b" "-i" "input.txt" "other.txt"
   -c  e.g. "-c" "-T" "input.txt" "other.txt"
-  -d  e.g. "-d" "-n" "input.txt" "other.txt"
-  -f  e.g. "-b" "-f" "input.txt" "other.txt"
-  -g  e.g. "-g" "-R" "input.txt" "other.txt"
-  -h  e.g. "-h" "-V" "input.txt" "other.txt"
-  -i  e.g. "-f" "-i" "input.txt" "other.txt"
-  -m  e.g. "-R" "-m" "input.txt" "other.txt"
-  -n  e.g. "-d" "-n" "input.txt" "other.txt"
-  -r  e.g. "-r" "--debug" "input.txt" "other.txt"
-  -s  e.g. "-R" "-s" "input.txt" "other.txt"
+  -d  e.g. "-d" "-V" "input.txt" "other.txt"
+  -f  e.g. "-f" "-m" "input.txt" "other.txt"
+  -g  e.g. "-g" "-M" "input.txt" "other.txt"
+  -h  e.g. "-M" "-h" "input.txt" "other.txt"
+  -i  e.g. "-b" "-i" "input.txt" "other.txt"
+  -m  e.g. "-r" "-m" "input.txt" "other.txt"
+  -n  e.g. "-n" "-s" "input.txt" "other.txt"
+  -r  e.g. "-r" "-m" "input.txt" "other.txt"
+  -s  e.g. "-n" "-s" "input.txt" "other.txt"
   -u  e.g. "-u" "--debug" "input.txt" "other.txt"
-  -z  e.g. "-z" "--debug" "input.txt" "other.txt"
+  -z  e.g. "-R" "-z" "input.txt" "other.txt"
 

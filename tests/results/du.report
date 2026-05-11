@@ -1,7 +1,7 @@
 # Exploration: du
 
 ## Rounds
-  round 0: 187 isolated cumulative, 140 identical in round (single-phase)
+  round 0: 191 isolated cumulative, 144 identical in round (single-phase)
 
 ## Observed: 25/26 flags
   10 solo, 15 via combination
@@ -11,15 +11,15 @@ Aliases: -0 = --null, -B = --block-size, -D = --dereference-args, -L = --derefer
 
 ## Solo (unique behavior)
   --apparent-size  # print apparent sizes rather than device usage; although
-    exemplar: "--apparent-size" "input.txt" "other.txt" in numeric_standard / input.txt=empty (reordered)
+    exemplar: "--apparent-size" "input.txt" "other.txt" in words_minimal (reordered)
     base:
-      0	input.txt
+      12	input.txt
       4	other.txt
     flag:
-      0	input.txt
+      11	input.txt
       1	other.txt
   --exclude  # exclude files that match PATTERN
-    exemplar: "--exclude=.*" "input.txt" "subdir" in numeric_standard / input.txt=empty (+1 lines, exit 1→0)
+    exemplar: "--exclude=.*" "input.txt" "subdir" in numbers_standard / input.txt=empty (+1 lines, exit 1→0)
     base:
       0	input.txt
       8	subdir
@@ -27,13 +27,13 @@ Aliases: -0 = --null, -B = --block-size, -D = --dereference-args, -L = --derefer
       0	input.txt
       8	subdir
   --files0-from  # summarize device usage of the
-    exemplar: "--files0-from=f" in numeric_standard (different)
+    exemplar: "--files0-from=f" in numbers_standard (different)
     base:
       8	./subdir
       36	.
     flag:
   --inodes  # list inode usage information instead of block usage
-    exemplar: "--inodes" "input.txt" "other.txt" in numeric_standard / input.txt=empty (different)
+    exemplar: "--inodes" "input.txt" "other.txt" in numbers_standard / input.txt=empty (different)
     base:
       0	input.txt
       4	other.txt
@@ -41,69 +41,70 @@ Aliases: -0 = --null, -B = --block-size, -D = --dereference-args, -L = --derefer
       1	input.txt
       1	other.txt
   --si  # like -h, but use powers of 1000 not 1024
-    exemplar: "--si" "input.txt" "other.txt" in alpha_minimal (different)
+    exemplar: "--si" "input.txt" "other.txt" in words_minimal (reordered)
     base:
-      4	input.txt
+      12	input.txt
       4	other.txt
     flag:
-      4.1k	input.txt
+      13k	input.txt
       4.1k	other.txt
   --time  # show time as WORD instead of modification time:
-    exemplar: "--time" "input.txt" "other.txt" in alpha_minimal (different)
+    exemplar: "--time" "input.txt" "other.txt" in words_minimal (reordered)
     base:
-      4	input.txt
+      12	input.txt
       4	other.txt
     flag:
-      4	2026-05-11 15:24	input.txt
-      4	2026-05-11 15:24	other.txt
+      12	2026-05-11 15:58	input.txt
+      4	2026-05-11 15:58	other.txt
   -B  # scale sizes by SIZE before printing them; e.g.,
-    exemplar: "-B" "$(head -n1 input.txt)" "input.txt" in numeric_minimal (different)
+    exemplar: "-B" in numbers_standard (different)
     base:
-      4	input.txt
+      8	./subdir
+      36	.
     flag:
-      41	input.txt
   -X  # exclude files that match any pattern in FILE
-    exemplar: "-X" "input.txt" "other.txt" in alpha_minimal (different)
+    exemplar: "-X" "input.txt" "other.txt" in words_minimal (different)
     base:
-      4	input.txt
+      12	input.txt
       4	other.txt
     flag:
       4	other.txt
   -d  # print the total for a directory (or file, with --all)
-    exemplar: "-d" "$(head -n1 input.txt)" "input.txt" in numeric_standard (different)
+    exemplar: "-d" "$(head -n1 input.txt)" "." in numbers_standard (different)
     base:
-      4	input.txt
+      8	./subdir
+      36	.
     flag:
-      4	input.txt
+      36	.
   -m  # like --block-size=1M
-    exemplar: "-m" "input.txt" "other.txt" in numeric_standard / input.txt=empty (reordered)
+    exemplar: "-m" "input.txt" "subdir" in words_standard (+1 lines, exit 1→0)
     base:
-      0	input.txt
-      4	other.txt
+      12	input.txt
+      8	subdir
     flag:
-      0	input.txt
-      1	other.txt
+      1	input.txt
+      1	subdir
   -t  # exclude entries smaller than SIZE if positive,
-    exemplar: "-t" "$(head -n1 input.txt)" "input.txt" in numeric_standard (different)
+    exemplar: "-t" "$(head -n1 input.txt)" "input.txt" in numbers_standard (different)
     base:
       4	input.txt
     flag:
       4	input.txt
 
 ## Via combination (distinguishable when paired)
-  --time-style  e.g. "-d" "--time-style=auto" "$(head -n1 input.txt)" "."
-  -0  e.g. "-0" "-b" "$(head -n1 input.txt)" "."
+  --time-style  e.g. "-X" "--time-style=auto" "$(head -n1 input.txt)" "."
+  -0  e.g. "-0" "-m" "$(head -n1 input.txt)" "."
   -D  e.g. "-B" "-D" "$(head -n1 input.txt)" "."
-  -H  e.g. "-B" "-H" "$(head -n1 input.txt)" "."
-  -L  e.g. "-d" "-L" "$(head -n1 input.txt)" "."
-  -P  e.g. "-d" "-P" "$(head -n1 input.txt)" "."
+  -H  e.g. "-d" "-H" "$(head -n1 input.txt)" "."
+  -L  e.g. "-B" "-L" "$(head -n1 input.txt)" "."
+  -P  e.g. "-B" "-P" "$(head -n1 input.txt)" "."
   -S  e.g. "-d" "-S" "$(head -n1 input.txt)" "."
-  -a  e.g. "-a" "-L" "$(head -n1 input.txt)" "."
-  -b  e.g. "-0" "-b" "$(head -n1 input.txt)" "."
-  -c  e.g. "-c" "--si" "$(head -n1 input.txt)" "."
-  -h  e.g. "-B" "-h" "$(head -n1 input.txt)" "."
-  -k  e.g. "-B" "-k" "$(head -n1 input.txt)" "."
-  -l  e.g. "-d" "-l" "$(head -n1 input.txt)" "."
-  -s  e.g. "-s" "--apparent-size" "$(head -n1 input.txt)" "."
+  -a  e.g. "-a" "-b" "$(head -n1 input.txt)" "."
+  -b  e.g. "-a" "-b" "$(head -n1 input.txt)" "."
+  -c  e.g. "-c" "-d" "$(head -n1 input.txt)" "."
+  -h  e.g. "-h" "-t" "$(head -n1 input.txt)" "."
+  -k  e.g. "-d" "-k" "$(head -n1 input.txt)" "."
+  -l  e.g. "-B" "-l" "$(head -n1 input.txt)" "."
+  -s  e.g. "-s" "--time" "$(head -n1 input.txt)" "."
   -x  e.g. "-B" "-x" "$(head -n1 input.txt)" "."
 

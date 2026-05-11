@@ -1,7 +1,7 @@
 # Exploration: diff
 
 ## Rounds
-  round 0: 198 isolated cumulative, 73 identical in round (single-phase)
+  round 0: 201 isolated cumulative, 72 identical in round (single-phase)
 
 ## Observed: 49/53 flags
   7 solo, 42 via combination
@@ -11,117 +11,117 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
 
 ## Solo (unique behavior)
   --horizon-lines  # keep NUM lines of the common prefix and suffix
-    exemplar: "--horizon-lines=1" "input.txt" "other.txt" in formatted_minimal (-4 lines)
+    exemplar: "--horizon-lines=1" "input.txt" "other.txt" in formatted_minimal (-48 lines)
     base:
-      1,13c1
+      1,24c1
       < first line
-      < 
-      < 
+      < second line with trailing spaces
       < 	indented with tab
+      <     indented with spaces
             ...
     flag:
-      1,13c1
+      1,24c1
       < first line
-      < 
-      < 
+      < second line with trailing spaces
       < 	indented with tab
+      <     indented with spaces
             ...
   --tabsize  # tab stops every NUM (default 8) print columns
-    exemplar: "--tabsize=1" "input.txt" "other.txt" in formatted_minimal (-4 lines)
+    exemplar: "--tabsize=1" "input.txt" "other.txt" in formatted_minimal (-48 lines)
     base:
-      1,13c1
+      1,24c1
       < first line
-      < 
-      < 
+      < second line with trailing spaces
       < 	indented with tab
+      <     indented with spaces
             ...
     flag:
-      1,13c1
+      1,24c1
       < first line
-      < 
-      < 
+      < second line with trailing spaces
       < 	indented with tab
+      <     indented with spaces
             ...
   --unified
-    exemplar: "--unified" "input.txt" "other.txt" in alpha_minimal (+11 lines, exit 127→1)
+    exemplar: "--unified" "input.txt" "other.txt" in words_minimal (+1516 lines, exit 127→1)
     base:
-      1,7c1
-      < cherry
-      < Apple
-      < banana
-      < Date
+      1,1512c1
+      < aardvark
+      < abbreviation
+      < about
+      < abstract
             ...
     flag:
-      --- input.txt	2026-05-11 15:24:27.750588105 -0700
-      +++ other.txt	2026-05-11 15:24:27.750601410 -0700
-      @@ -1,7 +1 @@
-      -cherry
-      -Apple
+      --- input.txt	2026-05-11 15:59:03.666959020 -0700
+      +++ other.txt	2026-05-11 15:59:03.666974268 -0700
+      @@ -1,1512 +1 @@
+      -aardvark
+      -abbreviation
             ...
   -D  # output merged file with '#ifdef NAME' diffs
   -W  # output at most NUM (default 130) print columns
   -X  # exclude files that match any pattern in FILE
   -u
-    exemplar: "-u" "input.txt" "other.txt" in alpha_minimal (+11 lines, exit 127→1)
+    exemplar: "-u" "input.txt" "other.txt" in words_minimal (+1516 lines, exit 127→1)
     base:
-      1,7c1
-      < cherry
-      < Apple
-      < banana
-      < Date
+      1,1512c1
+      < aardvark
+      < abbreviation
+      < about
+      < abstract
             ...
     flag:
-      --- input.txt	2026-05-11 15:24:27.749676631 -0700
-      +++ other.txt	2026-05-11 15:24:27.749682322 -0700
-      @@ -1,7 +1 @@
-      -cherry
-      -Apple
+      --- input.txt	2026-05-11 15:59:03.665976685 -0700
+      +++ other.txt	2026-05-11 15:59:03.665983939 -0700
+      @@ -1,1512 +1 @@
+      -aardvark
+      -abbreviation
             ...
 
 ## Via combination (distinguishable when paired)
-  --GTYPE-group-format  e.g. "-W" "--GTYPE-group-format=gfmt" "input.txt" "other.txt"
-  --LTYPE-line-format  e.g. "-W" "--LTYPE-line-format=lfmt" "input.txt" "other.txt"
+  --GTYPE-group-format  e.g. "-X" "--GTYPE-group-format=gfmt" "input.txt" "other.txt"
+  --LTYPE-line-format  e.g. "-X" "--LTYPE-line-format=lfmt" "input.txt" "other.txt"
   --color  e.g. "-u" "--color" "input.txt" "other.txt"
-  --context  e.g. "-X" "--context" "input.txt" "other.txt"
-  --from-file  e.g. "--unified" "--from-file=input.txt" "input.txt" "other.txt"
-  --ignore-file-name-case  e.g. "-X" "--ignore-file-name-case" "input.txt" "other.txt"
+  --context  e.g. "-W" "--context" "input.txt" "other.txt"
+  --from-file  e.g. "-D" "--from-file=input.txt" "input.txt" "other.txt"
+  --ignore-file-name-case  e.g. "-u" "--ignore-file-name-case" "input.txt" "other.txt"
   --label  e.g. "-X" "--label=test" "input.txt" "other.txt"
-  --left-column  e.g. "-D" "--left-column" "input.txt" "other.txt"
-  --line-format  e.g. "-D" "--line-format=lfmt" "input.txt" "other.txt"
-  --no-dereference  e.g. "-D" "--no-dereference" "input.txt" "other.txt"
-  --no-ignore-file-name-case  e.g. "-u" "--no-ignore-file-name-case" "input.txt" "other.txt"
-  --normal  e.g. "-W" "--normal" "input.txt" "other.txt"
+  --left-column  e.g. "--unified" "--left-column" "input.txt" "other.txt"
+  --line-format  e.g. "-W" "--line-format=lfmt" "input.txt" "other.txt"
+  --no-dereference  e.g. "-X" "--no-dereference" "input.txt" "other.txt"
+  --no-ignore-file-name-case  e.g. "-W" "--no-ignore-file-name-case" "input.txt" "other.txt"
+  --normal  e.g. "-D" "--normal" "input.txt" "other.txt"
   --palette  e.g. "-W" "--palette=palette" "input.txt" "other.txt"
   --speed-large-files  e.g. "-u" "--speed-large-files" "input.txt" "other.txt"
-  --strip-trailing-cr  e.g. "-X" "--strip-trailing-cr" "input.txt" "other.txt"
-  --suppress-blank-empty  e.g. "--suppress-blank-empty" "--from-file=input.txt" "input.txt" "other.txt"
-  --suppress-common-lines  e.g. "-W" "--suppress-common-lines" "input.txt" "other.txt"
-  --to-file  e.g. "--unified" "--to-file=input.txt" "input.txt" "other.txt"
+  --strip-trailing-cr  e.g. "-W" "--strip-trailing-cr" "input.txt" "other.txt"
+  --suppress-blank-empty  e.g. "-t" "--suppress-blank-empty" "input.txt" "other.txt"
+  --suppress-common-lines  e.g. "-u" "--suppress-common-lines" "input.txt" "other.txt"
+  --to-file  e.g. "-y" "--to-file=input.txt" "input.txt" "other.txt"
   --unidirectional-new-file  e.g. "-W" "--unidirectional-new-file" "input.txt" "other.txt"
-  -B  e.g. "-W" "-B" "input.txt" "other.txt"
-  -C  e.g. "-C" "-U" "input.txt" "other.txt"
-  -E  e.g. "-E" "--unified" "input.txt" "other.txt"
+  -B  e.g. "-B" "--unified" "input.txt" "other.txt"
+  -C  e.g. "-C" "-u" "input.txt" "other.txt"
+  -E  e.g. "-W" "-E" "input.txt" "other.txt"
   -F  e.g. "-W" "-F" "input.txt" "other.txt"
   -I  e.g. "-X" "-I" "input.txt" "other.txt"
   -N  e.g. "-W" "-N" "input.txt" "other.txt"
   -S  e.g. "-W" "-S" "input.txt" "other.txt"
   -T  e.g. "-T" "--from-file=input.txt" "input.txt" "other.txt"
   -U  e.g. "-C" "-U" "input.txt" "other.txt"
-  -Z  e.g. "-X" "-Z" "input.txt" "other.txt"
-  -a  e.g. "-u" "-a" "input.txt" "other.txt"
+  -Z  e.g. "-u" "-Z" "input.txt" "other.txt"
+  -a  e.g. "-X" "-a" "input.txt" "other.txt"
   -b  e.g. "-W" "-b" "input.txt" "other.txt"
   -c  e.g. (pairwise evidence)
   -d  e.g. "-W" "-d" "input.txt" "other.txt"
-  -e  e.g. "-e" "--to-file=input.txt" "input.txt" "other.txt"
-  -i  e.g. "-u" "-i" "input.txt" "other.txt"
-  -l  e.g. "-l" "--unified" "input.txt" "other.txt"
-  -n  e.g. "-n" "--to-file=input.txt" "input.txt" "other.txt"
-  -p  e.g. "-u" "-p" "input.txt" "other.txt"
-  -q  e.g. "-q" "--label=test" "input.txt" "other.txt"
-  -r  e.g. "-r" "--unified" "input.txt" "other.txt"
-  -s  e.g. "-s" "--unified" "input.txt" "other.txt"
-  -t  e.g. "-t" "--unified" "input.txt" "other.txt"
-  -v  e.g. "-W" "-v" "input.txt" "other.txt"
+  -e  e.g. "-e" "-l" "input.txt" "other.txt"
+  -i  e.g. "-X" "-i" "input.txt" "other.txt"
+  -l  e.g. "-W" "-l" "input.txt" "other.txt"
+  -n  e.g. "-n" "-l" "input.txt" "other.txt"
+  -p  e.g. "-p" "--unified" "input.txt" "other.txt"
+  -q  e.g. "-q" "--to-file=input.txt" "input.txt" "other.txt"
+  -r  e.g. "-W" "-r" "input.txt" "other.txt"
+  -s  e.g. "-s" "--from-file=input.txt" "input.txt" "other.txt"
+  -t  e.g. "-t" "--suppress-blank-empty" "input.txt" "other.txt"
+  -v  e.g. "-X" "-v" "input.txt" "other.txt"
   -w  e.g. "-X" "-w" "input.txt" "other.txt"
   -x  e.g. "-W" "-x" "input.txt" "other.txt"
   -y  e.g. "-y" "--to-file=input.txt" "input.txt" "other.txt"

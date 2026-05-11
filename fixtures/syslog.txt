@@ -1,0 +1,26 @@
+Jan 15 08:23:01 webserver sshd[2847]: Accepted publickey for alice from 192.168.1.100 port 54321 ssh2: RSA SHA256:nThbg6kXUpJWGl7E1IGOCspRomTxdCARLviKw6E5SY8
+Jan 15 08:23:01 webserver sshd[2847]: pam_unix(sshd:session): session opened for user alice(uid=1000) by (uid=0)
+Jan 15 08:23:05 webserver systemd[1]: Starting Daily apt download activities...
+Jan 15 08:23:05 webserver systemd[1]: Started Daily apt download activities.
+Jan 15 08:24:12 webserver nginx[1234]: 2024/01/15 08:24:12 [error] 1234#1234: *5678 open() "/var/www/html/missing.html" failed (2: No such file or directory)
+Jan 15 08:24:12 webserver nginx[1234]: 2024/01/15 08:24:12 [error] 1234#1234: *5678 open() "/var/www/html/missing.html" failed (2: No such file or directory)
+Jan 15 08:24:17 webserver kernel: [  142.857832] TCP: eth0: driver bug, attempting to wake queue 0
+Jan 15 08:25:00 webserver CRON[3001]: (root) CMD (/usr/local/bin/cleanup.sh >> /var/log/cleanup.log 2>&1)
+Jan 15 08:25:01 webserver CRON[3002]: (alice) CMD (cd /home/alice && python3 backup.py)
+Jan 15 08:26:30 webserver postfix/smtpd[3100]: connect from mail.example.com[10.0.0.25]
+Jan 15 08:26:31 webserver postfix/smtpd[3100]: disconnect from mail.example.com[10.0.0.25] ehlo=1 mail=1 rcpt=1 data=1 quit=1 commands=5
+Jan 15 08:27:00 dbserver postgres[4521]: LOG:  checkpoint starting: time
+Jan 15 08:27:05 dbserver postgres[4521]: LOG:  checkpoint complete: wrote 128 buffers (0.8%); 0 WAL file(s) added, 0 removed, 1 recycled
+Jan 15 08:28:00 webserver systemd[1]: Starting Rotate log files...
+Jan 15 08:28:00 webserver systemd[1]: logrotate.service: Succeeded.
+Jan 15 08:28:00 webserver systemd[1]: Finished Rotate log files.
+Jan 15 08:30:00 webserver sshd[2847]: Received disconnect from 192.168.1.100 port 54321:11: disconnected by user
+Jan 15 08:30:00 webserver sshd[2847]: Disconnected from user alice 192.168.1.100 port 54321
+Jan 15 08:30:00 webserver sshd[2847]: pam_unix(sshd:session): session closed for user alice
+Jan 15 08:31:22 webserver sshd[5001]: Failed password for invalid user admin from 10.0.0.99 port 43210 ssh2
+Jan 15 08:31:23 webserver sshd[5001]: Failed password for invalid user admin from 10.0.0.99 port 43210 ssh2
+Jan 15 08:31:24 webserver sshd[5001]: Failed password for invalid user admin from 10.0.0.99 port 43210 ssh2
+Jan 15 08:31:24 webserver sshd[5001]: Connection closed by invalid user admin 10.0.0.99 port 43210 [preauth]
+Jan 15 08:35:00 dbserver postgres[4521]: LOG:  automatic vacuum of table "appdb.public.sessions": index scans: 1
+Feb  3 14:00:01 webserver CRON[6100]: (root) CMD (/usr/local/bin/certbot renew --quiet)
+Mar 20 23:59:59 webserver kernel: [86399.999999] Out of memory: Killed process 7890 (java) total-vm:4194304kB, anon-rss:3145728kB

@@ -1,0 +1,24 @@
+first line
+second line with trailing spaces
+	indented with tab
+    indented with spaces
+	 	mixed tabs and spaces
+
+blank line above
+
+two blank lines above
+
+
+three blank lines above
+a]very long line that exceeds eighty characters in total width to exercise fold and fmt and similar line-wrapping tools and to ensure that column-counting logic works properly across all contexts
+short
+x
+trailing	tab
+  leading spaces and trailing spaces
+		double tab indent
+normal line between weird ones
+has	multiple		tabs			with	varying		widths
+UPPERCASE LINE
+lowercase line
+MiXeD cAsE lInE
+	tab	tab	tab	tab	tab	tab	tab	tab

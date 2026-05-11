@@ -1,0 +1,54 @@
+# Application Configuration
+# Last modified: 2024-01-15
+
+[database]
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=production
+DB_USER=appuser
+DB_PASSWORD=s3cret!@#$
+DB_POOL_SIZE=20
+DB_TIMEOUT=30s
+DB_SSL=true
+
+[server]
+HOST=0.0.0.0
+PORT=8080
+WORKERS=4
+MAX_CONNECTIONS=1000
+REQUEST_TIMEOUT=60s
+BIND_ADDRESS=127.0.0.1:8080
+BASE_URL=https://api.example.com/v2
+
+[logging]
+LOG_LEVEL=warn
+LOG_FORMAT=json
+LOG_FILE=/var/log/app/server.log
+LOG_ROTATE=daily
+LOG_MAX_SIZE=100M
+SYSLOG_ENABLED=true
+SYSLOG_FACILITY=local0
+
+[cache]
+REDIS_URL=redis://localhost:6379/0
+CACHE_TTL=3600
+CACHE_MAX_KEYS=10000
+# CACHE_PREFIX=app:v2:
+
+[features]
+ENABLE_SIGNUP=true
+ENABLE_OAUTH=false
+ENABLE_2FA=true
+MAINTENANCE_MODE=false
+MAX_UPLOAD_SIZE=50MB
+ALLOWED_ORIGINS=https://example.com,https://app.example.com
+RATE_LIMIT=100/minute
+
+[paths]
+DATA_DIR=/var/lib/app/data
+TEMP_DIR=/tmp/app
+PLUGIN_DIR=/usr/local/lib/app/plugins
+CONFIG_DIR=/etc/app
+BACKUP_DIR=/mnt/backups/app
+
+# End of configuration

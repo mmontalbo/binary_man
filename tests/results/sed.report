@@ -1,66 +1,68 @@
 # Exploration: sed
 
 ## Rounds
-  round 0: 33 isolated cumulative, 38 identical in round (single-phase)
+  round 0: 39 isolated cumulative, 41 identical in round (single-phase)
 
-## Observed: 22/24 flags
-  4 solo, 18 via combination
-  2 additional error-differentiated
+## Observed: 23/24 flags
+  3 solo, 20 via combination
+  1 additional error-differentiated
   3 behavioral aliases detected
 
 ## Solo (unique behavior)
   --debug
-    exemplar: "--debug" "input.txt" in alpha_minimal (different)
+    exemplar: "--debug" "input.txt" in words_minimal (different)
     base:
     flag:
       SED PROGRAM:
         i\nput.txt
   --follow-symlinks
-    exemplar: "--follow-symlinks" "input.txt" "other.txt" in alpha_minimal (-2 lines)
+    exemplar: "--follow-symlinks" "input.txt" "other.txt" in words_minimal (-2 lines)
     base:
       nput.txt
       hello world
     flag:
       nput.txt
       hello world
-  --in-place
-    exemplar: "--in-place" "input.txt" "other.txt" in alpha_minimal (different)
-    base:
-      nput.txt
-      hello world
-    flag:
   --posix
-    exemplar: "--posix" "$(head -n1 input.txt)" "input.txt" in numeric_standard / input.txt=size:1 (+1 lines, exit 1→0)
+    exemplar: "--posix" "$(head -n1 input.txt)" "input.txt" in passwd_minimal (+30 lines, exit 1→0)
     base:
+      root:x:0:0:root:/root:/bin/bash
+      daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+      bin:x:2:2:bin:/bin:/usr/sbin/nologin
+      sys:x:3:3:sys:/dev:/usr/sbin/nologin
+      sync:x:4:65534:sync:/bin:/bin/sync
+            ...
     flag:
-  -i
-    exemplar: "-i" "input.txt" "other.txt" in alpha_minimal (different)
-    base:
-      nput.txt
-      hello world
-    flag:
+      root:x:0:0:root:/root:/bin/bash
+      daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+      bin:x:2:2:bin:/bin:/usr/sbin/nologin
+      sys:x:3:3:sys:/dev:/usr/sbin/nologin
+      sync:x:4:65534:sync:/bin:/bin/sync
+            ...
   -l
-    exemplar: "-l" "input.txt" in alpha_minimal (different)
+    exemplar: "-l" "input.txt" in words_minimal (different)
     base:
     flag:
 
 ## Via combination (distinguishable when paired)
   --expression  e.g. "-f" "--expression" "$(head -n1 input.txt)" "input.txt"
   --file  e.g. "-f" "--file" "$(head -n1 input.txt)" "input.txt"
+  --in-place  e.g. "--in-place" "--sandbox" "$(head -n1 input.txt)" "input.txt"
   --line-length  e.g. (pairwise evidence)
   --null-data  e.g. "--in-place" "--null-data" "$(head -n1 input.txt)" "input.txt"
   --quiet  e.g. "-f" "--quiet" "$(head -n1 input.txt)" "input.txt"
   --regexp-extended  e.g. (pairwise evidence)
-  --sandbox  e.g. (pairwise evidence)
+  --sandbox  e.g. "--in-place" "--sandbox" "$(head -n1 input.txt)" "input.txt"
   --separate  e.g. (pairwise evidence)
   --silent  e.g. "-f" "--silent" "$(head -n1 input.txt)" "input.txt"
   --unbuffered  e.g. (pairwise evidence)
   -E  e.g. "-f" "-E" "$(head -n1 input.txt)" "input.txt"
   -e  e.g. (pairwise evidence)
   -f  e.g. "-f" "-l" "$(head -n1 input.txt)" "input.txt"
-  -n  e.g. "-n" "-i" "$(head -n1 input.txt)" "input.txt"
+  -i  e.g. "-i" "--sandbox" "$(head -n1 input.txt)" "input.txt"
+  -n  e.g. (pairwise evidence)
   -r  e.g. "-f" "-r" "$(head -n1 input.txt)" "input.txt"
   -s  e.g. "-f" "-s" "$(head -n1 input.txt)" "input.txt"
-  -u  e.g. "-f" "-u" "$(head -n1 input.txt)" "input.txt"
+  -u  e.g. "-u" "--in-place" "$(head -n1 input.txt)" "input.txt"
   -z  e.g. "-f" "-z" "$(head -n1 input.txt)" "input.txt"
 

@@ -11,7 +11,7 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
 
 ## Solo (unique behavior)
   --show-limits  # show limits on command-line length
-    exemplar: "--show-limits" in alpha_minimal (different)
+    exemplar: "--show-limits" in words_minimal (different)
     base:
     flag:
       cherry apple banana

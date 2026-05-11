@@ -1,7 +1,7 @@
 # Exploration: cut
 
 ## Rounds
-  round 0: 6 isolated cumulative, 14 identical in round (single-phase)
+  round 0: 7 isolated cumulative, 14 identical in round (single-phase)
 
 ## Observed: 3/10 flags
   1 solo, 2 via combination
@@ -12,7 +12,7 @@ Aliases: -b = --bytes, -c = --characters, -d = --delimiter, -f = --fields, -s = 
 
 ## Solo (unique behavior)
   -f  # select only these fields;  also print any line
-    exemplar: "-f" "input.txt" in alpha_minimal (different)
+    exemplar: "-f" "input.txt" in words_minimal (different)
     base:
     flag:
 

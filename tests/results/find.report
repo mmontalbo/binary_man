@@ -9,14 +9,14 @@
 
 ## Solo (unique behavior)
   -D
-    exemplar: "-D" "input.txt" "other.txt" in alpha_minimal (different)
+    exemplar: "-D" "input.txt" "other.txt" in words_minimal (different)
     base:
       input.txt
       other.txt
     flag:
       other.txt
   -N
-    exemplar: "-N" in alpha_standard (different)
+    exemplar: "-N" in words_standard (different)
     base:
       .
       ./b.txt
@@ -26,7 +26,7 @@
             ...
     flag:
   -a
-    exemplar: "-a" in alpha_standard (different)
+    exemplar: "-a" in words_standard (different)
     base:
       .
       ./b.txt
@@ -36,7 +36,7 @@
             ...
     flag:
   -o
-    exemplar: "-o" in alpha_standard (different)
+    exemplar: "-o" in words_standard (different)
     base:
       .
       ./b.txt

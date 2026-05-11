@@ -10,60 +10,60 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
 
 ## Solo (unique behavior)
   -e  # equivalent to -vE
-    exemplar: "-e" "input.txt" "other.txt" in formatted_minimal (-4 lines)
+    exemplar: "-e" "input.txt" "other.txt" in paths_minimal (-30 lines)
     base:
-      first line
-      
-      
-      	indented with tab
-      trailing spaces   
+      /usr/local/bin/python3
+      /usr/bin/env
+      /bin/sh
+      /home/alice/.bashrc
+      /home/alice/.config/nvim/init.lua
             ...
     flag:
-      first line$
-      $
-      $
-      	indented with tab$
-      trailing spaces   $
+      /usr/local/bin/python3$
+      /usr/bin/env$
+      /bin/sh$
+      /home/alice/.bashrc$
+      /home/alice/.config/nvim/init.lua$
             ...
   -t  # equivalent to -vT
-    exemplar: "-t" "input.txt" "other.txt" in formatted_minimal (-4 lines)
+    exemplar: "-t" "input.txt" "other.txt" in paths_minimal (-30 lines)
     base:
-      first line
-      
-      
-      	indented with tab
-      trailing spaces   
+      /usr/local/bin/python3
+      /usr/bin/env
+      /bin/sh
+      /home/alice/.bashrc
+      /home/alice/.config/nvim/init.lua
             ...
     flag:
-      first line
-      
-      
-      ^Iindented with tab
-      trailing spaces   
+      /usr/local/bin/python3
+      /usr/bin/env
+      /bin/sh
+      /home/alice/.bashrc
+      /home/alice/.config/nvim/init.lua
             ...
   -u  # (ignored)
-    exemplar: "-u" "input.txt" "other.txt" in formatted_minimal (-4 lines)
+    exemplar: "-u" "input.txt" "other.txt" in formatted_minimal (-48 lines)
     base:
       first line
-      
-      
+      second line with trailing spaces
       	indented with tab
-      trailing spaces   
+          indented with spaces
+      	 	mixed tabs and spaces
             ...
     flag:
       first line
-      
-      
+      second line with trailing spaces
       	indented with tab
-      trailing spaces   
+          indented with spaces
+      	 	mixed tabs and spaces
             ...
 
 ## Via combination (distinguishable when paired)
-  -A  e.g. "-A" "-b" "$(head -n1 input.txt)" "input.txt"
-  -E  e.g. "-E" "-T" "$(head -n1 input.txt)" "input.txt"
-  -T  e.g. "-n" "-T" "$(head -n1 input.txt)" "input.txt"
-  -b  e.g. "-b" "-v" "$(head -n1 input.txt)" "input.txt"
-  -n  e.g. "-n" "-T" "$(head -n1 input.txt)" "input.txt"
-  -s  e.g. "-s" "-t" "$(head -n1 input.txt)" "input.txt"
+  -A  e.g. "-A" "-n" "$(head -n1 input.txt)" "input.txt"
+  -E  e.g. "-b" "-E" "$(head -n1 input.txt)" "input.txt"
+  -T  e.g. "-b" "-T" "$(head -n1 input.txt)" "input.txt"
+  -b  e.g. "-b" "-E" "$(head -n1 input.txt)" "input.txt"
+  -n  e.g. "-n" "-v" "$(head -n1 input.txt)" "input.txt"
+  -s  e.g. "-e" "-s" "$(head -n1 input.txt)" "input.txt"
   -v  e.g. "-n" "-v" "$(head -n1 input.txt)" "input.txt"
 

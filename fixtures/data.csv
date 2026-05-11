@@ -1,0 +1,26 @@
+id,name,department,salary,start_date,city,active
+1,Alice Johnson,Engineering,95000,2019-03-15,San Francisco,true
+2,Bob Smith,Marketing,72000,2020-07-01,New York,true
+3,Charlie Brown,Engineering,88000,2018-11-20,San Francisco,true
+4,Diana Prince,Sales,67000,2021-01-10,Chicago,true
+5,Eve Wilson,Engineering,102000,2017-06-05,San Francisco,false
+6,Frank Miller,Marketing,72000,2020-07-01,New York,true
+7,"O'Brien, Pat",Legal,91000,2019-09-15,"Washington, DC",true
+8,Grace Hopper,Engineering,115000,2016-01-20,New York,true
+9,Henry García,Sales,58000,2022-03-01,Miami,true
+10,Iris Chang,Engineering,97000,2018-08-12,San Francisco,true
+11,Jack Müller,Marketing,76000,2020-11-30,Chicago,false
+12,Karen Lee,Engineering,88000,2018-11-20,San Francisco,true
+13,Leo Nakamura,Sales,62000,2021-06-15,Tokyo,true
+14,Maria Santos,Engineering,93000,2019-02-28,São Paulo,true
+15,Nancy Drew,Legal,85000,2020-01-15,"Washington, DC",true
+16,Oscar Wilde,Marketing,69000,2022-09-01,London,true
+17,"Price, Lisa",Sales,,2023-01-10,Chicago,true
+18,Quinn Foster,Engineering,105000,2017-04-22,San Francisco,true
+19,Rachel Kim,Marketing,78000,2019-12-01,New York,false
+20,Steve Rogers,Sales,71000,2020-05-20,New York,true
+21,Alice Johnson,Engineering,95000,2019-03-15,San Francisco,true
+22,Uma Patel,Engineering,99000,2018-07-10,London,true
+23,Victor Hugo,Legal,88000,2019-11-11,Paris,true
+24,Wendy Wu,Sales,64000,2022-02-14,Beijing,true
+25,Xavier López,Engineering,91000,2020-03-01,Mexico City,true

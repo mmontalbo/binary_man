@@ -12,146 +12,122 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
 
 ## Solo (unique behavior)
   -b  # use STYLE for numbering body lines
-    exemplar: "-b" "$(head -n1 input.txt)" "input.txt" in tabular_minimal (+12 lines, exit 1→0)
+    exemplar: "-b" "$(head -n1 input.txt)" "input.txt" in words_minimal (+1512 lines, exit 1→0)
     base:
-           1	name	age	city
-           2	alice	30	new york
-           3	bob	25	san francisco
-           4	alice	30	new york
-           5	charlie	35	chicago
+           1	aardvark
+           2	abbreviation
+           3	about
+           4	abstract
+           5	accept
             ...
     flag:
-             name	age	city
-             alice	30	new york
-             bob	25	san francisco
-             alice	30	new york
-             charlie	35	chicago
+           1	aardvark
+           2	abbreviation
+           3	about
+           4	abstract
+           5	accept
             ...
   -d  # use CC for logical page delimiters
-    exemplar: "-d" "input.txt" "other.txt" in alpha_minimal (-1 lines)
+    exemplar: "-d" "input.txt" "other.txt" in words_minimal (-1 lines)
     base:
-           1	cherry
-           2	Apple
-           3	banana
-           4	Date
-           5	elderberry
+           1	aardvark
+           2	abbreviation
+           3	about
+           4	abstract
+           5	accept
             ...
     flag:
            1	hello world
   -f  # use STYLE for numbering footer lines
-    exemplar: "-f" "$(head -n1 input.txt)" "input.txt" in tabular_minimal (+12 lines, exit 1→0)
+    exemplar: "-f" "$(head -n1 input.txt)" "input.txt" in words_minimal (+1512 lines, exit 1→0)
     base:
-           1	name	age	city
-           2	alice	30	new york
-           3	bob	25	san francisco
-           4	alice	30	new york
-           5	charlie	35	chicago
+           1	aardvark
+           2	abbreviation
+           3	about
+           4	abstract
+           5	accept
             ...
     flag:
-           1	name	age	city
-           2	alice	30	new york
-           3	bob	25	san francisco
-           4	alice	30	new york
-           5	charlie	35	chicago
+           1	aardvark
+           2	abbreviation
+           3	about
+           4	abstract
+           5	accept
             ...
   -h  # use STYLE for numbering header lines
-    exemplar: "-h" "$(head -n1 input.txt)" "input.txt" in tabular_minimal (+12 lines, exit 1→0)
+    exemplar: "-h" "$(head -n1 input.txt)" "input.txt" in words_minimal (+1512 lines, exit 1→0)
     base:
-           1	name	age	city
-           2	alice	30	new york
-           3	bob	25	san francisco
-           4	alice	30	new york
-           5	charlie	35	chicago
+           1	aardvark
+           2	abbreviation
+           3	about
+           4	abstract
+           5	accept
             ...
     flag:
-           1	name	age	city
-           2	alice	30	new york
-           3	bob	25	san francisco
-           4	alice	30	new york
-           5	charlie	35	chicago
+           1	aardvark
+           2	abbreviation
+           3	about
+           4	abstract
+           5	accept
             ...
   -i  # line number increment at each line
-    exemplar: "-i" "$(head -n1 input.txt)" "input.txt" in numeric_minimal (different)
+    exemplar: "-i" "$(head -n1 input.txt)" "input.txt" in numbers_minimal (different)
     base:
-           1	100
-           2	2
-           3	30
-           4	1
-           5	20
+           1	0
+           2	1
+           3	1.00
+           4	$1.00
+           5	1/2
             ...
     flag:
-           1	100
-         101	2
-         201	30
-         301	1
-         401	20
+           1	0
+           1	1
+           1	1.00
+           1	$1.00
+           1	1/2
             ...
   -l  # group of NUMBER empty lines counted as one
-    exemplar: "-l" "$(head -n1 input.txt)" "input.txt" in numeric_minimal (different)
+    exemplar: "-l" in words_minimal (different)
     base:
-           1	100
-           2	2
-           3	30
-           4	1
-           5	20
-            ...
     flag:
-           1	100
-           2	2
-           3	30
-           4	1
-           5	20
-            ...
   -n  # insert line numbers according to FORMAT
-    exemplar: "-n" in numeric_minimal (different)
+    exemplar: "-n" in words_minimal (different)
     base:
     flag:
   -s  # add STRING after (possible) line number
-    exemplar: "-s" "input.txt" in alpha_minimal (different)
+    exemplar: "-s" "input.txt" in words_minimal (different)
     base:
-           1	cherry
-           2	Apple
-           3	banana
-           4	Date
-           5	elderberry
+           1	aardvark
+           2	abbreviation
+           3	about
+           4	abstract
+           5	accept
             ...
     flag:
            1input.txtcherry
            2input.txtapple
            3input.txtbanana
   -v  # first line number for each section
-    exemplar: "-v" "$(head -n1 input.txt)" "input.txt" in numeric_minimal (different)
+    exemplar: "-v" "$(head -n1 input.txt)" "input.txt" in numbers_minimal (different)
     base:
-           1	100
-           2	2
-           3	30
-           4	1
-           5	20
+           1	0
+           2	1
+           3	1.00
+           4	$1.00
+           5	1/2
             ...
     flag:
-         100	100
-         101	2
-         102	30
-         103	1
-         104	20
+           0	0
+           1	1
+           2	1.00
+           3	$1.00
+           4	1/2
             ...
   -w  # use NUMBER columns for line numbers
-    exemplar: "-w" "$(head -n1 input.txt)" "input.txt" in numeric_minimal (different)
+    exemplar: "-w" in words_minimal (different)
     base:
-           1	100
-           2	2
-           3	30
-           4	1
-           5	20
-            ...
     flag:
-                                                                                                         1	100
-                                                                                                         2	2
-                                                                                                         3	30
-                                                                                                         4	1
-                                                                                                         5	20
-            ...
 
 ## Via combination (distinguishable when paired)
-  -p  e.g. "-i" "-p" "$(head -n1 input.txt)" "input.txt"
+  -p  e.g. "-b" "-p" "$(head -n1 input.txt)" "input.txt"
 

@@ -11,12 +11,12 @@ Aliases: -L = --max-line-length, -c = --bytes, -l = --lines, -m = --chars, -w = 
 
 ## Solo (unique behavior)
   --files0-from  # read input from the files specified by
-    exemplar: "--files0-from=f" in alpha_minimal (different)
+    exemplar: "--files0-from=f" in words_minimal (different)
     base:
             0       0       0
     flag:
   --total  # when to print a line with total counts;
-    exemplar: "--total=auto" in alpha_minimal (different)
+    exemplar: "--total=auto" in words_minimal (different)
     base:
             0       0       0
     flag:

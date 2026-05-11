@@ -1,0 +1,42 @@
+/usr/local/bin/python3
+/usr/bin/env
+/bin/sh
+/home/alice/.bashrc
+/home/alice/.config/nvim/init.lua
+/home/bob/.ssh/authorized_keys
+/var/log/syslog
+/var/log/nginx/access.log
+/var/log/nginx/error.log
+/etc/passwd
+/etc/shadow
+/etc/hosts
+/etc/nginx/sites-enabled/default
+/etc/ssl/certs/ca-certificates.crt
+/tmp/scratch/output.txt
+/tmp/.X11-unix/X0
+/proc/self/status
+/proc/1/cmdline
+/dev/null
+/dev/zero
+/dev/urandom
+/dev/sda1
+/sys/class/net/eth0/address
+./relative/path/file.md
+../parent/directory/other.txt
+../../grandparent/file
+~/Documents/report.pdf
+~/Downloads/archive.tar.gz
+/home/alice/My Documents/résumé.pdf
+/home/bob/project/src/main.rs
+/home/bob/project/target/debug/myapp
+/mnt/backup/2024-01-15/full.tar.zst
+/opt/app/lib/libcrypto.so.3
+/usr/share/dict/words
+/usr/share/man/man1/ls.1.gz
+/run/user/1000/bus
+/snap/firefox/current/usr/lib/firefox/firefox
+node_modules/.package-lock.json
+.git/objects/pack/pack-abc123.idx
+/home/alice/file with spaces.txt
+/home/alice/file	with	tabs.txt
+/home/alice/naïve-café.txt

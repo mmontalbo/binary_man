@@ -1,68 +1,61 @@
 //! Experiment design data — content levels, structure templates, perturbations.
 //!
-//! Separated from code so the experiment parameters are reviewable in one place
-//! and modifiable without changing logic. The Latin square assignment and
-//! structure builders in discover.rs consume this data to construct contexts.
+//! Content is loaded from fixture files in `fixtures/` via `include_str!`.
+//! Structure builders and perturbations are defined here.
+//! The context assignment in discover.rs consumes this data to construct grids.
 
 use crate::parse::{FileContent, Property, SetupCommand};
 
-/// Content levels — lines for input.txt in each content archetype.
-/// Each level exercises a different text-processing dimension.
-pub fn content_alpha() -> Vec<String> {
-    vec!["cherry", "Apple", "banana", "Date", "elderberry", "BANANA", "apple"]
-        .into_iter().map(String::from).collect()
+// --- Content levels from fixture files ---
+// Each fixture is a real-world data format or curated corpus.
+// See fixtures/SOURCES.md for attribution.
+
+fn lines(text: &str) -> Vec<String> {
+    text.lines().map(String::from).collect()
 }
 
-pub fn content_numeric() -> Vec<String> {
-    vec![
-        "100", "2", "30", "1", "20", "3", "10", "50", "8", "200",
-        "15", "99", "7", "42", "1000", "5",
-    ].into_iter().map(String::from).collect()
-}
+/// Dictionary: 1500 sorted English words with mixed case, hyphens, accents.
+pub fn content_words() -> Vec<String> { lines(include_str!("../fixtures/words.txt")) }
 
-pub fn content_fielded() -> Vec<String> {
-    vec!["bob:30:sales", "alice:25:eng", "charlie:35:sales"]
-        .into_iter().map(String::from).collect()
-}
+/// Numeric edge cases: integers, floats, hex, scientific notation, NaN, Infinity.
+/// Source: Big List of Naughty Strings (MIT).
+pub fn content_numbers() -> Vec<String> { lines(include_str!("../fixtures/numbers.txt")) }
 
-/// Tabular content: tab-delimited fields, repeated rows, long lines.
-/// Exercises: cut -f, paste -d, uniq -c/-d/-u, fold -w, awk, sort -t.
-pub fn content_tabular() -> Vec<String> {
-    vec![
-        "name\tage\tcity",
-        "alice\t30\tnew york",
-        "bob\t25\tsan francisco",
-        "alice\t30\tnew york",
-        "charlie\t35\tchicago",
-        "bob\t25\tsan francisco",
-        "diana\t28\tlos angeles",
-        "a]very long line that exceeds eighty characters in total width to exercise fold and fmt and similar line-wrapping tools properly",
-        "eve\t22\tseattle",
-        "alice\t30\tnew york",
-        "frank\t40\tboston",
-        "grace\t33\tdenver",
-    ].into_iter().map(String::from).collect()
-}
+/// Apache combined log format: IPs, timestamps, HTTP methods, status codes, user agents.
+pub fn content_access_log() -> Vec<String> { lines(include_str!("../fixtures/access_log.txt")) }
 
-/// Content with tabs, blank lines, trailing whitespace, control characters,
-/// and mixed formatting. Exercises: cat -n/-b/-s/-E/-T/-v, fold, fmt, nl, od, tr.
-pub fn content_formatted() -> Vec<String> {
-    vec![
-        "first line",
-        "",
-        "",
-        "\tindented with tab",
-        "trailing spaces   ",
-        "",
-        "  leading spaces",
-        "normal line",
-        "\ttwo\ttabs",
-        "has\x01control\x07chars",
-        "escape\x1b[31msequence",
-        "last line",
-        "",
-    ].into_iter().map(String::from).collect()
-}
+/// RFC 4180 CSV: header row, quoted fields, accented names, empty fields, duplicates.
+pub fn content_csv() -> Vec<String> { lines(include_str!("../fixtures/data.csv")) }
+
+/// /etc/passwd format: colon-delimited, 7 fields, UIDs, shells, service accounts.
+pub fn content_passwd() -> Vec<String> { lines(include_str!("../fixtures/passwd.txt")) }
+
+/// BSD syslog format: timestamps, hostnames, PIDs, services, duplicate entries.
+pub fn content_syslog() -> Vec<String> { lines(include_str!("../fixtures/syslog.txt")) }
+
+/// Date/time strings: ISO 8601, RFC 2822, month names, timezones, edge cases.
+pub fn content_dates() -> Vec<String> { lines(include_str!("../fixtures/dates.txt")) }
+
+/// INI/env config: sections, key=value, comments, URLs, paths, booleans.
+pub fn content_config() -> Vec<String> { lines(include_str!("../fixtures/config.txt")) }
+
+/// Unix filesystem paths: absolute, relative, dotfiles, spaces, unicode, deep nesting.
+pub fn content_paths() -> Vec<String> { lines(include_str!("../fixtures/paths.txt")) }
+
+/// Whitespace edge cases: tabs, trailing spaces, blank lines, long lines, mixed indent.
+pub fn content_formatted() -> Vec<String> { lines(include_str!("../fixtures/formatted.txt")) }
+
+/// Unicode/emoji/RTL/CJK stress strings.
+/// Source: Big List of Naughty Strings (MIT).
+pub fn content_naughty() -> Vec<String> { lines(include_str!("../fixtures/naughty.txt")) }
+
+// --- Legacy content accessors (used by existing code) ---
+// These map old names to the new fixture-backed content.
+
+pub fn content_alpha() -> Vec<String> { content_words() }
+pub fn content_numeric() -> Vec<String> { content_numbers() }
+pub fn content_fielded() -> Vec<String> { content_passwd() }
+pub fn content_tabular() -> Vec<String> { content_csv() }
 
 /// Structure level: minimal — just input.txt and other.txt.
 pub fn structure_minimal(content: &[String]) -> Vec<SetupCommand> {
@@ -153,8 +146,6 @@ pub fn perturbations() -> Vec<SetupCommand> {
 }
 
 /// Common subcommand verbs for behavioral subcommand discovery.
-/// Probed as first positional arg: `binary verb`. The ones that
-/// exit 0 or produce a recognized error are real subcommands.
 pub const SUBCOMMAND_CANDIDATES: &[&str] = &[
     "init", "add", "commit", "status", "diff", "log", "show",
     "clone", "push", "pull", "fetch", "merge", "rebase", "branch",
@@ -165,4 +156,3 @@ pub const SUBCOMMAND_CANDIDATES: &[&str] = &[
     "new", "check", "fmt", "lint", "deploy", "serve", "migrate",
     "info", "version", "help",
 ];
-

@@ -609,24 +609,11 @@ pub fn generate_initial_script(
     }
 
     // --- Base contexts ---
-    // Five content levels × three structure levels × three property levels.
-    // Property assignment cycles through Latin square pattern.
-    // Data definitions live in data.rs; the assignment is here.
-    //
-    //              minimal         standard              deep
-    // alpha        default         varied-perms          varied-times
-    // numeric      varied-times    default               varied-perms
-    // fielded      varied-perms    varied-times          default
-    // formatted    default         varied-times          varied-perms
-    // tabular      varied-times    varied-perms          default
+    // Content from fixture files (see fixtures/SOURCES.md for attribution).
+    // Core content types get full structure × property coverage (5×3 Latin square).
+    // Additional content types get minimal structure only (breadth over depth).
 
     use crate::data;
-
-    let content_alpha = data::content_alpha();
-    let content_numeric = data::content_numeric();
-    let content_fielded = data::content_fielded();
-    let content_formatted = data::content_formatted();
-    let content_tabular = data::content_tabular();
 
     let build_ctx = |name: &str, content: &[String],
                      structure_fn: fn(&[String]) -> Vec<SetupCommand>,
@@ -636,27 +623,56 @@ pub fn generate_initial_script(
         NamedContext { name: name.into(), extends: None, commands: cmds }
     };
 
+    // Core content × structure × property (Latin square, 5×3=15 contexts):
+    //              minimal         standard              deep
+    // words        default         varied-perms          varied-times
+    // numbers      varied-times    default               varied-perms
+    // passwd       varied-perms    varied-times          default
+    // formatted    default         varied-times          varied-perms
+    // csv          varied-times    varied-perms          default
+    let content_words = data::content_words();
+    let content_numbers = data::content_numbers();
+    let content_passwd = data::content_passwd();
+    let content_formatted = data::content_formatted();
+    let content_csv = data::content_csv();
+
     let mut contexts: Vec<NamedContext> = vec![
-        build_ctx("alpha_minimal",      &content_alpha,     data::structure_minimal,  data::props_default),
-        build_ctx("alpha_standard",     &content_alpha,     data::structure_standard, data::props_perms),
-        build_ctx("alpha_deep",         &content_alpha,     data::structure_deep,     data::props_times),
-        build_ctx("numeric_minimal",    &content_numeric,   data::structure_minimal,  data::props_times),
-        build_ctx("numeric_standard",   &content_numeric,   data::structure_standard, data::props_default),
-        build_ctx("numeric_deep",       &content_numeric,   data::structure_deep,     data::props_perms),
-        build_ctx("fielded_minimal",    &content_fielded,   data::structure_minimal,  data::props_perms),
-        build_ctx("fielded_standard",   &content_fielded,   data::structure_standard, data::props_times),
-        build_ctx("fielded_deep",       &content_fielded,   data::structure_deep,     data::props_default),
+        build_ctx("words_minimal",      &content_words,     data::structure_minimal,  data::props_default),
+        build_ctx("words_standard",     &content_words,     data::structure_standard, data::props_perms),
+        build_ctx("words_deep",         &content_words,     data::structure_deep,     data::props_times),
+        build_ctx("numbers_minimal",    &content_numbers,   data::structure_minimal,  data::props_times),
+        build_ctx("numbers_standard",   &content_numbers,   data::structure_standard, data::props_default),
+        build_ctx("numbers_deep",       &content_numbers,   data::structure_deep,     data::props_perms),
+        build_ctx("passwd_minimal",     &content_passwd,    data::structure_minimal,  data::props_perms),
+        build_ctx("passwd_standard",    &content_passwd,    data::structure_standard, data::props_times),
+        build_ctx("passwd_deep",        &content_passwd,    data::structure_deep,     data::props_default),
         build_ctx("formatted_minimal",  &content_formatted, data::structure_minimal,  data::props_default),
         build_ctx("formatted_standard", &content_formatted, data::structure_standard, data::props_times),
         build_ctx("formatted_deep",     &content_formatted, data::structure_deep,     data::props_perms),
-        build_ctx("tabular_minimal",    &content_tabular,   data::structure_minimal,  data::props_times),
-        build_ctx("tabular_standard",   &content_tabular,   data::structure_standard, data::props_perms),
-        build_ctx("tabular_deep",       &content_tabular,   data::structure_deep,     data::props_default),
+        build_ctx("csv_minimal",        &content_csv,       data::structure_minimal,  data::props_times),
+        build_ctx("csv_standard",       &content_csv,       data::structure_standard, data::props_perms),
+        build_ctx("csv_deep",           &content_csv,       data::structure_deep,     data::props_default),
         NamedContext { name: "empty_dir".into(), extends: None, commands: vec![] },
     ];
 
+    // Additional content types — minimal structure only (breadth contexts):
+    let extras: Vec<(&str, Vec<String>)> = vec![
+        ("access_log", data::content_access_log()),
+        ("syslog",     data::content_syslog()),
+        ("dates",      data::content_dates()),
+        ("config",     data::content_config()),
+        ("paths",      data::content_paths()),
+        ("naughty",    data::content_naughty()),
+    ];
+    for (name, content) in &extras {
+        contexts.push(build_ctx(
+            &format!("{}_minimal", name), content,
+            data::structure_minimal, data::props_default,
+        ));
+    };
+
     // --- Single-factor perturbations from numeric_standard (richest base) ---
-    let vary_base = "numeric_standard";
+    let vary_base = "numbers_standard";
     let perturbations = data::perturbations();
 
     let base_ctx = contexts.iter().find(|c| c.name == vary_base).unwrap().clone();
@@ -670,11 +686,11 @@ pub fn generate_initial_script(
 
 
     // Locale perturbation on alpha content (mixed case — sensitive to LC_ALL)
-    let alpha_base = contexts.iter().find(|c| c.name == "alpha_minimal").unwrap().clone();
+    let alpha_base = contexts.iter().find(|c| c.name == "words_minimal").unwrap().clone();
     let mut locale_cmds = alpha_base.commands.clone();
     locale_cmds.push(SetupCommand::SetEnv { var: "LC_ALL".into(), value: "en_US.UTF-8".into() });
     contexts.push(NamedContext {
-        name: "alpha_minimal / env LC_ALL=en_US.UTF-8".into(),
+        name: "words_minimal / env LC_ALL=en_US.UTF-8".into(),
         extends: None,
         commands: locale_cmds,
     });
