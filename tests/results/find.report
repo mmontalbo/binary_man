@@ -1,36 +1,48 @@
 # Exploration: find
 
 ## Rounds
-  round 0: 15 isolated cumulative, 27 identical in round (discovery)
-  round 1: 22 isolated cumulative, 8 identical in round (refinement)
-  round 2: 22 isolated cumulative, 8 identical in round (refinement)
+  round 0: 14 isolated cumulative, 28 identical in round (single-phase)
 
 ## Observed: 1/4 flags
   1 solo, 0 via combination
   3 additional error-differentiated
-  2 behavioral aliases detected
 
 ## Solo (unique behavior)
   -D
-    exemplar: "-D" "input.txt" "subdir" in many_files /remove env LC_ALL (different)
+    exemplar: "-D" "input.txt" "other.txt" in alpha_minimal (different)
     base:
-      (no base)
+      input.txt
+      other.txt
     flag:
-      subdir
-      subdir/nested.txt
+      other.txt
   -N
-    exemplar: "-N" in many_files /remove env LC_ALL (different)
+    exemplar: "-N" in alpha_standard (different)
     base:
-      (no base)
+      .
+      ./b.txt
+      ./exec.sh
+      ./a.txt
+      ./input.txt
+            ...
     flag:
   -a
-    exemplar: "-a" in many_files /remove env LC_ALL (different)
+    exemplar: "-a" in alpha_standard (different)
     base:
-      (no base)
+      .
+      ./b.txt
+      ./exec.sh
+      ./a.txt
+      ./input.txt
+            ...
     flag:
   -o
-    exemplar: "-o" in many_files /remove env LC_ALL (different)
+    exemplar: "-o" in alpha_standard (different)
     base:
-      (no base)
+      .
+      ./b.txt
+      ./exec.sh
+      ./a.txt
+      ./input.txt
+            ...
     flag:
 

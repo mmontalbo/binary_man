@@ -6,7 +6,7 @@ A `.probe` file describes a grid of **input states × invocations**. The tool
 executes every cell and writes observations to a `.results` file.
 
 ```
-bgrid <binary>                        iterative exploration (discover + run + refine)
+bgrid <binary>                        explore: discover flags + run grid + report
 bgrid --skeleton <binary>             print probe skeleton for manual authoring
 bgrid <binary> <file.probe>           run observation grid, write .results file
 bgrid --dry-run <binary> <file.probe> show resolved grid without executing

@@ -1,10 +1,7 @@
 # Exploration: fold
 
 ## Rounds
-  round 0: 13 isolated cumulative, 22 identical in round (discovery)
-  round 1: 18 isolated cumulative, 6 identical in round (refinement)
-  round 2: 28 isolated cumulative, 11 identical in round (refinement)
-  round 3: 28 isolated cumulative, 11 identical in round (refinement)
+  round 0: 12 isolated cumulative, 22 identical in round (single-phase)
 
 ## Observed: 3/3 flags
   1 solo, 2 via combination
@@ -13,12 +10,11 @@ Aliases: -b = --bytes, -s = --spaces, -w = --width
 
 ## Solo (unique behavior)
   -w  # use WIDTH columns instead of 80
-    exemplar: "-w" "input.txt" "subdir" in many_files /input.txt=size:1 (different)
+    exemplar: "-w" in numeric_minimal (different)
     base:
-      (no base)
     flag:
 
 ## Via combination (distinguishable when paired)
-  -b  e.g. "-w" "-b"
-  -s  e.g. "-w" "-s" "input.txt"
+  -b  e.g. (pairwise evidence)
+  -s  e.g. (pairwise evidence)
 

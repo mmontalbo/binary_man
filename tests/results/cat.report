@@ -1,80 +1,14 @@
 # Exploration: cat
 
 ## Rounds
-  round 0: 14 isolated cumulative, 49 identical in round (discovery)
-  round 1: 74 isolated cumulative, 30 identical in round (refinement)
-  round 2: 74 isolated cumulative, 29 identical in round (refinement)
+  round 0: 33 isolated cumulative, 49 identical in round (single-phase)
 
 ## Observed: 10/10 flags
-  10 solo, 0 via combination
+  3 solo, 7 via combination
 
 Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonblank, -n = --number, -s = --squeeze-blank, -v = --show-nonprinting
 
 ## Solo (unique behavior)
-  -A  # equivalent to -vET
-    exemplar: "-A" "input.txt" "other.txt" in formatted_minimal (-4 lines)
-    base:
-      first line
-      
-      
-      	indented with tab
-      trailing spaces   
-            ...
-    flag:
-      first line$
-      $
-      $
-      ^Iindented with tab$
-      trailing spaces   $
-            ...
-  -E  # display $ at end of each line
-    exemplar: "-E" "input.txt" "other.txt" in formatted_minimal (-4 lines)
-    base:
-      first line
-      
-      
-      	indented with tab
-      trailing spaces   
-            ...
-    flag:
-      first line$
-      $
-      $
-      	indented with tab$
-      trailing spaces   $
-            ...
-  -T  # display TAB characters as ^I
-    exemplar: "-T" "input.txt" "other.txt" in formatted_minimal (-4 lines)
-    base:
-      first line
-      
-      
-      	indented with tab
-      trailing spaces   
-            ...
-    flag:
-      first line
-      
-      
-      ^Iindented with tab
-      trailing spaces   
-            ...
-  -b  # number nonempty output lines, overrides -n
-    exemplar: "-b" "input.txt" "other.txt" in formatted_minimal (-4 lines)
-    base:
-      first line
-      
-      
-      	indented with tab
-      trailing spaces   
-            ...
-    flag:
-           1	first line
-      
-      
-           2		indented with tab
-           3	trailing spaces   
-            ...
   -e  # equivalent to -vE
     exemplar: "-e" "input.txt" "other.txt" in formatted_minimal (-4 lines)
     base:
@@ -90,38 +24,6 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
       $
       	indented with tab$
       trailing spaces   $
-            ...
-  -n  # number all output lines
-    exemplar: "-n" "input.txt" "other.txt" in formatted_minimal (-4 lines)
-    base:
-      first line
-      
-      
-      	indented with tab
-      trailing spaces   
-            ...
-    flag:
-           1	first line
-           2	
-           3	
-           4		indented with tab
-           5	trailing spaces   
-            ...
-  -s  # suppress repeated empty output lines
-    exemplar: "-s" "input.txt" "other.txt" in formatted_minimal (-5 lines)
-    base:
-      first line
-      
-      
-      	indented with tab
-      trailing spaces   
-            ...
-    flag:
-      first line
-      
-      	indented with tab
-      trailing spaces   
-      
             ...
   -t  # equivalent to -vT
     exemplar: "-t" "input.txt" "other.txt" in formatted_minimal (-4 lines)
@@ -155,20 +57,13 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
       	indented with tab
       trailing spaces   
             ...
-  -v  # use ^ and M- notation, except for LFD and TAB
-    exemplar: "-v" "input.txt" "other.txt" in formatted_minimal (-4 lines)
-    base:
-      first line
-      
-      
-      	indented with tab
-      trailing spaces   
-            ...
-    flag:
-      first line
-      
-      
-      	indented with tab
-      trailing spaces   
-            ...
+
+## Via combination (distinguishable when paired)
+  -A  e.g. "-A" "-b" "$(head -n1 input.txt)" "input.txt"
+  -E  e.g. "-E" "-T" "$(head -n1 input.txt)" "input.txt"
+  -T  e.g. "-n" "-T" "$(head -n1 input.txt)" "input.txt"
+  -b  e.g. "-b" "-v" "$(head -n1 input.txt)" "input.txt"
+  -n  e.g. "-n" "-T" "$(head -n1 input.txt)" "input.txt"
+  -s  e.g. "-s" "-t" "$(head -n1 input.txt)" "input.txt"
+  -v  e.g. "-n" "-v" "$(head -n1 input.txt)" "input.txt"
 

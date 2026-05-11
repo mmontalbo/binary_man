@@ -1,15 +1,11 @@
 # Exploration: xargs
 
 ## Rounds
-  round 0: 5 isolated cumulative, 13 identical in round (discovery)
-  round 1: 30 isolated cumulative, 17 identical in round (refinement)
-  round 2: 47 isolated cumulative, 27 identical in round (refinement)
-  round 3: 47 isolated cumulative, 23 identical in round (refinement)
+  round 0: 8 isolated cumulative, 15 identical in round (single-phase)
 
 ## Observed: 14/21 flags
-  3 solo, 11 via combination
+  1 solo, 13 via combination
   7 additional error-differentiated
-  1 behavioral aliases detected
 
 Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = --delimiter, -n = --max-args, -o = --open-tty, -p = --interactive, -r = --no-run-if-empty, -s = --max-chars, -t = --verbose, -x = --exit
 
@@ -19,34 +15,26 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
     base:
     flag:
       cherry apple banana
-  -a  # read arguments from FILE, not standard input
-    exemplar: "-a" in many_files /remove env LC_ALL (different)
-    base:
-      (no base)
-    flag:
-  -o  # Reopen stdin as /dev/tty in the child process
-  -t  # print commands before executing them
-    exemplar: "-t" in alpha_minimal (different)
-    base:
-    flag:
-      cherry apple banana
 
 ## Via combination (distinguishable when paired)
   --eof  e.g. (pairwise evidence)
-  --process-slot-var  e.g. "--show-limits" "--process-slot-var"
-  --replace  e.g. (pairwise evidence)
+  --process-slot-var  e.g. (pairwise evidence)
+  --replace  e.g. "-l" "--replace=r"
   -0  e.g. (pairwise evidence)
-  -E  e.g. "-a" "-E"
-  -I  e.g. "-a" "-I"
-  -L  e.g. "-L" "-s"
-  -P  e.g. "-a" "-P"
-  -d  e.g. "-d" "-E"
-  -e  e.g. "-L" "-e"
-  -i  e.g. "--show-limits" "-i"
-  -l  e.g. (pairwise evidence)
-  -n  e.g. "-a" "-n"
-  -p  e.g. "--show-limits" "-p"
-  -r  e.g. "-L" "-r"
-  -s  e.g. "-L" "-s"
-  -x  e.g. "-n" "-x"
+  -E  e.g. (pairwise evidence)
+  -I  e.g. (pairwise evidence)
+  -L  e.g. (pairwise evidence)
+  -P  e.g. (pairwise evidence)
+  -a  e.g. (pairwise evidence)
+  -d  e.g. (pairwise evidence)
+  -e  e.g. (pairwise evidence)
+  -i  e.g. (pairwise evidence)
+  -l  e.g. "-l" "--replace=r"
+  -n  e.g. (pairwise evidence)
+  -o  e.g. "-o" "-t"
+  -p  e.g. "-p" "--show-limits"
+  -r  e.g. (pairwise evidence)
+  -s  e.g. (pairwise evidence)
+  -t  e.g. "-o" "-t"
+  -x  e.g. (pairwise evidence)
 

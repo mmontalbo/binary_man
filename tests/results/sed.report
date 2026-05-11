@@ -1,74 +1,66 @@
 # Exploration: sed
 
 ## Rounds
-  round 0: 15 isolated cumulative, 13 identical in round (discovery)
-  round 1: 24 isolated cumulative, 25 identical in round (refinement)
-  round 2: 28 isolated cumulative, 36 identical in round (refinement)
-  round 3: 54 isolated cumulative, 36 identical in round (refinement)
+  round 0: 33 isolated cumulative, 38 identical in round (single-phase)
 
 ## Observed: 22/24 flags
   4 solo, 18 via combination
   2 additional error-differentiated
-  2 behavioral aliases detected
+  3 behavioral aliases detected
 
 ## Solo (unique behavior)
   --debug
-    exemplar: "--debug" "input.txt" "other.txt" in many_files /remove subdir (different)
+    exemplar: "--debug" "input.txt" in alpha_minimal (different)
     base:
-      (no base)
     flag:
       SED PROGRAM:
         i\nput.txt
-      
-      INPUT:   'other.txt' line 1
-      PATTERN: other content
-            ...
   --follow-symlinks
-    exemplar: "--follow-symlinks" "input.txt" "other.txt" in many_files /remove subdir (different)
+    exemplar: "--follow-symlinks" "input.txt" "other.txt" in alpha_minimal (-2 lines)
     base:
-      (no base)
+      nput.txt
+      hello world
     flag:
       nput.txt
-      other content
-      nput.txt
-      second line
+      hello world
   --in-place
-    exemplar: "--in-place" "$(head -n1 input.txt)" "input.txt" in many_files /remove subdir (different)
+    exemplar: "--in-place" "input.txt" "other.txt" in alpha_minimal (different)
     base:
-      (no base)
+      nput.txt
+      hello world
     flag:
   --posix
     exemplar: "--posix" "$(head -n1 input.txt)" "input.txt" in numeric_standard / input.txt=size:1 (+1 lines, exit 1→0)
     base:
     flag:
   -i
-    exemplar: "-i" "input.txt" "other.txt" in many_files /remove subdir (different)
+    exemplar: "-i" "input.txt" "other.txt" in alpha_minimal (different)
     base:
-      (no base)
+      nput.txt
+      hello world
     flag:
   -l
-    exemplar: "-l" "input.txt" "other.txt" in many_files /remove subdir (different)
+    exemplar: "-l" "input.txt" in alpha_minimal (different)
     base:
-      (no base)
     flag:
 
 ## Via combination (distinguishable when paired)
-  --expression  e.g. (pairwise evidence)
-  --file  e.g. "--debug" "--file" "--silent" "$(head -n1 input.txt)" "input.txt"
+  --expression  e.g. "-f" "--expression" "$(head -n1 input.txt)" "input.txt"
+  --file  e.g. "-f" "--file" "$(head -n1 input.txt)" "input.txt"
   --line-length  e.g. (pairwise evidence)
-  --null-data  e.g. "--follow-symlinks" "--in-place" "--null-data" "--silent" "$(head -n1 input.txt)" "input.txt"
-  --quiet  e.g. (pairwise evidence)
+  --null-data  e.g. "--in-place" "--null-data" "$(head -n1 input.txt)" "input.txt"
+  --quiet  e.g. "-f" "--quiet" "$(head -n1 input.txt)" "input.txt"
   --regexp-extended  e.g. (pairwise evidence)
-  --sandbox  e.g. "--debug" "--in-place" "--sandbox" "input.txt" "other.txt"
-  --separate  e.g. "--debug" "--in-place" "--separate" "input.txt" "other.txt"
-  --silent  e.g. "--debug" "--file" "--silent" "$(head -n1 input.txt)" "input.txt"
-  --unbuffered  e.g. "--follow-symlinks" "--in-place" "--null-data" "--unbuffered" "input.txt" "other.txt"
-  -E  e.g. (pairwise evidence)
+  --sandbox  e.g. (pairwise evidence)
+  --separate  e.g. (pairwise evidence)
+  --silent  e.g. "-f" "--silent" "$(head -n1 input.txt)" "input.txt"
+  --unbuffered  e.g. (pairwise evidence)
+  -E  e.g. "-f" "-E" "$(head -n1 input.txt)" "input.txt"
   -e  e.g. (pairwise evidence)
-  -f  e.g. "--follow-symlinks" "--in-place" "--null-data" "-f" "input.txt" "other.txt"
-  -n  e.g. (pairwise evidence)
-  -r  e.g. (pairwise evidence)
-  -s  e.g. (pairwise evidence)
-  -u  e.g. (pairwise evidence)
-  -z  e.g. (pairwise evidence)
+  -f  e.g. "-f" "-l" "$(head -n1 input.txt)" "input.txt"
+  -n  e.g. "-n" "-i" "$(head -n1 input.txt)" "input.txt"
+  -r  e.g. "-f" "-r" "$(head -n1 input.txt)" "input.txt"
+  -s  e.g. "-f" "-s" "$(head -n1 input.txt)" "input.txt"
+  -u  e.g. "-f" "-u" "$(head -n1 input.txt)" "input.txt"
+  -z  e.g. "-f" "-z" "$(head -n1 input.txt)" "input.txt"
 

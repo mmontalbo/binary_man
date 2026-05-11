@@ -31,9 +31,9 @@ Behavioral probing finds three working invocation patterns:
 
 Stdin probing confirms `head` accepts piped input. Value probing confirms `-c` and `-n` need numeric arguments (default value `1` works).
 
-### Grid Execution (Round 0)
+### Grid Execution
 
-The tool generates 157 runs (7 short flags + 6 long flags × 3 patterns + stdin variants + boundary values) across 26 contexts = 4,082 cells. Executed in 0.8s via batched bwrap sandboxing.
+The tool generates ~178 runs (7 short flags + 6 long flags × 3 patterns + stdin variants + boundary values + 21 pairwise combinations) across 26 contexts = ~4,628 cells. Executed in ~0.6s via batched bwrap sandboxing.
 
 ### Context and Observations
 
@@ -64,17 +64,17 @@ The delta key for `-v` across all contexts encodes: "prepends `==> input.txt <==
 
 ### Grouping
 
-Round 0 produces 39 behavioral groups from 157 runs:
+The grid produces ~37 behavioral groups from ~178 runs:
 - **4 isolated groups** (solo-distinguished flags): `-v`, `-z`, `-c`, `-n`
-- **35 identical groups** containing runs that produced the same transformation
+- **~33 identical groups** containing runs that produced the same transformation
 
-The 3 remaining flags (`-q`, `--quiet`, `--silent`) all suppress the multi-file header — they produce the same delta as the bare `head` base in multi-file contexts. They're in one identical group.
+The 3 remaining flags (`-q`, `--quiet`, `--silent`) all suppress the multi-file header — they produce the same delta as the bare `head` base in multi-file contexts. They're in one identical group, but pairwise combinations (e.g., `head --lines --silent`) provide interaction evidence that distinguishes them.
 
-### Refinement
+### Pairwise Combinations
 
-Round 1 generates interaction pairs: `head --lines --silent input.txt other.txt` vs `head --lines input.txt other.txt`. The `--silent` flag removes the header that `--lines` preserves → different output → `-q`/`--quiet`/`--silent` are now observed via combination.
+All flag pairs are tested in the same grid: `head --lines --silent input.txt other.txt` vs `head --lines input.txt other.txt`, etc. The `--silent` flag removes the header that `--lines` preserves → different output → `-q`/`--quiet`/`--silent` are distinguished via combination evidence.
 
-After 3 rounds: **5/7 flags observed** (4 solo + 1 via combination). The `-q`/`--silent` pair is correctly identified as behavioral aliases (same structural transformation in every context). Aliases detected: `-c = --bytes`, `-n = --lines`, `-v = --verbose`, `-z = --zero-terminated`.
+Result: **7/7 flags observed** (4 solo + 3 via combination). The `-q`/`--silent` pair is correctly identified as behavioral aliases (same structural transformation in every context). Aliases detected: `-c = --bytes`, `-n = --lines`, `-v = --verbose`, `-z = --zero-terminated`.
 
 ## Context Design
 
@@ -114,7 +114,7 @@ Help text provides flag candidates. Behavioral probing determines which invocati
 
 - **Arg patterns**: 7 candidates (no args, file, directory, two files, file+dir, pattern+file, pattern+dir) tested against the binary. Working patterns become run targets.
 - **Stdin**: binary tested with piped content. If accepted, stdin runs generated for each pattern × flag.
-- **Values**: flags with value hints (NUM, FILE, CHAR, etc.) get default `1`. If that fails, candidates (`auto`, `,`, `input.txt`, `.`, `0`) are tried.
+- **Values**: flags with value hints (NUM, FILE, CHAR, etc.) get default `1`. If that fails, candidates (`auto`, `,`, `input.txt`, `.`, `0`) are tried. All candidates are tested; the one whose output differs most from the unflagged baseline is selected.
 - **Subcommands**: common verbs probed as first positional arg. Classified as working, state-building, or needs-state.
 
 ## Delta Grouping
@@ -123,7 +123,7 @@ For runs with a `from` reference (base invocation), comparison uses **structural
 
 The structural delta is computed via two-level Needleman-Wunsch alignment:
 
-1. **Tokenize**: split stdout into lines, split lines by whitespace, hash each token. Same string always gets the same hash — shared tokens between ref and obs (filenames, keywords) are natural alignment anchors.
+1. **Tokenize**: split stdout into lines, split lines by whitespace. Shared tokens between ref and obs (filenames, keywords) are natural alignment anchors.
 2. **Line-level alignment**: match ref lines to obs lines. Match cost = token edit distance within the line pair. Delete/insert cost = token count. This correctly matches `"a.txt"` with `"-rw-r--r-- 1 root root 0 Jan 1 2020 a.txt"` because the shared token `a.txt` makes matching cheaper than delete+insert.
 3. **Token-level alignment**: within matched lines, classify each token position as Keep, Insert, Delete, or Replace.
 4. **Reorder detection**: if ref and obs contain the same lines in different order, encode as a permutation vector.
@@ -132,28 +132,16 @@ The resulting edit script is a structural description independent of per-cell no
 
 Runs with identical edit scripts in every context form a behavioral group. This is the equivalence relation: two flags are indistinguishable iff no tested context separates their structural transformation.
 
-Evidence accumulates across rounds: runs from all rounds contribute to the observed-behavior classification. A flag seen working in round 0's stdin runs counts even if round 2's refinement doesn't re-test it.
-
-## Refinement Strategies
-
-1. **Within-group interaction**: pairwise flag combinations from large identical groups. If two flags interact differently when combined, they're distinguished.
-
-2. **Cross-group interaction**: pair each indistinguishable flag with top isolated flags that have sensitivity signal. Targets exactly the flags the analysis identifies as needing evidence.
-
-3. **Sensitivity refinement**: for dimensions that caused splits, generate graduated variants (size 1, 100, 1K).
-
-4. **Untested pickup**: flags from --help not yet included in any run.
-
-Convergence: stops when no new flags gain observed behavior, or after 3 rounds.
+All runs — single-flag AND pairwise combinations — are tested in a single phase. No iterative refinement. The experimental design is fixed before execution, eliminating path-dependence (where intermediate results could influence which experiments are generated next).
 
 ## Execution
 
-Cells are batched by context. Per context: create per-cell workspace directories, generate one shell script with all commands (each with 2-second timeout), invoke bwrap once. ~27 bwrap invocations instead of thousands. 8 threads across contexts. Integration tests run 22 binaries in parallel (JOBS=4) in ~63 seconds.
+Cells are batched by context. Per context: create per-cell workspace directories, generate one shell script with all commands (each with 2-second timeout), invoke bwrap once. ~27 bwrap invocations instead of thousands. 8 threads across contexts. Integration tests run 22 binaries in parallel (JOBS=4) in ~67 seconds.
 
 ## Limitations
 
-- **Content-dimension gaps**: flags operating on case, whitespace, or blank lines (diff `-i`, `-b`, `-B`) remain indistinguishable because test content doesn't vary along those axes.
-- **Modifier flags**: flags like `-h` that only modify another flag's output need combination testing, which provides weaker evidence.
+- **Error-only flags**: flags that need specific content types (month names for `sort -M`, version strings for `sort -V`) or specific argument values to produce non-error output remain unobserved. These are at the boundary of binary-agnostic exploration.
+- **Modifier flags**: flags like `-h` that only modify another flag's output are distinguished via pairwise combination testing, which provides interaction evidence.
 - **Timing-dependent flags**: `cp -u` (copy only if newer) is nondeterministic because source and destination files are created within the same second. Filesystem snapshot-based change detection also has mtime race conditions.
 - **No semantic interpretation**: the tool reports *that* flags differ, not *why*. The structural edit script vocabulary (Insert/Delete/Keep/Replace) provides structural context but no domain semantics.
 - **Stateful binaries**: tools requiring prerequisite state (git repositories) need manual setup.

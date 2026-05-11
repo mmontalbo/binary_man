@@ -1,31 +1,28 @@
 # Exploration: rm
 
 ## Rounds
-  round 0: 11 isolated cumulative, 8 identical in round (discovery)
-  round 1: 11 isolated cumulative, 10 identical in round (refinement)
+  round 0: 8 isolated cumulative, 9 identical in round (single-phase)
 
 ## Observed: 10/12 flags
   2 solo, 8 via combination
+  2 additional error-differentiated
   1 behavioral aliases detected
-  2 indistinguishable under tested conditions
 
 Aliases: -d = --dir, -f = --force, -v = --verbose
 
 ## Solo (unique behavior)
   -f  # ignore nonexistent files and arguments, never prompt
-    exemplar: "-f" "input.txt" in many_files /remove env LC_ALL (different)
+    exemplar: "-f" "input.txt" in alpha_minimal (different)
     base:
-      (no base)
     flag:
   -v  # explain what is being done
-    exemplar: "-v" "input.txt" "other.txt" in many_files /remove env LC_ALL (different)
+    exemplar: "-v" "input.txt" in alpha_minimal (different)
     base:
-      (no base)
     flag:
       removed 'input.txt'
-      removed 'other.txt'
 
 ## Via combination (distinguishable when paired)
+  --interactive  e.g. (pairwise evidence)
   --no-preserve-root  e.g. (pairwise evidence)
   --one-file-system  e.g. (pairwise evidence)
   --preserve-root  e.g. (pairwise evidence)
@@ -33,9 +30,6 @@ Aliases: -d = --dir, -f = --force, -v = --verbose
   -I  e.g. (pairwise evidence)
   -R  e.g. (pairwise evidence)
   -d  e.g. (pairwise evidence)
+  -i  e.g. (pairwise evidence)
   -r  e.g. (pairwise evidence)
-
-## Indistinguishable under tested conditions
-  UNEXPLAINED (2): --interactive, -i
-  UNEXPLAINED (2): --interactive, -i
 

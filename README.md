@@ -3,13 +3,13 @@
 Observation-driven behavioral specification for CLI binaries. Given a
 binary, `bgrid` runs invocations across varied input states and records
 what happens — stdout, stderr, exit code, and filesystem changes. It
-iteratively refines experiments until each flag's behavioral surface
-is isolated or progress stalls.
+tests every flag individually and all pairwise combinations in a single
+phase, then reports which flags have unique observable behavior.
 
 ## Usage
 
 ```
-bgrid <binary>                        iterative exploration (discover + run + refine)
+bgrid <binary>                        explore: discover flags + run grid + report
 bgrid --skeleton <binary>             print probe skeleton for manual authoring
 bgrid <binary> <file.probe>           run observation grid from a probe file
 bgrid --trace <binary> <file.probe>   include syscall traces
@@ -20,12 +20,11 @@ bgrid --dry-run <binary> <file.probe> show resolved grid without executing
 
 `bgrid sort` discovers flags from `--help`, generates orthogonal contexts
 (varying file content, directory structure, permissions, timestamps),
-runs every flag across every context in parallel, analyzes behavioral
-groups, refines with cross-group interactions, and converges when no
-new flags are observed. Output is a report with exemplar
-observations showing what each flag does — base output vs flag output,
-mechanically selected from the context where the flag's behavior is
-most unique.
+runs every flag individually and all pairwise flag combinations across
+every context in parallel, then analyzes behavioral groups. Output is a
+report with exemplar observations showing what each flag does — base
+output vs flag output, mechanically selected from the context where the
+flag's behavior is most unique.
 
 For subcommands: `bgrid git diff` explores `git diff`.
 
@@ -55,10 +54,9 @@ See [LANGUAGE.md](LANGUAGE.md) for the probe language specification.
    line", "reverse line order"). Runs with identical edit scripts
    across all contexts are behaviorally equivalent. Singleton groups
    are isolated — that flag has unique behavior.
-4. **Refinement** generates new experiments targeting specific
-   indistinguishable flag stems: cross-group flag pairing (modifier +
-   mode flag), sensitivity-graduated contexts, untested flag pickup.
-   Converges when no new flags are observed.
+4. **Pairwise testing** runs all flag combinations to detect
+   interaction effects — two flags that look identical alone may
+   behave differently when combined with a third.
 5. **Report** shows observed behavior rate: flags where the tool saw
    the flag work (exit 0, non-trivial output or filesystem changes).
    Each flag gets an exemplar showing base vs flag output in the context

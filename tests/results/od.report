@@ -1,28 +1,24 @@
 # Exploration: od
 
 ## Rounds
-  round 0: 108 isolated cumulative, 133 identical in round (discovery)
-  round 1: 123 isolated cumulative, 31 identical in round (refinement)
-  round 2: 143 isolated cumulative, 32 identical in round (refinement)
-  round 3: 143 isolated cumulative, 32 identical in round (refinement)
+  round 0: 178 isolated cumulative, 135 identical in round (single-phase)
 
 ## Observed: 18/21 flags
   12 solo, 6 via combination
   3 additional error-differentiated
-  3 behavioral aliases detected
 
 Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --format, -v = --output-duplicates
 
 ## Solo (unique behavior)
   --endian  # swap input bytes according the specified order
-    exemplar: "--endian" in many_files /remove env LC_ALL (different)
+    exemplar: "--endian" in numeric_standard / input.txt=size:1 (different)
     base:
-      (no base)
+      0000000
     flag:
   --strings
-    exemplar: "--strings" in many_files /remove env LC_ALL (different)
+    exemplar: "--strings" in numeric_standard / input.txt=size:1 (different)
     base:
-      (no base)
+      0000000
     flag:
   --traditional  # accept arguments in third form above
     exemplar: "--traditional" in alpha_minimal (different)
@@ -49,73 +45,112 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
        020167 067571 065562 061412 060550 066162 062551 031411
             ...
   -N  # limit dump to BYTES input bytes
-    exemplar: "-N" "$(head -n1 input.txt)" "input.txt" in many_files /remove env LC_ALL (different)
+    exemplar: "-N" "$(head -n1 input.txt)" "input.txt" in numeric_minimal (different)
     base:
-      (no base)
+      0000000 030061 005060 005062 030063 030412 031012 005060 005063
+      0000020 030061 032412 005060 005070 030062 005060 032461 034412
+      0000040 005071 005067 031064 030412 030060 005060 005065
+      0000056
     flag:
       0000000 030061 005060 005062 030063 030412 031012 005060 005063
       0000020 030061 032412 005060 005070 030062 005060 032461 034412
       0000040 005071 005067 031064 030412 030060 005060 005065
       0000056
   -S
-    exemplar: "-S" "input.txt" "other.txt" in many_files /remove env LC_ALL (different)
+    exemplar: "-S" in numeric_standard / input.txt=size:1 (different)
     base:
-      (no base)
+      0000000
     flag:
   -a  # same as -t a,  select named characters, ignoring high-order bit
-    exemplar: "-a" in alpha_minimal (different)
+    exemplar: "-a" "input.txt" "other.txt" in alpha_minimal (-1 lines)
     base:
-      0000000
+      0000000 064143 071145 074562 040412 070160 062554 061012 067141
+      0000020 067141 005141 060504 062564 062412 062154 071145 062542
+      0000040 071162 005171 040502 040516 040516 060412 070160 062554
+      0000060 064012 066145 067554 073440 071157 062154 000012
+      0000075
     flag:
-      0000000   c   h   e   r   r   y  nl   a   p   p   l   e  nl   b   a   n
-      0000020   a   n   a
-      0000023
+      0000000   c   h   e   r   r   y  nl   A   p   p   l   e  nl   b   a   n
+      0000020   a   n   a  nl   D   a   t   e  nl   e   l   d   e   r   b   e
+      0000040   r   r   y  nl   B   A   N   A   N   A  nl   a   p   p   l   e
+      0000060  nl   h   e   l   l   o  sp   w   o   r   l   d  nl
+      0000075
   -b  # same as -t o1, select octal bytes
-    exemplar: "-b" in alpha_minimal (different)
+    exemplar: "-b" "input.txt" "other.txt" in alpha_minimal (-1 lines)
     base:
-      0000000
+      0000000 064143 071145 074562 040412 070160 062554 061012 067141
+      0000020 067141 005141 060504 062564 062412 062154 071145 062542
+      0000040 071162 005171 040502 040516 040516 060412 070160 062554
+      0000060 064012 066145 067554 073440 071157 062154 000012
+      0000075
     flag:
-      0000000 143 150 145 162 162 171 012 141 160 160 154 145 012 142 141 156
-      0000020 141 156 141
-      0000023
+      0000000 143 150 145 162 162 171 012 101 160 160 154 145 012 142 141 156
+      0000020 141 156 141 012 104 141 164 145 012 145 154 144 145 162 142 145
+      0000040 162 162 171 012 102 101 116 101 116 101 012 141 160 160 154 145
+      0000060 012 150 145 154 154 157 040 167 157 162 154 144 012
+      0000075
   -c  # same as -t c,  select printable characters or backslash escapes
-    exemplar: "-c" in alpha_minimal (different)
+    exemplar: "-c" "input.txt" "other.txt" in alpha_minimal (-1 lines)
     base:
-      0000000
+      0000000 064143 071145 074562 040412 070160 062554 061012 067141
+      0000020 067141 005141 060504 062564 062412 062154 071145 062542
+      0000040 071162 005171 040502 040516 040516 060412 070160 062554
+      0000060 064012 066145 067554 073440 071157 062154 000012
+      0000075
     flag:
-      0000000   c   h   e   r   r   y  \n   a   p   p   l   e  \n   b   a   n
-      0000020   a   n   a
-      0000023
+      0000000   c   h   e   r   r   y  \n   A   p   p   l   e  \n   b   a   n
+      0000020   a   n   a  \n   D   a   t   e  \n   e   l   d   e   r   b   e
+      0000040   r   r   y  \n   B   A   N   A   N   A  \n   a   p   p   l   e
+      0000060  \n   h   e   l   l   o       w   o   r   l   d  \n
+      0000075
   -f  # same as -t fF, select floats
-    exemplar: "-f" in alpha_minimal (different)
+    exemplar: "-f" "input.txt" "other.txt" in alpha_minimal (-1 lines)
     base:
-      0000000
+      0000000 064143 071145 074562 040412 070160 062554 061012 067141
+      0000020 067141 005141 060504 062564 062412 062154 071145 062542
+      0000040 071162 005171 040502 040516 040516 060412 070160 062554
+      0000060 064012 066145 067554 073440 071157 062154 000012
+      0000075
     flag:
-      0000000   4.5438888e+30    1.596501e+20   6.9784537e+22   1.7438162e+28
-      0000020     8.94764e-39
-      0000023
+      0000000   4.5438888e+30         8.65465   6.9784537e+22   1.7438162e+28
+      0000020   1.0854116e-32    7.212823e+22   1.7442849e+22   6.6835314e+22
+      0000040   1.2010439e-32       12.890932   1.5939727e+20   6.9784537e+22
+      0000060   1.1093413e+27   3.2540133e+33    1.744671e+22         1.4e-44
+      0000075
   -i  # same as -t dI, select decimal ints
-    exemplar: "-i" in alpha_minimal (different)
+    exemplar: "-i" "input.txt" "other.txt" in alpha_minimal (-1 lines)
+    base:
+      0000000 064143 071145 074562 040412 070160 062554 061012 067141
+      0000020 067141 005141 060504 062564 062412 062154 071145 062542
+      0000040 071162 005171 040502 040516 040516 060412 070160 062554
+      0000060 064012 066145 067554 073440 071157 062154 000012
+      0000075
+    flag:
+      0000000  1919248483  1091205490  1701605488  1851875850
+      0000020   174157409  1702125892  1684825354  1700950629
+      0000040   175731314  1095647554  1628062030  1701605488
+      0000060  1818585098  1998614380  1684828783          10
+      0000075
+  -j  # skip BYTES input bytes first
+    exemplar: "-j" "$(head -n1 input.txt)" "." in numeric_minimal (different)
     base:
       0000000
-    flag:
-      0000000  1919248483  1628076402  1701605488  1851875850
-      0000020     6385249
-      0000023
-  -j  # skip BYTES input bytes first
-    exemplar: "-j" "$(head -n1 input.txt)" "." in many_files /remove env LC_ALL (different)
-    base:
-      (no base)
     flag:
       0000144
   -l  # same as -t dL, select decimal longs
-    exemplar: "-l" in alpha_minimal (different)
+    exemplar: "-l" "input.txt" "other.txt" in alpha_minimal (-1 lines)
     base:
-      0000000
+      0000000 064143 071145 074562 040412 070160 062554 061012 067141
+      0000020 067141 005141 060504 062564 062412 062154 071145 062542
+      0000040 071162 005171 040502 040516 040516 060412 070160 062554
+      0000060 064012 066145 067554 073440 071157 062154 000012
+      0000075
     flag:
-      0000000  6992534903898597475  7953746213703807088
-      0000020              6385249
-      0000023
+      0000000  4686691894684903523  7953746213703807088
+      0000020  7310575039988985441  7305527325350454538
+      0000040  4705770412548125298  7308339923282182478
+      0000060  8583983401233901578          44634501743
+      0000075
   -t  # select output format or formats
     exemplar: "-t" "$(head -n1 input.txt)" "input.txt" in numeric_standard / input.txt=size:1 (+2 lines, exit 1→0)
     base:
@@ -125,19 +160,25 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000000 00000078
       0000001
   -x  # same as -t x2, select hexadecimal 2-byte units
-    exemplar: "-x" in alpha_minimal (different)
+    exemplar: "-x" "input.txt" "other.txt" in alpha_minimal (-1 lines)
     base:
-      0000000
+      0000000 064143 071145 074562 040412 070160 062554 061012 067141
+      0000020 067141 005141 060504 062564 062412 062154 071145 062542
+      0000040 071162 005171 040502 040516 040516 060412 070160 062554
+      0000060 064012 066145 067554 073440 071157 062154 000012
+      0000075
     flag:
-      0000000 6863 7265 7972 610a 7070 656c 620a 6e61
-      0000020 6e61 0061
-      0000023
+      0000000 6863 7265 7972 410a 7070 656c 620a 6e61
+      0000020 6e61 0a61 6144 6574 650a 646c 7265 6562
+      0000040 7272 0a79 4142 414e 414e 610a 7070 656c
+      0000060 680a 6c65 6f6c 7720 726f 646c 000a
+      0000075
 
 ## Via combination (distinguishable when paired)
-  --width  e.g. "--skip-bytes=1" "--width" "-s" "$(head -n1 input.txt)" "input.txt"
-  -d  e.g. "--skip-bytes=1" "-d" "-s" "input.txt" "subdir"
-  -o  e.g. (pairwise evidence)
-  -s  e.g. "--skip-bytes=1" "--width" "-s" "$(head -n1 input.txt)" "input.txt"
-  -v  e.g. (pairwise evidence)
-  -w  e.g. (pairwise evidence)
+  --width  e.g. "-j" "--width" "$(head -n1 input.txt)" "."
+  -d  e.g. "-j" "-d" "$(head -n1 input.txt)" "."
+  -o  e.g. "-S" "-o" "$(head -n1 input.txt)" "."
+  -s  e.g. "-N" "-s" "$(head -n1 input.txt)" "."
+  -v  e.g. "-j" "-v" "$(head -n1 input.txt)" "."
+  -w  e.g. "-S" "-w" "$(head -n1 input.txt)" "."
 
