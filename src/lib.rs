@@ -4,6 +4,6 @@ pub mod discover;
 pub mod execute;
 pub mod output;
 pub mod parse;
-pub mod refine;
+
 pub mod report;
 pub mod sandbox;

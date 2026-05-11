@@ -1,7 +1,7 @@
 //! Analysis pipeline: Script + GridResult → AnalysisMetrics.
 //!
 //! Compares observations using structural tree diff: stdout/stderr are tokenized
-//! into content-hashed label trees and aligned via two-level Needleman-Wunsch
+//! into lines of whitespace-split tokens and aligned via two-level Needleman-Wunsch
 //! (line-level, then token-level within matched lines). This correctly matches
 //! modified lines through shared tokens (e.g., "a.txt" in `ls` output anchors
 //! the match with `ls -l` output where 8 tokens are prepended).
@@ -49,14 +49,14 @@ pub struct BehaviorGroup {
     pub from_ref: Option<Vec<Arg>>,
     pub vs_diffs: Vec<(String, String)>,
     /// Per-context observations for the first run in this group.
-    /// Used for grouping comparisons during refinement.
+    /// Used for grouping comparisons.
     obs_list: Vec<(String, ObsKey)>,
 }
 
 // --- Structural diff types ---
 //
 // Stdout/stderr comparison uses a two-level Needleman-Wunsch alignment:
-//   1. Tokenize both ref and obs into lines of content-hashed labels
+//   1. Tokenize both ref and obs into lines of whitespace-split tokens
 //   2. Align lines (match cost = token edit distance, gap cost = token count)
 //   3. Within matched lines, align tokens (unit cost per insert/delete/replace)
 //   4. Produce a structural edit script: sequence of LineEdits, each containing TokenEdits
@@ -305,39 +305,6 @@ impl AnalysisMetrics {
 
     pub fn identical_count(&self) -> usize {
         self.groups.iter().filter(|g| !g.isolated()).count()
-    }
-
-    /// Identify run labels that produced no useful signal:
-    /// runs in a large identical group (≥5 runs) with the same positional args,
-    /// meaning the target arg isn't exercising the tool's behavior.
-    ///
-    /// Note: error-exit runs are NOT pruned — error behavior is still behavior.
-    /// Two flags that both exit 2 may produce different errors and belong in
-    /// different groups.
-    pub fn unproductive_runs(&self) -> HashSet<String> {
-        let mut unproductive = HashSet::new();
-
-        // Runs in large identical groups where all runs share the same
-        // non-flag args (same target, same pattern) — the target isn't helping
-        for group in &self.groups {
-            if group.run_labels.len() < 5 { continue; }
-            // Extract positional args from each run in the group
-            let positionals: Vec<Vec<&str>> = group.run_labels.iter()
-                .map(|label| {
-                    output::parse_label(label).into_iter()
-                        .filter(|s| !s.starts_with('-'))
-                        .collect()
-                })
-                .collect();
-            // If all runs have the same positionals, this target isn't differentiating
-            if !positionals.is_empty() && positionals.iter().all(|p| *p == positionals[0]) {
-                for label in &group.run_labels {
-                    unproductive.insert(label.clone());
-                }
-            }
-        }
-
-        unproductive
     }
 
     /// Find flag pairs proven different by cross-group interaction data.

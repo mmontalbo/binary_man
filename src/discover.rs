@@ -558,8 +558,23 @@ pub fn generate_initial_script(
 
                 if default_works { continue; }
 
-                // Default failed — try candidate values
-                let mut found_value = None;
+                // Default failed — try all candidates, pick the one whose output
+                // differs most from the no-flag baseline (maximizes distinguishability,
+                // not just output volume — grep --max-count=100 produces the same
+                // output as no flag if the file has <100 lines).
+                let _ = std::fs::write(work_dir.join("input.txt"), "cherry\napple\nbanana\n");
+                let baseline_output = {
+                    let mut base_args: Vec<String> = sub_args.iter().map(|s| s.to_string()).collect();
+                    base_args.extend(first_pattern.iter().cloned());
+                    let base_refs: Vec<&str> = base_args.iter().map(|s| s.as_str()).collect();
+                    let mut cmd_base = sandbox.command(binary, &base_refs, work_dir, &env, None);
+                    cmd_base.stdin(std::process::Stdio::null());
+                    cmd_base.stdout(std::process::Stdio::piped());
+                    cmd_base.stderr(std::process::Stdio::piped());
+                    cmd_base.output().map(|o| o.stdout).unwrap_or_default()
+                };
+
+                let mut best_value: Option<(String, usize)> = None; // (value, diff_from_baseline)
                 for &candidate in &value_candidates {
                     let flag_arg2 = format!("{}={}", long_flags[i].0, candidate);
                     let mut test_args2: Vec<String> = sub_args.iter().map(|s| s.to_string()).collect();
@@ -576,11 +591,16 @@ pub fn generate_initial_script(
 
                     if let Ok(output) = cmd2.output() {
                         if output.status.code().unwrap_or(-1) <= 1 {
-                            found_value = Some(candidate.to_uppercase());
-                            break;
+                            // Score by difference from baseline — how distinguishable is this value?
+                            let diff = if output.stdout == baseline_output { 0 }
+                                else { output.stdout.len().abs_diff(baseline_output.len()) + 1 };
+                            if best_value.as_ref().is_none_or(|(_, best_diff)| diff > *best_diff) {
+                                best_value = Some((candidate.to_uppercase(), diff));
+                            }
                         }
                     }
                 }
+                let found_value = best_value.map(|(v, _)| v);
                 if let Some(val) = found_value {
                     long_flags[i].1 = Some(val);
                 }
@@ -646,6 +666,8 @@ pub fn generate_initial_script(
         cmds.push(perturbation.clone());
         contexts.push(NamedContext { name: variant_name, extends: None, commands: cmds });
     }
+
+
 
     // Locale perturbation on alpha content (mixed case — sensitive to LC_ALL)
     let alpha_base = contexts.iter().find(|c| c.name == "alpha_minimal").unwrap().clone();
@@ -826,6 +848,62 @@ pub fn generate_initial_script(
                 args2.extend(first_pattern.iter().map(&to_arg));
                 runs.push(Run {
                     args: args2, in_contexts: None, stdin: None,
+                    diff_from: Some(base_args.clone()),
+                });
+            }
+        }
+    }
+
+    // --- Pairwise flag combinations ---
+    // Test all pairs of flags together in one phase (fixed DoE design).
+    // Uses the richest working pattern (most positional args) to ensure
+    // the tool has input to process — bare invocations (like `cat` with no file)
+    // read from null stdin and all combos produce empty output.
+    let combo_pattern = working_patterns.iter()
+        .max_by_key(|p| p.len())
+        .or(working_patterns.first());
+    if let Some(pattern) = combo_pattern {
+        let base_args: Vec<Arg> = sub_prefix.iter().cloned()
+            .chain(pattern.iter().map(&to_arg))
+            .collect();
+
+        // Build deduplicated flag args (resolve aliases to keep only one per pair)
+        let mut all_flag_args: Vec<Arg> = Vec::new();
+        let mut seen_stems: HashSet<String> = HashSet::new();
+        for flag in &short_flags {
+            let stem = flag.clone();
+            let canon = flag_info.aliases.get(&stem).unwrap_or(&stem).clone();
+            let key = if stem < canon { stem.clone() } else { canon.clone() };
+            if seen_stems.insert(key) {
+                all_flag_args.push(Arg::Literal(stem));
+            }
+        }
+        for (flag, hint) in &long_flags {
+            let canon = flag_info.aliases.get(flag).unwrap_or(flag).clone();
+            let key = if *flag < canon { flag.clone() } else { canon };
+            if seen_stems.insert(key) {
+                let val = hint.as_ref().map(|h| default_value(h));
+                if let Some(v) = val {
+                    all_flag_args.push(Arg::Literal(format!("{}={}", flag, v)));
+                } else {
+                    all_flag_args.push(Arg::Literal(flag.clone()));
+                }
+            }
+        }
+
+        // Generate all pairwise combos
+        let pair_count = all_flag_args.len() * (all_flag_args.len() - 1) / 2;
+        eprintln!("  pairs: {} flags, {} combinations", all_flag_args.len(), pair_count);
+        for i in 0..all_flag_args.len() {
+            for j in (i + 1)..all_flag_args.len() {
+                let mut args = sub_prefix.clone();
+                args.push(all_flag_args[i].clone());
+                args.push(all_flag_args[j].clone());
+                args.extend(pattern.iter().map(&to_arg));
+                runs.push(Run {
+                    args,
+                    in_contexts: None,
+                    stdin: None,
                     diff_from: Some(base_args.clone()),
                 });
             }

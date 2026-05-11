@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use binary_grid::{analyze, discover, execute, output, parse, refine, report, sandbox};
+use binary_grid::{analyze, discover, execute, output, parse, report, sandbox};
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -46,14 +46,13 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, skeleton: bool)
         return discover::print_skeleton(binary, &sub_args, sandbox);
     }
 
-    // --- Explore mode: iterative discovery loop ---
+    // --- Explore mode ---
     let cmd_label = if sub_args.is_empty() {
         binary.to_string()
     } else {
         format!("{} {}", binary, sub_args.join(" "))
     };
 
-    let max_rounds = 3;
 
     // Probe for subcommands (if no subcommand was specified)
     if sub_args.is_empty() {
@@ -81,35 +80,19 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, skeleton: bool)
         }
     }
 
-    // Round 0: generate initial script from --help discovery
+    // Single-phase exploration: fixed DoE design (no iterative refinement).
+    // All single-flag and pairwise-combo runs are generated up front.
     let (script, flag_info) = discover::generate_initial_script(binary, &sub_args, sandbox)?;
-    eprintln!("=== Exploring {} (max {} rounds) ===", cmd_label, max_rounds);
-    eprintln!("[round 0] {} contexts, {} runs, {} cells",
+    eprintln!("=== Exploring {} ===", cmd_label);
+    eprintln!("{} contexts, {} runs, {} cells",
         script.contexts.len(), script.runs.len(), execute::count_cells(&script));
 
     let grid = execute::run_grid(binary, &script, std::path::Path::new("."), sandbox)?;
     let metrics = analyze::analyze(&script, &grid, Some(&flag_info), None);
-    let mut prior_runs: Vec<analyze::RunAnalysis> = Vec::new();
 
-    // Track cumulative tested flags and isolation across rounds.
-    let mut ever_tested: HashSet<String> = HashSet::new();
-    for run in &script.runs {
-        for arg in &run.args {
-            if let Some(key) = arg.flag_key() {
-                ever_tested.insert(key.to_string());
-                if let Some(alias) = flag_info.aliases.get(key) {
-                    ever_tested.insert(alias.clone());
-                }
-            }
-        }
-    }
-
-    // Track cumulative isolation across rounds.
-    // A run isolated in ANY round stays isolated — it's never re-tested.
+    // Compute isolation
     let mut ever_isolated: HashSet<String> = HashSet::new();
     for group in &metrics.groups {
-        // Singleton groups are isolated. Also treat alias-pair groups
-        // (2 runs that map to the same flag stem) as effectively isolated.
         let effectively_isolated = group.isolated() || (group.run_labels.len() == 2 && {
             let stems: HashSet<String> = group.run_labels.iter()
                 .filter_map(|l| report::flag_stem(l))
@@ -124,121 +107,21 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, skeleton: bool)
         }
     }
 
-    let mut rounds = vec![report::RoundSummary {
+    eprintln!("{} groups, {} isolated, {} identical",
+        metrics.groups.len(), ever_isolated.len(), metrics.identical_count());
+
+    let rounds = vec![report::RoundSummary {
         round: 0,
         total_groups: metrics.groups.len(),
         isolated: ever_isolated.len(),
         identical: metrics.identical_count(),
-        strategies: vec!["discovery".into()],
+        strategies: vec!["single-phase".into()],
     }];
 
-    // Compute unproductive runs from round 0 — these are pruned from all refinement
-    let unproductive = metrics.unproductive_runs();
-    if !unproductive.is_empty() {
-        eprintln!("[round 0] {} unproductive runs pruned from refinement", unproductive.len());
-    }
-
-    eprintln!("[round 0] {} groups, {} isolated, {} identical",
-        metrics.groups.len(), ever_isolated.len(), metrics.identical_count());
-
-    let mut current_script = script;
-    let mut current_metrics = metrics;
-
-    // Refinement rounds
-    for round in 1..=max_rounds {
-        let prev_isolated_count = ever_isolated.len();
-
-        // Compute indistinguishable flag stems for targeted refinement
-        let indist_stems = report::indistinguishable_stems(
-            &current_metrics, &ever_isolated, Some(&flag_info.aliases));
-
-        let refine_state = refine::RefineState {
-            ever_isolated: &ever_isolated,
-            unproductive: &unproductive,
-            indist_stems: &indist_stems,
-            round: round - 1,
-            max_rounds,
-        };
-
-        let delta = refine::refine(
-            &current_script,
-            &current_metrics,
-            Some(&flag_info),
-            &refine_state,
-        );
-
-        let Some(delta_script) = delta else {
-            eprintln!("[round {}] converged — no further refinement", round);
-            break;
-        };
-
-        let delta_cells = execute::count_cells(&delta_script);
-        eprintln!("[round {}] {} contexts, {} runs, {} cells",
-            round, delta_script.contexts.len(), delta_script.runs.len(), delta_cells);
-
-        let delta_grid = execute::run_grid(binary, &delta_script, std::path::Path::new("."), sandbox)?;
-        // Accumulate tested flags from this round
-        for run in &delta_script.runs {
-            for arg in &run.args {
-                if let Some(key) = arg.flag_key() {
-                    ever_tested.insert(key.to_string());
-                    if let Some(alias) = flag_info.aliases.get(key) {
-                        ever_tested.insert(alias.clone());
-                    }
-                }
-            }
-        }
-
-        let delta_metrics = analyze::analyze(&delta_script, &delta_grid, Some(&flag_info), Some(&ever_tested));
-
-        // Update cumulative isolation: any newly-isolated run is permanently isolated
-        // Also treat alias-pair groups as effectively isolated
-        for group in &delta_metrics.groups {
-            let effectively_isolated = group.isolated() || (group.run_labels.len() == 2 && {
-                let stems: HashSet<String> = group.run_labels.iter()
-                    .filter_map(|l| report::flag_stem(l))
-                    .map(|s| report::canonical_flag(&s, Some(&flag_info.aliases)))
-                    .collect();
-                stems.len() == 1
-            });
-            if effectively_isolated {
-                for label in &group.run_labels {
-                    ever_isolated.insert(label.clone());
-                }
-            }
-        }
-
-        let newly_isolated = ever_isolated.len() - prev_isolated_count;
-
-        rounds.push(report::RoundSummary {
-            round,
-            total_groups: delta_metrics.groups.len(),
-            isolated: ever_isolated.len(),
-            identical: delta_metrics.identical_count(),
-            strategies: vec![],
-        });
-
-        eprintln!("[round {}] {} groups, {} cumulative isolated (+{}), {} identical in round",
-            round, delta_metrics.groups.len(), ever_isolated.len(), newly_isolated, delta_metrics.identical_count());
-
-        prior_runs.extend(current_metrics.runs);
-        current_metrics = delta_metrics;
-        current_script = delta_script;
-
-        if newly_isolated == 0 {
-            eprintln!("[round {}] no new isolations — converged", round);
-            break;
-        }
-
-    }
-
-    // Final report — include runs from all rounds for observed-behavior check
-    let all_runs: Vec<&analyze::RunAnalysis> = prior_runs.iter()
-        .chain(current_metrics.runs.iter())
-        .collect();
+    let all_runs: Vec<&analyze::RunAnalysis> = metrics.runs.iter().collect();
     let report = report::format_exploration_report(
         &rounds,
-        &current_metrics,
+        &metrics,
         Some(&flag_info),
         &ever_isolated,
         &cmd_label,

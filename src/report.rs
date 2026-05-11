@@ -216,9 +216,9 @@ pub struct RoundSummary {
     pub strategies: Vec<String>,
 }
 
-/// Format the final exploration report after iterative refinement.
+/// Format the exploration report.
 ///
-/// `ever_isolated` is the cumulative set of run labels isolated across all rounds.
+/// `ever_isolated` is the set of run labels in singleton behavioral groups.
 /// The report deduplicates to unique flag stems and separates solo-flag isolation
 /// from combination-based evidence.
 pub fn format_exploration_report(
@@ -324,7 +324,7 @@ pub fn format_exploration_report(
     // Round history
     out.push_str("## Rounds\n");
     for r in rounds {
-        let strat = if r.strategies.is_empty() { "refinement".into() }
+        let strat = if r.strategies.is_empty() { "discovery".into() }
             else { r.strategies.join("+") };
         out.push_str(&format!("  round {}: {} isolated cumulative, {} identical in round ({})\n",
             r.round, r.isolated, r.identical, strat));
