@@ -14,6 +14,50 @@ pub struct FlagInfo {
     pub descs: HashMap<String, String>,   // flag -> description
     pub aliases: HashMap<String, String>, // short -> long (and long -> short)
     pub all_flags: HashSet<String>,       // every flag discovered
+    pub extracted_values: HashMap<String, Vec<String>>, // flag -> values mined from help text
+}
+
+/// Extract values from a flag description using multiple patterns:
+/// - Single-quoted values: 'auto', 'always', 'never'
+/// - Brace enumerations: {all,none,older}
+/// - Pipe-separated braces: {big|little}
+/// - Bracket character sets: [doxn] (individual chars)
+/// - "one of" lists: one of X, Y, or Z
+fn mine_description_values(desc: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    let mut seen = HashSet::new();
+
+    // Single-quoted values: 'auto', 'always'
+    let quoted_re = Regex::new(r"'([a-zA-Z][-a-zA-Z0-9]*)'").unwrap();
+    for cap in quoted_re.captures_iter(desc) {
+        let v = cap[1].to_string();
+        if seen.insert(v.clone()) { values.push(v); }
+    }
+
+    // Brace enumerations: {all,none,older(default)} or {big|little}
+    let brace_re = Regex::new(r"\{([^}]+)\}").unwrap();
+    for cap in brace_re.captures_iter(desc) {
+        let inner = &cap[1];
+        for item in inner.split([',', '|']) {
+            // Strip annotations like "(default)"
+            let clean = item.trim().split('(').next().unwrap_or("").trim();
+            if !clean.is_empty() && clean.chars().all(|c| c.is_alphanumeric() || c == '-') {
+                let v = clean.to_string();
+                if seen.insert(v.clone()) { values.push(v); }
+            }
+        }
+    }
+
+    // Bracket character sets: [doxn] → individual chars as values
+    let bracket_re = Regex::new(r"\[([a-zA-Z]{2,8})\]").unwrap();
+    for cap in bracket_re.captures_iter(desc) {
+        for ch in cap[1].chars() {
+            let v = ch.to_string();
+            if seen.insert(v.clone()) { values.push(v); }
+        }
+    }
+
+    values
 }
 
 /// Extract flag descriptions and aliases from --help text.
@@ -21,16 +65,25 @@ pub fn extract_flag_info(help_text: &str) -> FlagInfo {
     let mut descs: HashMap<String, String> = HashMap::new();
     let mut aliases: HashMap<String, String> = HashMap::new();
     let mut all_flags: HashSet<String> = HashSet::new();
+    let mut extracted_values: HashMap<String, Vec<String>> = HashMap::new();
 
-    let re = Regex::new(
+    let flag_re = Regex::new(
         r"^\s+(-[a-zA-Z0-9](?:,\s*--[a-zA-Z][-a-zA-Z0-9]*(?:=\S+)?)?|--[a-zA-Z][-a-zA-Z0-9]*(?:=\S+)?)\s{2,}(.+)"
     ).unwrap();
 
-    for line in help_text.lines() {
-        if let Some(cap) = re.captures(line) {
+    // Two-pass: first collect full multi-line descriptions per flag group,
+    // then mine all patterns from the complete description.
+    let lines: Vec<&str> = help_text.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        if let Some(cap) = flag_re.captures(lines[i]) {
             let flags_part = cap[1].trim();
-            let desc = cap[2].trim().to_string();
+            let mut desc = cap[2].trim().to_string();
             let mut names: Vec<String> = Vec::new();
+
+            // Also extract values from the flag definition itself (e.g., --endian={big|little})
+            let flag_line_values = mine_description_values(flags_part);
+
             for flag in flags_part.split(',') {
                 let flag = flag.trim();
                 let name = if let Some(eq) = flag.find('=') {
@@ -44,14 +97,46 @@ pub fn extract_flag_info(help_text: &str) -> FlagInfo {
                     names.push(name.to_string());
                 }
             }
-            // Record alias pairs (e.g., -a <-> --all)
+
+            // Collect continuation lines (indented 20+ spaces, no flag prefix)
+            while i + 1 < lines.len() {
+                let next = lines[i + 1];
+                let trimmed = next.trim_start();
+                let indent = next.len() - trimmed.len();
+                if indent >= 20 && !trimmed.starts_with('-') {
+                    desc.push(' ');
+                    desc.push_str(trimmed);
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+
+            // Update descriptions with full multi-line text
+            for name in &names {
+                descs.insert(name.clone(), desc.clone());
+            }
+
+            // Record alias pairs
             if names.len() == 2 {
                 aliases.insert(names[0].clone(), names[1].clone());
                 aliases.insert(names[1].clone(), names[0].clone());
             }
+
+            // Mine values from the full description + flag definition
+            let mut values = mine_description_values(&desc);
+            for v in flag_line_values {
+                if !values.contains(&v) { values.push(v); }
+            }
+            if values.len() >= 2 {
+                for name in &names {
+                    extracted_values.insert(name.clone(), values.clone());
+                }
+            }
         }
+        i += 1;
     }
-    FlagInfo { descs, aliases, all_flags }
+    FlagInfo { descs, aliases, all_flags, extracted_values }
 }
 
 /// Try --help, then -h to get help text from a binary.
@@ -335,32 +420,45 @@ fn walkdir_count(dir: &std::path::Path) -> Option<usize> {
     Some(count)
 }
 
-/// Map a value hint from --help to a reasonable default.
-pub fn default_value(hint: &str) -> String {
-    let upper = hint.to_uppercase();
+/// Candidate values for a metavar (value placeholder from --help, e.g. NUM, FILE).
+/// Returns an ordered list; the first working candidate becomes the flag's value.
+/// List order is stable — new candidates are appended, never reordered.
+pub fn candidates(metavar: &str) -> Vec<&'static str> {
+    let upper = metavar.to_uppercase();
     let upper = upper.as_str();
     match upper {
         "NUM" | "NUMBER" | "N" | "SIZE" | "COLS" | "WIDTH" | "COUNT" | "LINES" | "BYTES"
-        | "MAX" | "PROCS" | "DEPTH" | "JOBS" | "LEVEL" => "1".into(),
-        "FILE" | "PATH" | "FILENAME" => "input.txt".into(),
-        "DIR" | "DIRECTORY" => ".".into(),
-        "PATTERN" | "PAT" | "REGEX" => ".*".into(),
-        "LIST" | "FIELDS" | "FIELD_LIST" => "1".into(),
-        "RANGE" | "SET1" | "SET2" | "CHARS" => "1-3".into(),
-        "CHAR" | "DELIM" | "SEP" | "CHARACTER" => ",".into(),
-        "FORMAT" | "FMT" => "%s".into(),
-        "MODE" => "644".into(),
-        "WORD" | "STYLE" | "TYPE" | "METHOD" | "WHEN" => "auto".into(),
-        "VAR" | "NAME" | "PREFIX" | "SUFFIX" | "STRING" | "STR" | "LABEL" | "TAG" => "test".into(),
+        | "MAX" | "PROCS" | "DEPTH" | "JOBS" | "LEVEL" =>
+            vec!["1", "0", "2", "10", "100"],
+        "FILE" | "PATH" | "FILENAME" =>
+            vec!["input.txt", "other.txt", "/dev/null"],
+        "DIR" | "DIRECTORY" =>
+            vec![".", "subdir", "/tmp"],
+        "PATTERN" | "PAT" | "REGEX" =>
+            vec![".*", "a", "^$", "[0-9]+"],
+        "LIST" | "FIELDS" | "FIELD_LIST" =>
+            vec!["1", "1,2", "1-3"],
+        "RANGE" | "SET1" | "SET2" | "CHARS" =>
+            vec!["1-3", "a-z", "1"],
+        "CHAR" | "DELIM" | "SEP" | "CHARACTER" =>
+            vec![",", ":", "\t", " "],
+        "FORMAT" | "FMT" =>
+            vec!["%s", "%d", "%f"],
+        "MODE" =>
+            vec!["644", "755", "600"],
+        "WORD" | "STYLE" | "TYPE" | "METHOD" | "WHEN" =>
+            vec!["auto", "always", "never"],
+        "VAR" | "NAME" | "PREFIX" | "SUFFIX" | "STRING" | "STR" | "LABEL" | "TAG" =>
+            vec!["test", "x", ""],
         _ => {
-            // Handle compound hints like "MAX-LINES", "MAX-PROCS", "MAX-CHARS"
-            // by checking if any component is a known numeric keyword
+            // Handle compound metavars like "MAX-LINES", "MAX-PROCS", "MAX-CHARS"
             let numeric_words = ["MAX", "NUM", "COUNT", "SIZE", "LINES", "BYTES",
                                  "PROCS", "ARGS", "CHARS", "DEPTH", "JOBS", "WIDTH"];
             if upper.split('-').any(|part| numeric_words.contains(&part)) {
-                return "1".into();
+                return vec!["1", "0", "2", "10"];
             }
-            hint.to_lowercase()
+            // Unknown metavar — try generic values
+            vec!["1", "auto", ",", "input.txt", ".", "0"]
         }
     }
 }
@@ -473,6 +571,115 @@ fn format_setup_cmd(cmd: &SetupCommand) -> String {
     }
 }
 
+/// Extract valid values from error output.
+/// Parses the GNU coreutils format: "Valid arguments are:\n  - 'value'\n  ..."
+fn mine_valid_values(stderr: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    let re = Regex::new(r"'([a-zA-Z][-a-zA-Z0-9]*)'").unwrap();
+    let mut in_valid_section = false;
+    for line in stderr.lines() {
+        if line.contains("Valid arguments are") || line.contains("valid arguments are") {
+            in_valid_section = true;
+            continue;
+        }
+        if in_valid_section {
+            if line.starts_with("  ") || line.starts_with("\t") {
+                for cap in re.captures_iter(line) {
+                    values.push(cap[1].to_string());
+                }
+            } else {
+                break; // End of valid arguments section
+            }
+        }
+    }
+    values
+}
+
+/// Push a flag (with optional value) as Arg::Literal(s).
+/// Short flags use space-separated values (-A 1), long flags use = (--after-context=1).
+fn push_flag_arg(args: &mut Vec<Arg>, flag: &str, value: Option<&str>) {
+    match value {
+        Some(v) if flag.starts_with("--") => {
+            args.push(Arg::Literal(format!("{}={}", flag, v)));
+        }
+        Some(v) => {
+            args.push(Arg::Literal(flag.to_string()));
+            args.push(Arg::Literal(v.to_string()));
+        }
+        None => {
+            args.push(Arg::Literal(flag.to_string()));
+        }
+    }
+}
+
+/// Probe whether a flag+value combination succeeds (exit code ≤ 1).
+/// Builds the command with sub_args, flag (with optional value and optional companion),
+/// and positional pattern args.
+#[allow(clippy::too_many_arguments)]
+fn probe_flag_value(
+    sandbox: &Sandbox, binary: &str, sub_args: &[&str],
+    flag: &str, value: Option<&str>,
+    companion: Option<(&str, &str)>,
+    pattern: &[String], work_dir: &std::path::Path,
+) -> bool {
+    let env = std::collections::HashMap::new();
+    let mut args: Vec<String> = sub_args.iter().map(|s| s.to_string()).collect();
+    // Add companion flag if present
+    if let Some((cf, cv)) = companion {
+        if cf.starts_with("--") {
+            args.push(format!("{}={}", cf, cv));
+        } else {
+            args.push(cf.to_string());
+            args.push(cv.to_string());
+        }
+    }
+    // Add target flag
+    if let Some(v) = value {
+        if flag.starts_with("--") {
+            args.push(format!("{}={}", flag, v));
+        } else {
+            args.push(flag.to_string());
+            args.push(v.to_string());
+        }
+    } else {
+        args.push(flag.to_string());
+    }
+    args.extend(pattern.iter().cloned());
+    let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let _ = std::fs::write(work_dir.join("input.txt"), "cherry\napple\nbanana\n");
+    let mut cmd = sandbox.command(binary, &refs, work_dir, &env, None);
+    cmd.stdin(std::process::Stdio::null());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    cmd.output().map(|o| o.status.code().unwrap_or(-1) <= 1).unwrap_or(false)
+}
+
+/// Try a deliberately invalid value for a flag and mine stderr for valid alternatives.
+fn probe_error_mine(
+    sandbox: &Sandbox, binary: &str, sub_args: &[&str],
+    flag: &str, pattern: &[String], work_dir: &std::path::Path,
+) -> Vec<String> {
+    let env = std::collections::HashMap::new();
+    let mut args: Vec<String> = sub_args.iter().map(|s| s.to_string()).collect();
+    if flag.starts_with("--") {
+        args.push(format!("{}=__bgrid_invalid__", flag));
+    } else {
+        args.push(flag.to_string());
+        args.push("__bgrid_invalid__".into());
+    }
+    args.extend(pattern.iter().cloned());
+    let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let _ = std::fs::write(work_dir.join("input.txt"), "cherry\napple\nbanana\n");
+    let mut cmd = sandbox.command(binary, &refs, work_dir, &env, None);
+    cmd.stdin(std::process::Stdio::null());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    match cmd.output() {
+        Ok(output) => mine_valid_values(&String::from_utf8_lossy(&output.stderr)),
+        Err(_) => Vec::new(),
+    }
+}
+
 /// Generate an initial Script from binary discovery.
 /// Returns (Script, FlagInfo) for the iteration loop.
 pub fn generate_initial_script(
@@ -486,23 +693,40 @@ pub fn generate_initial_script(
     let short_re = Regex::new(r"(?:^|\s)-([a-zA-Z0-9])\b").unwrap();
     let long_re = Regex::new(r"--([a-zA-Z][a-zA-Z0-9-]*)(?:[=\s]([A-Z][A-Z_]*))?").unwrap();
 
-    let mut short_flags: Vec<String> = Vec::new();
-    let mut long_flags: Vec<(String, Option<String>)> = Vec::new();
+    // Parse all flags into a single list with (name, metavar).
+    // After probing, metavar is overwritten with the resolved value.
+    let mut flags: Vec<(String, Option<String>)> = Vec::new();
     let mut seen = HashSet::new();
+    let mut long_metavars: HashMap<String, String> = HashMap::new();
 
     for line in help_text.lines() {
         for cap in short_re.captures_iter(line) {
             let flag = format!("-{}", &cap[1]);
             if seen.insert(flag.clone()) {
-                short_flags.push(flag);
+                flags.push((flag, None));
             }
         }
         for cap in long_re.captures_iter(line) {
             let name = format!("--{}", &cap[1]);
             if name == "--help" || name == "--version" { continue; }
-            let hint = cap.get(2).map(|m| m.as_str().to_string());
+            let metavar = cap.get(2).map(|m| m.as_str().to_string());
+            if let Some(mv) = &metavar {
+                long_metavars.insert(name.clone(), mv.clone());
+            }
             if seen.insert(name.clone()) {
-                long_flags.push((name, hint));
+                flags.push((name, metavar));
+            }
+        }
+    }
+
+    // Propagate metavars from long aliases to short flags.
+    // E.g., if -A aliases --after-context=NUM, -A inherits metavar NUM.
+    for (flag, metavar) in &mut flags {
+        if metavar.is_none() && flag.len() == 2 {
+            if let Some(long_alias) = flag_info.aliases.get(flag) {
+                if let Some(mv) = long_metavars.get(long_alias) {
+                    *metavar = Some(mv.clone());
+                }
             }
         }
     }
@@ -524,85 +748,97 @@ pub fn generate_initial_script(
         eprintln!("  pattern: context-derived");
     }
 
-    // Probe values for value-taking flags: try candidates and keep what works
+    // Record which flags have numeric metavars before probing overwrites metavar with resolved value
+    let numeric_metavar_names = ["NUM", "NUMBER", "N", "SIZE", "COLS", "WIDTH", "COUNT", "LINES", "BYTES"];
+    let numeric_flags: HashSet<String> = flags.iter()
+        .filter(|(_, mv)| mv.as_ref().is_some_and(|h| numeric_metavar_names.contains(&h.to_uppercase().as_str())))
+        .map(|(f, _)| f.clone())
+        .collect();
+
+    // Probe values for value-taking flags: try all candidates per flag.
+    // First working value = combo value (stored in flags tuple).
+    // All additional working values = extra solo runs (stored in extra_solo_values).
+    let mut extra_solo_values: HashMap<String, Vec<String>> = HashMap::new();
     if let Some(first_pattern) = working_patterns.first() {
-        let value_candidates = ["1", "auto", ",", ":", "input.txt", ".", "0"];
         let probe_dir = tempfile::Builder::new().prefix("bgrid_val_").tempdir().ok();
         if let Some(ref probe_dir) = probe_dir {
             let work_dir = probe_dir.path();
             let _ = std::fs::write(work_dir.join("input.txt"), "cherry\napple\nbanana\n");
             let _ = std::fs::write(work_dir.join("other.txt"), "hello world\n");
             let _ = std::fs::create_dir(work_dir.join("subdir"));
-            let env = std::collections::HashMap::new();
 
+            // Phase 1: Try all candidates per flag; first working = combo value,
+            // rest = extra solo values.
             #[allow(clippy::needless_range_loop)]
-            for i in 0..long_flags.len() {
-                let (ref flag, ref hint) = long_flags[i];
-                if hint.is_none() { continue; }
+            for i in 0..flags.len() {
+                let (ref flag, ref metavar) = flags[i];
+                let has_extracted = flag_info.extracted_values.contains_key(flag);
+                if metavar.is_none() && !has_extracted { continue; }
 
-                let default_val = default_value(hint.as_ref().unwrap());
-                let flag_arg = format!("{}={}", flag, default_val);
-                let mut test_args: Vec<String> = sub_args.iter().map(|s| s.to_string()).collect();
-                test_args.push(flag_arg);
-                test_args.extend(first_pattern.iter().cloned());
-                let test_refs: Vec<&str> = test_args.iter().map(|s| s.as_str()).collect();
-
-                let mut cmd = sandbox.command(binary, &test_refs, work_dir, &env, None);
-                cmd.stdin(std::process::Stdio::null());
-                cmd.stdout(std::process::Stdio::piped());
-                cmd.stderr(std::process::Stdio::piped());
-
-                let default_works = cmd.output()
-                    .map(|o| o.status.code().unwrap_or(-1) <= 1)
-                    .unwrap_or(false);
-
-                if default_works { continue; }
-
-                // Default failed — try all candidates, pick the one whose output
-                // differs most from the no-flag baseline (maximizes distinguishability,
-                // not just output volume — grep --max-count=100 produces the same
-                // output as no flag if the file has <100 lines).
-                let _ = std::fs::write(work_dir.join("input.txt"), "cherry\napple\nbanana\n");
-                let baseline_output = {
-                    let mut base_args: Vec<String> = sub_args.iter().map(|s| s.to_string()).collect();
-                    base_args.extend(first_pattern.iter().cloned());
-                    let base_refs: Vec<&str> = base_args.iter().map(|s| s.as_str()).collect();
-                    let mut cmd_base = sandbox.command(binary, &base_refs, work_dir, &env, None);
-                    cmd_base.stdin(std::process::Stdio::null());
-                    cmd_base.stdout(std::process::Stdio::piped());
-                    cmd_base.stderr(std::process::Stdio::piped());
-                    cmd_base.output().map(|o| o.stdout).unwrap_or_default()
-                };
-
-                let mut best_value: Option<(String, usize)> = None; // (value, diff_from_baseline)
-                for &candidate in &value_candidates {
-                    let flag_arg2 = format!("{}={}", long_flags[i].0, candidate);
-                    let mut test_args2: Vec<String> = sub_args.iter().map(|s| s.to_string()).collect();
-                    test_args2.push(flag_arg2);
-                    test_args2.extend(first_pattern.iter().cloned());
-                    let test_refs2: Vec<&str> = test_args2.iter().map(|s| s.as_str()).collect();
-
-                    let _ = std::fs::write(work_dir.join("input.txt"), "cherry\napple\nbanana\n");
-
-                    let mut cmd2 = sandbox.command(binary, &test_refs2, work_dir, &env, None);
-                    cmd2.stdin(std::process::Stdio::null());
-                    cmd2.stdout(std::process::Stdio::piped());
-                    cmd2.stderr(std::process::Stdio::piped());
-
-                    if let Ok(output) = cmd2.output() {
-                        if output.status.code().unwrap_or(-1) <= 1 {
-                            // Score by difference from baseline — how distinguishable is this value?
-                            let diff = if output.stdout == baseline_output { 0 }
-                                else { output.stdout.len().abs_diff(baseline_output.len()) + 1 };
-                            if best_value.as_ref().is_none_or(|(_, best_diff)| diff > *best_diff) {
-                                best_value = Some((candidate.to_uppercase(), diff));
-                            }
+                // Build candidate list: extracted values first, then metavar fallback
+                let mut cands: Vec<String> = Vec::new();
+                if let Some(extracted) = flag_info.extracted_values.get(flag) {
+                    cands.extend(extracted.iter().cloned());
+                }
+                if let Some(mv) = metavar.as_ref() {
+                    for c in candidates(mv) {
+                        if !cands.iter().any(|e| e == c) {
+                            cands.push(c.to_string());
                         }
                     }
                 }
-                let found_value = best_value.map(|(v, _)| v);
-                if let Some(val) = found_value {
-                    long_flags[i].1 = Some(val);
+
+                let mut working: Vec<String> = cands.iter()
+                    .filter(|c| probe_flag_value(sandbox, binary, sub_args, flag, Some(c), None, first_pattern, work_dir))
+                    .cloned().collect();
+
+                // If no candidates worked, try error mining
+                if working.is_empty() {
+                    let mined = probe_error_mine(sandbox, binary, sub_args, flag, first_pattern, work_dir);
+                    for val in mined {
+                        if probe_flag_value(sandbox, binary, sub_args, flag, Some(&val), None, first_pattern, work_dir) {
+                            working.push(val);
+                        }
+                    }
+                }
+
+                if let Some(first) = working.first() {
+                    flags[i].1 = Some(first.clone());
+                    if working.len() > 1 {
+                        extra_solo_values.insert(flags[i].0.clone(), working[1..].to_vec());
+                    }
+                } else {
+                    flags[i].1 = None;
+                }
+            }
+
+            // Phase 2: Compound probing — for flags with no working value,
+            // try them paired with each flag that DID find a value.
+            let working_flags: Vec<(String, String)> = flags.iter()
+                .filter_map(|(f, v)| v.as_ref().map(|val| (f.clone(), val.clone())))
+                .collect();
+            #[allow(clippy::needless_range_loop)]
+            for i in 0..flags.len() {
+                if flags[i].1.is_some() { continue; }
+                let flag = &flags[i].0;
+                let target_cands: Vec<String> = flag_info.extracted_values
+                    .get(flag).cloned().unwrap_or_default();
+
+                'companion: for (cf, cv) in &working_flags {
+                    if cf == flag { continue; }
+                    let companion = Some((cf.as_str(), cv.as_str()));
+                    if target_cands.is_empty() {
+                        if probe_flag_value(sandbox, binary, sub_args, flag, None, companion, first_pattern, work_dir) {
+                            break 'companion;
+                        }
+                    } else {
+                        for val in &target_cands {
+                            if probe_flag_value(sandbox, binary, sub_args, flag, Some(val), companion, first_pattern, work_dir) {
+                                flags[i].1 = Some(val.clone());
+                                break 'companion;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -720,10 +956,10 @@ pub fn generate_initial_script(
         // Base run (no flags)
         runs.push(Run { args: base_args.clone(), in_contexts: None, stdin: None, diff_from: None });
 
-        // Flag runs with from-reference to base
-        for flag in &short_flags {
+        // Flag runs with from-reference to base (using combo value)
+        for (flag, metavar) in flags.iter() {
             let mut args = sub_prefix.clone();
-            args.push(Arg::Literal(flag.clone()));
+            push_flag_arg(&mut args, flag, metavar.as_deref());
             args.extend(pattern.iter().map(&to_arg));
             runs.push(Run {
                 args,
@@ -731,20 +967,20 @@ pub fn generate_initial_script(
                 diff_from: Some(base_args.clone()),
             });
         }
-        for (flag, hint) in &long_flags {
-            let mut args = sub_prefix.clone();
-            let val = hint.as_ref().map(|h| default_value(h));
-            if let Some(v) = val {
-                args.push(Arg::Literal(format!("{}={}", flag, v)));
-            } else {
-                args.push(Arg::Literal(flag.clone()));
+
+        // Extra solo runs for additional working values (beyond the combo value).
+        // Each extra value generates an independent run for that flag.
+        for (flag, extra_vals) in &extra_solo_values {
+            for val in extra_vals {
+                let mut args = sub_prefix.clone();
+                push_flag_arg(&mut args, flag, Some(val));
+                args.extend(pattern.iter().map(&to_arg));
+                runs.push(Run {
+                    args,
+                    in_contexts: None, stdin: None,
+                    diff_from: Some(base_args.clone()),
+                });
             }
-            args.extend(pattern.iter().map(&to_arg));
-            runs.push(Run {
-                args,
-                in_contexts: None, stdin: None,
-                diff_from: Some(base_args.clone()),
-            });
         }
     }
 
@@ -768,25 +1004,9 @@ pub fn generate_initial_script(
                 diff_from: None,
             });
 
-            for flag in &short_flags {
+            for (flag, metavar) in flags.iter() {
                 let mut args = sub_prefix.clone();
-                args.push(Arg::Literal(flag.clone()));
-                args.extend(pattern.iter().map(&to_arg));
-                runs.push(Run {
-                    args,
-                    in_contexts: None,
-                    stdin: Some(stdin_content.clone()),
-                    diff_from: Some(base_args.clone()),
-                });
-            }
-            for (flag, hint) in &long_flags {
-                let mut args = sub_prefix.clone();
-                let val = hint.as_ref().map(|h| default_value(h));
-                if let Some(v) = val {
-                    args.push(Arg::Literal(format!("{}={}", flag, v)));
-                } else {
-                    args.push(Arg::Literal(flag.clone()));
-                }
+                push_flag_arg(&mut args, flag, metavar.as_deref());
                 args.extend(pattern.iter().map(&to_arg));
                 runs.push(Run {
                     args,
@@ -805,24 +1025,9 @@ pub fn generate_initial_script(
             stdin: Some(stdin_content.clone()),
             diff_from: None,
         });
-        for flag in &short_flags {
+        for (flag, metavar) in flags.iter() {
             let mut args = sub_prefix.clone();
-            args.push(Arg::Literal(flag.clone()));
-            runs.push(Run {
-                args,
-                in_contexts: None,
-                stdin: Some(stdin_content.clone()),
-                diff_from: Some(bare_args.clone()),
-            });
-        }
-        for (flag, hint) in &long_flags {
-            let mut args = sub_prefix.clone();
-            let val = hint.as_ref().map(|h| default_value(h));
-            if let Some(v) = val {
-                args.push(Arg::Literal(format!("{}={}", flag, v)));
-            } else {
-                args.push(Arg::Literal(flag.clone()));
-            }
+            push_flag_arg(&mut args, flag, metavar.as_deref());
             runs.push(Run {
                 args,
                 in_contexts: None,
@@ -834,9 +1039,8 @@ pub fn generate_initial_script(
 
     // Boundary runs for numeric flags (using first working pattern)
     if let Some(first_pattern) = working_patterns.first() {
-        let numeric_hints = ["NUM", "NUMBER", "N", "SIZE", "COLS", "WIDTH", "COUNT", "LINES", "BYTES"];
-        let zero_flags: Vec<&(String, Option<String>)> = long_flags.iter()
-            .filter(|(_, hint)| hint.as_ref().is_some_and(|h| numeric_hints.contains(&h.to_uppercase().as_str())))
+        let zero_flags: Vec<&(String, Option<String>)> = flags.iter()
+            .filter(|(f, _)| numeric_flags.contains(f))
             .collect();
         if !zero_flags.is_empty() {
             let base_args: Vec<Arg> = sub_prefix.iter().cloned()
@@ -844,7 +1048,7 @@ pub fn generate_initial_script(
                 .collect();
             for (flag, _) in &zero_flags {
                 let mut args = sub_prefix.clone();
-                args.push(Arg::Literal(format!("{}=0", flag)));
+                push_flag_arg(&mut args, flag, Some("0"));
                 args.extend(first_pattern.iter().map(&to_arg));
                 runs.push(Run {
                     args, in_contexts: None, stdin: None,
@@ -853,14 +1057,14 @@ pub fn generate_initial_script(
             }
             for (flag, _) in zero_flags.iter().take(3) {
                 let mut args1 = sub_prefix.clone();
-                args1.push(Arg::Literal(format!("{}=-1", flag)));
+                push_flag_arg(&mut args1, flag, Some("-1"));
                 args1.extend(first_pattern.iter().map(&to_arg));
                 runs.push(Run {
                     args: args1, in_contexts: None, stdin: None,
                     diff_from: Some(base_args.clone()),
                 });
                 let mut args2 = sub_prefix.clone();
-                args2.push(Arg::Literal(format!("{}=2147483647", flag)));
+                push_flag_arg(&mut args2, flag, Some("2147483647"));
                 args2.extend(first_pattern.iter().map(&to_arg));
                 runs.push(Run {
                     args: args2, in_contexts: None, stdin: None,
@@ -883,27 +1087,17 @@ pub fn generate_initial_script(
             .chain(pattern.iter().map(&to_arg))
             .collect();
 
-        // Build deduplicated flag args (resolve aliases to keep only one per pair)
-        let mut all_flag_args: Vec<Arg> = Vec::new();
+        // Build deduplicated flag arg groups (resolve aliases to keep only one per pair).
+        // Each group is a Vec<Arg> because short flags with values produce two args (e.g., -A 1).
+        let mut all_flag_args: Vec<Vec<Arg>> = Vec::new();
         let mut seen_stems: HashSet<String> = HashSet::new();
-        for flag in &short_flags {
-            let stem = flag.clone();
-            let canon = flag_info.aliases.get(&stem).unwrap_or(&stem).clone();
-            let key = if stem < canon { stem.clone() } else { canon.clone() };
-            if seen_stems.insert(key) {
-                all_flag_args.push(Arg::Literal(stem));
-            }
-        }
-        for (flag, hint) in &long_flags {
+        for (flag, metavar) in flags.iter() {
             let canon = flag_info.aliases.get(flag).unwrap_or(flag).clone();
             let key = if *flag < canon { flag.clone() } else { canon };
             if seen_stems.insert(key) {
-                let val = hint.as_ref().map(|h| default_value(h));
-                if let Some(v) = val {
-                    all_flag_args.push(Arg::Literal(format!("{}={}", flag, v)));
-                } else {
-                    all_flag_args.push(Arg::Literal(flag.clone()));
-                }
+                let mut group = Vec::new();
+                push_flag_arg(&mut group, flag, metavar.as_deref());
+                all_flag_args.push(group);
             }
         }
 
@@ -919,8 +1113,8 @@ pub fn generate_initial_script(
             for j in 0..all_flag_args.len() {
                 if i == j { continue; }
                 let mut args = sub_prefix.clone();
-                args.push(all_flag_args[i].clone());
-                args.push(all_flag_args[j].clone());
+                args.extend(all_flag_args[i].iter().cloned());
+                args.extend(all_flag_args[j].iter().cloned());
                 args.extend(pattern.iter().map(&to_arg));
                 runs.push(Run {
                     args,

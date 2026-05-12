@@ -17,10 +17,10 @@ Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
       ==> standard input <==
 
 ## Via combination (distinguishable when paired)
-  --quiet  e.g. "-c" "--quiet" "$(head -n1 input.txt)" "."
+  --quiet  e.g. "-n" "--quiet" "$(head -n1 input.txt)" "."
   --silent  e.g. "-n" "--silent" "$(head -n1 input.txt)" "."
-  -c  e.g. "-n" "-c" "$(head -n1 input.txt)" "."
-  -n  e.g. "-n" "-v" "$(head -n1 input.txt)" "."
-  -q  e.g. "-n" "-q" "$(head -n1 input.txt)" "."
-  -z  e.g. "-c" "-z" "$(head -n1 input.txt)" "."
+  -c  e.g. "-v" "-c" "$(head -n1 input.txt)" "."
+  -n  e.g. "-n" "-z" "$(head -n1 input.txt)" "."
+  -q  e.g. "-c" "-q" "$(head -n1 input.txt)" "."
+  -z  e.g. "-n" "-z" "$(head -n1 input.txt)" "."
 

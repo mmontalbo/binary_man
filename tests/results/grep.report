@@ -1,18 +1,33 @@
 # Exploration: grep
 
 ## Rounds
-  round 0: 121 isolated cumulative, 147 identical in round (single-phase)
+  round 0: 48 isolated cumulative, 133 identical in round (single-phase)
 
-## Observed: 42/49 flags
-  4 solo, 38 via combination
-  7 additional error-differentiated
-  1 behavioral aliases detected
+## Observed: 45/49 flags
+  6 solo, 39 via combination
+  4 additional error-differentiated
 
 Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --devices, -E = --extended-regexp, -F = --fixed-strings, -G = --basic-regexp, -H = --with-filename, -L = --files-without-match, -P = --perl-regexp, -R = --dereference-recursive, -T = --initial-tab, -U = --binary, -Z = --null, -a = --text, -b = --byte-offset, -c = --count, -d = --directories, -e = --regexp, -f = --file, -h = --no-filename, -i = --ignore-case, -l = --files-with-matches, -m = --max-count, -n = --line-number, -o = --only-matching, -r = --recursive, -s = --no-messages, -v = --invert-match, -w = --word-regexp, -x = --line-regexp, -z = --null-data
 
 ## Solo (unique behavior)
+  --exclude-from  # skip files that match any file pattern from FILE
+    exemplar: "--exclude-from=input.txt" "$(head -n1 input.txt)" "input.txt" in numbers_minimal (different)
+    base:
+      0
+      1.00
+      $1.00
+      1E02
+      1E+02
+            ...
+    flag:
+      0
+      1.00
+      $1.00
+      1E02
+      1E+02
+            ...
   -A  # print NUM lines of trailing context
-    exemplar: "-A" "$(head -n1 input.txt)" "input.txt" in numbers_minimal (different)
+    exemplar: "-A" "2" "$(head -n1 input.txt)" "input.txt" in numbers_minimal (different)
     base:
       0
       1.00
@@ -21,8 +36,14 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
       1E+02
             ...
     flag:
+      0
+      1
+      1.00
+      $1.00
+      1/2
+            ...
   -B  # print NUM lines of leading context
-    exemplar: "-B" "$(head -n1 input.txt)" "input.txt" in numbers_minimal (different)
+    exemplar: "-B" "2" "$(head -n1 input.txt)" "input.txt" in numbers_minimal (different)
     base:
       0
       1.00
@@ -31,8 +52,14 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
       1E+02
             ...
     flag:
+      0
+      1
+      1.00
+      $1.00
+      1/2
+            ...
   -C  # print NUM lines of output context
-    exemplar: "-C" "$(head -n1 input.txt)" "input.txt" in numbers_minimal (different)
+    exemplar: "-C" "2" "$(head -n1 input.txt)" "input.txt" in numbers_minimal (different)
     base:
       0
       1.00
@@ -41,8 +68,19 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
       1E+02
             ...
     flag:
-  -d  # how to handle directories;
-    exemplar: "-d" "$(head -n1 input.txt)" "input.txt" in numbers_minimal (different)
+      0
+      1
+      1.00
+      $1.00
+      1/2
+            ...
+  -d  # how to handle directories; ACTION is 'read', 'recurse', or 'skip'
+    exemplar: "-d" "1" "$(head -n1 input.txt)" "input.txt" in words_minimal (different)
+    base:
+      aardvark
+    flag:
+  -m  # stop after NUM selected lines
+    exemplar: "-m" "2" "$(head -n1 input.txt)" "input.txt" in numbers_minimal (different)
     base:
       0
       1.00
@@ -51,51 +89,51 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
       1E+02
             ...
     flag:
-  -f  # take PATTERNS from FILE
+      0
+      1.00
 
 ## Via combination (distinguishable when paired)
-  --binary-files  e.g. "-d" "--binary-files=auto" "$(head -n1 input.txt)" "input.txt"
-  --color  e.g. "-f" "--color" "$(head -n1 input.txt)" "input.txt"
-  --colour  e.g. "-f" "--colour" "$(head -n1 input.txt)" "input.txt"
-  --exclude  e.g. "-d" "--exclude=glob" "$(head -n1 input.txt)" "input.txt"
-  --exclude-dir  e.g. "-d" "--exclude-dir=glob" "$(head -n1 input.txt)" "input.txt"
-  --exclude-from  e.g. "-d" "--exclude-from=input.txt" "$(head -n1 input.txt)" "input.txt"
-  --group-separator  e.g. "-f" "--group-separator=," "$(head -n1 input.txt)" "input.txt"
-  --include  e.g. "-d" "--include=glob" "$(head -n1 input.txt)" "input.txt"
-  --label  e.g. "-f" "--label=test" "$(head -n1 input.txt)" "input.txt"
-  --line-buffered  e.g. "-f" "--line-buffered" "$(head -n1 input.txt)" "input.txt"
-  --no-group-separator  e.g. "-f" "--no-group-separator" "$(head -n1 input.txt)" "input.txt"
-  --no-ignore-case  e.g. "-d" "--no-ignore-case" "$(head -n1 input.txt)" "input.txt"
-  --quiet  e.g. "-f" "--quiet" "$(head -n1 input.txt)" "input.txt"
-  --silent  e.g. "-d" "--silent" "$(head -n1 input.txt)" "input.txt"
-  -D  e.g. "-d" "-D" "$(head -n1 input.txt)" "input.txt"
-  -E  e.g. "-f" "-E" "$(head -n1 input.txt)" "input.txt"
-  -F  e.g. "-f" "-F" "$(head -n1 input.txt)" "input.txt"
-  -G  e.g. "-d" "-G" "$(head -n1 input.txt)" "input.txt"
-  -H  e.g. "-d" "-H" "$(head -n1 input.txt)" "input.txt"
+  --binary-files  e.g. (pairwise evidence)
+  --color  e.g. (pairwise evidence)
+  --colour  e.g. (pairwise evidence)
+  --exclude  e.g. (pairwise evidence)
+  --exclude-dir  e.g. (pairwise evidence)
+  --group-separator  e.g. (pairwise evidence)
+  --include  e.g. (pairwise evidence)
+  --label  e.g. (pairwise evidence)
+  --line-buffered  e.g. (pairwise evidence)
+  --no-group-separator  e.g. (pairwise evidence)
+  --no-ignore-case  e.g. (pairwise evidence)
+  --quiet  e.g. (pairwise evidence)
+  --silent  e.g. (pairwise evidence)
+  -1  e.g. "-B" "-1" "$(head -n1 input.txt)" "input.txt"
+  -D  e.g. (pairwise evidence)
+  -E  e.g. (pairwise evidence)
+  -F  e.g. (pairwise evidence)
+  -G  e.g. (pairwise evidence)
+  -H  e.g. (pairwise evidence)
   -I  e.g. "-e" "-I" "$(head -n1 input.txt)" "input.txt"
-  -L  e.g. "-f" "-L" "$(head -n1 input.txt)" "input.txt"
-  -P  e.g. "-d" "-P" "$(head -n1 input.txt)" "input.txt"
-  -R  e.g. "-f" "-R" "$(head -n1 input.txt)" "input.txt"
-  -T  e.g. "-d" "-T" "$(head -n1 input.txt)" "input.txt"
-  -U  e.g. "-f" "-U" "$(head -n1 input.txt)" "input.txt"
-  -V  e.g. "-d" "-V" "$(head -n1 input.txt)" "input.txt"
-  -Z  e.g. "-d" "-Z" "$(head -n1 input.txt)" "input.txt"
-  -a  e.g. "-d" "-a" "$(head -n1 input.txt)" "input.txt"
-  -b  e.g. "-f" "-b" "$(head -n1 input.txt)" "input.txt"
+  -L  e.g. (pairwise evidence)
+  -P  e.g. (pairwise evidence)
+  -R  e.g. (pairwise evidence)
+  -T  e.g. (pairwise evidence)
+  -U  e.g. (pairwise evidence)
+  -V  e.g. (pairwise evidence)
+  -Z  e.g. (pairwise evidence)
+  -a  e.g. "-e" "-a" "$(head -n1 input.txt)" "input.txt"
+  -b  e.g. (pairwise evidence)
   -c  e.g. "-e" "-c" "$(head -n1 input.txt)" "input.txt"
-  -e  e.g. "-d" "-e" "$(head -n1 input.txt)" "input.txt"
+  -e  e.g. "-e" "-I" "$(head -n1 input.txt)" "input.txt"
   -h  e.g. "-e" "-h" "$(head -n1 input.txt)" "input.txt"
-  -i  e.g. "-d" "-i" "$(head -n1 input.txt)" "input.txt"
+  -i  e.g. "-e" "-i" "$(head -n1 input.txt)" "input.txt"
   -l  e.g. "-e" "-l" "$(head -n1 input.txt)" "input.txt"
-  -m  e.g. "-f" "-m" "$(head -n1 input.txt)" "input.txt"
   -n  e.g. "-e" "-n" "$(head -n1 input.txt)" "input.txt"
-  -o  e.g. "-d" "-o" "$(head -n1 input.txt)" "input.txt"
-  -q  e.g. "-f" "-q" "$(head -n1 input.txt)" "input.txt"
-  -r  e.g. "-d" "-r" "$(head -n1 input.txt)" "input.txt"
-  -s  e.g. "-f" "-s" "$(head -n1 input.txt)" "input.txt"
-  -v  e.g. "-f" "-v" "$(head -n1 input.txt)" "input.txt"
+  -o  e.g. "-e" "-o" "$(head -n1 input.txt)" "input.txt"
+  -q  e.g. (pairwise evidence)
+  -r  e.g. "-e" "-r" "$(head -n1 input.txt)" "input.txt"
+  -s  e.g. "-e" "-s" "$(head -n1 input.txt)" "input.txt"
+  -v  e.g. (pairwise evidence)
   -w  e.g. "-e" "-w" "$(head -n1 input.txt)" "input.txt"
-  -x  e.g. "-d" "-x" "$(head -n1 input.txt)" "input.txt"
-  -z  e.g. "-d" "-z" "$(head -n1 input.txt)" "input.txt"
+  -x  e.g. (pairwise evidence)
+  -z  e.g. (pairwise evidence)
 

@@ -29,7 +29,7 @@ Behavioral probing finds three working invocation patterns:
 - `head input.txt` (single file)
 - `head input.txt other.txt` (multi-file, shows headers)
 
-Stdin probing confirms `head` accepts piped input. Value probing confirms `-c` and `-n` need numeric arguments (default value `1` works).
+Stdin probing confirms `head` accepts piped input. Value probing finds working arguments for `-c` and `-n`: metavar-based candidates (`1`, `0`, `2`, `10`, `100`) are tried in order; the first success (`1`) becomes the combo value, and all successes generate independent solo runs.
 
 ### Grid Execution
 
@@ -114,7 +114,13 @@ Help text provides flag candidates. Behavioral probing determines which invocati
 
 - **Arg patterns**: 7 candidates (no args, file, directory, two files, file+dir, pattern+file, pattern+dir) tested against the binary. Working patterns become run targets.
 - **Stdin**: binary tested with piped content. If accepted, stdin runs generated for each pattern × flag.
-- **Values**: flags with value hints (NUM, FILE, CHAR, etc.) get default `1`. If that fails, candidates (`auto`, `,`, `input.txt`, `.`, `0`) are tried. All candidates are tested; the one whose output differs most from the unflagged baseline is selected.
+- **Values**: multi-source candidate discovery, tried in order until one succeeds (exit ≤ 1):
+  1. *Help text mining* — quoted values (`'auto'`, `'always'`), brace enumerations (`{big|little}`), bracket character sets (`[doxn]`), extracted from flag descriptions including continuation lines.
+  2. *Metavar-based candidates* — per-type curated lists keyed by the metavar placeholder (NUM → `1,0,2,10,100`; FILE → `input.txt,other.txt`; CHAR → `",",":"` etc.).
+  3. *Error mining* — if all candidates fail, probe with a deliberately invalid value and parse stderr for "Valid arguments are:" to discover valid alternatives.
+  4. *Compound probing* — if a flag still fails solo, try it paired with each flag that has a working value (discovers compound requirements like cut needing `-d` AND `-f`).
+  The first working value becomes the stable combo value. All working values generate independent solo runs (additive evidence).
+- **Alias propagation**: short flags inherit metavar from their long alias (e.g., `-A` gets `NUM` from `--after-context=NUM`), so they're probed with proper values instead of consuming positional args.
 - **Subcommands**: common verbs probed as first positional arg. Classified as working, state-building, or needs-state.
 
 ## Delta Grouping

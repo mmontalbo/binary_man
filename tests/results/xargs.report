@@ -1,10 +1,10 @@
 # Exploration: xargs
 
 ## Rounds
-  round 0: 3 isolated cumulative, 20 identical in round (single-phase)
+  round 0: 6 isolated cumulative, 31 identical in round (single-phase)
 
-## Observed: 14/21 flags
-  1 solo, 13 via combination
+## Observed: 13/21 flags
+  2 solo, 11 via combination
   7 additional error-differentiated
 
 Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = --delimiter, -n = --max-args, -o = --open-tty, -p = --interactive, -r = --no-run-if-empty, -s = --max-chars, -t = --verbose, -x = --exit
@@ -15,6 +15,11 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
     base:
     flag:
       cherry apple banana
+  -a  # read arguments from FILE, not standard input
+    exemplar: "-a" "other.txt" in words_minimal (reordered)
+    base:
+    flag:
+      hello world
 
 ## Via combination (distinguishable when paired)
   --eof  e.g. (pairwise evidence)
@@ -25,12 +30,10 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
   -I  e.g. (pairwise evidence)
   -L  e.g. (pairwise evidence)
   -P  e.g. (pairwise evidence)
-  -a  e.g. (pairwise evidence)
-  -d  e.g. (pairwise evidence)
   -e  e.g. (pairwise evidence)
   -i  e.g. (pairwise evidence)
   -l  e.g. (pairwise evidence)
-  -n  e.g. (pairwise evidence)
+  -n  e.g. "-n" "1" "-a" "input.txt"
   -o  e.g. (pairwise evidence)
   -p  e.g. (pairwise evidence)
   -r  e.g. (pairwise evidence)

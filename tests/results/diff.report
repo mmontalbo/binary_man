@@ -1,31 +1,42 @@
 # Exploration: diff
 
 ## Rounds
-  round 0: 302 isolated cumulative, 100 identical in round (single-phase)
+  round 0: 184 isolated cumulative, 120 identical in round (single-phase)
 
 ## Observed: 49/53 flags
-  6 solo, 43 via combination
+  10 solo, 39 via combination
   4 additional error-differentiated
 
 Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -F = --show-function-line, -I = --ignore-matching-lines, -N = --new-file, -S = --starting-file, -T = --initial-tab, -W = --width, -X = --exclude-from, -Z = --ignore-trailing-space, -a = --text, -b = --ignore-space-change, -d = --minimal, -e = --ed, -i = --ignore-case, -l = --paginate, -n = --rcs, -p = --show-c-function, -q = --brief, -r = --recursive, -s = --report-identical-files, -t = --expand-tabs, -w = --ignore-all-space, -x = --exclude, -y = --side-by-side
 
 ## Solo (unique behavior)
-  --horizon-lines  # keep NUM lines of the common prefix and suffix
-    exemplar: "--horizon-lines=1" "input.txt" "other.txt" in formatted_minimal (-48 lines)
+  --from-file  # compare FILE1 to all operands; FILE1 can be a directory
+    exemplar: "--from-file=/dev/null" "input.txt" "other.txt" in words_minimal (+1440 lines)
     base:
-      1,24c1
-      < first line
-      < second line with trailing spaces
-      < 	indented with tab
-      <     indented with spaces
+      1,1512c1
+      < aardvark
+      < abbreviation
+      < about
+      < abstract
             ...
     flag:
-      1,24c1
-      < first line
-      < second line with trailing spaces
-      < 	indented with tab
-      <     indented with spaces
+      0a1,1512
+      > aardvark
+      > abbreviation
+      > about
+      > abstract
             ...
+  --line-format  # format all input lines with LFMT
+    exemplar: "--line-format=auto" "input.txt" "other.txt" in words_minimal (reordered)
+    base:
+      1,1512c1
+      < aardvark
+      < abbreviation
+      < about
+      < abstract
+            ...
+    flag:
+      autoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoautoauto
   --tabsize  # tab stops every NUM (default 8) print columns
     exemplar: "--tabsize=1" "input.txt" "other.txt" in formatted_minimal (-48 lines)
     base:
@@ -42,6 +53,22 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       < 	indented with tab
       <     indented with spaces
             ...
+  --to-file  # compare all operands to FILE2; FILE2 can be a directory
+    exemplar: "--to-file=/dev/null" "input.txt" "other.txt" in words_minimal (+1440 lines)
+    base:
+      1,1512c1
+      < aardvark
+      < abbreviation
+      < about
+      < abstract
+            ...
+    flag:
+      1,1512d0
+      < aardvark
+      < abbreviation
+      < about
+      < abstract
+            ...
   --unified
     exemplar: "--unified" "input.txt" "other.txt" in words_minimal (+1516 lines, exit 127→1)
     base:
@@ -52,14 +79,70 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       < abstract
             ...
     flag:
-      --- input.txt	2026-05-11 18:21:48.912640679 -0700
-      +++ other.txt	2026-05-11 18:21:48.912650067 -0700
+      --- input.txt	2026-05-12 00:58:58.614874124 -0700
+      +++ other.txt	2026-05-12 00:58:58.614885626 -0700
       @@ -1,1512 +1 @@
       -aardvark
       -abbreviation
             ...
   -D  # output merged file with '#ifdef NAME' diffs
+    exemplar: "-D" "x" "input.txt" "other.txt" in words_minimal (+1440 lines)
+    base:
+      1,1512c1
+      < aardvark
+      < abbreviation
+      < about
+      < abstract
+            ...
+    flag:
+      #ifndef x
+      aardvark
+      abbreviation
+      about
+      abstract
+            ...
+  -I  # ignore changes where all lines match RE
+    exemplar: "-I" "." "input.txt" "other.txt" in words_minimal (different)
+    base:
+      1,1512c1
+      < aardvark
+      < abbreviation
+      < about
+      < abstract
+            ...
+    flag:
   -W  # output at most NUM (default 130) print columns
+    exemplar: "-W" "1" "input.txt" "other.txt" in formatted_minimal (-48 lines)
+    base:
+      1,24c1
+      < first line
+      < second line with trailing spaces
+      < 	indented with tab
+      <     indented with spaces
+            ...
+    flag:
+      1,24c1
+      < first line
+      < second line with trailing spaces
+      < 	indented with tab
+      <     indented with spaces
+            ...
+  -X  # exclude files that match any pattern in FILE
+    exemplar: "-X" "input.txt" "input.txt" "other.txt" in formatted_minimal (-48 lines)
+    base:
+      1,24c1
+      < first line
+      < second line with trailing spaces
+      < 	indented with tab
+      <     indented with spaces
+            ...
+    flag:
+      1,24c1
+      < first line
+      < second line with trailing spaces
+      < 	indented with tab
+      <     indented with spaces
+            ...
   -u
     exemplar: "-u" "input.txt" "other.txt" in words_minimal (+1516 lines, exit 127→1)
     base:
@@ -70,59 +153,55 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       < abstract
             ...
     flag:
-      --- input.txt	2026-05-11 18:21:48.911505976 -0700
-      +++ other.txt	2026-05-11 18:21:48.911521996 -0700
+      --- input.txt	2026-05-12 00:58:58.614803942 -0700
+      +++ other.txt	2026-05-12 00:58:58.614818599 -0700
       @@ -1,1512 +1 @@
       -aardvark
       -abbreviation
             ...
 
 ## Via combination (distinguishable when paired)
-  --GTYPE-group-format  e.g. "-X" "--GTYPE-group-format=gfmt" "input.txt" "other.txt"
-  --LTYPE-line-format  e.g. "-D" "--LTYPE-line-format=lfmt" "input.txt" "other.txt"
+  --GTYPE-group-format  e.g. (pairwise evidence)
+  --LTYPE-line-format  e.g. (pairwise evidence)
   --color  e.g. "--unified" "--color" "input.txt" "other.txt"
-  --context  e.g. "-X" "--context" "input.txt" "other.txt"
-  --from-file  e.g. "--from-file=input.txt" "--unified" "input.txt" "other.txt"
+  --context  e.g. (pairwise evidence)
+  --horizon-lines  e.g. "-u" "--horizon-lines=1" "input.txt" "other.txt"
   --ignore-file-name-case  e.g. "-u" "--ignore-file-name-case" "input.txt" "other.txt"
-  --label  e.g. "-D" "--label=test" "input.txt" "other.txt"
-  --left-column  e.g. "-u" "--left-column" "input.txt" "other.txt"
-  --line-format  e.g. "-D" "--line-format=lfmt" "input.txt" "other.txt"
-  --no-dereference  e.g. "--no-dereference" "-u" "input.txt" "other.txt"
-  --no-ignore-file-name-case  e.g. "-D" "--no-ignore-file-name-case" "input.txt" "other.txt"
-  --normal  e.g. "-X" "--normal" "input.txt" "other.txt"
-  --palette  e.g. "--palette=palette" "--unified" "input.txt" "other.txt"
-  --speed-large-files  e.g. "--speed-large-files" "-u" "input.txt" "other.txt"
-  --strip-trailing-cr  e.g. "-D" "--strip-trailing-cr" "input.txt" "other.txt"
-  --suppress-blank-empty  e.g. "-D" "--suppress-blank-empty" "input.txt" "other.txt"
+  --label  e.g. "--label=test" "-u" "input.txt" "other.txt"
+  --left-column  e.g. "--left-column" "-u" "input.txt" "other.txt"
+  --no-dereference  e.g. "--unified" "--no-dereference" "input.txt" "other.txt"
+  --no-ignore-file-name-case  e.g. "--unified" "--no-ignore-file-name-case" "input.txt" "other.txt"
+  --normal  e.g. (pairwise evidence)
+  --palette  e.g. "--palette=1" "--unified" "input.txt" "other.txt"
+  --speed-large-files  e.g. "--speed-large-files" "--unified" "input.txt" "other.txt"
+  --strip-trailing-cr  e.g. "--strip-trailing-cr" "-u" "input.txt" "other.txt"
+  --suppress-blank-empty  e.g. "--suppress-blank-empty" "-u" "input.txt" "other.txt"
   --suppress-common-lines  e.g. "--unified" "--suppress-common-lines" "input.txt" "other.txt"
-  --to-file  e.g. "--to-file=input.txt" "-X" "input.txt" "other.txt"
-  --unidirectional-new-file  e.g. "-W" "--unidirectional-new-file" "input.txt" "other.txt"
-  -B  e.g. "-D" "-B" "input.txt" "other.txt"
-  -C  e.g. "-X" "-C" "input.txt" "other.txt"
-  -E  e.g. "--unified" "-E" "input.txt" "other.txt"
-  -F  e.g. "-W" "-F" "input.txt" "other.txt"
-  -I  e.g. "-D" "-I" "input.txt" "other.txt"
-  -N  e.g. "--unified" "-N" "input.txt" "other.txt"
-  -S  e.g. "-W" "-S" "input.txt" "other.txt"
-  -T  e.g. "-X" "-T" "input.txt" "other.txt"
-  -U  e.g. "-D" "-U" "input.txt" "other.txt"
-  -X  e.g. "-X" "--context" "input.txt" "other.txt"
-  -Z  e.g. "-Z" "-u" "input.txt" "other.txt"
-  -a  e.g. "-D" "-a" "input.txt" "other.txt"
-  -b  e.g. "-D" "-b" "input.txt" "other.txt"
-  -c  e.g. "-c" "--to-file=input.txt" "input.txt" "other.txt"
-  -d  e.g. "-X" "-d" "input.txt" "other.txt"
+  --unidirectional-new-file  e.g. "--unidirectional-new-file" "--unified" "input.txt" "other.txt"
+  -B  e.g. "--unified" "-B" "input.txt" "other.txt"
+  -C  e.g. "-U" "-C" "input.txt" "other.txt"
+  -E  e.g. "-u" "-E" "input.txt" "other.txt"
+  -F  e.g. "-F" "1" "-u" "input.txt" "other.txt"
+  -N  e.g. "-N" "-u" "input.txt" "other.txt"
+  -S  e.g. "--unified" "-S" "input.txt" "input.txt" "other.txt"
+  -T  e.g. (pairwise evidence)
+  -U  e.g. "-U" "-C" "input.txt" "other.txt"
+  -Z  e.g. "--unified" "-Z" "input.txt" "other.txt"
+  -a  e.g. "--unified" "-a" "input.txt" "other.txt"
+  -b  e.g. "--unified" "-b" "input.txt" "other.txt"
+  -c  e.g. (pairwise evidence)
+  -d  e.g. "-u" "-d" "input.txt" "other.txt"
   -e  e.g. "-l" "-e" "input.txt" "other.txt"
-  -i  e.g. "-u" "-i" "input.txt" "other.txt"
-  -l  e.g. "-l" "-e" "input.txt" "other.txt"
-  -n  e.g. "-W" "-n" "input.txt" "other.txt"
-  -p  e.g. "-p" "-u" "input.txt" "other.txt"
-  -q  e.g. "-X" "-q" "input.txt" "other.txt"
-  -r  e.g. "-r" "--unified" "input.txt" "other.txt"
-  -s  e.g. "-D" "-s" "input.txt" "other.txt"
+  -i  e.g. "-i" "-u" "input.txt" "other.txt"
+  -l  e.g. "-l" "--unified" "input.txt" "other.txt"
+  -n  e.g. "-l" "-n" "input.txt" "other.txt"
+  -p  e.g. "-p" "--unified" "input.txt" "other.txt"
+  -q  e.g. (pairwise evidence)
+  -r  e.g. "-u" "-r" "input.txt" "other.txt"
+  -s  e.g. "--unified" "-s" "input.txt" "other.txt"
   -t  e.g. "-u" "-t" "input.txt" "other.txt"
-  -v  e.g. "-W" "-v" "input.txt" "other.txt"
+  -v  e.g. "-X" "input.txt" "-v" "input.txt" "other.txt"
   -w  e.g. "-u" "-w" "input.txt" "other.txt"
-  -x  e.g. "-W" "-x" "input.txt" "other.txt"
+  -x  e.g. "-u" "-x" ".*" "input.txt" "other.txt"
   -y  e.g. "-y" "-l" "input.txt" "other.txt"
 

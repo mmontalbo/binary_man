@@ -1,32 +1,17 @@
 # Exploration: fmt
 
 ## Rounds
-  round 0: 20 isolated cumulative, 55 identical in round (single-phase)
+  round 0: 74 isolated cumulative, 69 identical in round (single-phase)
 
 ## Observed: 7/7 flags
   3 solo, 4 via combination
+  1 behavioral aliases detected
 
 Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t = --tagged-paragraph, -u = --uniform-spacing, -w = --width
 
 ## Solo (unique behavior)
   -g  # goal width (default of 93% of width)
-    exemplar: "-g" "$(head -n1 input.txt)" "input.txt" in numbers_minimal (different)
-    base:
-      0 1 1.00 $1.00 1/2 1E2 1E02 1E+02 -1 -1.00 -$1.00 -1/2 -1E2 -1E02 -1E+02
-      1/0 0/0 -2147483648/-1 -9223372036854775808/-1 -0 -0.0 +0 +0.0 0.00 0..0 .
-      0.0.0 0,00 0,,0 , 0,0,0 0.0/0 1.0/0.0 0.0/0.0 1,0/0,0 0,0/0,0 --1 - -.  -,
-      999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999
-      NaN Infinity -Infinity INF 1#INF -1#IND 1#QNAN 1#SNAN 1#IND 0x0 0xffffffff
-            ...
-    flag:
-      0 1 1.00
-      $1.00 1/2
-      1E2 1E02
-      1E+02 -1
-      -1.00
-            ...
-  -p  # reformat only lines beginning with STRING,
-    exemplar: "-p" "input.txt" "other.txt" in words_minimal (-1 lines)
+    exemplar: "-g" "0" "input.txt" "other.txt" in words_minimal (+1357 lines)
     base:
       aardvark abbreviation about abstract accept accepted accepting access
       accommodate acknowledge across Africa afternoon again against aggregate
@@ -35,27 +20,40 @@ Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t 
       approximately architect Argentina around arrange Asia assembly
             ...
     flag:
-      hello world
-  -w  # maximum line width (default of 75 columns)
-    exemplar: "-w" "$(head -n1 input.txt)" "input.txt" in numbers_minimal (different)
+      aardvark
+      abbreviation
+      about
+      abstract
+      accept
+            ...
+  -p  # reformat only lines beginning with STRING, reattaching the prefix to reformatted lines
+    exemplar: "-p" "test" "input.txt" "other.txt" in numbers_standard / input.txt=size:1 (-71 lines)
     base:
-      0 1 1.00 $1.00 1/2 1E2 1E02 1E+02 -1 -1.00 -$1.00 -1/2 -1E2 -1E02 -1E+02
-      1/0 0/0 -2147483648/-1 -9223372036854775808/-1 -0 -0.0 +0 +0.0 0.00 0..0 .
-      0.0.0 0,00 0,,0 , 0,0,0 0.0/0 1.0/0.0 0.0/0.0 1,0/0,0 0,0/0,0 --1 - -.  -,
-      999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999
-      NaN Infinity -Infinity INF 1#INF -1#IND 1#QNAN 1#SNAN 1#IND 0x0 0xffffffff
+      x
+      other content second line
+    flag:
+      xother content
+      second line
+  -w  # maximum line width (default of 75 columns)
+    exemplar: "-w" "10" "input.txt" "other.txt" in words_minimal (+1322 lines)
+    base:
+      aardvark abbreviation about abstract accept accepted accepting access
+      accommodate acknowledge across Africa afternoon again against aggregate
+      ahead algorithm Alice all already also although always Amazon American
+      among an and another answer Apache apostrophe Apple application
+      approximately architect Argentina around arrange Asia assembly
             ...
     flag:
-      0
-      1
-      1.00
-      $1.00
-      1/2
+      aardvark
+      abbreviation
+      about
+      abstract
+      accept
             ...
 
 ## Via combination (distinguishable when paired)
   -c  e.g. (pairwise evidence)
-  -s  e.g. "-s" "-p" "$(head -n1 input.txt)" "input.txt"
-  -t  e.g. "-t" "-p" "$(head -n1 input.txt)" "input.txt"
+  -s  e.g. (pairwise evidence)
+  -t  e.g. (pairwise evidence)
   -u  e.g. (pairwise evidence)
 

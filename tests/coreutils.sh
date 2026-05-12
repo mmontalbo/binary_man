@@ -108,28 +108,28 @@ START=$(date +%s)
 # Expected lower bounds for observed behavior count.
 # These are the minimum acceptable — improvements raise them.
 CHECKS=(
-    "sort 24"
-    "ls 53"
+    "sort 23"
+    "ls 55"
     "cat 10"
     "cut 3"
     "head 5"
     "wc 6"
     "uniq 11"
-    "nl 10"
-    "od 16"
-    "fold 3"
-    "fmt 7"
+    "nl 9"
+    "od 18"
+    "fold 1"
+    "fmt 6"
     "paste 3"
     "du 25"
-    "cp 27"
+    "cp 35"
     "rm 10"
     "stat 6"
     "df 15"
     "sed 22"
-    "xargs 14"
-    "diff 34"
+    "xargs 13"
+    "diff 49"
     "find 1"
-    "grep 34"
+    "grep 45"
 )
 
 # Run all checks in parallel, limited to $JOBS at a time

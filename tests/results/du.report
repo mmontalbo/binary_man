@@ -1,16 +1,17 @@
 # Exploration: du
 
 ## Rounds
-  round 0: 192 isolated cumulative, 199 identical in round (single-phase)
+  round 0: 93 isolated cumulative, 242 identical in round (single-phase)
 
 ## Observed: 25/26 flags
-  10 solo, 15 via combination
+  8 solo, 17 via combination
   1 additional error-differentiated
+  1 behavioral aliases detected
 
 Aliases: -0 = --null, -B = --block-size, -D = --dereference-args, -L = --dereference, -P = --no-dereference, -S = --separate-dirs, -X = --exclude-from, -a = --all, -b = --bytes, -c = --total, -d = --max-depth, -h = --human-readable, -l = --count-links, -s = --summarize, -t = --threshold, -x = --one-file-system
 
 ## Solo (unique behavior)
-  --apparent-size  # print apparent sizes rather than device usage; although
+  --apparent-size  # print apparent sizes rather than device usage; although the apparent size is usually smaller, it may be larger due to holes in ('sparse') files, internal fragmentation, indirect blocks, and the like
     exemplar: "--apparent-size" "input.txt" "other.txt" in words_minimal (reordered)
     base:
       12	input.txt
@@ -26,11 +27,10 @@ Aliases: -0 = --null, -B = --block-size, -D = --dereference-args, -L = --derefer
     flag:
       0	input.txt
       8	subdir
-  --files0-from  # summarize device usage of the
-    exemplar: "--files0-from=f" in numbers_standard (different)
+  --files0-from  # summarize device usage of the NUL-terminated file names specified in file F; if F is -, then read names from standard input
+    exemplar: "--files0-from=1" in words_minimal (different)
     base:
-      8	./subdir
-      36	.
+      20	.
     flag:
   --inodes  # list inode usage information instead of block usage
     exemplar: "--inodes" "input.txt" "other.txt" in numbers_standard / input.txt=empty (different)
@@ -48,34 +48,30 @@ Aliases: -0 = --null, -B = --block-size, -D = --dereference-args, -L = --derefer
     flag:
       13k	input.txt
       4.1k	other.txt
-  --time  # show time as WORD instead of modification time:
+  --time  # show time as WORD instead of modification time: atime, access, use, ctime or status
     exemplar: "--time" "input.txt" "other.txt" in words_minimal (reordered)
     base:
       12	input.txt
       4	other.txt
     flag:
-      12	2026-05-11 18:21	input.txt
-      4	2026-05-11 18:21	other.txt
-  -B  # scale sizes by SIZE before printing them; e.g.,
-    exemplar: "-B" in numbers_standard (different)
-    base:
-      8	./subdir
-      36	.
-    flag:
-  -X  # exclude files that match any pattern in FILE
-    exemplar: "-X" "input.txt" "other.txt" in words_minimal (different)
+      12	2026-05-12 00:58	input.txt
+      4	2026-05-12 00:58	other.txt
+  -B  # scale sizes by SIZE before printing them; e.g., '-BM' prints sizes in units of 1,048,576 bytes; see SIZE format below
+    exemplar: "-B" "2" "input.txt" "other.txt" in words_minimal (reordered)
     base:
       12	input.txt
       4	other.txt
     flag:
-      4	other.txt
-  -d  # print the total for a directory (or file, with --all)
-    exemplar: "-d" "$(head -n1 input.txt)" "." in numbers_standard (different)
+      6144	input.txt
+      2048	other.txt
+  -X  # exclude files that match any pattern in FILE
+    exemplar: "-X" "input.txt" "input.txt" "subdir" in numbers_standard / input.txt=empty (+1 lines, exit 1→0)
     base:
-      8	./subdir
-      36	.
+      0	input.txt
+      8	subdir
     flag:
-      36	.
+      0	input.txt
+      8	subdir
   -m  # like --block-size=1M
     exemplar: "-m" "input.txt" "subdir" in words_standard (+1 lines, exit 1→0)
     base:
@@ -84,27 +80,23 @@ Aliases: -0 = --null, -B = --block-size, -D = --dereference-args, -L = --derefer
     flag:
       1	input.txt
       1	subdir
-  -t  # exclude entries smaller than SIZE if positive,
-    exemplar: "-t" "$(head -n1 input.txt)" "input.txt" in numbers_standard (different)
-    base:
-      4	input.txt
-    flag:
-      4	input.txt
 
 ## Via combination (distinguishable when paired)
-  --time-style  e.g. "-X" "--time-style=auto" "$(head -n1 input.txt)" "."
-  -0  e.g. "-B" "-0" "$(head -n1 input.txt)" "."
-  -D  e.g. "-t" "-D" "$(head -n1 input.txt)" "."
-  -H  e.g. "-X" "-H" "$(head -n1 input.txt)" "."
-  -L  e.g. "-t" "-L" "$(head -n1 input.txt)" "."
-  -P  e.g. "-X" "-P" "$(head -n1 input.txt)" "."
-  -S  e.g. "-t" "-S" "$(head -n1 input.txt)" "."
-  -a  e.g. "-B" "-a" "$(head -n1 input.txt)" "."
-  -b  e.g. "-t" "-b" "$(head -n1 input.txt)" "."
-  -c  e.g. "-c" "-t" "$(head -n1 input.txt)" "."
-  -h  e.g. "-h" "-d" "$(head -n1 input.txt)" "."
-  -k  e.g. "-t" "-k" "$(head -n1 input.txt)" "."
-  -l  e.g. "-t" "-l" "$(head -n1 input.txt)" "."
-  -s  e.g. "-B" "-s" "$(head -n1 input.txt)" "."
-  -x  e.g. "-B" "-x" "$(head -n1 input.txt)" "."
+  --time-style  e.g. (pairwise evidence)
+  -0  e.g. (pairwise evidence)
+  -D  e.g. (pairwise evidence)
+  -H  e.g. (pairwise evidence)
+  -L  e.g. (pairwise evidence)
+  -P  e.g. (pairwise evidence)
+  -S  e.g. (pairwise evidence)
+  -a  e.g. (pairwise evidence)
+  -b  e.g. (pairwise evidence)
+  -c  e.g. (pairwise evidence)
+  -d  e.g. (pairwise evidence)
+  -h  e.g. (pairwise evidence)
+  -k  e.g. (pairwise evidence)
+  -l  e.g. (pairwise evidence)
+  -s  e.g. (pairwise evidence)
+  -t  e.g. (pairwise evidence)
+  -x  e.g. (pairwise evidence)
 

@@ -1,20 +1,33 @@
 # Exploration: fold
 
 ## Rounds
-  round 0: 14 isolated cumulative, 27 identical in round (single-phase)
+  round 0: 36 isolated cumulative, 39 identical in round (single-phase)
 
-## Observed: 3/3 flags
-  1 solo, 2 via combination
+## Observed: 1/3 flags
+  1 solo, 0 via combination
+  2 indistinguishable under tested conditions
 
 Aliases: -b = --bytes, -s = --spaces, -w = --width
 
 ## Solo (unique behavior)
   -w  # use WIDTH columns instead of 80
-    exemplar: "-w" in numbers_minimal (different)
+    exemplar: "-w" "2" "input.txt" "other.txt" in numbers_minimal (+302 lines)
     base:
+      0
+      1
+      1.00
+      $1.00
+      1/2
+            ...
     flag:
+      0
+      1
+      1.
+      00
+      $1
+            ...
 
-## Via combination (distinguishable when paired)
-  -b  e.g. "-w" "-b" "$(head -n1 input.txt)" "input.txt"
-  -s  e.g. "-w" "-s" "$(head -n1 input.txt)" "input.txt"
+## Indistinguishable under tested conditions
+  UNEXPLAINED (2): -b, -s
+  UNEXPLAINED (2): -b, -s
 

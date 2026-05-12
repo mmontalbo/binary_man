@@ -1,29 +1,24 @@
 # Exploration: cut
 
 ## Rounds
-  round 0: 10 isolated cumulative, 16 identical in round (single-phase)
+  round 0: 0 isolated cumulative, 12 identical in round (single-phase)
 
 ## Observed: 3/10 flags
-  1 solo, 2 via combination
-  7 additional error-differentiated
-  1 behavioral aliases detected
+  0 solo, 3 via combination
+  6 additional error-differentiated
 
 Aliases: -b = --bytes, -c = --characters, -d = --delimiter, -f = --fields, -s = --only-delimited, -z = --zero-terminated
 
 ## Solo (unique behavior)
-  -f  # select only these fields;  also print any line
-    exemplar: "-f" "input.txt" in words_minimal (different)
-    base:
-    flag:
 
 ## Via combination (distinguishable when paired)
   --complement  e.g. (pairwise evidence)
   --output-delimiter  e.g. (pairwise evidence)
-  -M  e.g. "-f" "-M" "input.txt"
-  -b  e.g. "-f" "-b" "input.txt"
-  -c  e.g. "-b" "-c" "input.txt"
-  -d  e.g. "-f" "-d" "input.txt"
-  -n  e.g. "-f" "-n" "input.txt"
-  -s  e.g. "-f" "-s" "input.txt"
-  -z  e.g. "-f" "-z" "input.txt"
+  -M  e.g. (pairwise evidence)
+  -b  e.g. (pairwise evidence)
+  -c  e.g. (pairwise evidence)
+  -f  e.g. (pairwise evidence)
+  -n  e.g. (pairwise evidence)
+  -s  e.g. (pairwise evidence)
+  -z  e.g. (pairwise evidence)
 

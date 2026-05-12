@@ -1,7 +1,7 @@
 # Exploration: wc
 
 ## Rounds
-  round 0: 14 isolated cumulative, 45 identical in round (single-phase)
+  round 0: 12 isolated cumulative, 46 identical in round (single-phase)
 
 ## Observed: 6/7 flags
   1 solo, 5 via combination
@@ -10,17 +10,18 @@
 Aliases: -L = --max-line-length, -c = --bytes, -l = --lines, -m = --chars, -w = --words
 
 ## Solo (unique behavior)
-  --files0-from  # read input from the files specified by
-    exemplar: "--files0-from=f" in words_minimal (different)
+  --files0-from  # read input from the files specified by NUL-terminated names in file F; If F is - then read names from standard input
+    exemplar: "--files0-from=1" in words_minimal (different)
     base:
             0       0       0
     flag:
-  --total  # when to print a line with total counts;
-    exemplar: "--total=auto" in words_minimal (different)
+  --total  # when to print a line with total counts; WHEN can be: auto, always, only, never
+    exemplar: "--total=always" in words_minimal (different)
     base:
             0       0       0
     flag:
             0       0       0
+            0       0       0 total
 
 ## Via combination (distinguishable when paired)
   -L  e.g. (pairwise evidence)

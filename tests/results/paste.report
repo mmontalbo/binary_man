@@ -1,7 +1,7 @@
 # Exploration: paste
 
 ## Rounds
-  round 0: 11 isolated cumulative, 23 identical in round (single-phase)
+  round 0: 5 isolated cumulative, 22 identical in round (single-phase)
 
 ## Observed: 3/3 flags
   2 solo, 1 via combination
@@ -10,7 +10,7 @@ Aliases: -d = --delimiters, -s = --serial, -z = --zero-terminated
 
 ## Solo (unique behavior)
   -d  # reuse characters from LIST instead of TABs
-    exemplar: "-d" "input.txt" "other.txt" in words_minimal (-1 lines)
+    exemplar: "-d" "1" "input.txt" "other.txt" in words_minimal (+1441 lines)
     base:
       aardvark	hello world
       abbreviation	
@@ -19,7 +19,12 @@ Aliases: -d = --delimiters, -s = --serial, -z = --zero-terminated
       accept	
             ...
     flag:
-      hello world
+      aardvark1hello world
+      abbreviation1
+      about1
+      abstract1
+      accept1
+            ...
   -s  # paste one file at a time instead of in parallel
     exemplar: "-s" in words_minimal (different)
     base:

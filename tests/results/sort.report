@@ -1,17 +1,17 @@
 # Exploration: sort
 
 ## Rounds
-  round 0: 177 isolated cumulative, 157 identical in round (single-phase)
+  round 0: 103 isolated cumulative, 157 identical in round (single-phase)
 
-## Observed: 24/30 flags
-  7 solo, 17 via combination
-  6 additional error-differentiated
+## Observed: 23/30 flags
+  4 solo, 19 via combination
+  7 additional error-differentiated
 
 Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --temporary-directory, -V = --version-sort, -b = --ignore-leading-blanks, -d = --dictionary-order, -f = --ignore-case, -g = --general-numeric-sort, -h = --human-numeric-sort, -i = --ignore-nonprinting, -k = --key, -m = --merge, -n = --numeric-sort, -o = --output, -r = --reverse, -s = --stable, -t = --field-separator, -u = --unique, -z = --zero-terminated
 
 ## Solo (unique behavior)
-  --batch-size  # merge at most NMERGE inputs at once;
-  --debug  # annotate the part of the line used to sort,
+  --batch-size  # merge at most NMERGE inputs at once; for more use temp files
+  --debug  # annotate the part of the line used to sort, and warn about questionable usage to stderr
     exemplar: "--debug" "input.txt" in words_minimal (+2882 lines)
     base:
       Africa
@@ -27,8 +27,8 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       _____
       Amazon
             ...
-  --files0-from  # read input from the files specified by
-  --sort  # sort according to WORD:
+  --files0-from  # read input from the files specified by NUL-terminated names in file F; If F is - then read names from standard input
+  --sort  # sort according to WORD: general-numeric -g, human-numeric -h, month -M, numeric -n, random -R, version -V
     exemplar: "--sort=auto" in words_minimal (different)
     base:
     flag:
@@ -36,6 +36,7 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
     exemplar: "-C" in words_minimal (different)
     base:
     flag:
+  -M  # compare (unknown) < 'JAN' < ... < 'DEC'
   -R  # shuffle, but group identical keys.  See shuf(1)
     exemplar: "-R" "input.txt" in words_minimal (+1512 lines, exit 127→0)
     base:
@@ -46,15 +47,14 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       Apache
             ...
     flag:
-      who
-      somehow
-      early
-      to
-      case-sensitive
+      tail
+      deliver
+      knee
+      several
+      heart
             ...
   -S  # use SIZE for main memory buffer
-  -T  # use DIR for temporaries, not $TMPDIR or /tmp;
-    exemplar: "-T" "input.txt" "other.txt" in words_deep (+1 lines)
+    exemplar: "-S" "1" "input.txt" in words_minimal (+1441 lines)
     base:
       Africa
       Alice
@@ -63,40 +63,37 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       Apache
             ...
     flag:
-      deep other
-      line three
-      line two
-  -k  # sort via a key; KEYDEF gives location and type
+      Africa
+      Alice
+      Amazon
+      American
+      Apache
+            ...
   -o  # write result to FILE instead of standard output
     exemplar: "-o" "input.txt" in words_minimal (different)
     base:
-      Africa
-      Alice
-      Amazon
-      American
-      Apache
-            ...
     flag:
-  -t  # use SEP instead of non-blank to blank transition
 
 ## Via combination (distinguishable when paired)
-  --check  e.g. "-t" "--check" "input.txt" "other.txt"
-  --compress-program  e.g. "-R" "--compress-program=prog" "input.txt" "other.txt"
-  --parallel  e.g. "-o" "--parallel=1" "input.txt" "other.txt"
-  --random-source  e.g. "-t" "--random-source=input.txt" "input.txt" "other.txt"
-  -M  e.g. "-k" "-M" "input.txt" "other.txt"
-  -V  e.g. "-V" "-R" "input.txt" "other.txt"
-  -b  e.g. "-k" "-b" "input.txt" "other.txt"
-  -c  e.g. "-S" "-c" "input.txt" "other.txt"
-  -d  e.g. "-S" "-d" "input.txt" "other.txt"
+  --check  e.g. "--batch-size" "--check" "input.txt" "other.txt"
+  --compress-program  e.g. "--compress-program=1" "-S" "1" "input.txt" "other.txt"
+  --parallel  e.g. "--parallel=1" "-R" "input.txt" "other.txt"
+  --random-source  e.g. "--batch-size" "--random-source=input.txt" "input.txt" "other.txt"
+  -T  e.g. "-R" "-T" "." "input.txt" "other.txt"
+  -V  e.g. "--batch-size" "-V" "input.txt" "other.txt"
+  -b  e.g. "--batch-size" "-b" "input.txt" "other.txt"
+  -c  e.g. "--batch-size" "-c" "input.txt" "other.txt"
+  -d  e.g. "-R" "-d" "input.txt" "other.txt"
   -f  e.g. "-R" "-f" "input.txt" "other.txt"
-  -g  e.g. "-k" "-g" "input.txt" "other.txt"
-  -h  e.g. "-t" "-h" "input.txt" "other.txt"
+  -g  e.g. "--batch-size" "-g" "input.txt" "other.txt"
+  -h  e.g. "--batch-size" "-h" "input.txt" "other.txt"
   -i  e.g. "-i" "-R" "input.txt" "other.txt"
-  -m  e.g. "-k" "-m" "input.txt" "other.txt"
-  -n  e.g. "-o" "-n" "input.txt" "other.txt"
-  -r  e.g. "-R" "-r" "input.txt" "other.txt"
-  -s  e.g. "-s" "-R" "input.txt" "other.txt"
-  -u  e.g. "-k" "-u" "input.txt" "other.txt"
-  -z  e.g. "-o" "-z" "input.txt" "other.txt"
+  -k  e.g. "--batch-size" "-k" "1" "input.txt" "other.txt"
+  -m  e.g. "-m" "-R" "input.txt" "other.txt"
+  -n  e.g. "--batch-size" "-n" "input.txt" "other.txt"
+  -r  e.g. "--batch-size" "-r" "input.txt" "other.txt"
+  -s  e.g. "--batch-size" "-s" "input.txt" "other.txt"
+  -t  e.g. "-R" "-t" "," "input.txt" "other.txt"
+  -u  e.g. "--batch-size" "-u" "input.txt" "other.txt"
+  -z  e.g. "-z" "-R" "input.txt" "other.txt"
 
