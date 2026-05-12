@@ -1,7 +1,7 @@
 # Exploration: nl
 
 ## Rounds
-  round 0: 98 isolated cumulative, 69 identical in round (single-phase)
+  round 0: 138 isolated cumulative, 69 identical in round (single-phase)
 
 ## Observed: 10/11 flags
   9 solo, 1 via combination
@@ -129,5 +129,5 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
     flag:
 
 ## Via combination (distinguishable when paired)
-  -p  e.g. "-b" "-p" "$(head -n1 input.txt)" "input.txt"
+  -p  e.g. "-f" "-p" "$(head -n1 input.txt)" "input.txt"
 

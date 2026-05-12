@@ -1,7 +1,7 @@
 # Exploration: od
 
 ## Rounds
-  round 0: 189 isolated cumulative, 143 identical in round (single-phase)
+  round 0: 215 isolated cumulative, 144 identical in round (single-phase)
 
 ## Observed: 18/21 flags
   15 solo, 3 via combination
@@ -238,7 +238,7 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
             ...
 
 ## Via combination (distinguishable when paired)
-  --width  e.g. "-t" "--width" "$(head -n1 input.txt)" "."
-  -v  e.g. "-N" "-v" "$(head -n1 input.txt)" "."
-  -w  e.g. "-t" "-w" "$(head -n1 input.txt)" "."
+  --width  e.g. "-j" "--width" "$(head -n1 input.txt)" "."
+  -v  e.g. "-S" "-v" "$(head -n1 input.txt)" "."
+  -w  e.g. "-S" "-w" "$(head -n1 input.txt)" "."
 

@@ -66,7 +66,7 @@ pub struct BehaviorGroup {
 // are natural alignment anchors. Value-level precision: "root" ≠ "0" → ls -l vs ls -n.
 
 /// Token-level edit operation. Values are the raw token strings.
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug, Hash)]
 enum TokenEdit {
     Keep(String),
     Insert(String),
@@ -75,7 +75,7 @@ enum TokenEdit {
 }
 
 /// Line-level edit operation.
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug, Hash)]
 enum LineEdit {
     Same,
     Modified(Vec<TokenEdit>),
@@ -84,7 +84,7 @@ enum LineEdit {
 }
 
 /// Structural delta for an output channel (stdout or stderr).
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug, Hash)]
 enum OutputDelta {
     Identical,
     Permutation(Vec<usize>),
@@ -224,7 +224,7 @@ fn compute_output_delta(ref_out: &str, obs_out: &str) -> OutputDelta {
 /// token pattern of the raw observation.
 ///
 /// Two runs group together when their ObsKeys match across all contexts.
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Hash)]
 struct ObsKey {
     stdout: OutputDelta,
     stderr: OutputDelta,
@@ -254,35 +254,6 @@ impl ObsKey {
         }
     }
 
-    /// Compute a structural delta: what transformation did this flag apply to the base?
-    ///
-    /// Uses two-level NW alignment on content-hashed tokens. The resulting edit
-    /// script captures the shape of the transformation (which lines were inserted,
-    /// deleted, or modified, and within modified lines, which tokens changed).
-    /// Shared tokens (filenames, keywords) serve as natural anchors for alignment.
-    fn from_delta(reference: &Observation, obs: &Observation) -> Self {
-        let stdout = compute_output_delta(&reference.stdout, &obs.stdout);
-        let stderr = compute_output_delta(&reference.stderr, &obs.stderr);
-
-        let exit_code = if reference.exit_code == obs.exit_code {
-            reference.exit_code
-        } else {
-            Some(reference.exit_code.unwrap_or(0) * 1000 + obs.exit_code.unwrap_or(0))
-        };
-
-        // FS changes: set difference, filtering mtime-only modifications.
-        // Mtime changes from directory entry creation are timing-dependent
-        // (second-level granularity makes detection a coin flip), not behavioral signal.
-        let ref_fs: HashSet<&execute::FsChange> = reference.fs_changes.iter().collect();
-        let obs_fs: HashSet<&execute::FsChange> = obs.fs_changes.iter().collect();
-        let mut fs_changes: Vec<execute::FsChange> = obs_fs.difference(&ref_fs)
-            .filter(|c| !matches!(c, execute::FsChange::Modified { detail, .. } if detail == "mtime changed"))
-            .map(|c| (*c).clone())
-            .collect();
-        fs_changes.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
-
-        ObsKey { stdout, stderr, exit_code, fs_changes }
-    }
 }
 
 impl BehaviorGroup {
@@ -401,6 +372,16 @@ pub fn analyze(
     }
     let mut run_obs_keys: Vec<RunObsEntry> = Vec::new();
 
+    // Cache NW delta results by (ref_stdout_hash, obs_stdout_hash) to avoid
+    // recomputing for combo runs that produce identical output.
+    let mut delta_cache: HashMap<(u64, u64), OutputDelta> = HashMap::new();
+    let str_hash = |s: &str| -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        s.hash(&mut h);
+        h.finish()
+    };
+
     for (ri, run) in script.runs.iter().enumerate() {
         let args_str = output::format_args(&run.args);
 
@@ -423,7 +404,32 @@ pub fn analyze(
             obs_list.iter().map(|(name, obs)| {
                 let ref_obs = obs_by_args.get(&(ref_args.as_slice(), *name));
                 let key = match ref_obs {
-                    Some(ref_obs) => ObsKey::from_delta(ref_obs, obs),
+                    Some(ref_obs) => {
+                        // Cache stdout/stderr deltas by content hash
+                        let stdout_key = (str_hash(&ref_obs.stdout), str_hash(&obs.stdout));
+                        let stdout = delta_cache.entry(stdout_key)
+                            .or_insert_with(|| compute_output_delta(&ref_obs.stdout, &obs.stdout))
+                            .clone();
+                        let stderr_key = (str_hash(&ref_obs.stderr), str_hash(&obs.stderr));
+                        let stderr = delta_cache.entry(stderr_key)
+                            .or_insert_with(|| compute_output_delta(&ref_obs.stderr, &obs.stderr))
+                            .clone();
+
+                        let exit_code = if ref_obs.exit_code == obs.exit_code {
+                            ref_obs.exit_code
+                        } else {
+                            Some(ref_obs.exit_code.unwrap_or(0) * 1000 + obs.exit_code.unwrap_or(0))
+                        };
+
+                        let ref_fs: HashSet<&execute::FsChange> = ref_obs.fs_changes.iter().collect();
+                        let obs_fs: HashSet<&execute::FsChange> = obs.fs_changes.iter().collect();
+                        let mut fs_changes: Vec<execute::FsChange> = obs_fs.difference(&ref_fs)
+                            .filter(|c| !matches!(c, execute::FsChange::Modified { detail, .. } if detail == "mtime changed"))
+                            .map(|c| (*c).clone()).collect();
+                        fs_changes.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
+
+                        ObsKey { stdout, stderr, exit_code, fs_changes }
+                    }
                     None => ObsKey::from_obs(obs),
                 };
                 (name.to_string(), key)
@@ -550,26 +556,39 @@ pub fn analyze(
     }
 
     // --- Group runs into BehaviorGroups ---
+    // Hash-based grouping: O(runs × contexts) instead of O(runs × groups × contexts).
+    // Each run's per-context obs keys are hashed to a u64 for fast lookup.
     let mut behavior_groups: Vec<BehaviorGroup> = Vec::new();
+    let mut group_index: HashMap<u64, Vec<usize>> = HashMap::new();
 
     for analysis in &run_analyses {
         let ri = analysis.run_index;
 
-        // Find the obs_keys for this run
         let obs_entry = run_obs_keys.iter()
             .find(|e| e.run_index == ri);
 
         let Some(entry) = obs_entry else { continue };
         let keys = &entry.keys;
 
-        // Try to find an existing group with identical per-context observations
-        let found = behavior_groups.iter_mut().find(|g| {
-            g.from_ref.as_ref() == analysis.from_ref.as_ref()
-            && g.obs_list.len() == keys.len()
-            && g.obs_list.iter().zip(keys.iter()).all(|((_, a), (_, b))| a == b)
+        // Hash the grouping key: from_ref + per-context obs keys
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        analysis.from_ref.hash(&mut hasher);
+        keys.hash(&mut hasher);
+        let h = hasher.finish();
+
+        // Look up candidate groups by hash, verify with equality
+        let found = group_index.get(&h).and_then(|indices| {
+            indices.iter().find(|&&gi| {
+                let g = &behavior_groups[gi];
+                g.from_ref.as_ref() == analysis.from_ref.as_ref()
+                && g.obs_list.len() == keys.len()
+                && g.obs_list.iter().zip(keys.iter()).all(|((_, a), (_, b))| a == b)
+            }).copied()
         });
 
-        if let Some(group) = found {
+        if let Some(gi) = found {
+            let group = &mut behavior_groups[gi];
             group.run_indices.push(ri);
             group.run_labels.push(analysis.args_str.clone());
             if let Some(ref diff) = analysis.vs_diff {
@@ -581,6 +600,8 @@ pub fn analyze(
                 }
             }
         } else {
+            let gi = behavior_groups.len();
+            group_index.entry(h).or_default().push(gi);
             let mut vs_diffs = Vec::new();
             if let Some(ref diff) = analysis.vs_diff {
                 vs_diffs.push((analysis.args_str.clone(), diff.clone()));

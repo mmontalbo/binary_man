@@ -1,7 +1,7 @@
 # Exploration: grep
 
 ## Rounds
-  round 0: 150 isolated cumulative, 53 identical in round (single-phase)
+  round 0: 121 isolated cumulative, 147 identical in round (single-phase)
 
 ## Observed: 42/49 flags
   4 solo, 38 via combination
@@ -54,48 +54,48 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
   -f  # take PATTERNS from FILE
 
 ## Via combination (distinguishable when paired)
-  --binary-files  e.g. "-f" "--binary-files=auto" "$(head -n1 input.txt)" "input.txt"
-  --color  e.g. "-d" "--color" "$(head -n1 input.txt)" "input.txt"
+  --binary-files  e.g. "-d" "--binary-files=auto" "$(head -n1 input.txt)" "input.txt"
+  --color  e.g. "-f" "--color" "$(head -n1 input.txt)" "input.txt"
   --colour  e.g. "-f" "--colour" "$(head -n1 input.txt)" "input.txt"
   --exclude  e.g. "-d" "--exclude=glob" "$(head -n1 input.txt)" "input.txt"
   --exclude-dir  e.g. "-d" "--exclude-dir=glob" "$(head -n1 input.txt)" "input.txt"
-  --exclude-from  e.g. "-f" "--exclude-from=input.txt" "$(head -n1 input.txt)" "input.txt"
+  --exclude-from  e.g. "-d" "--exclude-from=input.txt" "$(head -n1 input.txt)" "input.txt"
   --group-separator  e.g. "-f" "--group-separator=," "$(head -n1 input.txt)" "input.txt"
   --include  e.g. "-d" "--include=glob" "$(head -n1 input.txt)" "input.txt"
   --label  e.g. "-f" "--label=test" "$(head -n1 input.txt)" "input.txt"
-  --line-buffered  e.g. "-d" "--line-buffered" "$(head -n1 input.txt)" "input.txt"
+  --line-buffered  e.g. "-f" "--line-buffered" "$(head -n1 input.txt)" "input.txt"
   --no-group-separator  e.g. "-f" "--no-group-separator" "$(head -n1 input.txt)" "input.txt"
   --no-ignore-case  e.g. "-d" "--no-ignore-case" "$(head -n1 input.txt)" "input.txt"
-  --quiet  e.g. "-d" "--quiet" "$(head -n1 input.txt)" "input.txt"
-  --silent  e.g. "-f" "--silent" "$(head -n1 input.txt)" "input.txt"
-  -D  e.g. "-f" "-D" "$(head -n1 input.txt)" "input.txt"
-  -E  e.g. (pairwise evidence)
-  -F  e.g. "-F" "-z" "$(head -n1 input.txt)" "input.txt"
-  -G  e.g. (pairwise evidence)
-  -H  e.g. "-H" "-o" "$(head -n1 input.txt)" "input.txt"
+  --quiet  e.g. "-f" "--quiet" "$(head -n1 input.txt)" "input.txt"
+  --silent  e.g. "-d" "--silent" "$(head -n1 input.txt)" "input.txt"
+  -D  e.g. "-d" "-D" "$(head -n1 input.txt)" "input.txt"
+  -E  e.g. "-f" "-E" "$(head -n1 input.txt)" "input.txt"
+  -F  e.g. "-f" "-F" "$(head -n1 input.txt)" "input.txt"
+  -G  e.g. "-d" "-G" "$(head -n1 input.txt)" "input.txt"
+  -H  e.g. "-d" "-H" "$(head -n1 input.txt)" "input.txt"
   -I  e.g. "-e" "-I" "$(head -n1 input.txt)" "input.txt"
-  -L  e.g. "-d" "-L" "$(head -n1 input.txt)" "input.txt"
-  -P  e.g. (pairwise evidence)
+  -L  e.g. "-f" "-L" "$(head -n1 input.txt)" "input.txt"
+  -P  e.g. "-d" "-P" "$(head -n1 input.txt)" "input.txt"
   -R  e.g. "-f" "-R" "$(head -n1 input.txt)" "input.txt"
   -T  e.g. "-d" "-T" "$(head -n1 input.txt)" "input.txt"
   -U  e.g. "-f" "-U" "$(head -n1 input.txt)" "input.txt"
-  -V  e.g. "-f" "-V" "$(head -n1 input.txt)" "input.txt"
-  -Z  e.g. "-l" "-Z" "$(head -n1 input.txt)" "input.txt"
-  -a  e.g. "-e" "-a" "$(head -n1 input.txt)" "input.txt"
-  -b  e.g. "-x" "-b" "$(head -n1 input.txt)" "input.txt"
-  -c  e.g. "-d" "-c" "$(head -n1 input.txt)" "input.txt"
-  -e  e.g. "-e" "-s" "$(head -n1 input.txt)" "input.txt"
-  -h  e.g. "-f" "-h" "$(head -n1 input.txt)" "input.txt"
-  -i  e.g. (pairwise evidence)
-  -l  e.g. "-l" "-Z" "$(head -n1 input.txt)" "input.txt"
+  -V  e.g. "-d" "-V" "$(head -n1 input.txt)" "input.txt"
+  -Z  e.g. "-d" "-Z" "$(head -n1 input.txt)" "input.txt"
+  -a  e.g. "-d" "-a" "$(head -n1 input.txt)" "input.txt"
+  -b  e.g. "-f" "-b" "$(head -n1 input.txt)" "input.txt"
+  -c  e.g. "-e" "-c" "$(head -n1 input.txt)" "input.txt"
+  -e  e.g. "-d" "-e" "$(head -n1 input.txt)" "input.txt"
+  -h  e.g. "-e" "-h" "$(head -n1 input.txt)" "input.txt"
+  -i  e.g. "-d" "-i" "$(head -n1 input.txt)" "input.txt"
+  -l  e.g. "-e" "-l" "$(head -n1 input.txt)" "input.txt"
   -m  e.g. "-f" "-m" "$(head -n1 input.txt)" "input.txt"
   -n  e.g. "-e" "-n" "$(head -n1 input.txt)" "input.txt"
-  -o  e.g. "-z" "-o" "$(head -n1 input.txt)" "input.txt"
+  -o  e.g. "-d" "-o" "$(head -n1 input.txt)" "input.txt"
   -q  e.g. "-f" "-q" "$(head -n1 input.txt)" "input.txt"
-  -r  e.g. "-f" "-r" "$(head -n1 input.txt)" "input.txt"
-  -s  e.g. "-e" "-s" "$(head -n1 input.txt)" "input.txt"
-  -v  e.g. "-v" "-l" "$(head -n1 input.txt)" "input.txt"
-  -w  e.g. "-F" "-w" "$(head -n1 input.txt)" "input.txt"
-  -x  e.g. "-x" "-b" "$(head -n1 input.txt)" "input.txt"
-  -z  e.g. "-F" "-z" "$(head -n1 input.txt)" "input.txt"
+  -r  e.g. "-d" "-r" "$(head -n1 input.txt)" "input.txt"
+  -s  e.g. "-f" "-s" "$(head -n1 input.txt)" "input.txt"
+  -v  e.g. "-f" "-v" "$(head -n1 input.txt)" "input.txt"
+  -w  e.g. "-e" "-w" "$(head -n1 input.txt)" "input.txt"
+  -x  e.g. "-d" "-x" "$(head -n1 input.txt)" "input.txt"
+  -z  e.g. "-d" "-z" "$(head -n1 input.txt)" "input.txt"
 

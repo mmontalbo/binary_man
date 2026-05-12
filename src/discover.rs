@@ -907,11 +907,17 @@ pub fn generate_initial_script(
             }
         }
 
-        // Generate all pairwise combos
-        let pair_count = all_flag_args.len() * (all_flag_args.len() - 1) / 2;
-        eprintln!("  pairs: {} flags, {} combinations", all_flag_args.len(), pair_count);
+        // Generate all pairwise combos in BOTH orderings.
+        // Tools with last-flag-wins semantics (head -q -v ≠ head -v -q)
+        // produce different output depending on argument order.
+        // Testing both orderings detects order-sensitivity and prevents
+        // false positives where alias flags at different list positions
+        // get different orderings against a third flag.
+        let pair_count = all_flag_args.len() * (all_flag_args.len() - 1);
+        eprintln!("  pairs: {} flags, {} combinations (both orderings)", all_flag_args.len(), pair_count);
         for i in 0..all_flag_args.len() {
-            for j in (i + 1)..all_flag_args.len() {
+            for j in 0..all_flag_args.len() {
+                if i == j { continue; }
                 let mut args = sub_prefix.clone();
                 args.push(all_flag_args[i].clone());
                 args.push(all_flag_args[j].clone());

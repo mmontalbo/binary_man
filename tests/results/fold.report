@@ -1,7 +1,7 @@
 # Exploration: fold
 
 ## Rounds
-  round 0: 13 isolated cumulative, 26 identical in round (single-phase)
+  round 0: 14 isolated cumulative, 27 identical in round (single-phase)
 
 ## Observed: 3/3 flags
   1 solo, 2 via combination
@@ -15,6 +15,6 @@ Aliases: -b = --bytes, -s = --spaces, -w = --width
     flag:
 
 ## Via combination (distinguishable when paired)
-  -b  e.g. "-b" "-s" "$(head -n1 input.txt)" "input.txt"
-  -s  e.g. "-b" "-s" "$(head -n1 input.txt)" "input.txt"
+  -b  e.g. "-w" "-b" "$(head -n1 input.txt)" "input.txt"
+  -s  e.g. "-w" "-s" "$(head -n1 input.txt)" "input.txt"
 

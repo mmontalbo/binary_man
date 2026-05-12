@@ -1,11 +1,12 @@
 # Exploration: cp
 
 ## Rounds
-  round 0: 63 isolated cumulative, 19 identical in round (single-phase)
+  round 0: 54 isolated cumulative, 31 identical in round (single-phase)
 
 ## Observed: 34/36 flags
-  8 solo, 26 via combination
+  9 solo, 25 via combination
   2 additional error-differentiated
+  1 behavioral aliases detected
 
 Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-target-directory, -a = --archive, -f = --force, -i = --interactive, -l = --link, -n = --no-clobber, -s = --symbolic-link, -t = --target-directory, -v = --verbose, -x = --one-file-system
 
@@ -26,6 +27,10 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     flag:
   --parents  # use full source file name under DIRECTORY
     exemplar: "--parents" "input.txt" "other.txt" in words_minimal (different)
+    base:
+    flag:
+  --recursive
+    exemplar: "--recursive" "input.txt" "other.txt" in words_minimal (different)
     base:
     flag:
   --reflink
@@ -55,12 +60,11 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
       'input.txt' -> 'other.txt'
 
 ## Via combination (distinguishable when paired)
-  --attributes-only  e.g. "--attributes-only" "--parents" "input.txt" "subdir"
+  --attributes-only  e.g. "-t" "--attributes-only" "input.txt" "subdir"
   --context  e.g. "-t" "--context" "input.txt" "subdir"
   --copy-contents  e.g. "-t" "--copy-contents" "input.txt" "subdir"
   --keep-directory-symlink  e.g. "-t" "--keep-directory-symlink" "input.txt" "subdir"
   --preserve  e.g. "-t" "--preserve" "input.txt" "subdir"
-  --recursive  e.g. "-t" "--recursive" "input.txt" "subdir"
   --sparse  e.g. "-t" "--sparse=auto" "input.txt" "subdir"
   --strip-trailing-slashes  e.g. "-t" "--strip-trailing-slashes" "input.txt" "subdir"
   --update  e.g. "-t" "--update" "input.txt" "subdir"
@@ -68,17 +72,17 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
   -L  e.g. "-t" "-L" "input.txt" "subdir"
   -P  e.g. "-t" "-P" "input.txt" "subdir"
   -R  e.g. "-t" "-R" "input.txt" "subdir"
-  -T  e.g. "-T" "--attributes-only" "input.txt" "subdir"
+  -T  e.g. "-T" "-t" "input.txt" "subdir"
   -Z  e.g. "-t" "-Z" "input.txt" "subdir"
   -a  e.g. "-t" "-a" "input.txt" "subdir"
   -d  e.g. "-t" "-d" "input.txt" "subdir"
   -f  e.g. "-t" "-f" "input.txt" "subdir"
   -i  e.g. "-t" "-i" "input.txt" "subdir"
-  -l  e.g. "-l" "-s" "input.txt" "subdir"
+  -l  e.g. "-t" "-l" "input.txt" "subdir"
   -n  e.g. "-t" "-n" "input.txt" "subdir"
   -p  e.g. "-t" "-p" "input.txt" "subdir"
   -r  e.g. "-t" "-r" "input.txt" "subdir"
-  -s  e.g. "-l" "-s" "input.txt" "subdir"
+  -s  e.g. "-t" "-s" "input.txt" "subdir"
   -u  e.g. "-t" "-u" "input.txt" "subdir"
   -x  e.g. "-t" "-x" "input.txt" "subdir"
 

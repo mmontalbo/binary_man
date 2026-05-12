@@ -1,7 +1,7 @@
 # Exploration: du
 
 ## Rounds
-  round 0: 191 isolated cumulative, 144 identical in round (single-phase)
+  round 0: 192 isolated cumulative, 199 identical in round (single-phase)
 
 ## Observed: 25/26 flags
   10 solo, 15 via combination
@@ -54,8 +54,8 @@ Aliases: -0 = --null, -B = --block-size, -D = --dereference-args, -L = --derefer
       12	input.txt
       4	other.txt
     flag:
-      12	2026-05-11 15:58	input.txt
-      4	2026-05-11 15:58	other.txt
+      12	2026-05-11 18:21	input.txt
+      4	2026-05-11 18:21	other.txt
   -B  # scale sizes by SIZE before printing them; e.g.,
     exemplar: "-B" in numbers_standard (different)
     base:
@@ -93,18 +93,18 @@ Aliases: -0 = --null, -B = --block-size, -D = --dereference-args, -L = --derefer
 
 ## Via combination (distinguishable when paired)
   --time-style  e.g. "-X" "--time-style=auto" "$(head -n1 input.txt)" "."
-  -0  e.g. "-0" "-m" "$(head -n1 input.txt)" "."
-  -D  e.g. "-B" "-D" "$(head -n1 input.txt)" "."
-  -H  e.g. "-d" "-H" "$(head -n1 input.txt)" "."
-  -L  e.g. "-B" "-L" "$(head -n1 input.txt)" "."
-  -P  e.g. "-B" "-P" "$(head -n1 input.txt)" "."
-  -S  e.g. "-d" "-S" "$(head -n1 input.txt)" "."
-  -a  e.g. "-a" "-b" "$(head -n1 input.txt)" "."
-  -b  e.g. "-a" "-b" "$(head -n1 input.txt)" "."
-  -c  e.g. "-c" "-d" "$(head -n1 input.txt)" "."
-  -h  e.g. "-h" "-t" "$(head -n1 input.txt)" "."
-  -k  e.g. "-d" "-k" "$(head -n1 input.txt)" "."
-  -l  e.g. "-B" "-l" "$(head -n1 input.txt)" "."
-  -s  e.g. "-s" "--time" "$(head -n1 input.txt)" "."
+  -0  e.g. "-B" "-0" "$(head -n1 input.txt)" "."
+  -D  e.g. "-t" "-D" "$(head -n1 input.txt)" "."
+  -H  e.g. "-X" "-H" "$(head -n1 input.txt)" "."
+  -L  e.g. "-t" "-L" "$(head -n1 input.txt)" "."
+  -P  e.g. "-X" "-P" "$(head -n1 input.txt)" "."
+  -S  e.g. "-t" "-S" "$(head -n1 input.txt)" "."
+  -a  e.g. "-B" "-a" "$(head -n1 input.txt)" "."
+  -b  e.g. "-t" "-b" "$(head -n1 input.txt)" "."
+  -c  e.g. "-c" "-t" "$(head -n1 input.txt)" "."
+  -h  e.g. "-h" "-d" "$(head -n1 input.txt)" "."
+  -k  e.g. "-t" "-k" "$(head -n1 input.txt)" "."
+  -l  e.g. "-t" "-l" "$(head -n1 input.txt)" "."
+  -s  e.g. "-B" "-s" "$(head -n1 input.txt)" "."
   -x  e.g. "-B" "-x" "$(head -n1 input.txt)" "."
 

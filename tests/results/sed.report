@@ -1,7 +1,7 @@
 # Exploration: sed
 
 ## Rounds
-  round 0: 39 isolated cumulative, 41 identical in round (single-phase)
+  round 0: 21 isolated cumulative, 71 identical in round (single-phase)
 
 ## Observed: 23/24 flags
   3 solo, 20 via combination
@@ -10,11 +10,17 @@
 
 ## Solo (unique behavior)
   --debug
-    exemplar: "--debug" "input.txt" in words_minimal (different)
+    exemplar: "--debug" "input.txt" "other.txt" in words_minimal (-7 lines)
     base:
+      nput.txt
+      hello world
     flag:
       SED PROGRAM:
         i\nput.txt
+      
+      INPUT:   'other.txt' line 1
+      PATTERN: hello world
+            ...
   --follow-symlinks
     exemplar: "--follow-symlinks" "input.txt" "other.txt" in words_minimal (-2 lines)
     base:
@@ -45,24 +51,24 @@
     flag:
 
 ## Via combination (distinguishable when paired)
-  --expression  e.g. "-f" "--expression" "$(head -n1 input.txt)" "input.txt"
+  --expression  e.g. (pairwise evidence)
   --file  e.g. "-f" "--file" "$(head -n1 input.txt)" "input.txt"
   --in-place  e.g. "--in-place" "--sandbox" "$(head -n1 input.txt)" "input.txt"
   --line-length  e.g. (pairwise evidence)
-  --null-data  e.g. "--in-place" "--null-data" "$(head -n1 input.txt)" "input.txt"
-  --quiet  e.g. "-f" "--quiet" "$(head -n1 input.txt)" "input.txt"
+  --null-data  e.g. "-i" "--null-data" "$(head -n1 input.txt)" "input.txt"
+  --quiet  e.g. (pairwise evidence)
   --regexp-extended  e.g. (pairwise evidence)
-  --sandbox  e.g. "--in-place" "--sandbox" "$(head -n1 input.txt)" "input.txt"
+  --sandbox  e.g. "-i" "--sandbox" "$(head -n1 input.txt)" "input.txt"
   --separate  e.g. (pairwise evidence)
-  --silent  e.g. "-f" "--silent" "$(head -n1 input.txt)" "input.txt"
+  --silent  e.g. (pairwise evidence)
   --unbuffered  e.g. (pairwise evidence)
-  -E  e.g. "-f" "-E" "$(head -n1 input.txt)" "input.txt"
+  -E  e.g. (pairwise evidence)
   -e  e.g. (pairwise evidence)
-  -f  e.g. "-f" "-l" "$(head -n1 input.txt)" "input.txt"
-  -i  e.g. "-i" "--sandbox" "$(head -n1 input.txt)" "input.txt"
+  -f  e.g. "-f" "--file" "$(head -n1 input.txt)" "input.txt"
+  -i  e.g. "-i" "--follow-symlinks" "$(head -n1 input.txt)" "input.txt"
   -n  e.g. (pairwise evidence)
-  -r  e.g. "-f" "-r" "$(head -n1 input.txt)" "input.txt"
-  -s  e.g. "-f" "-s" "$(head -n1 input.txt)" "input.txt"
-  -u  e.g. "-u" "--in-place" "$(head -n1 input.txt)" "input.txt"
-  -z  e.g. "-f" "-z" "$(head -n1 input.txt)" "input.txt"
+  -r  e.g. (pairwise evidence)
+  -s  e.g. (pairwise evidence)
+  -u  e.g. (pairwise evidence)
+  -z  e.g. "-i" "-z" "$(head -n1 input.txt)" "input.txt"
 

@@ -1,7 +1,7 @@
 # Exploration: cut
 
 ## Rounds
-  round 0: 7 isolated cumulative, 14 identical in round (single-phase)
+  round 0: 10 isolated cumulative, 16 identical in round (single-phase)
 
 ## Observed: 3/10 flags
   1 solo, 2 via combination
@@ -20,9 +20,9 @@ Aliases: -b = --bytes, -c = --characters, -d = --delimiter, -f = --fields, -s = 
   --complement  e.g. (pairwise evidence)
   --output-delimiter  e.g. (pairwise evidence)
   -M  e.g. "-f" "-M" "input.txt"
-  -b  e.g. "-b" "-c" "input.txt"
+  -b  e.g. "-f" "-b" "input.txt"
   -c  e.g. "-b" "-c" "input.txt"
-  -d  e.g. (pairwise evidence)
+  -d  e.g. "-f" "-d" "input.txt"
   -n  e.g. "-f" "-n" "input.txt"
   -s  e.g. "-f" "-s" "input.txt"
   -z  e.g. "-f" "-z" "input.txt"

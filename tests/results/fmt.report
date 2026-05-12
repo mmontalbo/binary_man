@@ -1,7 +1,7 @@
 # Exploration: fmt
 
 ## Rounds
-  round 0: 20 isolated cumulative, 47 identical in round (single-phase)
+  round 0: 20 isolated cumulative, 55 identical in round (single-phase)
 
 ## Observed: 7/7 flags
   3 solo, 4 via combination
@@ -54,8 +54,8 @@ Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t 
             ...
 
 ## Via combination (distinguishable when paired)
-  -c  e.g. "-c" "-u" "$(head -n1 input.txt)" "input.txt"
-  -s  e.g. "-s" "-u" "$(head -n1 input.txt)" "input.txt"
-  -t  e.g. "-t" "-u" "$(head -n1 input.txt)" "input.txt"
-  -u  e.g. "-c" "-u" "$(head -n1 input.txt)" "input.txt"
+  -c  e.g. (pairwise evidence)
+  -s  e.g. "-s" "-p" "$(head -n1 input.txt)" "input.txt"
+  -t  e.g. "-t" "-p" "$(head -n1 input.txt)" "input.txt"
+  -u  e.g. (pairwise evidence)
 

@@ -1,7 +1,7 @@
 # Exploration: cat
 
 ## Rounds
-  round 0: 33 isolated cumulative, 49 identical in round (single-phase)
+  round 0: 12 isolated cumulative, 70 identical in round (single-phase)
 
 ## Observed: 10/10 flags
   3 solo, 7 via combination
@@ -59,11 +59,11 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
             ...
 
 ## Via combination (distinguishable when paired)
-  -A  e.g. "-A" "-n" "$(head -n1 input.txt)" "input.txt"
-  -E  e.g. "-b" "-E" "$(head -n1 input.txt)" "input.txt"
-  -T  e.g. "-b" "-T" "$(head -n1 input.txt)" "input.txt"
-  -b  e.g. "-b" "-E" "$(head -n1 input.txt)" "input.txt"
-  -n  e.g. "-n" "-v" "$(head -n1 input.txt)" "input.txt"
-  -s  e.g. "-e" "-s" "$(head -n1 input.txt)" "input.txt"
-  -v  e.g. "-n" "-v" "$(head -n1 input.txt)" "input.txt"
+  -A  e.g. (pairwise evidence)
+  -E  e.g. (pairwise evidence)
+  -T  e.g. (pairwise evidence)
+  -b  e.g. (pairwise evidence)
+  -n  e.g. (pairwise evidence)
+  -s  e.g. (pairwise evidence)
+  -v  e.g. (pairwise evidence)
 

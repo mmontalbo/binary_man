@@ -1,7 +1,7 @@
 # Exploration: xargs
 
 ## Rounds
-  round 0: 8 isolated cumulative, 15 identical in round (single-phase)
+  round 0: 3 isolated cumulative, 20 identical in round (single-phase)
 
 ## Observed: 14/21 flags
   1 solo, 13 via combination
@@ -19,7 +19,7 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
 ## Via combination (distinguishable when paired)
   --eof  e.g. (pairwise evidence)
   --process-slot-var  e.g. (pairwise evidence)
-  --replace  e.g. "-l" "--replace=r"
+  --replace  e.g. (pairwise evidence)
   -0  e.g. (pairwise evidence)
   -E  e.g. (pairwise evidence)
   -I  e.g. (pairwise evidence)
@@ -29,12 +29,12 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
   -d  e.g. (pairwise evidence)
   -e  e.g. (pairwise evidence)
   -i  e.g. (pairwise evidence)
-  -l  e.g. "-l" "--replace=r"
+  -l  e.g. (pairwise evidence)
   -n  e.g. (pairwise evidence)
-  -o  e.g. "-o" "-t"
-  -p  e.g. "-p" "--show-limits"
+  -o  e.g. (pairwise evidence)
+  -p  e.g. (pairwise evidence)
   -r  e.g. (pairwise evidence)
   -s  e.g. (pairwise evidence)
-  -t  e.g. "-o" "-t"
+  -t  e.g. (pairwise evidence)
   -x  e.g. (pairwise evidence)
 

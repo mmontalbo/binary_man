@@ -1,7 +1,7 @@
 # Exploration: paste
 
 ## Rounds
-  round 0: 12 isolated cumulative, 22 identical in round (single-phase)
+  round 0: 11 isolated cumulative, 23 identical in round (single-phase)
 
 ## Observed: 3/3 flags
   2 solo, 1 via combination
@@ -26,5 +26,5 @@ Aliases: -d = --delimiters, -s = --serial, -z = --zero-terminated
     flag:
 
 ## Via combination (distinguishable when paired)
-  -z  e.g. "-s" "-z" "input.txt" "subdir"
+  -z  e.g. (pairwise evidence)
 

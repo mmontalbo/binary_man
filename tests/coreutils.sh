@@ -12,7 +12,7 @@
 set -euo pipefail
 
 BGRID="${1:-./target/release/bgrid}"
-TIMEOUT=${TIMEOUT:-180}
+TIMEOUT=${TIMEOUT:-600}
 RESULTS_DIR="tests/results"
 JOBS=${JOBS:-4}
 
