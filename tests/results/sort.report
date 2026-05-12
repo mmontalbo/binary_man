@@ -1,7 +1,7 @@
 # Exploration: sort
 
 ## Rounds
-  round 0: 103 isolated cumulative, 157 identical in round (single-phase)
+  round 0: 105 isolated cumulative, 159 identical in round (single-phase)
 
 ## Observed: 23/30 flags
   4 solo, 19 via combination
@@ -47,11 +47,11 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       Apache
             ...
     flag:
-      tail
-      deliver
-      knee
-      several
-      heart
+      rate
+      property
+      impact
+      laid
+      without
             ...
   -S  # use SIZE for main memory buffer
     exemplar: "-S" "1" "input.txt" in words_minimal (+1441 lines)
@@ -70,7 +70,7 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       Apache
             ...
   -o  # write result to FILE instead of standard output
-    exemplar: "-o" "input.txt" in words_minimal (different)
+    exemplar: "-o" "input.txt" in words_minimal (different, exit 127→0)
     base:
     flag:
 
@@ -81,19 +81,19 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
   --random-source  e.g. "--batch-size" "--random-source=input.txt" "input.txt" "other.txt"
   -T  e.g. "-R" "-T" "." "input.txt" "other.txt"
   -V  e.g. "--batch-size" "-V" "input.txt" "other.txt"
-  -b  e.g. "--batch-size" "-b" "input.txt" "other.txt"
+  -b  e.g. "-b" "-R" "input.txt" "other.txt"
   -c  e.g. "--batch-size" "-c" "input.txt" "other.txt"
   -d  e.g. "-R" "-d" "input.txt" "other.txt"
-  -f  e.g. "-R" "-f" "input.txt" "other.txt"
+  -f  e.g. "-f" "-R" "input.txt" "other.txt"
   -g  e.g. "--batch-size" "-g" "input.txt" "other.txt"
   -h  e.g. "--batch-size" "-h" "input.txt" "other.txt"
-  -i  e.g. "-i" "-R" "input.txt" "other.txt"
-  -k  e.g. "--batch-size" "-k" "1" "input.txt" "other.txt"
+  -i  e.g. "-R" "-i" "input.txt" "other.txt"
+  -k  e.g. "-R" "-k" "1" "input.txt" "other.txt"
   -m  e.g. "-m" "-R" "input.txt" "other.txt"
   -n  e.g. "--batch-size" "-n" "input.txt" "other.txt"
-  -r  e.g. "--batch-size" "-r" "input.txt" "other.txt"
-  -s  e.g. "--batch-size" "-s" "input.txt" "other.txt"
-  -t  e.g. "-R" "-t" "," "input.txt" "other.txt"
+  -r  e.g. "-R" "-r" "input.txt" "other.txt"
+  -s  e.g. "-s" "-R" "input.txt" "other.txt"
+  -t  e.g. "--batch-size" "-t" "," "input.txt" "other.txt"
   -u  e.g. "--batch-size" "-u" "input.txt" "other.txt"
-  -z  e.g. "-z" "-R" "input.txt" "other.txt"
+  -z  e.g. "-R" "-z" "input.txt" "other.txt"
 

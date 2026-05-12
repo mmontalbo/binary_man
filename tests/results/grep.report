@@ -123,7 +123,7 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
   -a  e.g. "-e" "-a" "$(head -n1 input.txt)" "input.txt"
   -b  e.g. (pairwise evidence)
   -c  e.g. "-e" "-c" "$(head -n1 input.txt)" "input.txt"
-  -e  e.g. "-e" "-I" "$(head -n1 input.txt)" "input.txt"
+  -e  e.g. "-e" "-l" "$(head -n1 input.txt)" "input.txt"
   -h  e.g. "-e" "-h" "$(head -n1 input.txt)" "input.txt"
   -i  e.g. "-e" "-i" "$(head -n1 input.txt)" "input.txt"
   -l  e.g. "-e" "-l" "$(head -n1 input.txt)" "input.txt"

@@ -1,7 +1,7 @@
 # Exploration: xargs
 
 ## Rounds
-  round 0: 6 isolated cumulative, 31 identical in round (single-phase)
+  round 0: 7 isolated cumulative, 31 identical in round (single-phase)
 
 ## Observed: 13/21 flags
   2 solo, 11 via combination
@@ -26,7 +26,7 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
   --process-slot-var  e.g. (pairwise evidence)
   --replace  e.g. (pairwise evidence)
   -0  e.g. (pairwise evidence)
-  -E  e.g. (pairwise evidence)
+  -E  e.g. "-E" "1" "-a" "input.txt"
   -I  e.g. (pairwise evidence)
   -L  e.g. (pairwise evidence)
   -P  e.g. (pairwise evidence)

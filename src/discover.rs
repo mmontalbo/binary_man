@@ -136,6 +136,7 @@ pub fn extract_flag_info(help_text: &str) -> FlagInfo {
         }
         i += 1;
     }
+
     FlagInfo { descs, aliases, all_flags, extracted_values }
 }
 
@@ -690,7 +691,9 @@ pub fn generate_initial_script(
     let help_text = try_help(binary, sub_args, sandbox)?;
     let flag_info = extract_flag_info(&help_text);
 
+    // Two short-flag regexes: one for discovery (permissive), one for metavar capture.
     let short_re = Regex::new(r"(?:^|\s)-([a-zA-Z0-9])\b").unwrap();
+    let short_metavar_re = Regex::new(r"^\s{2,}.*-([a-zA-Z0-9])\s+([A-Z][-A-Z_]*)(?:\s|,|$)").unwrap();
     let long_re = Regex::new(r"--([a-zA-Z][a-zA-Z0-9-]*)(?:[=\s]([A-Z][A-Z_]*))?").unwrap();
 
     // Parse all flags into a single list with (name, metavar).
@@ -698,12 +701,21 @@ pub fn generate_initial_script(
     let mut flags: Vec<(String, Option<String>)> = Vec::new();
     let mut seen = HashSet::new();
     let mut long_metavars: HashMap<String, String> = HashMap::new();
+    // Collect short flag metavars from a second pass (only on indented flag lines)
+    let mut short_metavars: HashMap<String, String> = HashMap::new();
+    for line in help_text.lines() {
+        for cap in short_metavar_re.captures_iter(line) {
+            let flag = format!("-{}", &cap[1]);
+            short_metavars.insert(flag, cap[2].to_string());
+        }
+    }
 
     for line in help_text.lines() {
         for cap in short_re.captures_iter(line) {
             let flag = format!("-{}", &cap[1]);
             if seen.insert(flag.clone()) {
-                flags.push((flag, None));
+                let metavar = short_metavars.get(&flag).cloned();
+                flags.push((flag, metavar));
             }
         }
         for cap in long_re.captures_iter(line) {
@@ -841,6 +853,7 @@ pub fn generate_initial_script(
                     }
                 }
             }
+
         }
     }
 

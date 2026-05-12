@@ -1,11 +1,11 @@
 # Exploration: uniq
 
 ## Rounds
-  round 0: 80 isolated cumulative, 69 identical in round (single-phase)
+  round 0: 88 isolated cumulative, 75 identical in round (single-phase)
 
 ## Observed: 11/11 flags
-  4 solo, 7 via combination
-  1 behavioral aliases detected
+  9 solo, 2 via combination
+  2 behavioral aliases detected
 
 Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, -s = --skip-chars, -u = --unique, -w = --check-chars, -z = --zero-terminated
 
@@ -26,6 +26,32 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
       
       about
             ...
+  -c  # prefix lines by the number of occurrences
+    exemplar: "-c" "input.txt" in words_minimal (+1441 lines)
+    base:
+      aardvark
+      abbreviation
+      about
+      abstract
+      accept
+            ...
+    flag:
+            1 aardvark
+            1 abbreviation
+            1 about
+            1 abstract
+            1 accept
+            ...
+  -d  # only print duplicate lines, one for each group
+    exemplar: "-d" "input.txt" in formatted_minimal (+1 lines)
+    base:
+      first line
+      second line with trailing spaces
+      	indented with tab
+          indented with spaces
+      	 	mixed tabs and spaces
+            ...
+    flag:
   -f  # avoid comparing the first N fields
     exemplar: "-f" "2" "input.txt" in numbers_minimal (different)
     base:
@@ -41,6 +67,13 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
       1'000'000.00
       1 000 000,00
       1'000'000,00
+  -i  # ignore differences in case when comparing
+    exemplar: "-i" in words_minimal (different)
+    base:
+    flag:
+      cherry
+      apple
+      banana
   -s  # avoid comparing the first N characters
     exemplar: "-s" "2" "input.txt" in numbers_minimal (different)
     base:
@@ -56,6 +89,22 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
       $1.00
       1/2
       1E02
+            ...
+  -u  # only print unique lines
+    exemplar: "-u" "input.txt" in formatted_minimal (-49 lines)
+    base:
+      first line
+      second line with trailing spaces
+      	indented with tab
+          indented with spaces
+      	 	mixed tabs and spaces
+            ...
+    flag:
+      first line
+      second line with trailing spaces
+      	indented with tab
+          indented with spaces
+      	 	mixed tabs and spaces
             ...
   -w  # compare no more than N characters in lines
     exemplar: "-w" "2" "input.txt" in words_minimal (+269 lines)
@@ -73,13 +122,24 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
       Africa
       afternoon
             ...
+  -z  # line delimiter is NUL, not newline
+    exemplar: "-z" "input.txt" in words_minimal (+1441 lines)
+    base:
+      aardvark
+      abbreviation
+      about
+      abstract
+      accept
+            ...
+    flag:
+      aardvark
+      abbreviation
+      about
+      abstract
+      accept
+            ...
 
 ## Via combination (distinguishable when paired)
-  --all-repeated  e.g. "-d" "--all-repeated" "input.txt" "other.txt"
-  -D  e.g. "-d" "-D" "input.txt" "other.txt"
-  -c  e.g. "-c" "-w" "1" "input.txt" "other.txt"
-  -d  e.g. "-d" "-D" "input.txt" "other.txt"
-  -i  e.g. "-f" "1" "-i" "input.txt" "other.txt"
-  -u  e.g. "-u" "-i" "input.txt" "other.txt"
-  -z  e.g. "-z" "-c" "input.txt" "other.txt"
+  --all-repeated  e.g. "-i" "--all-repeated" "input.txt" "other.txt"
+  -D  e.g. (pairwise evidence)
 

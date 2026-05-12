@@ -16,9 +16,9 @@ Aliases: -L = --dereference, -f = --file-system, -t = --terse
     base:
         File: input.txt
         Size: 10586     	Blocks: 24         IO Block: 4096   regular file
-      Device: 254,0	Inode: 152707742   Links: 1
+      Device: 254,0	Inode: 152180215   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-12 00:58:48.048675208 -0700
+      Access: 2026-05-12 14:01:38.901233427 -0700
             ...
     flag:
   --format
@@ -26,9 +26,9 @@ Aliases: -L = --dereference, -f = --file-system, -t = --terse
     base:
         File: input.txt
         Size: 10586     	Blocks: 24         IO Block: 4096   regular file
-      Device: 254,0	Inode: 152505634   Links: 1
+      Device: 254,0	Inode: 152120567   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-12 00:58:47.628771579 -0700
+      Access: 2026-05-12 14:01:38.275798952 -0700
             ...
     flag:
       65024
@@ -38,9 +38,9 @@ Aliases: -L = --dereference, -f = --file-system, -t = --terse
     base:
         File: input.txt
         Size: 10586     	Blocks: 24         IO Block: 4096   regular file
-      Device: 254,0	Inode: 152505634   Links: 1
+      Device: 254,0	Inode: 152120567   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-12 00:58:47.628771579 -0700
+      Access: 2026-05-12 14:01:38.275798952 -0700
             ...
     flag:
       6502465024
@@ -49,25 +49,25 @@ Aliases: -L = --dereference, -f = --file-system, -t = --terse
     base:
         File: input.txt
         Size: 10586     	Blocks: 24         IO Block: 4096   regular file
-      Device: 254,0	Inode: 152504589   Links: 1
+      Device: 254,0	Inode: 152119676   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-12 00:58:47.645906661 -0700
+      Access: 2026-05-12 14:01:38.290618988 -0700
             ...
     flag:
         File: input.txt
         Size: 10586     	Blocks: 24         IO Block: 4096   regular file
-      Device: 254,0	Inode: 152504632   Links: 1
+      Device: 254,0	Inode: 152119697   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-12 00:58:47.627157371 -0700
+      Access: 2026-05-12 14:01:38.274288591 -0700
             ...
   -c  # --format=FORMAT   use the specified FORMAT instead of the default; output a newline after each use of FORMAT
     exemplar: "-c" "input.txt" "other.txt" in words_minimal (different)
     base:
         File: input.txt
         Size: 10586     	Blocks: 24         IO Block: 4096   regular file
-      Device: 254,0	Inode: 152505634   Links: 1
+      Device: 254,0	Inode: 152120567   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-12 00:58:47.628771579 -0700
+      Access: 2026-05-12 14:01:38.275798952 -0700
             ...
     flag:
       input.txt
@@ -76,25 +76,25 @@ Aliases: -L = --dereference, -f = --file-system, -t = --terse
     base:
         File: input.txt
         Size: 10586     	Blocks: 24         IO Block: 4096   regular file
-      Device: 254,0	Inode: 152504589   Links: 1
+      Device: 254,0	Inode: 152119676   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-12 00:58:47.645906661 -0700
+      Access: 2026-05-12 14:01:38.290618988 -0700
             ...
     flag:
         File: "input.txt"
           ID: c63eb3646de0a34 Namelen: 255     Type: ext2/ext3
       Block size: 4096       Fundamental block size: 4096
-      Blocks: Total: 1937552970 Free: 1609576039 Available: 1511909981
-      Inodes: Total: 244158464  Free: 240384678
+      Blocks: Total: 1937552970 Free: 1609516191 Available: 1511850133
+      Inodes: Total: 244158464  Free: 240376345
   -t  # print the information in terse form
     exemplar: "-t" "input.txt" in words_minimal (+1 lines, exit 127→0)
     base:
         File: input.txt
         Size: 10586     	Blocks: 24         IO Block: 4096   regular file
-      Device: 254,0	Inode: 152504589   Links: 1
+      Device: 254,0	Inode: 152119676   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-12 00:58:47.645906661 -0700
+      Access: 2026-05-12 14:01:38.290618988 -0700
             ...
     flag:
-      input.txt 10586 24 81a4 1000 100 fe00 152504900 1 0 0 1778572727 1778572727 1778572727 1778572727 4096
+      input.txt 10586 24 81a4 1000 100 fe00 152119889 1 0 0 1778619698 1778619698 1778619698 1778619698 4096
 

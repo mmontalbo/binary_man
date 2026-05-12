@@ -1,7 +1,7 @@
 # Exploration: od
 
 ## Rounds
-  round 0: 279 isolated cumulative, 214 identical in round (single-phase)
+  round 0: 249 isolated cumulative, 207 identical in round (single-phase)
 
 ## Observed: 18/21 flags
   14 solo, 4 via combination
@@ -27,11 +27,6 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000060 070164 062544 005141 061543 062560 072151 067147 005141
       0000100 061543 062563 071412 060543 061557 066555 067544 060564
             ...
-  --strings
-    exemplar: "--strings" in words_minimal (different)
-    base:
-      0000000
-    flag:
   --traditional  # accept arguments in third form above
     exemplar: "--traditional" in words_minimal (different)
     base:
@@ -65,11 +60,6 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
     flag:
       0000000 072157
       0000002
-  -S
-    exemplar: "-S" in words_minimal (different)
-    base:
-      0000000
-    flag:
   -a  # same as -t a,  select named characters, ignoring high-order bit
     exemplar: "-a" "input.txt" "other.txt" in words_minimal (+624 lines)
     base:
@@ -237,8 +227,10 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
             ...
 
 ## Via combination (distinguishable when paired)
-  --width  e.g. "-S" "--width" "$(head -n1 input.txt)" "."
-  -o  e.g. "-S" "-o" "$(head -n1 input.txt)" "."
-  -v  e.g. "-S" "-v" "$(head -n1 input.txt)" "."
-  -w  e.g. "-S" "-w" "$(head -n1 input.txt)" "."
+  --strings  e.g. (pairwise evidence)
+  --width  e.g. (pairwise evidence)
+  -S  e.g. (pairwise evidence)
+  -o  e.g. (pairwise evidence)
+  -v  e.g. (pairwise evidence)
+  -w  e.g. (pairwise evidence)
 

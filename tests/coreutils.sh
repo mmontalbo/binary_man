@@ -127,7 +127,7 @@ CHECKS=(
     "df 15"
     "sed 22"
     "xargs 13"
-    "diff 49"
+    "diff 51"
     "find 1"
     "grep 45"
 )
