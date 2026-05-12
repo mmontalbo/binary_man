@@ -1,11 +1,12 @@
 # Exploration: uniq
 
 ## Rounds
-  round 0: 88 isolated cumulative, 75 identical in round (single-phase)
+  round 0: 84 isolated cumulative, 75 identical in round (single-phase)
 
 ## Observed: 11/11 flags
-  9 solo, 2 via combination
+  8 solo, 3 via combination
   2 behavioral aliases detected
+  robustness: 11 robust, 0 moderate, 0 fragile
 
 Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, -s = --skip-chars, -u = --unique, -w = --check-chars, -z = --zero-terminated
 
@@ -67,13 +68,6 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
       1'000'000.00
       1 000 000,00
       1'000'000,00
-  -i  # ignore differences in case when comparing
-    exemplar: "-i" in words_minimal (different)
-    base:
-    flag:
-      cherry
-      apple
-      banana
   -s  # avoid comparing the first N characters
     exemplar: "-s" "2" "input.txt" in numbers_minimal (different)
     base:
@@ -140,6 +134,7 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
             ...
 
 ## Via combination (distinguishable when paired)
-  --all-repeated  e.g. "-i" "--all-repeated" "input.txt" "other.txt"
-  -D  e.g. (pairwise evidence)
+  --all-repeated  e.g. (pairwise evidence)
+  -D  e.g. "-D" "-f" "1" "input.txt" "other.txt"
+  -i  e.g. "-i" "-w" "1" "input.txt" "other.txt"
 

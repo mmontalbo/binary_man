@@ -7,6 +7,7 @@
   2 solo, 8 via combination
   2 additional error-differentiated
   1 behavioral aliases detected
+  robustness: 12 robust, 0 moderate, 0 fragile
 
 Aliases: -d = --dir, -f = --force, -v = --verbose
 

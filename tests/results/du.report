@@ -7,6 +7,7 @@
   8 solo, 17 via combination
   1 additional error-differentiated
   1 behavioral aliases detected
+  robustness: 25 robust, 0 moderate, 0 fragile
 
 Aliases: -0 = --null, -B = --block-size, -D = --dereference-args, -L = --dereference, -P = --no-dereference, -S = --separate-dirs, -X = --exclude-from, -a = --all, -b = --bytes, -c = --total, -d = --max-depth, -h = --human-readable, -l = --count-links, -s = --summarize, -t = --threshold, -x = --one-file-system
 
@@ -54,8 +55,8 @@ Aliases: -0 = --null, -B = --block-size, -D = --dereference-args, -L = --derefer
       12	input.txt
       4	other.txt
     flag:
-      12	2026-05-12 14:01	input.txt
-      4	2026-05-12 14:01	other.txt
+      12	2026-05-12 14:12	input.txt
+      4	2026-05-12 14:12	other.txt
   -B  # scale sizes by SIZE before printing them; e.g., '-BM' prints sizes in units of 1,048,576 bytes; see SIZE format below
     exemplar: "-B" "2" "input.txt" "other.txt" in words_minimal (reordered)
     base:

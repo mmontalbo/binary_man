@@ -6,6 +6,7 @@
 ## Observed: 13/21 flags
   2 solo, 11 via combination
   7 additional error-differentiated
+  robustness: 19 robust, 0 moderate, 0 fragile
 
 Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = --delimiter, -n = --max-args, -o = --open-tty, -p = --interactive, -r = --no-run-if-empty, -s = --max-chars, -t = --verbose, -x = --exit
 

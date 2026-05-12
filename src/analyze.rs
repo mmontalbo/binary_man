@@ -267,6 +267,9 @@ pub struct AnalysisMetrics {
     pub untested_flags: Vec<String>,
     pub context_count: usize,
     pub total_runs: usize,
+    /// Leave-one-out robustness: flag stem → (contexts_survived, total_contexts).
+    /// A flag with 15/15 is robust; 1/15 is fragile.
+    pub robustness: HashMap<String, (usize, usize)>,
 }
 
 impl AnalysisMetrics {
@@ -278,70 +281,115 @@ impl AnalysisMetrics {
         self.groups.iter().filter(|g| !g.isolated()).count()
     }
 
-    /// Find flag pairs proven different by cross-group interaction data.
-    ///
-    /// For combination runs like `X A target` and `X B target` that are in different
-    /// behavioral groups, flags A and B are proven distinguishable (they modify X's
-    /// behavior differently). Returns the set of flag stems proven different.
     pub fn pairwise_distinguished(&self) -> HashSet<String> {
-        // Map: (base_flags, positionals) → Vec<(modifier_flag, group_index)>
-        struct ComboKey { base: Vec<String>, positionals: Vec<String> }
-        impl std::hash::Hash for ComboKey {
-            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-                self.base.hash(state);
-                self.positionals.hash(state);
-            }
-        }
-        impl PartialEq for ComboKey { fn eq(&self, other: &Self) -> bool { self.base == other.base && self.positionals == other.positionals } }
-        impl Eq for ComboKey {}
-
-        let mut combo_map: HashMap<ComboKey, Vec<(String, usize)>> = HashMap::new();
-
-        for (gi, group) in self.groups.iter().enumerate() {
-            for label in &group.run_labels {
-                let args = output::parse_label(label);
-                let flags: Vec<&&str> = args.iter().filter(|a| a.starts_with('-')).collect();
-                let positionals: Vec<String> = args.iter().filter(|a| !a.starts_with('-')).map(|s| s.to_string()).collect();
-
-                // For runs with 2+ flags, try each flag as the "modifier"
-                if flags.len() >= 2 {
-                    for (fi, modifier) in flags.iter().enumerate() {
-                        let base: Vec<String> = flags.iter().enumerate()
-                            .filter(|(i, _)| *i != fi)
-                            .map(|(_, f)| f.to_string())
-                            .collect();
-                        // Strip =value from modifier for canonical comparison
-                        let mod_stem = if let Some(eq) = modifier.find('=') {
-                            modifier[..eq].to_string()
-                        } else {
-                            modifier.to_string()
-                        };
-                        let key = ComboKey { base, positionals: positionals.clone() };
-                        combo_map.entry(key).or_default().push((mod_stem, gi));
-                    }
-                }
-            }
-        }
-
-        // For each (base, positionals) group, if two modifiers are in different
-        // behavioral groups, they're proven different
-        let mut distinguished = HashSet::new();
-        for entries in combo_map.values() {
-            if entries.len() < 2 { continue; }
-            for i in 0..entries.len() {
-                for j in (i + 1)..entries.len() {
-                    let (flag_a, group_a) = &entries[i];
-                    let (flag_b, group_b) = &entries[j];
-                    if group_a != group_b && flag_a != flag_b {
-                        distinguished.insert(flag_a.clone());
-                        distinguished.insert(flag_b.clone());
-                    }
-                }
-            }
-        }
-
-        distinguished
+        pairwise_distinguished_from_groups(&self.groups)
     }
+}
+
+/// Find flag pairs proven different by cross-group interaction data.
+fn pairwise_distinguished_from_groups(groups: &[BehaviorGroup]) -> HashSet<String> {
+    struct ComboKey { base: Vec<String>, positionals: Vec<String> }
+    impl std::hash::Hash for ComboKey {
+        fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+            self.base.hash(state);
+            self.positionals.hash(state);
+        }
+    }
+    impl PartialEq for ComboKey { fn eq(&self, other: &Self) -> bool { self.base == other.base && self.positionals == other.positionals } }
+    impl Eq for ComboKey {}
+
+    let mut combo_map: HashMap<ComboKey, Vec<(String, usize)>> = HashMap::new();
+    for (gi, group) in groups.iter().enumerate() {
+        for label in &group.run_labels {
+            let args = output::parse_label(label);
+            let flags: Vec<&&str> = args.iter().filter(|a| a.starts_with('-')).collect();
+            let positionals: Vec<String> = args.iter().filter(|a| !a.starts_with('-')).map(|s| s.to_string()).collect();
+            if flags.len() >= 2 {
+                for (fi, modifier) in flags.iter().enumerate() {
+                    let base: Vec<String> = flags.iter().enumerate()
+                        .filter(|(i, _)| *i != fi)
+                        .map(|(_, f)| f.to_string())
+                        .collect();
+                    let mod_stem = if let Some(eq) = modifier.find('=') {
+                        modifier[..eq].to_string()
+                    } else {
+                        modifier.to_string()
+                    };
+                    combo_map.entry(ComboKey { base, positionals: positionals.clone() })
+                        .or_default().push((mod_stem, gi));
+                }
+            }
+        }
+    }
+
+    let mut distinguished = HashSet::new();
+    for entries in combo_map.values() {
+        if entries.len() < 2 { continue; }
+        for i in 0..entries.len() {
+            for j in (i + 1)..entries.len() {
+                let (flag_a, group_a) = &entries[i];
+                let (flag_b, group_b) = &entries[j];
+                if group_a != group_b && flag_a != flag_b {
+                    distinguished.insert(flag_a.clone());
+                    distinguished.insert(flag_b.clone());
+                }
+            }
+        }
+    }
+    distinguished
+}
+
+/// Lightweight pairwise analysis from label groups (for leave-one-out).
+fn pairwise_distinguished_from_label_groups(groups: &[Vec<String>]) -> HashSet<String> {
+    struct ComboKey { base: Vec<String>, positionals: Vec<String> }
+    impl std::hash::Hash for ComboKey {
+        fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+            self.base.hash(state);
+            self.positionals.hash(state);
+        }
+    }
+    impl PartialEq for ComboKey { fn eq(&self, other: &Self) -> bool { self.base == other.base && self.positionals == other.positionals } }
+    impl Eq for ComboKey {}
+
+    let mut combo_map: HashMap<ComboKey, Vec<(String, usize)>> = HashMap::new();
+    for (gi, labels) in groups.iter().enumerate() {
+        for label in labels {
+            let args = output::parse_label(label);
+            let flags: Vec<&&str> = args.iter().filter(|a| a.starts_with('-')).collect();
+            let positionals: Vec<String> = args.iter().filter(|a| !a.starts_with('-')).map(|s| s.to_string()).collect();
+            if flags.len() >= 2 {
+                for (fi, modifier) in flags.iter().enumerate() {
+                    let base: Vec<String> = flags.iter().enumerate()
+                        .filter(|(i, _)| *i != fi)
+                        .map(|(_, f)| f.to_string())
+                        .collect();
+                    let mod_stem = if let Some(eq) = modifier.find('=') {
+                        modifier[..eq].to_string()
+                    } else {
+                        modifier.to_string()
+                    };
+                    combo_map.entry(ComboKey { base, positionals: positionals.clone() })
+                        .or_default().push((mod_stem, gi));
+                }
+            }
+        }
+    }
+
+    let mut distinguished = HashSet::new();
+    for entries in combo_map.values() {
+        if entries.len() < 2 { continue; }
+        for i in 0..entries.len() {
+            for j in (i + 1)..entries.len() {
+                let (flag_a, group_a) = &entries[i];
+                let (flag_b, group_b) = &entries[j];
+                if group_a != group_b && flag_a != flag_b {
+                    distinguished.insert(flag_a.clone());
+                    distinguished.insert(flag_b.clone());
+                }
+            }
+        }
+    }
+    distinguished
 }
 
 /// Core analysis: Script + GridResult → AnalysisMetrics.
@@ -649,11 +697,79 @@ pub fn analyze(
     }
 
     let total_runs = run_analyses.len();
+
+    // --- Leave-one-out robustness ---
+    // For each context, mask it and re-group to check if each flag is still distinguished.
+    // Uses lightweight grouping: just (from_ref_hash, masked_obs_keys) → group_index,
+    // then pairwise_distinguished_from_labels on the resulting label groups.
+    let context_names: Vec<String> = script.contexts.iter().map(|c| c.name.clone()).collect();
+    let all_distinguished = pairwise_distinguished_from_groups(&behavior_groups);
+
+    let mut robustness: HashMap<String, (usize, usize)> = HashMap::new();
+    let n_contexts = context_names.len();
+    for flag in &all_distinguished {
+        robustness.insert(flag.clone(), (0, n_contexts));
+    }
+
+    for drop_ctx in &context_names {
+        // Re-group: hash each run's (from_ref, masked obs_keys) → group labels
+        let mut loo_label_groups: Vec<Vec<String>> = Vec::new();
+        let mut loo_index: HashMap<u64, Vec<usize>> = HashMap::new();
+
+        for entry in &run_obs_keys {
+            let ri = entry.run_index;
+            let Some(analysis) = run_analyses.iter().find(|a| a.run_index == ri) else { continue };
+            let masked_keys: Vec<&(String, ObsKey)> = entry.keys.iter()
+                .filter(|(ctx, _)| ctx != drop_ctx)
+                .collect();
+
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            analysis.from_ref.hash(&mut hasher);
+            for (_, k) in &masked_keys { k.hash(&mut hasher); }
+            let h = hasher.finish();
+
+            let found = loo_index.get(&h).and_then(|indices| {
+                indices.iter().find(|&&gi| {
+                    // Verify: same from_ref and same masked obs_keys
+                    let other_entry = run_obs_keys.iter().find(|e| {
+                        run_analyses.iter().any(|a| a.run_index == e.run_index
+                            && a.args_str == loo_label_groups[gi][0])
+                    });
+                    if let Some(other) = other_entry {
+                        let other_analysis = run_analyses.iter().find(|a| a.run_index == other.run_index).unwrap();
+                        if other_analysis.from_ref != analysis.from_ref { return false; }
+                        let other_masked: Vec<&(String, ObsKey)> = other.keys.iter()
+                            .filter(|(ctx, _)| ctx != drop_ctx).collect();
+                        masked_keys.len() == other_masked.len()
+                            && masked_keys.iter().zip(other_masked.iter()).all(|((_, a), (_, b))| a == b)
+                    } else { false }
+                }).copied()
+            });
+
+            if let Some(gi) = found {
+                loo_label_groups[gi].push(analysis.args_str.clone());
+            } else {
+                let gi = loo_label_groups.len();
+                loo_index.entry(h).or_default().push(gi);
+                loo_label_groups.push(vec![analysis.args_str.clone()]);
+            }
+        }
+
+        let loo_distinguished = pairwise_distinguished_from_label_groups(&loo_label_groups);
+        for flag in &all_distinguished {
+            if loo_distinguished.contains(flag) {
+                robustness.get_mut(flag).unwrap().0 += 1;
+            }
+        }
+    }
+
     AnalysisMetrics {
         groups: behavior_groups,
         runs: run_analyses,
         untested_flags,
         context_count: grid.context_count,
         total_runs,
+        robustness,
     }
 }

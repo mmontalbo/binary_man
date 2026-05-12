@@ -5,6 +5,7 @@
 
 ## Observed: 3/3 flags
   2 solo, 1 via combination
+  robustness: 2 robust, 0 moderate, 0 fragile
 
 Aliases: -d = --delimiters, -s = --serial, -z = --zero-terminated
 

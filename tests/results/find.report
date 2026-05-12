@@ -6,6 +6,7 @@
 ## Observed: 1/4 flags
   1 solo, 0 via combination
   3 additional error-differentiated
+  robustness: 4 robust, 0 moderate, 0 fragile
 
 ## Solo (unique behavior)
   -D

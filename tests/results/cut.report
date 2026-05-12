@@ -6,6 +6,7 @@
 ## Observed: 3/10 flags
   0 solo, 3 via combination
   6 additional error-differentiated
+  robustness: 9 robust, 0 moderate, 0 fragile
 
 Aliases: -b = --bytes, -c = --characters, -d = --delimiter, -f = --fields, -s = --only-delimited, -z = --zero-terminated
 

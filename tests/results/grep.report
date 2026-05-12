@@ -6,6 +6,7 @@
 ## Observed: 45/49 flags
   6 solo, 39 via combination
   4 additional error-differentiated
+  robustness: 48 robust, 0 moderate, 0 fragile
 
 Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --devices, -E = --extended-regexp, -F = --fixed-strings, -G = --basic-regexp, -H = --with-filename, -L = --files-without-match, -P = --perl-regexp, -R = --dereference-recursive, -T = --initial-tab, -U = --binary, -Z = --null, -a = --text, -b = --byte-offset, -c = --count, -d = --directories, -e = --regexp, -f = --file, -h = --no-filename, -i = --ignore-case, -l = --files-with-matches, -m = --max-count, -n = --line-number, -o = --only-matching, -r = --recursive, -s = --no-messages, -v = --invert-match, -w = --word-regexp, -x = --line-regexp, -z = --null-data
 
@@ -123,7 +124,7 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
   -a  e.g. "-e" "-a" "$(head -n1 input.txt)" "input.txt"
   -b  e.g. (pairwise evidence)
   -c  e.g. "-e" "-c" "$(head -n1 input.txt)" "input.txt"
-  -e  e.g. "-e" "-l" "$(head -n1 input.txt)" "input.txt"
+  -e  e.g. "-e" "-r" "$(head -n1 input.txt)" "input.txt"
   -h  e.g. "-e" "-h" "$(head -n1 input.txt)" "input.txt"
   -i  e.g. "-e" "-i" "$(head -n1 input.txt)" "input.txt"
   -l  e.g. "-e" "-l" "$(head -n1 input.txt)" "input.txt"

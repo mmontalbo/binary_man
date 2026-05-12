@@ -6,6 +6,7 @@
 ## Observed: 35/36 flags
   7 solo, 28 via combination
   1 additional error-differentiated
+  robustness: 34 robust, 0 moderate, 0 fragile
 
 Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-target-directory, -a = --archive, -f = --force, -i = --interactive, -l = --link, -n = --no-clobber, -s = --symbolic-link, -t = --target-directory, -v = --verbose, -x = --one-file-system
 

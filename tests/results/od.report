@@ -7,6 +7,7 @@
   14 solo, 4 via combination
   3 additional error-differentiated
   1 behavioral aliases detected
+  robustness: 19 robust, 0 moderate, 0 fragile
 
 Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --format, -v = --output-duplicates
 

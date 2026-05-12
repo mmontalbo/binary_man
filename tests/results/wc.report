@@ -6,6 +6,7 @@
 ## Observed: 6/7 flags
   1 solo, 5 via combination
   1 additional error-differentiated
+  robustness: 7 robust, 0 moderate, 0 fragile
 
 Aliases: -L = --max-line-length, -c = --bytes, -l = --lines, -m = --chars, -w = --words
 

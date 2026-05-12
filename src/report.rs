@@ -406,6 +406,22 @@ pub fn format_exploration_report(
     if untested > 0 {
         out.push_str(&format!("  {} untested\n", untested));
     }
+
+    // Robustness summary: count flags by confidence tier
+    if !final_metrics.robustness.is_empty() {
+        let mut robust = 0usize; // survives all contexts
+        let mut moderate = 0usize; // survives >50%
+        let mut fragile = 0usize; // survives ≤50%
+        for (survived, total) in final_metrics.robustness.values() {
+            if *total == 0 { continue; }
+            if *survived == *total { robust += 1; }
+            else if *survived * 2 > *total { moderate += 1; }
+            else { fragile += 1; }
+        }
+        out.push_str(&format!("  robustness: {} robust, {} moderate, {} fragile\n",
+            robust, moderate, fragile));
+    }
+
     out.push('\n');
 
     // Alias map

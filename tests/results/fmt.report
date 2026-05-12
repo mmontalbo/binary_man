@@ -6,6 +6,7 @@
 ## Observed: 7/7 flags
   3 solo, 4 via combination
   1 behavioral aliases detected
+  robustness: 5 robust, 0 moderate, 0 fragile
 
 Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t = --tagged-paragraph, -u = --uniform-spacing, -w = --width
 

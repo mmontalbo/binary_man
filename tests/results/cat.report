@@ -5,6 +5,7 @@
 
 ## Observed: 10/10 flags
   3 solo, 7 via combination
+  robustness: 10 robust, 0 moderate, 0 fragile
 
 Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonblank, -n = --number, -s = --squeeze-blank, -v = --show-nonprinting
 
