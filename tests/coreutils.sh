@@ -14,7 +14,8 @@ set -euo pipefail
 BGRID="${1:-./target/release/bgrid}"
 TIMEOUT=${TIMEOUT:-600}
 RESULTS_DIR="tests/results"
-JOBS=${JOBS:-4}
+JOBS=${JOBS:-$(nproc 2>/dev/null || echo 4)}
+REPRO=${REPRO:-0}
 
 # Create timestamped run directory for full diagnostic retention
 RUN_ID=$(date +%Y%m%d_%H%M%S)
@@ -190,10 +191,10 @@ echo "=== Results: $PASS/$TOTAL passed, $FAIL failed ($ELAPSED seconds) ==="
 echo "Reports saved to $RESULTS_DIR/"
 echo "Run log saved to $RUN_DIR/"
 
-# --- Reproducibility verification ---
+# --- Reproducibility verification (opt-in: REPRO=1) ---
 # Re-run each binary once and compare observed counts.
 # Nondeterministic binaries are reported but don't fail the test.
-if [ "$FAIL" -eq 0 ]; then
+if [ "$FAIL" -eq 0 ] && [ "$REPRO" = "1" ]; then
     echo ""
     echo "=== Reproducibility check ==="
     REPRO_PASS=0

@@ -168,7 +168,7 @@ fn diff_snapshots(before: &FsSnapshot, after: &FsSnapshot) -> Vec<FsChange> {
 pub const CELL_TIMEOUT_SECS: u64 = 2;
 
 /// Max concurrent cells (threads).
-const MAX_THREADS: usize = 8;
+const MAX_THREADS: usize = 16;
 
 /// Run the entire grid with batched execution.
 ///
