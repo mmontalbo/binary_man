@@ -35,6 +35,7 @@ mkdir -p "$RESULTS_DIR" "$RUN_DIR"
 run_one() {
     local binary="$1"
     local min_distinguished="$2"
+    local expected_total="${3:-0}"
     local result_file="$RESULTS_DIR/$binary.result"
 
     local report_file="$RESULTS_DIR/$binary.report"
@@ -89,10 +90,26 @@ run_one() {
         diag=" [$diag ]"
     fi
 
-    if [ "$distinguished" -ge "$min_distinguished" ]; then
+    # Check for fragile flags (robustness score)
+    local fragile=0
+    fragile=$(grep -a 'robustness:' "$report_file" 2>/dev/null | grep -oP '\d+(?= fragile)' || echo "0")
+    if [ -z "$fragile" ]; then fragile=0; fi
+
+    local fail=""
+    if [ "$distinguished" -lt "$min_distinguished" ]; then
+        fail="observed $distinguished < $min_distinguished"
+    fi
+    if [ "$expected_total" -gt 0 ] && [ "$denominator" -ne "$expected_total" ]; then
+        fail="${fail:+$fail; }surface $denominator != $expected_total"
+    fi
+    if [ "$fragile" -gt 0 ]; then
+        fail="${fail:+$fail; }$fragile fragile"
+    fi
+
+    if [ -z "$fail" ]; then
         echo "PASS  $binary: $distinguished/$denominator (expected >=$min_distinguished)$diag" >"$result_file"
     else
-        echo "FAIL  $binary: $distinguished/$denominator (expected >=$min_distinguished)$diag" >"$result_file"
+        echo "FAIL  $binary: $distinguished/$denominator ($fail)$diag" >"$result_file"
     fi
 }
 
@@ -105,31 +122,32 @@ echo ""
 
 START=$(date +%s)
 
-# Expected lower bounds for observed behavior count.
-# These are the minimum acceptable — improvements raise them.
+# Expected values: "binary min_observed expected_total"
+# min_observed: lower bound for observed behavior count (improvements raise it)
+# expected_total: exact flag count from discovery (changes indicate regex/parsing shifts)
 CHECKS=(
-    "sort 23"
-    "ls 56"
-    "cat 10"
-    "cut 3"
-    "head 5"
-    "wc 6"
-    "uniq 11"
-    "nl 9"
-    "od 18"
-    "fold 1"
-    "fmt 6"
-    "paste 3"
-    "du 25"
-    "cp 35"
-    "rm 10"
-    "stat 6"
-    "df 15"
-    "sed 22"
-    "xargs 13"
-    "diff 51"
-    "find 1"
-    "grep 45"
+    "sort 23 30"
+    "ls 56 60"
+    "cat 10 10"
+    "cut 3 10"
+    "head 5 7"
+    "wc 6 7"
+    "uniq 11 11"
+    "nl 9 11"
+    "od 18 21"
+    "fold 1 3"
+    "fmt 6 7"
+    "paste 3 3"
+    "du 25 26"
+    "cp 35 36"
+    "rm 10 12"
+    "stat 6 7"
+    "df 15 16"
+    "sed 22 24"
+    "xargs 13 21"
+    "diff 51 53"
+    "find 1 4"
+    "grep 45 49"
 )
 
 # Run all checks in parallel, limited to $JOBS at a time
