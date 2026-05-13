@@ -208,18 +208,25 @@ pub fn build_contexts() -> Vec<crate::parse::NamedContext> {
         extends: None, commands: cmds, stdin: None,
     });
 
-    // Stdin contexts: same content piped via stdin instead of (in addition to) files.
-    // These naturally exercise stdin-primary tools (xargs, sort, etc.)
-    let stdin_content = parse::StdinSource::Lines(
+    // Stdin contexts: content piped via stdin exercises stdin-primary tools.
+    // Multiple stdin variants exercise different splitting/delimiter behavior.
+    let stdin_lines = parse::StdinSource::Lines(
         vec!["cherry".into(), "apple".into(), "banana".into()]
     );
-    for base_name in ["words_minimal", "numbers_minimal", "passwd_minimal"] {
+    let stdin_delimited = parse::StdinSource::Lines(
+        vec!["a,b,c".into(), "d:e:f".into(), "g h i".into()]
+    );
+    for (base_name, stdin) in [
+        ("words_minimal", &stdin_lines),
+        ("numbers_minimal", &stdin_lines),
+        ("passwd_minimal", &stdin_delimited),
+    ] {
         if let Some(base) = contexts.iter().find(|c| c.name == base_name).cloned() {
             contexts.push(NamedContext {
                 name: format!("{} / stdin", base_name),
                 extends: None,
                 commands: base.commands,
-                stdin: Some(stdin_content.clone()),
+                stdin: Some(stdin.clone()),
             });
         }
     }

@@ -1,39 +1,46 @@
 # Exploration: xargs
 
 ## Rounds
-  round 0: 6 isolated cumulative, 40 identical in round (single-phase)
+  round 0: 11 isolated cumulative, 42 identical in round (single-phase)
 
 ## Observed: 14/21 flags
-  1 solo, 13 via combination
+  3 solo, 11 via combination
   4 additional error-differentiated
-  1 behavioral aliases detected
   robustness: 17 robust, 0 moderate, 0 fragile
 
 Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = --delimiter, -n = --max-args, -o = --open-tty, -p = --interactive, -r = --no-run-if-empty, -s = --max-chars, -t = --verbose, -x = --exit
 
 ## Solo (unique behavior)
+  -L  # use at most MAX-LINES non-blank input lines per command line
+    exemplar: "-L" "1" in passwd_minimal / stdin (different)
+    base:
+      a,b,c d:e:f g h i
+    flag:
   -a  # read arguments from FILE, not standard input
     exemplar: "-a" "other.txt" in words_minimal (different)
     base:
     flag:
       hello world
+  -n  # use at most MAX-ARGS arguments per command line
+    exemplar: "-n" "1" in passwd_minimal / stdin (different)
+    base:
+      a,b,c d:e:f g h i
+    flag:
 
 ## Via combination (distinguishable when paired)
   --eof  e.g. (pairwise evidence)
   --process-slot-var  e.g. (pairwise evidence)
   --replace  e.g. (pairwise evidence)
-  --show-limits  e.g. (pairwise evidence)
+  --show-limits  e.g. "-n" "1" "--show-limits"
   -0  e.g. (pairwise evidence)
-  -L  e.g. (pairwise evidence)
   -P  e.g. (pairwise evidence)
   -e  e.g. (pairwise evidence)
   -i  e.g. (pairwise evidence)
   -l  e.g. (pairwise evidence)
-  -n  e.g. "-n" "1" "-a" "input.txt"
   -o  e.g. (pairwise evidence)
   -p  e.g. (pairwise evidence)
-  -r  e.g. (pairwise evidence)
+  -r  e.g. "-n" "1" "-r"
   -s  e.g. (pairwise evidence)
-  -t  e.g. (pairwise evidence)
+  -t  e.g. "-n" "1" "-t"
   -x  e.g. (pairwise evidence)
 
