@@ -126,8 +126,8 @@ START=$(date +%s)
 # min_observed: lower bound for observed behavior count (improvements raise it)
 # expected_total: exact flag count from discovery (changes indicate regex/parsing shifts)
 CHECKS=(
-    "sort 23 30"
-    "ls 56 60"
+    "sort 25 30"
+    "ls 59 60"
     "cat 10 10"
     "cut 3 10"
     "head 5 7"

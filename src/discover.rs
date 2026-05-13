@@ -818,12 +818,21 @@ pub fn generate_initial_script(
                     }
                 }
 
-                // If no candidates worked, try error mining
-                if working.is_empty() {
+                // Error mining: try when no candidates worked OR when all exit 1
+                // (exit 1 may be "invalid value" error, not real behavior)
+                if working.is_empty() || !has_exit0 {
                     let mined = probe_error_mine(sandbox, binary, sub_args, flag, first_pattern, work_dir);
                     for val in mined {
-                        if probe_flag_value(sandbox, binary, sub_args, flag, Some(&val), None, first_pattern, work_dir) {
-                            working.push(val);
+                        if let Some(exit) = probe_flag_exit(sandbox, binary, sub_args, flag, Some(&val), None, first_pattern, work_dir, None) {
+                            if exit <= 1 {
+                                if exit == 0 && !has_exit0 {
+                                    // Mined exit-0 value is better — insert first
+                                    working.insert(0, val);
+                                    has_exit0 = true;
+                                } else if !working.contains(&val) {
+                                    working.push(val);
+                                }
+                            }
                         }
                     }
                 }

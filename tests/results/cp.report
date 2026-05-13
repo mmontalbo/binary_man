@@ -1,11 +1,10 @@
 # Exploration: cp
 
 ## Rounds
-  round 0: 40 isolated cumulative, 38 identical in round (single-phase)
+  round 0: 39 isolated cumulative, 36 identical in round (single-phase)
 
-## Observed: 35/36 flags
-  8 solo, 27 via combination
-  1 additional error-differentiated
+## Observed: 36/36 flags
+  9 solo, 27 via combination
   1 behavioral aliases detected
   robustness: 34 robust, 0 moderate, 0 fragile
 
@@ -19,7 +18,7 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
       'input.txt' -> 'other.txt'
       copy offload: yes, reflink: unsupported, sparse detection: no
   --no-preserve  # don't preserve the specified attributes
-    exemplar: "--no-preserve=1" "input.txt" "other.txt" in words_minimal (different)
+    exemplar: "--no-preserve=mode" "input.txt" "other.txt" in words_minimal (different)
     base:
     flag:
   --parents  # use full source file name under DIRECTORY
