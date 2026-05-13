@@ -109,7 +109,7 @@ START=$(date +%s)
 # These are the minimum acceptable — improvements raise them.
 CHECKS=(
     "sort 23"
-    "ls 55"
+    "ls 56"
     "cat 10"
     "cut 3"
     "head 5"

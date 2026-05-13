@@ -412,8 +412,18 @@ pub fn candidates(metavar: &str) -> Vec<&'static str> {
             vec!["%s", "%d", "%f"],
         "MODE" =>
             vec!["644", "755", "600"],
-        "WORD" | "STYLE" | "TYPE" | "METHOD" | "WHEN" =>
-            vec!["auto", "always", "never"],
+        "WORD" | "STYLE" | "TYPE" | "METHOD" | "WHEN" | "CONTROL" =>
+            vec!["auto", "always", "never", "none"],
+        "KEYDEF" | "KEY" | "POS" =>
+            vec!["1", "1,2", "2", "1,1"],
+        "PROG" | "PROGRAM" | "COMMAND" =>
+            vec!["cat", "true", "echo"],
+        "END" | "EOF" =>
+            vec!["EOF", ""],
+        "R" | "REPLACE" =>
+            vec!["{}", "X"],
+        "TIME_STYLE" =>
+            vec!["full-iso", "long-iso", "iso", "locale"],
         "VAR" | "NAME" | "PREFIX" | "SUFFIX" | "STRING" | "STR" | "LABEL" | "TAG" =>
             vec!["test", "x", ""],
         _ => {
@@ -545,8 +555,6 @@ fn push_flag_arg(args: &mut Vec<Arg>, flag: &str, value: Option<&str>) {
 }
 
 /// Probe whether a flag+value combination succeeds (exit code ≤ 1).
-/// Builds the command with sub_args, flag (with optional value and optional companion),
-/// and positional pattern args.
 #[allow(clippy::too_many_arguments)]
 fn probe_flag_value(
     sandbox: &Sandbox, binary: &str, sub_args: &[&str],
@@ -554,9 +562,20 @@ fn probe_flag_value(
     companion: Option<(&str, &str)>,
     pattern: &[String], work_dir: &std::path::Path,
 ) -> bool {
+    probe_flag_value_stdin(sandbox, binary, sub_args, flag, value, companion, pattern, work_dir, None)
+}
+
+/// Probe with optional stdin piping. Used for tools like xargs that need input data.
+#[allow(clippy::too_many_arguments)]
+fn probe_flag_value_stdin(
+    sandbox: &Sandbox, binary: &str, sub_args: &[&str],
+    flag: &str, value: Option<&str>,
+    companion: Option<(&str, &str)>,
+    pattern: &[String], work_dir: &std::path::Path,
+    stdin_data: Option<&[u8]>,
+) -> bool {
     let env = std::collections::HashMap::new();
     let mut args: Vec<String> = sub_args.iter().map(|s| s.to_string()).collect();
-    // Add companion flag if present
     if let Some((cf, cv)) = companion {
         if cf.starts_with("--") {
             args.push(format!("{}={}", cf, cv));
@@ -565,7 +584,6 @@ fn probe_flag_value(
             args.push(cv.to_string());
         }
     }
-    // Add target flag
     if let Some(v) = value {
         if flag.starts_with("--") {
             args.push(format!("{}={}", flag, v));
@@ -580,10 +598,23 @@ fn probe_flag_value(
     let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     let _ = std::fs::write(work_dir.join("input.txt"), "cherry\napple\nbanana\n");
     let mut cmd = sandbox.command(binary, &refs, work_dir, &env, None);
-    cmd.stdin(std::process::Stdio::null());
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
-    cmd.output().map(|o| o.status.code().unwrap_or(-1) <= 1).unwrap_or(false)
+
+    if let Some(data) = stdin_data {
+        cmd.stdin(std::process::Stdio::piped());
+        let Ok(mut child) = cmd.spawn() else { return false };
+        if let Some(mut si) = child.stdin.take() {
+            use std::io::Write;
+            let _ = si.write_all(data);
+        }
+        child.wait_with_output()
+            .map(|o| o.status.code().unwrap_or(-1) <= 1)
+            .unwrap_or(false)
+    } else {
+        cmd.stdin(std::process::Stdio::null());
+        cmd.output().map(|o| o.status.code().unwrap_or(-1) <= 1).unwrap_or(false)
+    }
 }
 
 /// Try a deliberately invalid value for a flag and mine stderr for valid alternatives.
@@ -741,6 +772,21 @@ pub fn generate_initial_script(
                     for val in mined {
                         if probe_flag_value(sandbox, binary, sub_args, flag, Some(&val), None, first_pattern, work_dir) {
                             working.push(val);
+                        }
+                    }
+                }
+
+                // If binary accepts stdin, also try candidates with piped input.
+                // Tools like xargs need stdin data to work — file-based probing
+                // may exit 1 (technically ≤1 but error-mode, not real behavior).
+                if stdin_works {
+                    let stdin_data = b"cherry\napple\nbanana\n";
+                    let empty_pattern: Vec<String> = vec![];
+                    for c in &cands {
+                        if !working.contains(c)
+                            && probe_flag_value_stdin(sandbox, binary, sub_args, flag, Some(c), None, &empty_pattern, work_dir, Some(stdin_data))
+                        {
+                            working.push(c.clone());
                         }
                     }
                 }

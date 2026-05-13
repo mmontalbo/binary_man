@@ -1,11 +1,12 @@
 # Exploration: cp
 
 ## Rounds
-  round 0: 34 isolated cumulative, 37 identical in round (single-phase)
+  round 0: 38 isolated cumulative, 40 identical in round (single-phase)
 
 ## Observed: 35/36 flags
-  7 solo, 28 via combination
+  8 solo, 27 via combination
   1 additional error-differentiated
+  1 behavioral aliases detected
   robustness: 34 robust, 0 moderate, 0 fragile
 
 Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-target-directory, -a = --archive, -f = --force, -i = --interactive, -l = --link, -n = --no-clobber, -s = --symbolic-link, -t = --target-directory, -v = --verbose, -x = --one-file-system
@@ -33,6 +34,10 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     exemplar: "--remove-destination" "input.txt" "other.txt" in words_minimal (different)
     base:
     flag:
+  --sparse  # control creation of sparse files. See below
+    exemplar: "--sparse=auto" "input.txt" "other.txt" in words_minimal (different)
+    base:
+    flag:
   -S  # override the usual backup suffix
     exemplar: "-S" "test" "input.txt" "other.txt" in words_minimal (different)
     base:
@@ -55,7 +60,6 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
   --keep-directory-symlink  e.g. (pairwise evidence)
   --preserve  e.g. (pairwise evidence)
   --recursive  e.g. (pairwise evidence)
-  --sparse  e.g. (pairwise evidence)
   --strip-trailing-slashes  e.g. (pairwise evidence)
   --update  e.g. (pairwise evidence)
   -H  e.g. (pairwise evidence)

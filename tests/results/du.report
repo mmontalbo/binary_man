@@ -55,8 +55,8 @@ Aliases: -0 = --null, -B = --block-size, -D = --dereference-args, -L = --derefer
       12	input.txt
       4	other.txt
     flag:
-      12	2026-05-12 14:12	input.txt
-      4	2026-05-12 14:12	other.txt
+      12	2026-05-12 21:26	input.txt
+      4	2026-05-12 21:26	other.txt
   -B  # scale sizes by SIZE before printing them; e.g., '-BM' prints sizes in units of 1,048,576 bytes; see SIZE format below
     exemplar: "-B" "2" "input.txt" "other.txt" in words_minimal (reordered)
     base:

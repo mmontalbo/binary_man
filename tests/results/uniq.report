@@ -1,16 +1,27 @@
 # Exploration: uniq
 
 ## Rounds
-  round 0: 84 isolated cumulative, 75 identical in round (single-phase)
+  round 0: 55 isolated cumulative, 83 identical in round (single-phase)
 
 ## Observed: 11/11 flags
-  8 solo, 3 via combination
-  2 behavioral aliases detected
+  11 solo, 0 via combination
+  3 behavioral aliases detected
   robustness: 11 robust, 0 moderate, 0 fragile
 
 Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, -s = --skip-chars, -u = --unique, -w = --check-chars, -z = --zero-terminated
 
 ## Solo (unique behavior)
+  --all-repeated
+    exemplar: "--all-repeated" "input.txt" in formatted_minimal (+2 lines)
+    base:
+      first line
+      second line with trailing spaces
+      	indented with tab
+          indented with spaces
+      	 	mixed tabs and spaces
+            ...
+    flag:
+      
   --group
     exemplar: "--group" "input.txt" in words_minimal (+2882 lines)
     base:
@@ -27,6 +38,17 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
       
       about
             ...
+  -D  # print all duplicate lines
+    exemplar: "-D" "input.txt" in formatted_minimal (+2 lines)
+    base:
+      first line
+      second line with trailing spaces
+      	indented with tab
+          indented with spaces
+      	 	mixed tabs and spaces
+            ...
+    flag:
+      
   -c  # prefix lines by the number of occurrences
     exemplar: "-c" "input.txt" in words_minimal (+1441 lines)
     base:
@@ -68,6 +90,13 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
       1'000'000.00
       1 000 000,00
       1'000'000,00
+  -i  # ignore differences in case when comparing
+    exemplar: "-i" in words_minimal (different)
+    base:
+    flag:
+      cherry
+      apple
+      banana
   -s  # avoid comparing the first N characters
     exemplar: "-s" "2" "input.txt" in numbers_minimal (different)
     base:
@@ -132,9 +161,4 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
       abstract
       accept
             ...
-
-## Via combination (distinguishable when paired)
-  --all-repeated  e.g. (pairwise evidence)
-  -D  e.g. "-D" "-f" "1" "input.txt" "other.txt"
-  -i  e.g. "-i" "-w" "1" "input.txt" "other.txt"
 

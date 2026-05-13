@@ -1,10 +1,10 @@
 # Exploration: nl
 
 ## Rounds
-  round 0: 123 isolated cumulative, 94 identical in round (single-phase)
+  round 0: 115 isolated cumulative, 94 identical in round (single-phase)
 
 ## Observed: 9/11 flags
-  6 solo, 3 via combination
+  5 solo, 4 via combination
   1 additional error-differentiated
   1 behavioral aliases detected
   robustness: 8 robust, 0 moderate, 0 fragile
@@ -12,22 +12,6 @@
 Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numbering, -h = --header-numbering, -i = --line-increment, -l = --join-blank-lines, -n = --number-format, -p = --no-renumber, -s = --number-separator, -v = --starting-line-number, -w = --number-width
 
 ## Solo (unique behavior)
-  -b  # use STYLE for numbering body lines
-    exemplar: "-b" "never" "input.txt" "other.txt" in words_minimal (+1440 lines)
-    base:
-           1	aardvark
-           2	abbreviation
-           3	about
-           4	abstract
-           5	accept
-            ...
-    flag:
-             aardvark
-             abbreviation
-             about
-             abstract
-             accept
-            ...
   -i  # line number increment at each line
     exemplar: "-i" "0" "input.txt" "other.txt" in words_minimal (+1440 lines)
     base:
@@ -114,6 +98,7 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
             ...
 
 ## Via combination (distinguishable when paired)
+  -b  e.g. (pairwise evidence)
   -d  e.g. (pairwise evidence)
   -f  e.g. (pairwise evidence)
   -h  e.g. (pairwise evidence)
