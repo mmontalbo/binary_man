@@ -287,7 +287,9 @@ impl AnalysisMetrics {
 }
 
 /// Find flag pairs proven different by cross-group interaction data.
-fn pairwise_distinguished_from_groups(groups: &[BehaviorGroup]) -> HashSet<String> {
+/// Find flag stems proven distinguishable by cross-group pairwise interaction.
+/// Takes groups as slices of label slices — used by both full analysis and leave-one-out.
+fn pairwise_distinguished_from_label_groups(groups: &[&[String]]) -> HashSet<String> {
     struct ComboKey { base: Vec<String>, positionals: Vec<String> }
     impl std::hash::Hash for ComboKey {
         fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
@@ -299,8 +301,8 @@ fn pairwise_distinguished_from_groups(groups: &[BehaviorGroup]) -> HashSet<Strin
     impl Eq for ComboKey {}
 
     let mut combo_map: HashMap<ComboKey, Vec<(String, usize)>> = HashMap::new();
-    for (gi, group) in groups.iter().enumerate() {
-        for label in &group.run_labels {
+    for (gi, labels) in groups.iter().enumerate() {
+        for label in *labels {
             let args = output::parse_label(label);
             let flags: Vec<&&str> = args.iter().filter(|a| a.starts_with('-')).collect();
             let positionals: Vec<String> = args.iter().filter(|a| !a.starts_with('-')).map(|s| s.to_string()).collect();
@@ -339,57 +341,9 @@ fn pairwise_distinguished_from_groups(groups: &[BehaviorGroup]) -> HashSet<Strin
     distinguished
 }
 
-/// Lightweight pairwise analysis from label groups (for leave-one-out).
-fn pairwise_distinguished_from_label_groups(groups: &[Vec<String>]) -> HashSet<String> {
-    struct ComboKey { base: Vec<String>, positionals: Vec<String> }
-    impl std::hash::Hash for ComboKey {
-        fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-            self.base.hash(state);
-            self.positionals.hash(state);
-        }
-    }
-    impl PartialEq for ComboKey { fn eq(&self, other: &Self) -> bool { self.base == other.base && self.positionals == other.positionals } }
-    impl Eq for ComboKey {}
-
-    let mut combo_map: HashMap<ComboKey, Vec<(String, usize)>> = HashMap::new();
-    for (gi, labels) in groups.iter().enumerate() {
-        for label in labels {
-            let args = output::parse_label(label);
-            let flags: Vec<&&str> = args.iter().filter(|a| a.starts_with('-')).collect();
-            let positionals: Vec<String> = args.iter().filter(|a| !a.starts_with('-')).map(|s| s.to_string()).collect();
-            if flags.len() >= 2 {
-                for (fi, modifier) in flags.iter().enumerate() {
-                    let base: Vec<String> = flags.iter().enumerate()
-                        .filter(|(i, _)| *i != fi)
-                        .map(|(_, f)| f.to_string())
-                        .collect();
-                    let mod_stem = if let Some(eq) = modifier.find('=') {
-                        modifier[..eq].to_string()
-                    } else {
-                        modifier.to_string()
-                    };
-                    combo_map.entry(ComboKey { base, positionals: positionals.clone() })
-                        .or_default().push((mod_stem, gi));
-                }
-            }
-        }
-    }
-
-    let mut distinguished = HashSet::new();
-    for entries in combo_map.values() {
-        if entries.len() < 2 { continue; }
-        for i in 0..entries.len() {
-            for j in (i + 1)..entries.len() {
-                let (flag_a, group_a) = &entries[i];
-                let (flag_b, group_b) = &entries[j];
-                if group_a != group_b && flag_a != flag_b {
-                    distinguished.insert(flag_a.clone());
-                    distinguished.insert(flag_b.clone());
-                }
-            }
-        }
-    }
-    distinguished
+fn pairwise_distinguished_from_groups(groups: &[BehaviorGroup]) -> HashSet<String> {
+    let label_slices: Vec<&[String]> = groups.iter().map(|g| g.run_labels.as_slice()).collect();
+    pairwise_distinguished_from_label_groups(&label_slices)
 }
 
 /// Core analysis: Script + GridResult → AnalysisMetrics.
@@ -756,7 +710,8 @@ pub fn analyze(
             }
         }
 
-        let loo_distinguished = pairwise_distinguished_from_label_groups(&loo_label_groups);
+        let loo_slices: Vec<&[String]> = loo_label_groups.iter().map(|g| g.as_slice()).collect();
+        let loo_distinguished = pairwise_distinguished_from_label_groups(&loo_slices);
         for flag in &all_distinguished {
             if loo_distinguished.contains(flag) {
                 robustness.get_mut(flag).unwrap().0 += 1;

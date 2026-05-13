@@ -49,14 +49,6 @@ pub fn content_formatted() -> Vec<String> { lines(include_str!("../fixtures/form
 /// Source: Big List of Naughty Strings (MIT).
 pub fn content_naughty() -> Vec<String> { lines(include_str!("../fixtures/naughty.txt")) }
 
-// --- Legacy content accessors (used by existing code) ---
-// These map old names to the new fixture-backed content.
-
-pub fn content_alpha() -> Vec<String> { content_words() }
-pub fn content_numeric() -> Vec<String> { content_numbers() }
-pub fn content_fielded() -> Vec<String> { content_passwd() }
-pub fn content_tabular() -> Vec<String> { content_csv() }
-
 /// Structure level: minimal — just input.txt and other.txt.
 pub fn structure_minimal(content: &[String]) -> Vec<SetupCommand> {
     vec![
