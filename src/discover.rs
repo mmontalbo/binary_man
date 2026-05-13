@@ -494,92 +494,80 @@ fn push_flag_arg(args: &mut Vec<Arg>, flag: &str, value: Option<&str>) {
 }
 
 /// Probe a flag+value combination. Returns exit code if it ran, None if spawn failed.
-#[allow(clippy::too_many_arguments)]
-fn probe_flag_exit(
-    sandbox: &Sandbox, binary: &str, sub_args: &[&str],
-    flag: &str, value: Option<&str>,
-    companion: Option<(&str, &str)>,
-    pattern: &[String], work_dir: &std::path::Path,
-    stdin_data: Option<&[u8]>,
-) -> Option<i32> {
-    let env = std::collections::HashMap::new();
-    let mut args: Vec<String> = sub_args.iter().map(|s| s.to_string()).collect();
-    if let Some((cf, cv)) = companion {
-        if cf.starts_with("--") {
-            args.push(format!("{}={}", cf, cv));
-        } else {
-            args.push(cf.to_string());
-            args.push(cv.to_string());
+/// Shared context for probing flag values against a binary.
+struct ProbeCtx<'a> {
+    sandbox: &'a Sandbox,
+    binary: &'a str,
+    sub_args: &'a [&'a str],
+    pattern: &'a [String],
+    work_dir: &'a std::path::Path,
+}
+
+impl<'a> ProbeCtx<'a> {
+    /// Probe a flag+value. Returns exit code if it ran.
+    fn exit_code(&self, flag: &str, value: Option<&str>,
+        companion: Option<(&str, &str)>, stdin_data: Option<&[u8]>,
+    ) -> Option<i32> {
+        let env = std::collections::HashMap::new();
+        let mut args: Vec<String> = self.sub_args.iter().map(|s| s.to_string()).collect();
+        if let Some((cf, cv)) = companion {
+            if cf.starts_with("--") { args.push(format!("{}={}", cf, cv)); }
+            else { args.push(cf.to_string()); args.push(cv.to_string()); }
         }
-    }
-    if let Some(v) = value {
-        if flag.starts_with("--") {
-            args.push(format!("{}={}", flag, v));
+        if let Some(v) = value {
+            if flag.starts_with("--") { args.push(format!("{}={}", flag, v)); }
+            else { args.push(flag.to_string()); args.push(v.to_string()); }
         } else {
             args.push(flag.to_string());
-            args.push(v.to_string());
         }
-    } else {
-        args.push(flag.to_string());
+        args.extend(self.pattern.iter().cloned());
+        let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let _ = std::fs::write(self.work_dir.join("input.txt"), "cherry\napple\nbanana\n");
+        let mut cmd = self.sandbox.command(self.binary, &refs, self.work_dir, &env, None);
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        if let Some(data) = stdin_data {
+            cmd.stdin(std::process::Stdio::piped());
+            let mut child = cmd.spawn().ok()?;
+            if let Some(mut si) = child.stdin.take() {
+                use std::io::Write;
+                let _ = si.write_all(data);
+            }
+            child.wait_with_output().ok()?.status.code()
+        } else {
+            cmd.stdin(std::process::Stdio::null());
+            cmd.output().ok()?.status.code()
+        }
     }
-    args.extend(pattern.iter().cloned());
-    let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    let _ = std::fs::write(work_dir.join("input.txt"), "cherry\napple\nbanana\n");
-    let mut cmd = sandbox.command(binary, &refs, work_dir, &env, None);
-    cmd.stdout(std::process::Stdio::piped());
-    cmd.stderr(std::process::Stdio::piped());
 
-    if let Some(data) = stdin_data {
-        cmd.stdin(std::process::Stdio::piped());
-        let child = cmd.spawn().ok()?;
-        // Immediately drop stdin to close the pipe after writing
-        let mut child = child;
-        if let Some(mut si) = child.stdin.take() {
-            use std::io::Write;
-            let _ = si.write_all(data);
+    /// Probe succeeds if exit code ≤ 1.
+    fn succeeds(&self, flag: &str, value: Option<&str>,
+        companion: Option<(&str, &str)>,
+    ) -> bool {
+        self.exit_code(flag, value, companion, None).is_some_and(|c| c <= 1)
+    }
+
+    /// Try invalid value and mine stderr for valid alternatives.
+    fn error_mine(&self, flag: &str) -> Vec<String> {
+        let env = std::collections::HashMap::new();
+        let mut args: Vec<String> = self.sub_args.iter().map(|s| s.to_string()).collect();
+        if flag.starts_with("--") {
+            args.push(format!("{}=__bgrid_invalid__", flag));
+        } else {
+            args.push(flag.to_string());
+            args.push("__bgrid_invalid__".into());
         }
-        child.wait_with_output().ok()?.status.code()
-    } else {
+        args.extend(self.pattern.iter().cloned());
+        let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let _ = std::fs::write(self.work_dir.join("input.txt"), "cherry\napple\nbanana\n");
+        let mut cmd = self.sandbox.command(self.binary, &refs, self.work_dir, &env, None);
         cmd.stdin(std::process::Stdio::null());
-        cmd.output().ok()?.status.code()
-    }
-}
-
-/// Convenience: probe succeeds if exit code ≤ 1.
-#[allow(clippy::too_many_arguments)]
-fn probe_flag_value(
-    sandbox: &Sandbox, binary: &str, sub_args: &[&str],
-    flag: &str, value: Option<&str>,
-    companion: Option<(&str, &str)>,
-    pattern: &[String], work_dir: &std::path::Path,
-) -> bool {
-    probe_flag_exit(sandbox, binary, sub_args, flag, value, companion, pattern, work_dir, None)
-        .is_some_and(|c| c <= 1)
-}
-
-/// Try a deliberately invalid value for a flag and mine stderr for valid alternatives.
-fn probe_error_mine(
-    sandbox: &Sandbox, binary: &str, sub_args: &[&str],
-    flag: &str, pattern: &[String], work_dir: &std::path::Path,
-) -> Vec<String> {
-    let env = std::collections::HashMap::new();
-    let mut args: Vec<String> = sub_args.iter().map(|s| s.to_string()).collect();
-    if flag.starts_with("--") {
-        args.push(format!("{}=__bgrid_invalid__", flag));
-    } else {
-        args.push(flag.to_string());
-        args.push("__bgrid_invalid__".into());
-    }
-    args.extend(pattern.iter().cloned());
-    let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    let _ = std::fs::write(work_dir.join("input.txt"), "cherry\napple\nbanana\n");
-    let mut cmd = sandbox.command(binary, &refs, work_dir, &env, None);
-    cmd.stdin(std::process::Stdio::null());
-    cmd.stdout(std::process::Stdio::piped());
-    cmd.stderr(std::process::Stdio::piped());
-    match cmd.output() {
-        Ok(output) => mine_valid_values(&String::from_utf8_lossy(&output.stderr)),
-        Err(_) => Vec::new(),
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        match cmd.output() {
+            Ok(output) => mine_valid_values(&String::from_utf8_lossy(&output.stderr)),
+            Err(_) => Vec::new(),
+        }
     }
 }
 
@@ -633,12 +621,11 @@ fn parse_flags(help_text: &str, flag_info: &FlagInfo) -> (Vec<(String, Option<St
 
 /// Probe flag values: try candidates, error mining, stdin, and compound probing.
 /// Returns (flags_with_values, extra_solo_values, prerequisites).
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+#[allow(clippy::type_complexity)]
 fn probe_values(
-    sandbox: &Sandbox, binary: &str, sub_args: &[&str],
+    ctx: &ProbeCtx,
     flags: &mut [(String, Option<String>)],
     flag_info: &FlagInfo,
-    first_pattern: &[String],
     stdin_works: bool,
 ) -> (HashMap<String, Vec<String>>, HashMap<String, (String, String)>) {
     let mut extra_solo_values: HashMap<String, Vec<String>> = HashMap::new();
@@ -647,15 +634,6 @@ fn probe_values(
     let original_metavars: HashMap<String, String> = flags.iter()
         .filter_map(|(f, mv)| mv.as_ref().map(|m| (f.clone(), m.clone())))
         .collect();
-
-    let probe_dir = tempfile::Builder::new().prefix("bgrid_val_").tempdir().ok();
-    let Some(ref probe_dir) = probe_dir else {
-        return (extra_solo_values, prerequisites);
-    };
-    let work_dir = probe_dir.path();
-    let _ = std::fs::write(work_dir.join("input.txt"), "cherry\napple\nbanana\n");
-    let _ = std::fs::write(work_dir.join("other.txt"), "hello world\n");
-    let _ = std::fs::create_dir(work_dir.join("subdir"));
 
     // Phase 1: Try all candidates per flag
     #[allow(clippy::needless_range_loop)]
@@ -677,7 +655,7 @@ fn probe_values(
         let mut working: Vec<String> = Vec::new();
         let mut has_exit0 = false;
         for c in &cands {
-            if let Some(exit) = probe_flag_exit(sandbox, binary, sub_args, flag, Some(c), None, first_pattern, work_dir, None) {
+            if let Some(exit) = ctx.exit_code(flag, Some(c), None, None) {
                 if exit <= 1 {
                     working.push(c.clone());
                     if exit == 0 { has_exit0 = true; }
@@ -687,9 +665,9 @@ fn probe_values(
 
         // Error mining: try when no candidates worked OR when all exit 1
         if working.is_empty() || !has_exit0 {
-            let mined = probe_error_mine(sandbox, binary, sub_args, flag, first_pattern, work_dir);
+            let mined = ctx.error_mine(flag);
             for val in mined {
-                if let Some(exit) = probe_flag_exit(sandbox, binary, sub_args, flag, Some(&val), None, first_pattern, work_dir, None) {
+                if let Some(exit) = ctx.exit_code(flag, Some(&val), None, None) {
                     if exit <= 1 {
                         if exit == 0 && !has_exit0 {
                             working.insert(0, val);
@@ -706,9 +684,10 @@ fn probe_values(
         if stdin_works && !has_exit0 {
             let stdin_data = b"cherry\napple\nbanana\n";
             let empty_pattern: Vec<String> = vec![];
+            let stdin_ctx = ProbeCtx { pattern: &empty_pattern, ..*ctx };
             for c in &cands {
                 if !working.contains(c)
-                    && probe_flag_exit(sandbox, binary, sub_args, flag, Some(c), None, &empty_pattern, work_dir, Some(stdin_data)) == Some(0)
+                    && stdin_ctx.exit_code(flag, Some(c), None, Some(stdin_data)) == Some(0)
                 {
                     working.insert(0, c.clone());
                     break;
@@ -746,12 +725,12 @@ fn probe_values(
             if *cf == flag { continue; }
             let companion = Some((cf.as_str(), cv.as_str()));
             if target_cands.is_empty() {
-                if probe_flag_value(sandbox, binary, sub_args, &flag, None, companion, first_pattern, work_dir) {
+                if ctx.succeeds(&flag, None, companion) {
                     break 'companion;
                 }
             } else {
                 for val in &target_cands {
-                    if probe_flag_value(sandbox, binary, sub_args, &flag, Some(val), companion, first_pattern, work_dir) {
+                    if ctx.succeeds(&flag, Some(val), companion) {
                         flags[i].1 = Some(val.clone());
                         break 'companion;
                     }
@@ -783,7 +762,7 @@ fn probe_values(
             if bi == ai || flags[*bi].1.is_some() { continue; }
             if let (Some(va), Some(vb)) = (a_cands.first(), b_cands.first()) {
                 let companion = Some((flags[*bi].0.as_str(), vb.as_str()));
-                if probe_flag_value(sandbox, binary, sub_args, &flags[*ai].0, Some(va), companion, first_pattern, work_dir) {
+                if ctx.succeeds(&flags[*ai].0, Some(va), companion) {
                     flags[*ai].1 = Some(va.clone());
                     flags[*bi].1 = Some(vb.clone());
                     prerequisites.insert(flags[*ai].0.clone(), (flags[*bi].0.clone(), vb.clone()));
@@ -826,7 +805,15 @@ pub fn generate_initial_script(
         .collect();
 
     let (extra_solo_values, prerequisites) = if let Some(first_pattern) = working_patterns.first() {
-        probe_values(sandbox, binary, sub_args, &mut flags, &flag_info, first_pattern, stdin_works)
+        let probe_dir = tempfile::Builder::new().prefix("bgrid_val_").tempdir()
+            .expect("create probe dir");
+        let work_dir = probe_dir.path();
+        let _ = std::fs::write(work_dir.join("input.txt"), "cherry\napple\nbanana\n");
+        let _ = std::fs::write(work_dir.join("other.txt"), "hello world\n");
+        let _ = std::fs::create_dir(work_dir.join("subdir"));
+        let sub_refs: Vec<&str> = sub_args.to_vec();
+        let ctx = ProbeCtx { sandbox, binary, sub_args: &sub_refs, pattern: first_pattern, work_dir };
+        probe_values(&ctx, &mut flags, &flag_info, stdin_works)
     } else {
         (HashMap::new(), HashMap::new())
     };
