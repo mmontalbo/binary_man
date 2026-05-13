@@ -619,8 +619,9 @@ fn parse_flags(help_text: &str, flag_info: &FlagInfo) -> (Vec<(String, Option<St
     (flags, seen)
 }
 
-/// Probe flag values: try candidates, error mining, stdin, and compound probing.
-/// Returns (flags_with_values, extra_solo_values, prerequisites).
+/// Pilot study: determine working factor levels for each flag.
+/// Tries candidates solo, then with companions, then mutual compounds.
+/// Returns (extra_solo_values, prerequisites).
 #[allow(clippy::type_complexity)]
 fn probe_values(
     ctx: &ProbeCtx,
@@ -635,7 +636,7 @@ fn probe_values(
         .filter_map(|(f, mv)| mv.as_ref().map(|m| (f.clone(), m.clone())))
         .collect();
 
-    // Phase 1: Try all candidates per flag
+    // Solo probing: try all candidates per flag
     #[allow(clippy::needless_range_loop)]
     for i in 0..flags.len() {
         let (ref flag, ref metavar) = flags[i];
@@ -705,7 +706,7 @@ fn probe_values(
         }
     }
 
-    // Phase 2: Compound probing — try failing flags with each working flag
+    // Companion probing: try failing flags with each working flag as companion
     let working_flags: Vec<(String, String)> = flags.iter()
         .filter_map(|(f, v)| v.as_ref().map(|val| (f.clone(), val.clone())))
         .collect();
@@ -739,7 +740,7 @@ fn probe_values(
         }
     }
 
-    // Phase 3: Mutual compound probing — both-failing flag pairs
+    // Mutual compound probing: try pairs of both-failing flags together
     let still_failing: Vec<(usize, Vec<String>)> = (0..flags.len())
         .filter(|&i| flags[i].1.is_none())
         .filter_map(|i| {
@@ -776,14 +777,22 @@ fn probe_values(
     (extra_solo_values, prerequisites)
 }
 
-/// Generate an initial Script from binary discovery.
-/// Three phases: (1) parse flags from help text, (2) probe values, (3) build grid.
+/// Generate the experimental design: discover factors and construct the grid.
+///
+/// DoE workflow:
+///   1. Factor identification — parse flags from --help, discover invocation patterns
+///   2. Level determination — probe flag values (candidates, error mining, compounds)
+///   3. Design construction — cross flags × patterns × contexts into runs
+///
+/// The grid (runs × contexts) is fully determined before any behavioral observation.
 pub fn generate_initial_script(
     binary: &str,
     sub_args: &[&str],
     sandbox: &Sandbox,
 ) -> Result<(Script, FlagInfo)> {
-    // --- Phase 1: Discovery (pure parsing, no execution) ---
+    // --- Factor identification ---
+    // Parse help text for flags (treatment factors) and their metavars (value hints).
+    // Discover invocation patterns (positional arg templates that work).
     let help_text = try_help(binary, sub_args, sandbox)?;
     let flag_info = extract_flag_info(&help_text);
     let (mut flags, seen) = parse_flags(&help_text, &flag_info);
@@ -794,7 +803,10 @@ pub fn generate_initial_script(
     if stdin_works { eprintln!("  stdin: accepted"); }
     if probe_pattern.is_some() { eprintln!("  pattern: context-derived"); }
 
-    // --- Phase 2: Probing (behavioral, determines factor levels) ---
+    // --- Level determination (pilot study) ---
+    // Probe each flag with candidate values to determine working levels.
+    // Sequential and adaptive (standard pilot study practice) — but the
+    // main experiment (the grid) is fixed once levels are determined.
     let original_metavars: HashMap<String, String> = flags.iter()
         .filter_map(|(f, mv)| mv.as_ref().map(|m| (f.clone(), m.clone())))
         .collect();
@@ -818,10 +830,11 @@ pub fn generate_initial_script(
         (HashMap::new(), HashMap::new())
     };
 
-    // --- Phase 3: Grid construction (pure data assembly) ---
+    // --- Design construction ---
+    // Cross all flags × invocation patterns × contexts into a fixed grid.
+    // No adaptation from here — the design is determined.
     let contexts = crate::data::build_contexts();
 
-    // --- Build runs from behaviorally-discovered arg patterns ---
     let mut runs: Vec<Run> = Vec::new();
     let sub_prefix: Vec<Arg> = sub_args.iter().map(|s| Arg::Literal(s.to_string())).collect();
 
@@ -836,9 +849,8 @@ pub fn generate_initial_script(
         }
     };
 
-    // Generate base + flag runs for each working pattern.
-    // Stdin is now a context property — contexts with stdin data naturally
-    // provide piped input, so runs don't need to specify stdin.
+    // Solo runs: one base + one per flag, for each invocation pattern.
+    // Each flag run diffs against the base to isolate the flag's effect.
     for pattern in &working_patterns {
         let base_args: Vec<Arg> = sub_prefix.iter().cloned()
             .chain(pattern.iter().map(&to_arg))
@@ -909,11 +921,9 @@ pub fn generate_initial_script(
         }
     }
 
-    // --- Pairwise flag combinations ---
-    // Test all pairs of flags together in one phase (fixed DoE design).
-    // Uses the richest working pattern (most positional args) to ensure
-    // the tool has input to process — bare invocations (like `cat` with no file)
-    // read from null stdin and all combos produce empty output.
+    // Pairwise interaction runs: all flag pairs in both orderings.
+    // Detects flags distinguishable only through interaction effects.
+    // Uses richest pattern to ensure the tool has input to process.
     let combo_pattern = working_patterns.iter()
         .max_by_key(|p| p.len())
         .or(working_patterns.first());

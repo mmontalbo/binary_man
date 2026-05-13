@@ -108,20 +108,29 @@ tabular       varied-times    varied-perms          default
 
 Plus 10 single-factor perturbations from numeric_standard and a locale perturbation on alpha_minimal. Total: ~27 contexts per grid.
 
-## Behavioral Discovery
+## Factor Identification and Level Determination
 
-Help text provides flag candidates. Behavioral probing determines which invocations work:
+The experiment has three factors:
+- **Flag** (treatment): which flag is applied. Levels = all flags from `--help`.
+- **Value** (nested within flag): what argument value the flag gets. Levels determined by pilot study.
+- **Context** (blocking): input content, filesystem structure, environment. Levels = fixed fixture corpus.
 
-- **Arg patterns**: 7 candidates (no args, file, directory, two files, file+dir, pattern+file, pattern+dir) tested against the binary. Working patterns become run targets.
-- **Stdin**: binary tested with piped content. If accepted, stdin runs generated for each pattern × flag.
-- **Values**: multi-source candidate discovery, tried in order until one succeeds (exit ≤ 1):
-  1. *Help text mining* — quoted values (`'auto'`, `'always'`), brace enumerations (`{big|little}`), bracket character sets (`[doxn]`), extracted from flag descriptions including continuation lines.
-  2. *Metavar-based candidates* — per-type curated lists keyed by the metavar placeholder (NUM → `1,0,2,10,100`; FILE → `input.txt,other.txt`; CHAR → `",",":"` etc.).
-  3. *Error mining* — if all candidates fail, probe with a deliberately invalid value and parse stderr for "Valid arguments are:" to discover valid alternatives.
-  4. *Compound probing* — if a flag still fails solo, try it paired with each flag that has a working value (discovers compound requirements like cut needing `-d` AND `-f`).
-  The first working value becomes the stable combo value. All working values generate independent solo runs (additive evidence).
-- **Alias propagation**: short flags inherit metavar from their long alias (e.g., `-A` gets `NUM` from `--after-context=NUM`), so they're probed with proper values instead of consuming positional args.
-- **Subcommands**: common verbs probed as first positional arg. Classified as working, state-building, or needs-state.
+### Pilot study (factor level determination)
+
+Before the main experiment, a sequential pilot study determines working factor levels:
+
+- **Invocation patterns**: 7 positional arg candidates + structural patterns from Usage line (`COMMAND → echo`, `[expression] → -name/-type`). Working patterns become run templates.
+- **Stdin**: piped content tested. If accepted, stdin contexts provide input alongside file contexts.
+- **Flag values**: multi-source candidate discovery per flag:
+  1. *Help text mining* — quoted values, brace enumerations, bracket character sets, continuation lines.
+  2. *Metavar candidates* — per-type curated lists (NUM → `1,0,2,10,100`; FILE → `input.txt`; etc.).
+  3. *Error mining* — fires when no candidate exits 0; parses "Valid arguments are:" from stderr.
+  4. *Companion probing* — failing flags tried with each working flag as companion.
+  5. *Mutual compound probing* — pairs of both-failing flags tried together (discovers co-dependencies).
+  First working value = combo value (stable). All working values generate independent solo runs (additive).
+- **Alias propagation**: short flags inherit metavar from long alias for proper value probing.
+
+The pilot is adaptive (later probes depend on earlier results). The main experiment is fixed.
 
 ## Delta Grouping
 
