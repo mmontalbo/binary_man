@@ -1,33 +1,26 @@
 # Exploration: nl
 
 ## Rounds
-  round 0: 142 isolated cumulative, 95 identical in round (single-phase)
+  round 0: 155 isolated cumulative, 105 identical in round (single-phase)
 
 ## Observed: 9/11 flags
   5 solo, 4 via combination
   1 additional error-differentiated
-  1 behavioral aliases detected
   robustness: 8 robust, 0 moderate, 0 fragile
 
 Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numbering, -h = --header-numbering, -i = --line-increment, -l = --join-blank-lines, -n = --number-format, -p = --no-renumber, -s = --number-separator, -v = --starting-line-number, -w = --number-width
 
 ## Solo (unique behavior)
   -i  # line number increment at each line
-    exemplar: "-i" "0" "input.txt" "other.txt" in words_minimal (+1440 lines)
+    exemplar: "-i" "2" in words_minimal / stdin (+3 lines)
     base:
-           1	aardvark
-           2	abbreviation
-           3	about
-           4	abstract
-           5	accept
-            ...
+           1	cherry
+           2	apple
+           3	banana
     flag:
-           1	aardvark
-           1	abbreviation
-           1	about
-           1	abstract
-           1	accept
-            ...
+           1	cherry
+           3	apple
+           5	banana
   -l  # group of NUMBER empty lines counted as one
     exemplar: "-l" "1" "input.txt" "other.txt" in formatted_minimal (-45 lines)
     base:
@@ -45,7 +38,7 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
            5		 	mixed tabs and spaces
             ...
   -n  # insert line numbers according to FORMAT
-    exemplar: "-n" "%s" in words_minimal / stdin (different)
+    exemplar: "-n" "%s" in numbers_minimal / stdin (different)
     base:
            1	cherry
            2	apple
@@ -62,37 +55,25 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
            2xapple
            3xbanana
   -v  # first line number for each section
-    exemplar: "-v" "0" "input.txt" "other.txt" in words_minimal (+1440 lines)
+    exemplar: "-v" "2" in words_minimal / stdin (+3 lines)
     base:
-           1	aardvark
-           2	abbreviation
-           3	about
-           4	abstract
-           5	accept
-            ...
+           1	cherry
+           2	apple
+           3	banana
     flag:
-           0	aardvark
-           1	abbreviation
-           2	about
-           3	abstract
-           4	accept
-            ...
+           2	cherry
+           3	apple
+           4	banana
   -w  # use NUMBER columns for line numbers
-    exemplar: "-w" "1" "input.txt" "other.txt" in words_minimal (+1440 lines)
+    exemplar: "-w" "2" in words_minimal / stdin (+3 lines)
     base:
-           1	aardvark
-           2	abbreviation
-           3	about
-           4	abstract
-           5	accept
-            ...
+           1	cherry
+           2	apple
+           3	banana
     flag:
-      1	aardvark
-      2	abbreviation
-      3	about
-      4	abstract
-      5	accept
-            ...
+       1	cherry
+       2	apple
+       3	banana
 
 ## Via combination (distinguishable when paired)
   -b  e.g. (pairwise evidence)

@@ -1,7 +1,7 @@
 # Exploration: fold
 
 ## Rounds
-  round 0: 60 isolated cumulative, 33 identical in round (single-phase)
+  round 0: 59 isolated cumulative, 33 identical in round (single-phase)
 
 ## Observed: 3/3 flags
   3 solo, 0 via combination
@@ -42,19 +42,16 @@ Aliases: -b = --bytes, -s = --spaces, -w = --width
       sync:x:4:65534:sync:/bin:/bin/sync
             ...
   -w  # use WIDTH columns instead of 80
-    exemplar: "-w" "1" "input.txt" "other.txt" in numbers_minimal (+572 lines)
+    exemplar: "-w" "2" in words_minimal / stdin (+9 lines)
     base:
-      0
-      1
-      1.00
-      $1.00
-      1/2
-            ...
+      cherry
+      apple
+      banana
     flag:
-      0
-      1
-      1
-      .
-      0
+      ch
+      er
+      ry
+      ap
+      pl
             ...
 

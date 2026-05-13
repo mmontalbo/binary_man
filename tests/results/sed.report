@@ -1,7 +1,7 @@
 # Exploration: sed
 
 ## Rounds
-  round 0: 12 isolated cumulative, 68 identical in round (single-phase)
+  round 0: 15 isolated cumulative, 63 identical in round (single-phase)
 
 ## Observed: 23/24 flags
   3 solo, 20 via combination
@@ -42,20 +42,20 @@
 
 ## Via combination (distinguishable when paired)
   --expression  e.g. (pairwise evidence)
-  --file  e.g. "--file" "-f" "$(head -n1 input.txt)" "input.txt"
-  --in-place  e.g. (pairwise evidence)
+  --file  e.g. "-f" "--file" "$(head -n1 input.txt)" "input.txt"
+  --in-place  e.g. "--debug" "--in-place" "$(head -n1 input.txt)" "input.txt"
   --line-length  e.g. (pairwise evidence)
   --null-data  e.g. (pairwise evidence)
   --quiet  e.g. (pairwise evidence)
   --regexp-extended  e.g. (pairwise evidence)
-  --sandbox  e.g. "-i" "--sandbox" "$(head -n1 input.txt)" "input.txt"
+  --sandbox  e.g. (pairwise evidence)
   --separate  e.g. (pairwise evidence)
   --silent  e.g. (pairwise evidence)
   --unbuffered  e.g. (pairwise evidence)
   -E  e.g. (pairwise evidence)
   -e  e.g. (pairwise evidence)
-  -f  e.g. "--file" "-f" "$(head -n1 input.txt)" "input.txt"
-  -i  e.g. "-i" "--sandbox" "$(head -n1 input.txt)" "input.txt"
+  -f  e.g. "-f" "--file" "$(head -n1 input.txt)" "input.txt"
+  -i  e.g. "--debug" "-i" "$(head -n1 input.txt)" "input.txt"
   -n  e.g. (pairwise evidence)
   -r  e.g. (pairwise evidence)
   -s  e.g. (pairwise evidence)

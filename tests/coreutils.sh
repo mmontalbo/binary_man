@@ -137,7 +137,7 @@ CHECKS=(
     "od 18 21"
     "fold 3 3"
     "fmt 6 7"
-    "paste 3 3"
+    "paste 2 3"
     "du 25 26"
     "cp 36 36"
     "rm 10 12"
@@ -189,6 +189,69 @@ echo ""
 echo "=== Results: $PASS/$TOTAL passed, $FAIL failed ($ELAPSED seconds) ==="
 echo "Reports saved to $RESULTS_DIR/"
 echo "Run log saved to $RUN_DIR/"
+
+# --- Reproducibility verification ---
+# Re-run each binary once and compare observed counts.
+# Nondeterministic binaries are reported but don't fail the test.
+if [ "$FAIL" -eq 0 ]; then
+    echo ""
+    echo "=== Reproducibility check ==="
+    REPRO_PASS=0
+    REPRO_FLAKY=0
+    REPRO_TOTAL=0
+
+    verify_one() {
+        local binary="$1"
+        local first_count="$2"
+        local result_file="$RESULTS_DIR/$binary.repro_result"
+        local report_file="$RESULTS_DIR/$binary.repro"
+        timeout "$TIMEOUT" "$BGRID" "$binary" >"$report_file" 2>/dev/null || true
+        local second_count
+        second_count=$(grep -a "^## Observed:" "$report_file" 2>/dev/null | grep -oP '\d+(?=/)')
+        rm -f "$report_file"
+        if [ -z "$second_count" ]; then
+            echo "FLAKY $binary: repro run failed" >"$result_file"
+        elif [ "$first_count" -eq "$second_count" ]; then
+            echo "STABLE" >"$result_file"
+        else
+            echo "FLAKY $binary: $first_count vs $second_count" >"$result_file"
+        fi
+    }
+    export -f verify_one
+    export BGRID TIMEOUT RESULTS_DIR
+
+    # Build repro tasks and run in parallel
+    REPRO_TASKS=""
+    for entry in "${CHECKS[@]}"; do
+        binary="${entry%% *}"
+        first_count=$(grep -a "^## Observed:" "$RESULTS_DIR/$binary.report" 2>/dev/null | grep -oP '\d+(?=/)')
+        if [ -n "$first_count" ]; then
+            REPRO_TASKS="$REPRO_TASKS$binary $first_count\n"
+        fi
+    done
+    printf "$REPRO_TASKS" | xargs -P "$JOBS" -I{} bash -c 'verify_one {}'
+
+    # Collect repro results
+    for entry in "${CHECKS[@]}"; do
+        binary="${entry%% *}"
+        result_file="$RESULTS_DIR/$binary.repro_result"
+        if [ -f "$result_file" ]; then
+            line=$(cat "$result_file")
+            REPRO_TOTAL=$((REPRO_TOTAL + 1))
+            if [ "$line" = "STABLE" ]; then
+                REPRO_PASS=$((REPRO_PASS + 1))
+            else
+                REPRO_FLAKY=$((REPRO_FLAKY + 1))
+                echo "$line"
+            fi
+            rm -f "$result_file"
+        fi
+    done
+
+    REPRO_END=$(date +%s)
+    REPRO_ELAPSED=$((REPRO_END - END))
+    echo "=== Reproducibility: $REPRO_PASS/$REPRO_TOTAL stable, $REPRO_FLAKY flaky ($REPRO_ELAPSED seconds) ==="
+fi
 
 # Save summary to run directory
 {

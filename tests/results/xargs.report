@@ -1,7 +1,7 @@
 # Exploration: xargs
 
 ## Rounds
-  round 0: 40 isolated cumulative, 81 identical in round (single-phase)
+  round 0: 45 isolated cumulative, 82 identical in round (single-phase)
 
 ## Observed: 16/21 flags
   7 solo, 9 via combination
@@ -46,7 +46,7 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
     flag:
       cherry apple banana
   -s  # limit length of command line to MAX-CHARS
-    exemplar: "-s" "100" "echo" in words_minimal / stdin (reordered)
+    exemplar: "-s" "100" in words_minimal / stdin (reordered)
     base:
       cherry apple banana
     flag:
@@ -63,7 +63,7 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
   --process-slot-var  e.g. (pairwise evidence)
   --replace  e.g. (pairwise evidence)
   -0  e.g. (pairwise evidence)
-  -P  e.g. (pairwise evidence)
+  -P  e.g. "-o" "-P" "1" "echo" "input.txt"
   -e  e.g. (pairwise evidence)
   -i  e.g. (pairwise evidence)
   -l  e.g. (pairwise evidence)

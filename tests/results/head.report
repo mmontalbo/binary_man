@@ -59,7 +59,7 @@ Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
             ...
 
 ## Via combination (distinguishable when paired)
-  --quiet  e.g. "-c" "--quiet" "$(head -n1 input.txt)" "."
-  --silent  e.g. "-c" "--silent" "$(head -n1 input.txt)" "."
+  --quiet  e.g. "-n" "--quiet" "$(head -n1 input.txt)" "."
+  --silent  e.g. "-n" "--silent" "$(head -n1 input.txt)" "."
   -q  e.g. "-c" "-q" "$(head -n1 input.txt)" "."
 

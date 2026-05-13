@@ -1,11 +1,10 @@
 # Exploration: fmt
 
 ## Rounds
-  round 0: 120 isolated cumulative, 66 identical in round (single-phase)
+  round 0: 122 isolated cumulative, 65 identical in round (single-phase)
 
 ## Observed: 7/7 flags
   7 solo, 0 via combination
-  1 behavioral aliases detected
   robustness: 5 robust, 0 moderate, 0 fragile
 
 Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t = --tagged-paragraph, -u = --uniform-spacing, -w = --width
@@ -28,21 +27,12 @@ Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t 
       blank line above
             ...
   -g  # goal width (default of 93% of width)
-    exemplar: "-g" "1" "input.txt" "other.txt" in words_minimal (+1315 lines)
+    exemplar: "-g" "2" in passwd_minimal / stdin (+2 lines)
     base:
-      aardvark abbreviation about abstract accept accepted accepting access
-      accommodate acknowledge across Africa afternoon again against aggregate
-      ahead algorithm Alice all already also although always Amazon American
-      among an and another answer Apache apostrophe Apple application
-      approximately architect Argentina around arrange Asia assembly
-            ...
+      a,b,c d:e:f g h i
     flag:
-      aardvark
-      abbreviation
-      about
-      abstract
-      accept
-            ...
+      a,b,c
+      d:e:f g h i
   -p  # reformat only lines beginning with STRING, reattaching the prefix to reformatted lines
     exemplar: "-p" "test" "input.txt" "other.txt" in numbers_standard / input.txt=size:1 (-71 lines)
     base:
@@ -100,19 +90,11 @@ Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t 
       
             ...
   -w  # maximum line width (default of 75 columns)
-    exemplar: "-w" "10" "input.txt" "other.txt" in words_minimal (+1322 lines)
+    exemplar: "-w" "10" in passwd_minimal / stdin (+3 lines)
     base:
-      aardvark abbreviation about abstract accept accepted accepting access
-      accommodate acknowledge across Africa afternoon again against aggregate
-      ahead algorithm Alice all already also although always Amazon American
-      among an and another answer Apache apostrophe Apple application
-      approximately architect Argentina around arrange Asia assembly
-            ...
+      a,b,c d:e:f g h i
     flag:
-      aardvark
-      abbreviation
-      about
-      abstract
-      accept
-            ...
+      a,b,c
+      d:e:f g
+      h i
 
