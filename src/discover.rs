@@ -5,7 +5,7 @@ use regex::Regex;
 use std::collections::{HashMap, HashSet};
 
 use crate::parse::{
-    self, Arg, FileContent, NamedContext, Property, Run, Script, SetupCommand,
+    self, Arg, NamedContext, Run, Script, SetupCommand,
 };
 use crate::sandbox::Sandbox;
 
@@ -263,56 +263,23 @@ pub fn probe_arg_patterns(
         }
     }
 
-    // Probe stdin: try piping content with no file arg and with sub_args only
-    let mut stdin_works = false;
-    {
-        let mut args: Vec<&str> = sub_args.to_vec();
-        // Some tools need a flag to signal stdin (like sort with no args reads stdin)
-        // Try with no args first
-        let mut cmd = sandbox.command(binary, &args, work_dir, &env, None);
-        cmd.stdin(std::process::Stdio::piped());
-        cmd.stdout(std::process::Stdio::piped());
-        cmd.stderr(std::process::Stdio::piped());
-
-        if let Ok(mut child) = cmd.spawn() {
-            // Write content to stdin
-            if let Some(mut stdin) = child.stdin.take() {
+    // Probe stdin: try piping content (bare, then with "-" marker)
+    let stdin_works = [sub_args.to_vec(), { let mut a = sub_args.to_vec(); a.push("-"); a }]
+        .iter().any(|args| {
+            let mut cmd = sandbox.command(binary, args, work_dir, &env, None);
+            cmd.stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped());
+            let Ok(mut child) = cmd.spawn() else { return false };
+            if let Some(mut si) = child.stdin.take() {
                 use std::io::Write;
-                let _ = stdin.write_all(b"cherry\napple\nbanana\n");
+                let _ = si.write_all(b"cherry\napple\nbanana\n");
             }
-            // Wait with a short timeout
-            if let Ok(output) = child.wait_with_output() {
-                let exit = output.status.code().unwrap_or(-1);
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                if (exit == 0 || exit == 1) && !stdout.trim().is_empty() {
-                    stdin_works = true;
-                }
-            }
-        }
-
-        // Also try with "-" as explicit stdin marker
-        if !stdin_works {
-            args.push("-");
-            let mut cmd2 = sandbox.command(binary, &args, work_dir, &env, None);
-            cmd2.stdin(std::process::Stdio::piped());
-            cmd2.stdout(std::process::Stdio::piped());
-            cmd2.stderr(std::process::Stdio::piped());
-
-            if let Ok(mut child) = cmd2.spawn() {
-                if let Some(mut stdin) = child.stdin.take() {
-                    use std::io::Write;
-                    let _ = stdin.write_all(b"cherry\napple\nbanana\n");
-                }
-                if let Ok(output) = child.wait_with_output() {
-                    let exit = output.status.code().unwrap_or(-1);
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    if (exit == 0 || exit == 1) && !stdout.trim().is_empty() {
-                        stdin_works = true;
-                    }
-                }
-            }
-        }
-    }
+            child.wait_with_output().map(|o| {
+                let exit = o.status.code().unwrap_or(-1);
+                (exit == 0 || exit == 1) && !String::from_utf8_lossy(&o.stdout).trim().is_empty()
+            }).unwrap_or(false)
+        });
 
     if working.is_empty() {
         working.push(vec!["input.txt".into()]);
@@ -489,7 +456,7 @@ pub fn print_skeleton(
         if ctx.name.contains(" / ") { continue; }
         println!("context \"{}\"", ctx.name);
         for cmd in &ctx.commands {
-            println!("  {}", format_setup_cmd(cmd));
+            println!("  {}", crate::output::format_setup_cmd(cmd));
         }
         println!();
     }
@@ -504,7 +471,7 @@ pub fn print_skeleton(
         for ctx in &vary_contexts {
             // The last command is the perturbation
             if let Some(cmd) = ctx.commands.last() {
-                println!("  {}", format_setup_cmd(cmd));
+                println!("  {}", crate::output::format_setup_cmd(cmd));
             }
         }
         println!();
@@ -536,40 +503,6 @@ pub fn print_skeleton(
     }
 
     Ok(())
-}
-
-fn format_setup_cmd(cmd: &SetupCommand) -> String {
-    match cmd {
-        SetupCommand::CreateFile { path, content } => {
-            match content {
-                FileContent::Lines(lines) => {
-                    let quoted: Vec<String> = lines.iter().map(|l| format!("\"{}\"", l)).collect();
-                    format!("file \"{}\" {}", path, quoted.join(" "))
-                }
-                FileContent::Size(n) => format!("file \"{}\" size {}", path, n),
-                FileContent::Empty => format!("file \"{}\" empty", path),
-                FileContent::From(src) => format!("file \"{}\" from \"{}\"", path, src),
-            }
-        }
-        SetupCommand::CreateDir { path } => format!("dir \"{}\"", path),
-        SetupCommand::CreateLink { path, target } => format!("file \"{}\" -> \"{}\"", path, target),
-        SetupCommand::SetProps { path, props } => {
-            let p: Vec<&str> = props.iter().map(|p| match p {
-                Property::Executable => "executable",
-                Property::MtimeOld => "mtime old",
-                Property::MtimeRecent => "mtime recent",
-                Property::ReadOnly => "readonly",
-            }).collect();
-            format!("props \"{}\" {}", path, p.join(" "))
-        }
-        SetupCommand::SetEnv { var, value } => format!("env {} \"{}\"", var, value),
-        SetupCommand::Remove { path } => format!("remove \"{}\"", path),
-        SetupCommand::RemoveEnv { var } => format!("remove env {}", var),
-        SetupCommand::Invoke { args } => {
-            let quoted: Vec<String> = args.iter().map(|a| format!("\"{}\"", a)).collect();
-            format!("invoke {}", quoted.join(" "))
-        }
-    }
 }
 
 /// Extract valid values from error output.
@@ -959,94 +892,56 @@ pub fn generate_initial_script(
         }
     };
 
-    // For each working arg pattern, generate a base run + flag runs
-    for pattern in &working_patterns {
-        // Build base args: sub_prefix + positional args
+    // Generate base + flag runs for a pattern with optional stdin.
+    let mut gen_runs = |pattern: &[String], stdin: Option<&parse::StdinSource>| {
         let base_args: Vec<Arg> = sub_prefix.iter().cloned()
             .chain(pattern.iter().map(&to_arg))
             .collect();
-
-        // Base run (no flags)
-        runs.push(Run { args: base_args.clone(), in_contexts: None, stdin: None, diff_from: None });
-
-        // Flag runs with from-reference to base (using combo value)
+        runs.push(Run { args: base_args.clone(), in_contexts: None,
+            stdin: stdin.cloned(), diff_from: None });
         for (flag, metavar) in flags.iter() {
             let mut args = sub_prefix.clone();
             push_flag_arg(&mut args, flag, metavar.as_deref());
             args.extend(pattern.iter().map(&to_arg));
-            runs.push(Run {
-                args,
-                in_contexts: None, stdin: None,
-                diff_from: Some(base_args.clone()),
-            });
+            runs.push(Run { args, in_contexts: None,
+                stdin: stdin.cloned(), diff_from: Some(base_args.clone()) });
         }
-
-        // Extra solo runs for additional working values (beyond the combo value).
-        // Each extra value generates an independent run for that flag.
+        // Extra solo runs for additional working values
         for (flag, extra_vals) in &extra_solo_values {
             for val in extra_vals {
                 let mut args = sub_prefix.clone();
                 push_flag_arg(&mut args, flag, Some(val));
                 args.extend(pattern.iter().map(&to_arg));
-                runs.push(Run {
-                    args,
-                    in_contexts: None, stdin: None,
-                    diff_from: Some(base_args.clone()),
-                });
+                runs.push(Run { args, in_contexts: None,
+                    stdin: stdin.cloned(), diff_from: Some(base_args.clone()) });
             }
         }
-    }
+    };
 
-    // Stdin runs: if the binary accepts stdin, generate runs that pipe content
-    // combined with each working arg pattern (not just bare stdin)
+    for pattern in &working_patterns {
+        gen_runs(pattern, None);
+    }
     if stdin_works {
         let stdin_content = parse::StdinSource::Lines(
             vec!["cherry".into(), "apple".into(), "banana".into()]
         );
-
-        // Stdin with each working arg pattern
-        for pattern in &working_patterns {
+        // Stdin with each working arg pattern + bare stdin — flag runs only, no extra solo values
+        let mut stdin_patterns: Vec<&[String]> = working_patterns.iter().map(|p| p.as_slice()).collect();
+        let empty: Vec<String> = vec![];
+        stdin_patterns.push(&empty);
+        for pattern in stdin_patterns {
             let base_args: Vec<Arg> = sub_prefix.iter().cloned()
                 .chain(pattern.iter().map(&to_arg))
                 .collect();
-
-            runs.push(Run {
-                args: base_args.clone(),
-                in_contexts: None,
-                stdin: Some(stdin_content.clone()),
-                diff_from: None,
-            });
-
+            runs.push(Run { args: base_args.clone(), in_contexts: None,
+                stdin: Some(stdin_content.clone()), diff_from: None });
             for (flag, metavar) in flags.iter() {
                 let mut args = sub_prefix.clone();
                 push_flag_arg(&mut args, flag, metavar.as_deref());
                 args.extend(pattern.iter().map(&to_arg));
-                runs.push(Run {
-                    args,
-                    in_contexts: None,
-                    stdin: Some(stdin_content.clone()),
-                    diff_from: Some(base_args.clone()),
-                });
+                runs.push(Run { args, in_contexts: None,
+                    stdin: Some(stdin_content.clone()), diff_from: Some(base_args.clone()) });
             }
-        }
-
-        // Also stdin with no positional args (bare stdin)
-        let bare_args: Vec<Arg> = sub_prefix.clone();
-        runs.push(Run {
-            args: bare_args.clone(),
-            in_contexts: None,
-            stdin: Some(stdin_content.clone()),
-            diff_from: None,
-        });
-        for (flag, metavar) in flags.iter() {
-            let mut args = sub_prefix.clone();
-            push_flag_arg(&mut args, flag, metavar.as_deref());
-            runs.push(Run {
-                args,
-                in_contexts: None,
-                stdin: Some(stdin_content.clone()),
-                diff_from: Some(bare_args.clone()),
-            });
         }
     }
 

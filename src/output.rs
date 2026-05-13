@@ -1,6 +1,7 @@
 //! Output formatting for observations and results.
 
 use crate::execute::{FsChange, Observation};
+use crate::parse::{SetupCommand, Property};
 
 /// Sensitive file patterns that should be flagged in trace output.
 const SENSITIVE_PATHS: &[&str] = &[".netrc", ".git-credentials", ".ssh/", "credentials", "token"];
@@ -165,6 +166,44 @@ pub fn format_obs(out: &mut String, obs: &Observation, indent: &str) {
         }
         if !obs.trace_signals.is_empty() {
             out.push_str(&format!("{}  signals: {}\n", indent, obs.trace_signals.join(", ")));
+        }
+    }
+}
+
+/// Format a SetupCommand for display in skeleton/diagnostic output.
+pub fn format_setup_cmd(cmd: &SetupCommand) -> String {
+    match cmd {
+        SetupCommand::CreateFile { path, content } => {
+            let preview: String = match content {
+                crate::parse::FileContent::Lines(lines) => {
+                    let joined = lines.join("\\n");
+                    if joined.len() > 60 { format!("{}...", &joined[..57]) } else { joined }
+                }
+                crate::parse::FileContent::Size(size) =>
+                    format!("<generated {} bytes>", size),
+                crate::parse::FileContent::Empty => "<empty>".into(),
+                crate::parse::FileContent::From(src) =>
+                    format!("<from {}>", src),
+            };
+            format!("write \"{}\" \"{}\"", path, preview)
+        }
+        SetupCommand::CreateDir { path } => format!("mkdir \"{}\"", path),
+        SetupCommand::CreateLink { path, target } => format!("symlink \"{}\" -> \"{}\"", path, target),
+        SetupCommand::SetProps { path, props } => {
+            let p: Vec<&str> = props.iter().map(|prop| match prop {
+                Property::Executable => "executable",
+                Property::MtimeOld => "mtime old",
+                Property::MtimeRecent => "mtime recent",
+                Property::ReadOnly => "readonly",
+            }).collect();
+            format!("props \"{}\" {}", path, p.join(" "))
+        }
+        SetupCommand::SetEnv { var, value } => format!("env {} \"{}\"", var, value),
+        SetupCommand::Remove { path } => format!("remove \"{}\"", path),
+        SetupCommand::RemoveEnv { var } => format!("remove env {}", var),
+        SetupCommand::Invoke { args } => {
+            let quoted: Vec<String> = args.iter().map(|a| format!("\"{}\"", a)).collect();
+            format!("invoke {}", quoted.join(" "))
         }
     }
 }

@@ -173,7 +173,7 @@ fn cmd_dry_run(test_path: &PathBuf) -> Result<()> {
     for ctx in &script.contexts {
         println!("  {:?} ({} commands)", ctx.name, ctx.commands.len());
         for (i, cmd) in ctx.commands.iter().enumerate() {
-            println!("    {}. {}", i + 1, format_setup_cmd(cmd));
+            println!("    {}. {}", i + 1, output::format_setup_cmd(cmd));
         }
     }
 
@@ -197,27 +197,6 @@ fn cmd_dry_run(test_path: &PathBuf) -> Result<()> {
     execute::validate_from_references(&script);
 
     Ok(())
-}
-
-fn format_setup_cmd(cmd: &parse::SetupCommand) -> String {
-    match cmd {
-        parse::SetupCommand::CreateFile { path, content } => {
-            match content {
-                parse::FileContent::Lines(l) if l.len() <= 1 => format!("file {:?} {:?}", path, l.first().map(|s| s.as_str()).unwrap_or("")),
-                parse::FileContent::Lines(l) => format!("file {:?} ({} lines)", path, l.len()),
-                parse::FileContent::Size(n) => format!("file {:?} size {}", path, n),
-                parse::FileContent::Empty => format!("file {:?} empty", path),
-                parse::FileContent::From(src) => format!("file {:?} from {:?}", path, src),
-            }
-        }
-        parse::SetupCommand::CreateDir { path } => format!("dir {:?}", path),
-        parse::SetupCommand::CreateLink { path, target } => format!("file {:?} -> {:?}", path, target),
-        parse::SetupCommand::SetProps { path, .. } => format!("props {:?} ...", path),
-        parse::SetupCommand::SetEnv { var, value } => format!("env {} {:?}", var, value),
-        parse::SetupCommand::Remove { path } => format!("remove {:?}", path),
-        parse::SetupCommand::RemoveEnv { var } => format!("remove env {}", var),
-        parse::SetupCommand::Invoke { args } => format!("invoke {}", args.iter().map(|a| format!("{:?}", a)).collect::<Vec<_>>().join(" ")),
-    }
 }
 
 fn cmd_run(binary: &str, test_path: &PathBuf, sandbox: &sandbox::Sandbox) -> Result<()> {
