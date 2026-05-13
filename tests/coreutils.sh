@@ -144,9 +144,9 @@ CHECKS=(
     "stat 6 7"
     "df 15 16"
     "sed 22 24"
-    "xargs 14 21"
+    "xargs 16 21"
     "diff 51 53"
-    "find 1 4"
+    "find 4 4"
     "grep 45 49"
 )
 

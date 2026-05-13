@@ -279,6 +279,44 @@ pub fn probe_arg_patterns(
             }).unwrap_or(false)
         });
 
+    // Usage-line mining: detect structural args the binary expects after flags.
+    // E.g., "Usage: xargs [OPTION]... COMMAND" → try "echo" as trailing command.
+    if let Ok(help_text) = try_help(binary, sub_args, sandbox) {
+        let usage_line = help_text.lines()
+            .find(|l| l.starts_with("Usage:") || l.starts_with("usage:"))
+            .unwrap_or("");
+        // Look for uppercase structural placeholders after [OPTION]
+        let structural_candidates: Vec<Vec<&str>> = if usage_line.contains("COMMAND") {
+            vec![
+                vec!["echo"],
+                vec!["echo", "input.txt"],
+            ]
+        } else if usage_line.contains("[expression]") || usage_line.contains("EXPRESSION") {
+            vec![
+                vec![".", "-print"],
+                vec![".", "-name", "*.txt"],
+                vec![".", "-type", "f"],
+            ]
+        } else {
+            vec![]
+        };
+        for candidate in &structural_candidates {
+            let mut args: Vec<&str> = sub_args.to_vec();
+            args.extend(candidate.iter());
+            let mut cmd = sandbox.command(binary, &args, work_dir, &env, None);
+            cmd.stdin(std::process::Stdio::null());
+            cmd.stdout(std::process::Stdio::piped());
+            cmd.stderr(std::process::Stdio::piped());
+            if let Ok(output) = cmd.output() {
+                let exit = output.status.code().unwrap_or(-1);
+                let has_output = !String::from_utf8_lossy(&output.stdout).trim().is_empty();
+                if exit == 0 || (exit <= 1 && has_output) {
+                    working.push(candidate.iter().map(|s| s.to_string()).collect());
+                }
+            }
+        }
+    }
+
     if working.is_empty() {
         working.push(vec!["input.txt".into()]);
     }
@@ -738,6 +776,7 @@ pub fn generate_initial_script(
     // First working value = combo value (stored in flags tuple).
     // All additional working values = extra solo runs (stored in extra_solo_values).
     let mut extra_solo_values: HashMap<String, Vec<String>> = HashMap::new();
+    let mut prerequisites: HashMap<String, (String, String)> = HashMap::new();
     if let Some(first_pattern) = working_patterns.first() {
         let probe_dir = tempfile::Builder::new().prefix("bgrid_val_").tempdir().ok();
         if let Some(ref probe_dir) = probe_dir {
@@ -819,32 +858,32 @@ pub fn generate_initial_script(
 
             // Phase 2: Compound probing — for flags with no working value,
             // try them paired with each flag that DID find a value.
+            // Records prerequisites: flag → (companion_flag, companion_value).
             let working_flags: Vec<(String, String)> = flags.iter()
                 .filter_map(|(f, v)| v.as_ref().map(|val| (f.clone(), val.clone())))
                 .collect();
             #[allow(clippy::needless_range_loop)]
             for i in 0..flags.len() {
                 if flags[i].1.is_some() { continue; }
-                let flag = &flags[i].0;
-                // Build candidate list: extracted values, then metavar-based fallback
+                let flag = flags[i].0.clone();
                 let mut target_cands: Vec<String> = flag_info.extracted_values
-                    .get(flag).cloned().unwrap_or_default();
+                    .get(&flag).cloned().unwrap_or_default();
                 if target_cands.is_empty() {
-                    if let Some(mv) = original_metavars.get(flag) {
+                    if let Some(mv) = original_metavars.get(&flag) {
                         target_cands = candidates(mv).into_iter().map(String::from).collect();
                     }
                 }
 
                 'companion: for (cf, cv) in &working_flags {
-                    if cf == flag { continue; }
+                    if *cf == flag { continue; }
                     let companion = Some((cf.as_str(), cv.as_str()));
                     if target_cands.is_empty() {
-                        if probe_flag_value(sandbox, binary, sub_args, flag, None, companion, first_pattern, work_dir) {
+                        if probe_flag_value(sandbox, binary, sub_args, &flag, None, companion, first_pattern, work_dir) {
                             break 'companion;
                         }
                     } else {
                         for val in &target_cands {
-                            if probe_flag_value(sandbox, binary, sub_args, flag, Some(val), companion, first_pattern, work_dir) {
+                            if probe_flag_value(sandbox, binary, sub_args, &flag, Some(val), companion, first_pattern, work_dir) {
                                 flags[i].1 = Some(val.clone());
                                 break 'companion;
                             }
@@ -881,6 +920,9 @@ pub fn generate_initial_script(
                         if probe_flag_value(sandbox, binary, sub_args, &flags[*ai].0, Some(va), companion, first_pattern, work_dir) {
                             flags[*ai].1 = Some(va.clone());
                             flags[*bi].1 = Some(vb.clone());
+                            // Both flags need each other — record mutual prerequisites
+                            prerequisites.insert(flags[*ai].0.clone(), (flags[*bi].0.clone(), vb.clone()));
+                            prerequisites.insert(flags[*bi].0.clone(), (flags[*ai].0.clone(), va.clone()));
                             break;
                         }
                     }
@@ -916,6 +958,10 @@ pub fn generate_initial_script(
         runs.push(Run { args: base_args.clone(), in_contexts: None, diff_from: None });
         for (flag, metavar) in flags.iter() {
             let mut args = sub_prefix.clone();
+            // Include prerequisite companion if this flag needs one
+            if let Some((cf, cv)) = prerequisites.get(flag) {
+                push_flag_arg(&mut args, cf, Some(cv));
+            }
             push_flag_arg(&mut args, flag, metavar.as_deref());
             args.extend(pattern.iter().map(&to_arg));
             runs.push(Run { args, in_contexts: None, diff_from: Some(base_args.clone()) });

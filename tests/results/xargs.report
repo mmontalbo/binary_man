@@ -1,46 +1,72 @@
 # Exploration: xargs
 
 ## Rounds
-  round 0: 11 isolated cumulative, 42 identical in round (single-phase)
+  round 0: 39 isolated cumulative, 81 identical in round (single-phase)
 
-## Observed: 14/21 flags
-  3 solo, 11 via combination
-  4 additional error-differentiated
+## Observed: 16/21 flags
+  7 solo, 9 via combination
+  2 additional error-differentiated
   robustness: 17 robust, 0 moderate, 0 fragile
 
 Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = --delimiter, -n = --max-args, -o = --open-tty, -p = --interactive, -r = --no-run-if-empty, -s = --max-chars, -t = --verbose, -x = --exit
 
 ## Solo (unique behavior)
+  --show-limits  # show limits on command-line length
+    exemplar: "--show-limits" in words_minimal / stdin (reordered)
+    base:
+      cherry apple banana
+    flag:
+      cherry apple banana
   -L  # use at most MAX-LINES non-blank input lines per command line
-    exemplar: "-L" "1" in passwd_minimal / stdin (different)
+    exemplar: "-L" "2" "echo" "input.txt" in passwd_minimal / stdin (+1 lines)
     base:
-      a,b,c d:e:f g h i
+      input.txt a,b,c d:e:f g h i
     flag:
+      input.txt a,b,c d:e:f
+      input.txt g h i
   -a  # read arguments from FILE, not standard input
-    exemplar: "-a" "other.txt" in words_minimal (different)
+    exemplar: "-a" "other.txt" "echo" "input.txt" in words_minimal (different)
     base:
+      input.txt
     flag:
-      hello world
+      input.txt hello world
   -n  # use at most MAX-ARGS arguments per command line
-    exemplar: "-n" "1" in passwd_minimal / stdin (different)
+    exemplar: "-n" "2" "echo" "input.txt" in passwd_minimal / stdin (+2 lines)
     base:
-      a,b,c d:e:f g h i
+      input.txt a,b,c d:e:f g h i
     flag:
+      input.txt a,b,c d:e:f
+      input.txt g h
+      input.txt i
+  -o  # Reopen stdin as /dev/tty in the child process before executing the command; useful to run an interactive application.
+  -r  # if there are no arguments, then do not run COMMAND; if this option is not given, COMMAND will be run at least once
+    exemplar: "-r" in words_minimal / stdin (+1 lines)
+    base:
+      cherry apple banana
+    flag:
+      cherry apple banana
+  -s  # limit length of command line to MAX-CHARS
+    exemplar: "-s" "100" "echo" in words_minimal / stdin (reordered)
+    base:
+      cherry apple banana
+    flag:
+      cherry apple banana
+  -t  # print commands before executing them
+    exemplar: "-t" in words_minimal / stdin (reordered)
+    base:
+      cherry apple banana
+    flag:
+      cherry apple banana
 
 ## Via combination (distinguishable when paired)
   --eof  e.g. (pairwise evidence)
   --process-slot-var  e.g. (pairwise evidence)
   --replace  e.g. (pairwise evidence)
-  --show-limits  e.g. "-n" "1" "--show-limits"
   -0  e.g. (pairwise evidence)
   -P  e.g. (pairwise evidence)
   -e  e.g. (pairwise evidence)
   -i  e.g. (pairwise evidence)
   -l  e.g. (pairwise evidence)
-  -o  e.g. (pairwise evidence)
   -p  e.g. (pairwise evidence)
-  -r  e.g. "-n" "1" "-r"
-  -s  e.g. (pairwise evidence)
-  -t  e.g. "-n" "1" "-t"
   -x  e.g. (pairwise evidence)
 

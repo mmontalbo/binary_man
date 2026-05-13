@@ -1,7 +1,7 @@
 # Exploration: uniq
 
 ## Rounds
-  round 0: 133 isolated cumulative, 58 identical in round (single-phase)
+  round 0: 113 isolated cumulative, 65 identical in round (single-phase)
 
 ## Observed: 11/11 flags
   9 solo, 2 via combination
@@ -148,6 +148,6 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
             ...
 
 ## Via combination (distinguishable when paired)
-  --all-repeated  e.g. "--all-repeated" "-z" "input.txt" "other.txt"
-  -D  e.g. "-s" "1" "-D" "input.txt" "other.txt"
+  --all-repeated  e.g. "-d" "--all-repeated" "input.txt" "other.txt"
+  -D  e.g. "-D" "-f" "1" "input.txt" "other.txt"
 

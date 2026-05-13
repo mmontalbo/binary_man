@@ -1,10 +1,10 @@
 # Exploration: find
 
 ## Rounds
-  round 0: 20 isolated cumulative, 11 identical in round (single-phase)
+  round 0: 27 isolated cumulative, 13 identical in round (single-phase)
 
-## Observed: 1/4 flags
-  1 solo, 0 via combination
+## Observed: 4/4 flags
+  3 solo, 1 via combination
   3 additional error-differentiated
   1 behavioral aliases detected
   robustness: 4 robust, 0 moderate, 0 fragile
@@ -37,6 +37,13 @@
       ./input.txt
             ...
     flag:
+  -name
+    exemplar: "." "-name" "*.txt" in passwd_minimal (different)
+    base:
+      (no base)
+    flag:
+      ./input.txt
+      ./other.txt
   -o
     exemplar: "-o" in words_standard (different)
     base:
@@ -47,4 +54,18 @@
       ./input.txt
             ...
     flag:
+  -type
+    exemplar: "." "-type" "f" in words_standard (+7 lines)
+    base:
+      (no base)
+    flag:
+      ./b.txt
+      ./exec.sh
+      ./a.txt
+      ./input.txt
+      ./subdir/nested.txt
+            ...
+
+## Via combination (distinguishable when paired)
+  -print  e.g. "-N" "." "-print"
 

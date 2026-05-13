@@ -1,7 +1,7 @@
 # Exploration: sort
 
 ## Rounds
-  round 0: 113 isolated cumulative, 151 identical in round (single-phase)
+  round 0: 114 isolated cumulative, 148 identical in round (single-phase)
 
 ## Observed: 23/30 flags
   18 solo, 5 via combination
@@ -62,15 +62,21 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
     flag:
   -M  # compare (unknown) < 'JAN' < ... < 'DEC'
   -R  # shuffle, but group identical keys.  See shuf(1)
-    exemplar: "-R" in passwd_minimal / stdin (+3 lines)
+    exemplar: "-R" "input.txt" in words_minimal (+1512 lines, exit 127→0)
     base:
-      a,b,c
-      d:e:f
-      g h i
+      Africa
+      Alice
+      Amazon
+      American
+      Apache
+            ...
     flag:
-      g h i
-      a,b,c
-      d:e:f
+      impact
+      would
+      period
+      been
+      well-known
+            ...
   -S  # use SIZE for main memory buffer
     exemplar: "-S" "1" "input.txt" in formatted_minimal (-44 lines)
     base:
@@ -305,7 +311,7 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
 
 ## Via combination (distinguishable when paired)
   --check  e.g. (pairwise evidence)
-  --compress-program  e.g. "-S" "1" "--compress-program=cat" "input.txt" "other.txt"
+  --compress-program  e.g. "-R" "--compress-program=cat" "input.txt" "other.txt"
   --random-source  e.g. (pairwise evidence)
   -T  e.g. "-R" "-T" "." "input.txt" "other.txt"
   -c  e.g. (pairwise evidence)
