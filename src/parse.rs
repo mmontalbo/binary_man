@@ -114,11 +114,6 @@ pub fn lit_args(strings: Vec<String>) -> Vec<Arg> {
     strings.into_iter().map(Arg::Literal).collect()
 }
 
-/// Convert a &[String] to Vec<Arg> (all Literal, cloned).
-pub fn lit_args_ref(strings: &[String]) -> Vec<Arg> {
-    strings.iter().map(|s| Arg::Literal(s.clone())).collect()
-}
-
 /// A run invocation with optional diff reference and scoping.
 #[derive(Debug)]
 pub struct Run {

@@ -38,43 +38,10 @@ impl Sandbox {
         env_vars: &HashMap<String, String>,
         trace_dir: Option<&Path>,
     ) -> Command {
-        let mut cmd = Command::new(&self.bwrap);
-
-        // Namespace isolation
-        cmd.arg("--unshare-net");
-        cmd.arg("--die-with-parent");
-
-        // Read-only system paths (only bind what exists)
-        for path in &["/nix", "/usr", "/bin", "/lib", "/lib64", "/etc", "/run"] {
-            if Path::new(path).exists() {
-                cmd.arg("--ro-bind").arg(path).arg(path);
-            }
-        }
-
-        // Proc and dev
-        cmd.arg("--proc").arg("/proc");
-        cmd.arg("--dev").arg("/dev");
-        cmd.arg("--tmpfs").arg("/tmp");
-
-        // Read-write workspace
-        cmd.arg("--bind").arg(work_dir).arg("/workspace");
-        cmd.arg("--chdir").arg("/workspace");
-
-        // Trace output directory (separate from workspace)
+        let mut cmd = self.bwrap_base(work_dir, "/workspace", env_vars);
         if let Some(td) = trace_dir {
             cmd.arg("--bind").arg(td).arg("/trace");
         }
-
-        // Environment
-        cmd.arg("--setenv").arg("HOME").arg("/workspace");
-        cmd.arg("--setenv").arg("PATH").arg(std::env::var("PATH").unwrap_or_default());
-        cmd.arg("--setenv").arg("LANG").arg("C");
-        cmd.arg("--setenv").arg("LC_ALL").arg("C");
-        for (k, v) in env_vars {
-            cmd.arg("--setenv").arg(k).arg(v);
-        }
-
-        // The actual command — wrapped in strace only when tracing this invocation
         cmd.arg("--");
         if trace_dir.is_some() {
             if let Some(ref strace) = self.strace {
@@ -95,45 +62,39 @@ impl Sandbox {
     }
 
     /// Build a bwrap Command that runs a shell script with a batch directory mounted.
-    /// The batch_dir contains cell workspaces and an output directory.
-    /// `script_name` is the filename of the script within batch_dir (e.g., "run.sh").
     pub fn batch_command(
         &self,
         batch_dir: &Path,
         script_name: &str,
         env_vars: &HashMap<String, String>,
     ) -> Command {
+        let mut cmd = self.bwrap_base(batch_dir, "/batch", env_vars);
+        cmd.arg("--");
+        cmd.arg("sh").arg(format!("/batch/{}", script_name));
+        cmd
+    }
+
+    /// Common bwrap setup: namespace isolation, system paths, workspace bind, env.
+    fn bwrap_base(&self, work_dir: &Path, mount_point: &str, env_vars: &HashMap<String, String>) -> Command {
         let mut cmd = Command::new(&self.bwrap);
-
-        cmd.arg("--unshare-net");
-        cmd.arg("--die-with-parent");
-
+        cmd.arg("--unshare-net").arg("--die-with-parent");
         for path in &["/nix", "/usr", "/bin", "/lib", "/lib64", "/etc", "/run"] {
             if Path::new(path).exists() {
                 cmd.arg("--ro-bind").arg(path).arg(path);
             }
         }
-
         cmd.arg("--proc").arg("/proc");
         cmd.arg("--dev").arg("/dev");
         cmd.arg("--tmpfs").arg("/tmp");
-
-        // Mount batch directory (contains cell workspaces + output dir)
-        cmd.arg("--bind").arg(batch_dir).arg("/batch");
-        cmd.arg("--chdir").arg("/batch");
-
-        // Environment
-        cmd.arg("--setenv").arg("HOME").arg("/batch");
+        cmd.arg("--bind").arg(work_dir).arg(mount_point);
+        cmd.arg("--chdir").arg(mount_point);
+        cmd.arg("--setenv").arg("HOME").arg(mount_point);
         cmd.arg("--setenv").arg("PATH").arg(std::env::var("PATH").unwrap_or_default());
         cmd.arg("--setenv").arg("LANG").arg("C");
         cmd.arg("--setenv").arg("LC_ALL").arg("C");
         for (k, v) in env_vars {
             cmd.arg("--setenv").arg(k).arg(v);
         }
-
-        cmd.arg("--");
-        cmd.arg("sh").arg(format!("/batch/{}", script_name));
-
         cmd
     }
 }
