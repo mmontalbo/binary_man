@@ -1,24 +1,19 @@
 # Exploration: xargs
 
 ## Rounds
-  round 0: 6 isolated cumulative, 31 identical in round (single-phase)
+  round 0: 6 isolated cumulative, 40 identical in round (single-phase)
 
-## Observed: 13/21 flags
-  2 solo, 11 via combination
-  5 additional error-differentiated
-  2 indistinguishable under tested conditions
+## Observed: 14/21 flags
+  1 solo, 13 via combination
+  4 additional error-differentiated
+  1 behavioral aliases detected
   robustness: 17 robust, 0 moderate, 0 fragile
 
 Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = --delimiter, -n = --max-args, -o = --open-tty, -p = --interactive, -r = --no-run-if-empty, -s = --max-chars, -t = --verbose, -x = --exit
 
 ## Solo (unique behavior)
-  --show-limits  # show limits on command-line length
-    exemplar: "--show-limits" in words_minimal (different)
-    base:
-    flag:
-      cherry apple banana
   -a  # read arguments from FILE, not standard input
-    exemplar: "-a" "other.txt" in words_minimal (reordered)
+    exemplar: "-a" "other.txt" in words_minimal (different)
     base:
     flag:
       hello world
@@ -27,6 +22,7 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
   --eof  e.g. (pairwise evidence)
   --process-slot-var  e.g. (pairwise evidence)
   --replace  e.g. (pairwise evidence)
+  --show-limits  e.g. (pairwise evidence)
   -0  e.g. (pairwise evidence)
   -L  e.g. (pairwise evidence)
   -P  e.g. (pairwise evidence)
@@ -40,7 +36,4 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
   -s  e.g. (pairwise evidence)
   -t  e.g. (pairwise evidence)
   -x  e.g. (pairwise evidence)
-
-## Indistinguishable under tested conditions
-  UNEXPLAINED (2): -E, -d
 

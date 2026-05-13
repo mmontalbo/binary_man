@@ -1,7 +1,7 @@
 # Exploration: nl
 
 ## Rounds
-  round 0: 115 isolated cumulative, 94 identical in round (single-phase)
+  round 0: 142 isolated cumulative, 95 identical in round (single-phase)
 
 ## Observed: 9/11 flags
   5 solo, 4 via combination
@@ -45,25 +45,22 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
            5		 	mixed tabs and spaces
             ...
   -n  # insert line numbers according to FORMAT
-    exemplar: "-n" "%s" in words_minimal (different)
+    exemplar: "-n" "%s" in words_minimal / stdin (different)
     base:
+           1	cherry
+           2	apple
+           3	banana
     flag:
   -s  # add STRING after (possible) line number
-    exemplar: "-s" "x" "input.txt" "other.txt" in words_minimal (+1440 lines)
+    exemplar: "-s" "x" in words_minimal / stdin (+3 lines)
     base:
-           1	aardvark
-           2	abbreviation
-           3	about
-           4	abstract
-           5	accept
-            ...
+           1	cherry
+           2	apple
+           3	banana
     flag:
-           1xaardvark
-           2xabbreviation
-           3xabout
-           4xabstract
-           5xaccept
-            ...
+           1xcherry
+           2xapple
+           3xbanana
   -v  # first line number for each section
     exemplar: "-v" "0" "input.txt" "other.txt" in words_minimal (+1440 lines)
     base:
@@ -81,7 +78,7 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
            4	accept
             ...
   -w  # use NUMBER columns for line numbers
-    exemplar: "-w" "2" "input.txt" "other.txt" in words_minimal (+1440 lines)
+    exemplar: "-w" "1" "input.txt" "other.txt" in words_minimal (+1440 lines)
     base:
            1	aardvark
            2	abbreviation
@@ -90,11 +87,11 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
            5	accept
             ...
     flag:
-       1	aardvark
-       2	abbreviation
-       3	about
-       4	abstract
-       5	accept
+      1	aardvark
+      2	abbreviation
+      3	about
+      4	abstract
+      5	accept
             ...
 
 ## Via combination (distinguishable when paired)

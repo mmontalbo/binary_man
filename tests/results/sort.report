@@ -1,11 +1,12 @@
 # Exploration: sort
 
 ## Rounds
-  round 0: 108 isolated cumulative, 161 identical in round (single-phase)
+  round 0: 142 isolated cumulative, 149 identical in round (single-phase)
 
 ## Observed: 23/30 flags
-  5 solo, 18 via combination
+  17 solo, 6 via combination
   7 additional error-differentiated
+  1 behavioral aliases detected
   robustness: 26 robust, 0 moderate, 0 fragile
 
 Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --temporary-directory, -V = --version-sort, -b = --ignore-leading-blanks, -d = --dictionary-order, -f = --ignore-case, -g = --general-numeric-sort, -h = --human-numeric-sort, -i = --ignore-nonprinting, -k = --key, -m = --merge, -n = --numeric-sort, -o = --output, -r = --reverse, -s = --stable, -t = --field-separator, -u = --unique, -z = --zero-terminated
@@ -30,12 +31,18 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
             ...
   --files0-from  # read input from the files specified by NUL-terminated names in file F; If F is - then read names from standard input
   --sort  # sort according to WORD: general-numeric -g, human-numeric -h, month -M, numeric -n, random -R, version -V
-    exemplar: "--sort=auto" in words_minimal (different)
+    exemplar: "--sort=auto" in words_minimal / stdin (different)
     base:
+      apple
+      banana
+      cherry
     flag:
   -C
-    exemplar: "-C" in words_minimal (different)
+    exemplar: "-C" in words_minimal / stdin (different, exit 0→1)
     base:
+      apple
+      banana
+      cherry
     flag:
   -M  # compare (unknown) < 'JAN' < ... < 'DEC'
   -R  # shuffle, but group identical keys.  See shuf(1)
@@ -48,11 +55,11 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       Apache
             ...
     flag:
-      enable
-      intend
-      stage
-      September
-      literature
+      water
+      mirror
+      memory
+      most
+      already
             ...
   -S  # use SIZE for main memory buffer
     exemplar: "-S" "1" "input.txt" in formatted_minimal (-44 lines)
@@ -70,6 +77,118 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       
       		double tab indent
             ...
+  -V  # natural sort of (version) numbers within text
+    exemplar: "-V" "input.txt" in words_minimal (+1441 lines)
+    base:
+      Africa
+      Alice
+      Amazon
+      American
+      Apache
+            ...
+    flag:
+      Africa
+      Alice
+      Amazon
+      American
+      Apache
+            ...
+  -b  # ignore leading blanks
+    exemplar: "-b" "input.txt" in formatted_minimal (-44 lines)
+    base:
+      
+      
+      
+      
+      		double tab indent
+            ...
+    flag:
+      
+      
+      
+      
+      MiXeD cAsE lInE
+            ...
+  -d  # consider only blanks and alphanumeric characters
+    exemplar: "-d" "input.txt" in words_minimal (+1441 lines)
+    base:
+      Africa
+      Alice
+      Amazon
+      American
+      Apache
+            ...
+    flag:
+      Africa
+      Alice
+      Amazon
+      American
+      Apache
+            ...
+  -f  # fold lower case to upper case characters
+    exemplar: "-f" "input.txt" in words_minimal (+1441 lines)
+    base:
+      Africa
+      Alice
+      Amazon
+      American
+      Apache
+            ...
+    flag:
+      aardvark
+      abbreviation
+      about
+      abstract
+      accept
+            ...
+  -g  # compare according to general numerical value
+    exemplar: "-g" "input.txt" in words_minimal (+1441 lines)
+    base:
+      Africa
+      Alice
+      Amazon
+      American
+      Apache
+            ...
+    flag:
+      Africa
+      Alice
+      Amazon
+      American
+      Apache
+            ...
+  -h  # compare human readable numbers (e.g., 2K 1G)
+    exemplar: "-h" "input.txt" in numbers_minimal (different)
+    base:
+      $1.00
+      +0
+      +0.0
+      ,
+      -
+            ...
+    flag:
+      -1E+02
+      -1E02
+      -1E2
+      -9223372036854775808/-1
+      -2147483648/-1
+            ...
+  -i  # consider only printable characters
+    exemplar: "-i" "input.txt" in words_minimal (+1441 lines)
+    base:
+      Africa
+      Alice
+      Amazon
+      American
+      Apache
+            ...
+    flag:
+      Africa
+      Alice
+      Amazon
+      American
+      Apache
+            ...
   -k  # sort via a key; KEYDEF gives location and type
     exemplar: "-k" "2" "input.txt" in words_minimal (+1441 lines)
     base:
@@ -86,30 +205,101 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       American
       Apache
             ...
-  -o  # write result to FILE instead of standard output
-    exemplar: "-o" "input.txt" in words_minimal (different)
+  -m  # merge already sorted files; do not sort
+    exemplar: "-m" "input.txt" in words_minimal (+1441 lines)
     base:
+      Africa
+      Alice
+      Amazon
+      American
+      Apache
+            ...
     flag:
+      aardvark
+      abbreviation
+      about
+      abstract
+      accept
+            ...
+  -n  # compare according to string numerical value; see manual for which strings are supported
+    exemplar: "-n" "input.txt" in numbers_minimal (different)
+    base:
+      $1.00
+      +0
+      +0.0
+      ,
+      -
+            ...
+    flag:
+      -9223372036854775808/-1
+      -2147483648/-1
+      -1
+      -1#IND
+      -1.00
+            ...
+  -o  # write result to FILE instead of standard output
+    exemplar: "-o" "input.txt" in words_minimal / stdin (different)
+    base:
+      apple
+      banana
+      cherry
+    flag:
+  -r  # reverse the result of comparisons
+    exemplar: "-r" "input.txt" in words_minimal (+1441 lines)
+    base:
+      Africa
+      Alice
+      Amazon
+      American
+      Apache
+            ...
+    flag:
+      zoo
+      zone
+      zip
+      zero
+      youth
+            ...
+  -u  # with -c, check for strict ordering; without -c, output only the first of an equal run
+    exemplar: "-u" "input.txt" in formatted_minimal (-47 lines)
+    base:
+      
+      
+      
+      
+      		double tab indent
+            ...
+    flag:
+      
+      		double tab indent
+      	 	mixed tabs and spaces
+      	indented with tab
+      	tab	tab	tab	tab	tab	tab	tab	tab
+            ...
+  -z  # line delimiter is NUL, not newline
+    exemplar: "-z" "input.txt" in words_minimal (+1441 lines)
+    base:
+      Africa
+      Alice
+      Amazon
+      American
+      Apache
+            ...
+    flag:
+      aardvark
+      abbreviation
+      about
+      abstract
+      accept
+            ...
 
 ## Via combination (distinguishable when paired)
   --check  e.g. "--batch-size" "--check" "input.txt" "other.txt"
-  --compress-program  e.g. "-S" "1" "--compress-program=cat" "input.txt" "other.txt"
-  --parallel  e.g. "--parallel=1" "-R" "input.txt" "other.txt"
+  --compress-program  e.g. "--compress-program=cat" "-R" "input.txt" "other.txt"
+  --parallel  e.g. "--batch-size" "--parallel=1" "input.txt" "other.txt"
   --random-source  e.g. "--batch-size" "--random-source=input.txt" "input.txt" "other.txt"
-  -T  e.g. "-R" "-T" "." "input.txt" "other.txt"
-  -V  e.g. "-R" "-V" "input.txt" "other.txt"
-  -b  e.g. "-R" "-b" "input.txt" "other.txt"
+  -T  e.g. "-T" "." "-R" "input.txt" "other.txt"
   -c  e.g. "--batch-size" "-c" "input.txt" "other.txt"
-  -d  e.g. "--batch-size" "-d" "input.txt" "other.txt"
-  -f  e.g. "--batch-size" "-f" "input.txt" "other.txt"
-  -g  e.g. "--batch-size" "-g" "input.txt" "other.txt"
-  -h  e.g. "--batch-size" "-h" "input.txt" "other.txt"
-  -i  e.g. "-R" "-i" "input.txt" "other.txt"
-  -m  e.g. "-R" "-m" "input.txt" "other.txt"
-  -n  e.g. "--batch-size" "-n" "input.txt" "other.txt"
-  -r  e.g. "-R" "-r" "input.txt" "other.txt"
-  -s  e.g. "-s" "-R" "input.txt" "other.txt"
-  -t  e.g. "-t" "," "-R" "input.txt" "other.txt"
-  -u  e.g. "-R" "-u" "input.txt" "other.txt"
-  -z  e.g. "-z" "-R" "input.txt" "other.txt"
+  -s  e.g. "--batch-size" "-s" "input.txt" "other.txt"
+  -t  e.g. "-R" "-t" "," "input.txt" "other.txt"
 

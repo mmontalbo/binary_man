@@ -1,10 +1,10 @@
 # Exploration: wc
 
 ## Rounds
-  round 0: 19 isolated cumulative, 46 identical in round (single-phase)
+  round 0: 58 isolated cumulative, 38 identical in round (single-phase)
 
 ## Observed: 6/7 flags
-  1 solo, 5 via combination
+  4 solo, 2 via combination
   1 additional error-differentiated
   robustness: 7 robust, 0 moderate, 0 fragile
 
@@ -23,11 +23,26 @@ Aliases: -L = --max-line-length, -c = --bytes, -l = --lines, -m = --chars, -w = 
     flag:
             0       0       0
             0       0       0 total
+  -L  # print the maximum display width
+    exemplar: "-L" "input.txt" in words_minimal (reordered)
+    base:
+       1512  1513 10586 input.txt
+    flag:
+      18 input.txt
+  -l  # print the newline counts
+    exemplar: "-l" "input.txt" in words_minimal (reordered)
+    base:
+       1512  1513 10586 input.txt
+    flag:
+      1512 input.txt
+  -w  # print the word counts
+    exemplar: "-w" "input.txt" in words_minimal (reordered)
+    base:
+       1512  1513 10586 input.txt
+    flag:
+      1513 input.txt
 
 ## Via combination (distinguishable when paired)
-  -L  e.g. (pairwise evidence)
   -c  e.g. (pairwise evidence)
-  -l  e.g. (pairwise evidence)
   -m  e.g. (pairwise evidence)
-  -w  e.g. (pairwise evidence)
 

@@ -302,8 +302,8 @@ pub fn run_grid(
                                 .collect::<Vec<_>>()
                                 .join(" ");
 
-                            // Handle stdin
-                            let stdin_part = match &run.stdin {
+                            // Handle stdin from context (not run)
+                            let stdin_part = match &ctx.stdin {
                                 Some(crate::parse::StdinSource::Lines(lines)) => {
                                     let content = lines.join("\n");
                                     format!("printf '{}' | ", content.replace('\'', "'\\''"))

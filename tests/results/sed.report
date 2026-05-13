@@ -1,7 +1,7 @@
 # Exploration: sed
 
 ## Rounds
-  round 0: 11 isolated cumulative, 69 identical in round (single-phase)
+  round 0: 11 isolated cumulative, 68 identical in round (single-phase)
 
 ## Observed: 23/24 flags
   3 solo, 20 via combination
@@ -16,7 +16,7 @@
       SED PROGRAM:
         i\nput.txt
   --follow-symlinks
-    exemplar: "--follow-symlinks" "input.txt" "other.txt" in words_minimal (-2 lines)
+    exemplar: "--follow-symlinks" "input.txt" "other.txt" in words_minimal (different)
     base:
       nput.txt
       hello world

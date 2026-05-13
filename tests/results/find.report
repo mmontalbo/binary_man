@@ -1,11 +1,12 @@
 # Exploration: find
 
 ## Rounds
-  round 0: 14 isolated cumulative, 29 identical in round (single-phase)
+  round 0: 20 isolated cumulative, 11 identical in round (single-phase)
 
 ## Observed: 1/4 flags
   1 solo, 0 via combination
   3 additional error-differentiated
+  1 behavioral aliases detected
   robustness: 4 robust, 0 moderate, 0 fragile
 
 ## Solo (unique behavior)

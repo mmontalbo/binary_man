@@ -148,7 +148,7 @@ pub fn build_contexts() -> Vec<crate::parse::NamedContext> {
                  props_fn: fn(&mut Vec<SetupCommand>)| -> NamedContext {
         let mut cmds = structure_fn(content);
         props_fn(&mut cmds);
-        NamedContext { name: name.into(), extends: None, commands: cmds }
+        NamedContext { name: name.into(), extends: None, commands: cmds, stdin: None }
     };
 
     let words = content_words();
@@ -173,7 +173,7 @@ pub fn build_contexts() -> Vec<crate::parse::NamedContext> {
         build("csv_minimal",        &csv,       structure_minimal,  props_times),
         build("csv_standard",       &csv,       structure_standard, props_perms),
         build("csv_deep",           &csv,       structure_deep,     props_default),
-        NamedContext { name: "empty_dir".into(), extends: None, commands: vec![] },
+        NamedContext { name: "empty_dir".into(), extends: None, commands: vec![], stdin: None },
     ];
 
     // Breadth-only extras (minimal structure)
@@ -195,7 +195,7 @@ pub fn build_contexts() -> Vec<crate::parse::NamedContext> {
         cmds.push(p.clone());
         contexts.push(NamedContext {
             name: format!("numbers_standard / {}", parse::describe_perturbation(p)),
-            extends: None, commands: cmds,
+            extends: None, commands: cmds, stdin: None,
         });
     }
 
@@ -205,8 +205,24 @@ pub fn build_contexts() -> Vec<crate::parse::NamedContext> {
     cmds.push(SetupCommand::SetEnv { var: "LC_ALL".into(), value: "en_US.UTF-8".into() });
     contexts.push(NamedContext {
         name: "words_minimal / env LC_ALL=en_US.UTF-8".into(),
-        extends: None, commands: cmds,
+        extends: None, commands: cmds, stdin: None,
     });
+
+    // Stdin contexts: same content piped via stdin instead of (in addition to) files.
+    // These naturally exercise stdin-primary tools (xargs, sort, etc.)
+    let stdin_content = parse::StdinSource::Lines(
+        vec!["cherry".into(), "apple".into(), "banana".into()]
+    );
+    for base_name in ["words_minimal", "numbers_minimal", "passwd_minimal"] {
+        if let Some(base) = contexts.iter().find(|c| c.name == base_name).cloned() {
+            contexts.push(NamedContext {
+                name: format!("{} / stdin", base_name),
+                extends: None,
+                commands: base.commands,
+                stdin: Some(stdin_content.clone()),
+            });
+        }
+    }
 
     contexts
 }

@@ -1,15 +1,79 @@
 # Exploration: cat
 
 ## Rounds
-  round 0: 12 isolated cumulative, 70 identical in round (single-phase)
+  round 0: 57 isolated cumulative, 55 identical in round (single-phase)
 
 ## Observed: 10/10 flags
-  3 solo, 7 via combination
+  10 solo, 0 via combination
   robustness: 10 robust, 0 moderate, 0 fragile
 
 Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonblank, -n = --number, -s = --squeeze-blank, -v = --show-nonprinting
 
 ## Solo (unique behavior)
+  -A  # equivalent to -vET
+    exemplar: "-A" "input.txt" "other.txt" in formatted_minimal (-45 lines)
+    base:
+      first line
+      second line with trailing spaces
+      	indented with tab
+          indented with spaces
+      	 	mixed tabs and spaces
+            ...
+    flag:
+      first line$
+      second line with trailing spaces$
+      ^Iindented with tab$
+          indented with spaces$
+      ^I ^Imixed tabs and spaces$
+            ...
+  -E  # display $ at end of each line
+    exemplar: "-E" "input.txt" "other.txt" in words_minimal (+1440 lines)
+    base:
+      aardvark
+      abbreviation
+      about
+      abstract
+      accept
+            ...
+    flag:
+      aardvark$
+      abbreviation$
+      about$
+      abstract$
+      accept$
+            ...
+  -T  # display TAB characters as ^I
+    exemplar: "-T" "input.txt" "other.txt" in formatted_minimal (-45 lines)
+    base:
+      first line
+      second line with trailing spaces
+      	indented with tab
+          indented with spaces
+      	 	mixed tabs and spaces
+            ...
+    flag:
+      first line
+      second line with trailing spaces
+      ^Iindented with tab
+          indented with spaces
+      ^I ^Imixed tabs and spaces
+            ...
+  -b  # number nonempty output lines, overrides -n
+    exemplar: "-b" "input.txt" "other.txt" in formatted_minimal (-45 lines)
+    base:
+      first line
+      second line with trailing spaces
+      	indented with tab
+          indented with spaces
+      	 	mixed tabs and spaces
+            ...
+    flag:
+           1	first line
+           2	second line with trailing spaces
+           3		indented with tab
+           4	    indented with spaces
+           5		 	mixed tabs and spaces
+            ...
   -e  # equivalent to -vE
     exemplar: "-e" "input.txt" "other.txt" in formatted_minimal (-45 lines)
     base:
@@ -25,6 +89,38 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
       	indented with tab$
           indented with spaces$
       	 	mixed tabs and spaces$
+            ...
+  -n  # number all output lines
+    exemplar: "-n" "input.txt" "other.txt" in formatted_minimal (-45 lines)
+    base:
+      first line
+      second line with trailing spaces
+      	indented with tab
+          indented with spaces
+      	 	mixed tabs and spaces
+            ...
+    flag:
+           1	first line
+           2	second line with trailing spaces
+           3		indented with tab
+           4	    indented with spaces
+           5		 	mixed tabs and spaces
+            ...
+  -s  # suppress repeated empty output lines
+    exemplar: "-s" "input.txt" "other.txt" in formatted_minimal (-46 lines)
+    base:
+      first line
+      second line with trailing spaces
+      	indented with tab
+          indented with spaces
+      	 	mixed tabs and spaces
+            ...
+    flag:
+      first line
+      second line with trailing spaces
+      	indented with tab
+          indented with spaces
+      	 	mixed tabs and spaces
             ...
   -t  # equivalent to -vT
     exemplar: "-t" "input.txt" "other.txt" in formatted_minimal (-45 lines)
@@ -58,13 +154,20 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
           indented with spaces
       	 	mixed tabs and spaces
             ...
-
-## Via combination (distinguishable when paired)
-  -A  e.g. (pairwise evidence)
-  -E  e.g. (pairwise evidence)
-  -T  e.g. (pairwise evidence)
-  -b  e.g. (pairwise evidence)
-  -n  e.g. (pairwise evidence)
-  -s  e.g. (pairwise evidence)
-  -v  e.g. (pairwise evidence)
+  -v  # use ^ and M- notation, except for LFD and TAB
+    exemplar: "-v" "input.txt" "other.txt" in formatted_minimal (-45 lines)
+    base:
+      first line
+      second line with trailing spaces
+      	indented with tab
+          indented with spaces
+      	 	mixed tabs and spaces
+            ...
+    flag:
+      first line
+      second line with trailing spaces
+      	indented with tab
+          indented with spaces
+      	 	mixed tabs and spaces
+            ...
 

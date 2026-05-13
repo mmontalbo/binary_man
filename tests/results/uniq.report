@@ -1,10 +1,10 @@
 # Exploration: uniq
 
 ## Rounds
-  round 0: 70 isolated cumulative, 82 identical in round (single-phase)
+  round 0: 90 isolated cumulative, 66 identical in round (single-phase)
 
 ## Observed: 11/11 flags
-  9 solo, 2 via combination
+  8 solo, 3 via combination
   2 behavioral aliases detected
   robustness: 11 robust, 0 moderate, 0 fragile
 
@@ -54,29 +54,20 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
             ...
     flag:
   -f  # avoid comparing the first N fields
-    exemplar: "-f" "2" "input.txt" in numbers_minimal (different)
+    exemplar: "-f" "1" "input.txt" in words_minimal (-6 lines)
     base:
-      0
-      1
-      1.00
-      $1.00
-      1/2
+      aardvark
+      abbreviation
+      about
+      abstract
+      accept
             ...
     flag:
-      0
-      1 000 000.00
-      1'000'000.00
-      1 000 000,00
-      1'000'000,00
-  -i  # ignore differences in case when comparing
-    exemplar: "-i" in words_minimal (different)
-    base:
-    flag:
-      cherry
-      apple
-      banana
+      aardvark
+      San Francisco
+      Saturday
   -s  # avoid comparing the first N characters
-    exemplar: "-s" "2" "input.txt" in numbers_minimal (different)
+    exemplar: "-s" "1" "input.txt" in numbers_minimal (different)
     base:
       0
       1
@@ -89,7 +80,7 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
       1.00
       $1.00
       1/2
-      1E02
+      1E2
             ...
   -u  # only print unique lines
     exemplar: "-u" "input.txt" in formatted_minimal (-46 lines)
@@ -108,7 +99,7 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
       	 	mixed tabs and spaces
             ...
   -w  # compare no more than N characters in lines
-    exemplar: "-w" "2" "input.txt" in words_minimal (+269 lines)
+    exemplar: "-w" "1" "input.txt" in words_minimal (+162 lines)
     base:
       aardvark
       abbreviation
@@ -118,10 +109,10 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
             ...
     flag:
       aardvark
-      abbreviation
-      accept
       Africa
       afternoon
+      Alice
+      all
             ...
   -z  # line delimiter is NUL, not newline
     exemplar: "-z" "input.txt" in words_minimal (+1441 lines)
@@ -143,4 +134,5 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
 ## Via combination (distinguishable when paired)
   --all-repeated  e.g. (pairwise evidence)
   -D  e.g. (pairwise evidence)
+  -i  e.g. "-i" "-c" "input.txt" "other.txt"
 

@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
 
-use crate::parse::{self, Arg, NamedContext, Run, Script};
+use crate::parse::{Arg, NamedContext, Run, Script};
 use crate::sandbox::Sandbox;
 
 /// Extracted flag info from --help text.
@@ -896,19 +896,19 @@ pub fn generate_initial_script(
         }
     };
 
-    // Generate base + flag runs for a pattern with optional stdin.
-    let mut gen_runs = |pattern: &[String], stdin: Option<&parse::StdinSource>| {
+    // Generate base + flag runs for each working pattern.
+    // Stdin is now a context property — contexts with stdin data naturally
+    // provide piped input, so runs don't need to specify stdin.
+    for pattern in &working_patterns {
         let base_args: Vec<Arg> = sub_prefix.iter().cloned()
             .chain(pattern.iter().map(&to_arg))
             .collect();
-        runs.push(Run { args: base_args.clone(), in_contexts: None,
-            stdin: stdin.cloned(), diff_from: None });
+        runs.push(Run { args: base_args.clone(), in_contexts: None, diff_from: None });
         for (flag, metavar) in flags.iter() {
             let mut args = sub_prefix.clone();
             push_flag_arg(&mut args, flag, metavar.as_deref());
             args.extend(pattern.iter().map(&to_arg));
-            runs.push(Run { args, in_contexts: None,
-                stdin: stdin.cloned(), diff_from: Some(base_args.clone()) });
+            runs.push(Run { args, in_contexts: None, diff_from: Some(base_args.clone()) });
         }
         // Extra solo runs for additional working values
         for (flag, extra_vals) in &extra_solo_values {
@@ -916,36 +916,18 @@ pub fn generate_initial_script(
                 let mut args = sub_prefix.clone();
                 push_flag_arg(&mut args, flag, Some(val));
                 args.extend(pattern.iter().map(&to_arg));
-                runs.push(Run { args, in_contexts: None,
-                    stdin: stdin.cloned(), diff_from: Some(base_args.clone()) });
+                runs.push(Run { args, in_contexts: None, diff_from: Some(base_args.clone()) });
             }
         }
-    };
-
-    for pattern in &working_patterns {
-        gen_runs(pattern, None);
     }
+    // Bare-args run (no positional args) — for stdin contexts
     if stdin_works {
-        let stdin_content = parse::StdinSource::Lines(
-            vec!["cherry".into(), "apple".into(), "banana".into()]
-        );
-        // Stdin with each working arg pattern + bare stdin — flag runs only, no extra solo values
-        let mut stdin_patterns: Vec<&[String]> = working_patterns.iter().map(|p| p.as_slice()).collect();
-        let empty: Vec<String> = vec![];
-        stdin_patterns.push(&empty);
-        for pattern in stdin_patterns {
-            let base_args: Vec<Arg> = sub_prefix.iter().cloned()
-                .chain(pattern.iter().map(&to_arg))
-                .collect();
-            runs.push(Run { args: base_args.clone(), in_contexts: None,
-                stdin: Some(stdin_content.clone()), diff_from: None });
-            for (flag, metavar) in flags.iter() {
-                let mut args = sub_prefix.clone();
-                push_flag_arg(&mut args, flag, metavar.as_deref());
-                args.extend(pattern.iter().map(&to_arg));
-                runs.push(Run { args, in_contexts: None,
-                    stdin: Some(stdin_content.clone()), diff_from: Some(base_args.clone()) });
-            }
+        let bare_args: Vec<Arg> = sub_prefix.clone();
+        runs.push(Run { args: bare_args.clone(), in_contexts: None, diff_from: None });
+        for (flag, metavar) in flags.iter() {
+            let mut args = sub_prefix.clone();
+            push_flag_arg(&mut args, flag, metavar.as_deref());
+            runs.push(Run { args, in_contexts: None, diff_from: Some(bare_args.clone()) });
         }
     }
 
@@ -963,8 +945,7 @@ pub fn generate_initial_script(
                 push_flag_arg(&mut args, flag, Some("0"));
                 args.extend(first_pattern.iter().map(&to_arg));
                 runs.push(Run {
-                    args, in_contexts: None, stdin: None,
-                    diff_from: Some(base_args.clone()),
+                    args, in_contexts: None,                    diff_from: Some(base_args.clone()),
                 });
             }
             for (flag, _) in zero_flags.iter().take(3) {
@@ -972,15 +953,13 @@ pub fn generate_initial_script(
                 push_flag_arg(&mut args1, flag, Some("-1"));
                 args1.extend(first_pattern.iter().map(&to_arg));
                 runs.push(Run {
-                    args: args1, in_contexts: None, stdin: None,
-                    diff_from: Some(base_args.clone()),
+                    args: args1, in_contexts: None,                    diff_from: Some(base_args.clone()),
                 });
                 let mut args2 = sub_prefix.clone();
                 push_flag_arg(&mut args2, flag, Some("2147483647"));
                 args2.extend(first_pattern.iter().map(&to_arg));
                 runs.push(Run {
-                    args: args2, in_contexts: None, stdin: None,
-                    diff_from: Some(base_args.clone()),
+                    args: args2, in_contexts: None,                    diff_from: Some(base_args.clone()),
                 });
             }
         }
@@ -1031,8 +1010,7 @@ pub fn generate_initial_script(
                 runs.push(Run {
                     args,
                     in_contexts: None,
-                    stdin: None,
-                    diff_from: Some(base_args.clone()),
+                                       diff_from: Some(base_args.clone()),
                 });
             }
         }
@@ -1042,7 +1020,7 @@ pub fn generate_initial_script(
     {
         let mut err_args = sub_prefix.clone();
         err_args.push(Arg::Literal("nonexistent-file.txt".into()));
-        runs.push(Run { args: err_args, in_contexts: None, stdin: None, diff_from: None });
+        runs.push(Run { args: err_args, in_contexts: None, diff_from: None });
     }
 
     Ok((Script { contexts, runs }, flag_info))

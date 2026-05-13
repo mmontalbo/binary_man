@@ -1,7 +1,7 @@
 # Exploration: diff
 
 ## Rounds
-  round 0: 264 isolated cumulative, 68 identical in round (single-phase)
+  round 0: 264 isolated cumulative, 69 identical in round (single-phase)
 
 ## Observed: 51/53 flags
   11 solo, 40 via combination
@@ -80,8 +80,8 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       < abstract
             ...
     flag:
-      --- input.txt	2026-05-12 22:24:51.085586539 -0700
-      +++ other.txt	2026-05-12 22:24:51.085592100 -0700
+      --- input.txt	2026-05-12 22:35:01.148467532 -0700
+      +++ other.txt	2026-05-12 22:35:01.148479745 -0700
       @@ -1,1512 +1 @@
       -aardvark
       -abbreviation
@@ -122,8 +122,8 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       < abstract
             ...
     flag:
-      --- input.txt	2026-05-12 22:24:51.085557955 -0700
-      +++ other.txt	2026-05-12 22:24:51.085564738 -0700
+      --- input.txt	2026-05-12 22:35:01.148418269 -0700
+      +++ other.txt	2026-05-12 22:35:01.148441292 -0700
       @@ -1,1512 +1 @@
       -aardvark
       -abbreviation
@@ -170,8 +170,8 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       < abstract
             ...
     flag:
-      --- input.txt	2026-05-12 22:24:51.085526806 -0700
-      +++ other.txt	2026-05-12 22:24:51.085536995 -0700
+      --- input.txt	2026-05-12 22:35:01.148368184 -0700
+      +++ other.txt	2026-05-12 22:35:01.148387511 -0700
       @@ -1,1512 +1 @@
       -aardvark
       -abbreviation
@@ -180,45 +180,45 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
 ## Via combination (distinguishable when paired)
   --GTYPE-group-format  e.g. (pairwise evidence)
   --LTYPE-line-format  e.g. (pairwise evidence)
-  --color  e.g. "--unified" "--color" "input.txt" "other.txt"
+  --color  e.g. "--color" "-u" "input.txt" "other.txt"
   --context  e.g. (pairwise evidence)
-  --horizon-lines  e.g. "--unified" "--horizon-lines=1" "input.txt" "other.txt"
+  --horizon-lines  e.g. "--horizon-lines=1" "-U" "1" "input.txt" "other.txt"
   --ignore-file-name-case  e.g. "-U" "1" "--ignore-file-name-case" "input.txt" "other.txt"
-  --label  e.g. "--label=test" "-u" "input.txt" "other.txt"
+  --label  e.g. "--unified" "--label=test" "input.txt" "other.txt"
   --left-column  e.g. "--left-column" "-U" "1" "input.txt" "other.txt"
-  --no-dereference  e.g. "-u" "--no-dereference" "input.txt" "other.txt"
-  --no-ignore-file-name-case  e.g. "--no-ignore-file-name-case" "-U" "1" "input.txt" "other.txt"
+  --no-dereference  e.g. "--no-dereference" "--unified" "input.txt" "other.txt"
+  --no-ignore-file-name-case  e.g. "-u" "--no-ignore-file-name-case" "input.txt" "other.txt"
   --normal  e.g. (pairwise evidence)
-  --palette  e.g. "-u" "--palette=1" "input.txt" "other.txt"
-  --speed-large-files  e.g. "--speed-large-files" "-u" "input.txt" "other.txt"
-  --strip-trailing-cr  e.g. "-U" "1" "--strip-trailing-cr" "input.txt" "other.txt"
-  --suppress-blank-empty  e.g. "--suppress-blank-empty" "-u" "input.txt" "other.txt"
-  --suppress-common-lines  e.g. "--suppress-common-lines" "--unified" "input.txt" "other.txt"
-  --unidirectional-new-file  e.g. "--unidirectional-new-file" "-U" "1" "input.txt" "other.txt"
+  --palette  e.g. "--palette=1" "--unified" "input.txt" "other.txt"
+  --speed-large-files  e.g. "--unified" "--speed-large-files" "input.txt" "other.txt"
+  --strip-trailing-cr  e.g. "--strip-trailing-cr" "-U" "1" "input.txt" "other.txt"
+  --suppress-blank-empty  e.g. "-U" "1" "--suppress-blank-empty" "input.txt" "other.txt"
+  --suppress-common-lines  e.g. "--suppress-common-lines" "-U" "1" "input.txt" "other.txt"
+  --unidirectional-new-file  e.g. "--unidirectional-new-file" "-u" "input.txt" "other.txt"
   -1  e.g. "-W" "-1" "input.txt" "other.txt"
-  -B  e.g. "-B" "--unified" "input.txt" "other.txt"
+  -B  e.g. "-B" "-U" "1" "input.txt" "other.txt"
   -C  e.g. (pairwise evidence)
-  -E  e.g. "-U" "1" "-E" "input.txt" "other.txt"
-  -F  e.g. "-F" "1" "-u" "input.txt" "other.txt"
-  -N  e.g. "-N" "-U" "1" "input.txt" "other.txt"
-  -S  e.g. "-S" "input.txt" "-U" "1" "input.txt" "other.txt"
+  -E  e.g. "-E" "--unified" "input.txt" "other.txt"
+  -F  e.g. "-u" "-F" "1" "input.txt" "other.txt"
+  -N  e.g. "-U" "1" "-N" "input.txt" "other.txt"
+  -S  e.g. "-U" "1" "-S" "input.txt" "input.txt" "other.txt"
   -T  e.g. (pairwise evidence)
-  -Z  e.g. "-u" "-Z" "input.txt" "other.txt"
+  -Z  e.g. "-Z" "-u" "input.txt" "other.txt"
   -a  e.g. "-a" "-u" "input.txt" "other.txt"
-  -b  e.g. "--unified" "-b" "input.txt" "other.txt"
+  -b  e.g. "-b" "-u" "input.txt" "other.txt"
   -c  e.g. (pairwise evidence)
-  -d  e.g. "-d" "-U" "1" "input.txt" "other.txt"
+  -d  e.g. "--unified" "-d" "input.txt" "other.txt"
   -e  e.g. "-e" "-l" "input.txt" "other.txt"
-  -i  e.g. "-u" "-i" "input.txt" "other.txt"
-  -l  e.g. "--unified" "-l" "input.txt" "other.txt"
-  -n  e.g. "-n" "-l" "input.txt" "other.txt"
-  -p  e.g. "-u" "-p" "input.txt" "other.txt"
+  -i  e.g. "-i" "-U" "1" "input.txt" "other.txt"
+  -l  e.g. "-e" "-l" "input.txt" "other.txt"
+  -n  e.g. "-l" "-n" "input.txt" "other.txt"
+  -p  e.g. "-p" "--unified" "input.txt" "other.txt"
   -q  e.g. (pairwise evidence)
   -r  e.g. "--unified" "-r" "input.txt" "other.txt"
-  -s  e.g. "-u" "-s" "input.txt" "other.txt"
-  -t  e.g. "--unified" "-t" "input.txt" "other.txt"
+  -s  e.g. "-s" "-u" "input.txt" "other.txt"
+  -t  e.g. "-t" "--unified" "input.txt" "other.txt"
   -v  e.g. "-X" "input.txt" "-v" "input.txt" "other.txt"
-  -w  e.g. "-u" "-w" "input.txt" "other.txt"
-  -x  e.g. "-U" "1" "-x" ".*" "input.txt" "other.txt"
+  -w  e.g. "-U" "1" "-w" "input.txt" "other.txt"
+  -x  e.g. "-x" ".*" "-U" "1" "input.txt" "other.txt"
   -y  e.g. "-y" "-l" "input.txt" "other.txt"
 

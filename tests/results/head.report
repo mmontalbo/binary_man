@@ -1,27 +1,65 @@
 # Exploration: head
 
 ## Rounds
-  round 0: 18 isolated cumulative, 35 identical in round (single-phase)
+  round 0: 52 isolated cumulative, 28 identical in round (single-phase)
 
 ## Observed: 5/7 flags
-  1 solo, 4 via combination
+  2 solo, 3 via combination
   2 additional error-differentiated
   robustness: 7 robust, 0 moderate, 0 fragile
 
 Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
 
 ## Solo (unique behavior)
-  -v  # always print headers giving file names
-    exemplar: "-v" in words_minimal (different)
+  -c  # print the first NUM bytes of each file; with the leading '-', print all but the last NUM bytes of each file
+    exemplar: "-c" in numbers_minimal / stdin (different)
     base:
+      cherry
+      apple
+      banana
     flag:
-      ==> standard input <==
+  -n  # print the first NUM lines instead of the first 10; with the leading '-', print all but the last NUM lines of each file
+    exemplar: "-n" in numbers_minimal / stdin (different)
+    base:
+      cherry
+      apple
+      banana
+    flag:
+  -v  # always print headers giving file names
+    exemplar: "-v" "input.txt" "other.txt" in words_minimal (-1 lines)
+    base:
+      ==> input.txt <==
+      aardvark
+      abbreviation
+      about
+      abstract
+            ...
+    flag:
+      ==> input.txt <==
+      aardvark
+      abbreviation
+      about
+      abstract
+            ...
+  -z  # line delimiter is NUL, not newline
+    exemplar: "-z" "input.txt" in words_minimal (+1441 lines)
+    base:
+      aardvark
+      abbreviation
+      about
+      abstract
+      accept
+            ...
+    flag:
+      aardvark
+      abbreviation
+      about
+      abstract
+      accept
+            ...
 
 ## Via combination (distinguishable when paired)
   --quiet  e.g. "-c" "--quiet" "$(head -n1 input.txt)" "."
-  --silent  e.g. "-c" "--silent" "$(head -n1 input.txt)" "."
-  -c  e.g. "-c" "-v" "$(head -n1 input.txt)" "."
-  -n  e.g. "-n" "-c" "$(head -n1 input.txt)" "."
-  -q  e.g. "-c" "-q" "$(head -n1 input.txt)" "."
-  -z  e.g. "-n" "-z" "$(head -n1 input.txt)" "."
+  --silent  e.g. "-n" "--silent" "$(head -n1 input.txt)" "."
+  -q  e.g. "-n" "-q" "$(head -n1 input.txt)" "."
 

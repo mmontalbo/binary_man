@@ -12,12 +12,13 @@ pub struct Script {
     pub runs: Vec<Run>,
 }
 
-/// A named execution context with setup commands.
+/// A named execution context with setup commands and optional stdin.
 #[derive(Debug, Clone)]
 pub struct NamedContext {
     pub name: String,
     pub extends: Option<String>,
     pub commands: Vec<SetupCommand>,
+    pub stdin: Option<StdinSource>,
 }
 
 /// A setup command.
@@ -119,7 +120,6 @@ pub fn lit_args(strings: Vec<String>) -> Vec<Arg> {
 pub struct Run {
     pub args: Vec<Arg>,
     pub in_contexts: Option<Vec<String>>,
-    pub stdin: Option<StdinSource>,
     /// If set, diff this run's results from the reference run.
     pub diff_from: Option<Vec<Arg>>,
 }
@@ -236,7 +236,7 @@ pub fn parse_script(source: &str) -> Result<Script> {
             current_run = Some(Run {
                 args,
                 in_contexts: current_in.clone(),
-                stdin: None,
+
                 diff_from: current_from.clone(),
             });
         } else if let Some(rest) = line.strip_prefix("in ") {
@@ -266,20 +266,21 @@ pub fn parse_script(source: &str) -> Result<Script> {
             if let Some((_, ref mut flag_lists)) = current_combine {
                 flag_lists.push(flags);
             }
-        } else if let Some(rest) = line.strip_prefix("stdin ") {
-            let run = current_run.as_mut().ok_or_else(|| {
-                anyhow::anyhow!("line {}: 'stdin' outside of a run block", line_num)
+        } else if line.starts_with("stdin ") {
+            // stdin is now a context property — attach to current context
+            let ctx = current_context.as_mut().ok_or_else(|| {
+                anyhow::anyhow!("line {}: 'stdin' outside of a context block", line_num)
             })?;
-            let rest = rest.trim();
+            let rest = line.strip_prefix("stdin ").unwrap().trim();
             if let Some(path) = rest.strip_prefix("from ") {
                 let tokens = tokenize(path, line_num)?;
                 if tokens.is_empty() {
                     bail!("line {}: stdin from requires a path", line_num);
                 }
-                run.stdin = Some(StdinSource::FromFile(tokens[0].clone()));
+                ctx.stdin = Some(StdinSource::FromFile(tokens[0].clone()));
             } else {
                 let lines = tokenize(rest, line_num)?;
-                run.stdin = Some(StdinSource::Lines(lines));
+                ctx.stdin = Some(StdinSource::Lines(lines));
             }
         } else {
             // Setup command — goes into current context or vary block
@@ -304,6 +305,7 @@ pub fn parse_script(source: &str) -> Result<Script> {
             name: "(default)".to_string(),
             extends: None,
             commands: Vec::new(),
+            stdin: None,
         });
     }
 
@@ -341,7 +343,7 @@ fn flush_combine(
             runs.push(Run {
                 args,
                 in_contexts: current_in.clone(),
-                stdin: None,
+
                 diff_from: current_from.clone(),
             });
         }
@@ -356,7 +358,7 @@ fn flush_combine(
                 runs.push(Run {
                     args,
                     in_contexts: current_in.clone(),
-                    stdin: None,
+    
                     diff_from: current_from.clone(),
                 });
             }
@@ -387,7 +389,7 @@ fn parse_context_line(rest: &str, line_num: usize) -> Result<NamedContext> {
     } else {
         None
     };
-    Ok(NamedContext { name, extends, commands: Vec::new() })
+    Ok(NamedContext { name, extends, commands: Vec::new(), stdin: None })
 }
 
 fn parse_setup_line(line: &str, line_num: usize) -> Result<SetupCommand> {
@@ -532,14 +534,14 @@ fn resolve_vary(contexts: &mut Vec<NamedContext>, vary_blocks: &[VaryBlock]) -> 
             for p in &vary.perturbations {
                 cmds.push(p.clone());
             }
-            contexts.push(NamedContext { name: variant_name, extends: None, commands: cmds });
+            contexts.push(NamedContext { name: variant_name, extends: None, commands: cmds, stdin: None });
         } else {
             // Each perturbation is an independent single-factor variant
             for perturbation in &vary.perturbations {
                 let variant_name = format!("{} / {}", vary.base, describe_perturbation(perturbation));
                 let mut cmds = base_cmds.clone();
                 cmds.push(perturbation.clone());
-                contexts.push(NamedContext { name: variant_name, extends: None, commands: cmds });
+                contexts.push(NamedContext { name: variant_name, extends: None, commands: cmds, stdin: None });
             }
         }
     }
@@ -666,6 +668,7 @@ fn resolve_stress(contexts: &mut Vec<NamedContext>, stress_blocks: &[StressBlock
                 name: format!("{} / stress_{}", block.base, name),
                 extends: None,
                 commands: cmds,
+                stdin: None,
             });
         }
     }
