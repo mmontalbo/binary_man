@@ -1,11 +1,11 @@
 # Exploration: uniq
 
 ## Rounds
-  round 0: 114 isolated cumulative, 60 identical in round (single-phase)
+  round 0: 133 isolated cumulative, 58 identical in round (single-phase)
 
 ## Observed: 11/11 flags
   9 solo, 2 via combination
-  3 behavioral aliases detected
+  2 behavioral aliases detected
   robustness: 11 robust, 0 moderate, 0 fragile
 
 Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, -s = --skip-chars, -u = --unique, -w = --check-chars, -z = --zero-terminated
@@ -148,6 +148,6 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
             ...
 
 ## Via combination (distinguishable when paired)
-  --all-repeated  e.g. "--all-repeated" "-s" "1" "input.txt" "other.txt"
-  -D  e.g. "-D" "-s" "1" "input.txt" "other.txt"
+  --all-repeated  e.g. "--all-repeated" "-z" "input.txt" "other.txt"
+  -D  e.g. "-s" "1" "-D" "input.txt" "other.txt"
 

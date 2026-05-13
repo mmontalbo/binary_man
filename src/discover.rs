@@ -723,10 +723,14 @@ pub fn generate_initial_script(
         eprintln!("  pattern: context-derived");
     }
 
-    // Record which flags have numeric metavars before probing overwrites metavar with resolved value
+    // Save original metavars before probing overwrites them with resolved values.
+    // Used by numeric boundary runs and compound probing fallback.
+    let original_metavars: HashMap<String, String> = flags.iter()
+        .filter_map(|(f, mv)| mv.as_ref().map(|m| (f.clone(), m.clone())))
+        .collect();
     let numeric_metavar_names = ["NUM", "NUMBER", "N", "SIZE", "COLS", "WIDTH", "COUNT", "LINES", "BYTES"];
-    let numeric_flags: HashSet<String> = flags.iter()
-        .filter(|(_, mv)| mv.as_ref().is_some_and(|h| numeric_metavar_names.contains(&h.to_uppercase().as_str())))
+    let numeric_flags: HashSet<String> = original_metavars.iter()
+        .filter(|(_, mv)| numeric_metavar_names.contains(&mv.to_uppercase().as_str()))
         .map(|(f, _)| f.clone())
         .collect();
 
@@ -822,8 +826,14 @@ pub fn generate_initial_script(
             for i in 0..flags.len() {
                 if flags[i].1.is_some() { continue; }
                 let flag = &flags[i].0;
-                let target_cands: Vec<String> = flag_info.extracted_values
+                // Build candidate list: extracted values, then metavar-based fallback
+                let mut target_cands: Vec<String> = flag_info.extracted_values
                     .get(flag).cloned().unwrap_or_default();
+                if target_cands.is_empty() {
+                    if let Some(mv) = original_metavars.get(flag) {
+                        target_cands = candidates(mv).into_iter().map(String::from).collect();
+                    }
+                }
 
                 'companion: for (cf, cv) in &working_flags {
                     if cf == flag { continue; }
@@ -850,14 +860,14 @@ pub fn generate_initial_script(
                 .filter(|&i| flags[i].1.is_none())
                 .filter_map(|i| {
                     let f = &flags[i].0;
-                    // Must have real candidates — don't use generic fallback
-                    let c: Vec<String> = flag_info.extracted_values
+                    let mut c: Vec<String> = flag_info.extracted_values
                         .get(f).cloned().unwrap_or_default();
                     if c.is_empty() {
-                        // Check if original metavar was probed (it was cleared to None)
-                        // We can't recover it, so skip this flag
-                        return None;
+                        if let Some(mv) = original_metavars.get(f) {
+                            c = candidates(mv).into_iter().map(String::from).collect();
+                        }
                     }
+                    if c.is_empty() { return None; }
                     Some((i, c))
                 })
                 .collect();
