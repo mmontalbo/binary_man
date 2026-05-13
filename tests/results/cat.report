@@ -11,39 +11,39 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
 
 ## Solo (unique behavior)
   -e  # equivalent to -vE
-    exemplar: "-e" "input.txt" "other.txt" in paths_minimal (-30 lines)
+    exemplar: "-e" "input.txt" "other.txt" in formatted_minimal (-45 lines)
     base:
-      /usr/local/bin/python3
-      /usr/bin/env
-      /bin/sh
-      /home/alice/.bashrc
-      /home/alice/.config/nvim/init.lua
+      first line
+      second line with trailing spaces
+      	indented with tab
+          indented with spaces
+      	 	mixed tabs and spaces
             ...
     flag:
-      /usr/local/bin/python3$
-      /usr/bin/env$
-      /bin/sh$
-      /home/alice/.bashrc$
-      /home/alice/.config/nvim/init.lua$
+      first line$
+      second line with trailing spaces$
+      	indented with tab$
+          indented with spaces$
+      	 	mixed tabs and spaces$
             ...
   -t  # equivalent to -vT
-    exemplar: "-t" "input.txt" "other.txt" in paths_minimal (-30 lines)
+    exemplar: "-t" "input.txt" "other.txt" in formatted_minimal (-45 lines)
     base:
-      /usr/local/bin/python3
-      /usr/bin/env
-      /bin/sh
-      /home/alice/.bashrc
-      /home/alice/.config/nvim/init.lua
+      first line
+      second line with trailing spaces
+      	indented with tab
+          indented with spaces
+      	 	mixed tabs and spaces
             ...
     flag:
-      /usr/local/bin/python3
-      /usr/bin/env
-      /bin/sh
-      /home/alice/.bashrc
-      /home/alice/.config/nvim/init.lua
+      first line
+      second line with trailing spaces
+      ^Iindented with tab
+          indented with spaces
+      ^I ^Imixed tabs and spaces
             ...
   -u  # (ignored)
-    exemplar: "-u" "input.txt" "other.txt" in formatted_minimal (-48 lines)
+    exemplar: "-u" "input.txt" "other.txt" in formatted_minimal (-45 lines)
     base:
       first line
       second line with trailing spaces

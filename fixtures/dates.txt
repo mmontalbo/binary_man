@@ -67,3 +67,15 @@ PST
 America/New_York
 Europe/London
 Asia/Tokyo
+JAN
+FEB
+MAR
+APR
+MAY
+JUN
+JUL
+AUG
+SEP
+OCT
+NOV
+DEC

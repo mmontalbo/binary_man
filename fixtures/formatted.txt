@@ -22,3 +22,6 @@ UPPERCASE LINE
 lowercase line
 MiXeD cAsE lInE
 	tab	tab	tab	tab	tab	tab	tab	tab
+café résumé naïve über straße — multi-byte words that wrap differently with fold -b vs fold (columns vs bytes)
+日本語テキスト：漢字とひらがなとカタカナを含む行で、バイト数と文字数が異なる
+emoji line: 🎉🎊🎈🎁🎂🎄🎃🎆🎇✨🌟💫⭐️🌈☀️🌙⚡️🔥💧🌊

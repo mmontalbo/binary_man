@@ -554,26 +554,15 @@ fn push_flag_arg(args: &mut Vec<Arg>, flag: &str, value: Option<&str>) {
     }
 }
 
-/// Probe whether a flag+value combination succeeds (exit code ≤ 1).
+/// Probe a flag+value combination. Returns exit code if it ran, None if spawn failed.
 #[allow(clippy::too_many_arguments)]
-fn probe_flag_value(
-    sandbox: &Sandbox, binary: &str, sub_args: &[&str],
-    flag: &str, value: Option<&str>,
-    companion: Option<(&str, &str)>,
-    pattern: &[String], work_dir: &std::path::Path,
-) -> bool {
-    probe_flag_value_stdin(sandbox, binary, sub_args, flag, value, companion, pattern, work_dir, None)
-}
-
-/// Probe with optional stdin piping. Used for tools like xargs that need input data.
-#[allow(clippy::too_many_arguments)]
-fn probe_flag_value_stdin(
+fn probe_flag_exit(
     sandbox: &Sandbox, binary: &str, sub_args: &[&str],
     flag: &str, value: Option<&str>,
     companion: Option<(&str, &str)>,
     pattern: &[String], work_dir: &std::path::Path,
     stdin_data: Option<&[u8]>,
-) -> bool {
+) -> Option<i32> {
     let env = std::collections::HashMap::new();
     let mut args: Vec<String> = sub_args.iter().map(|s| s.to_string()).collect();
     if let Some((cf, cv)) = companion {
@@ -603,18 +592,30 @@ fn probe_flag_value_stdin(
 
     if let Some(data) = stdin_data {
         cmd.stdin(std::process::Stdio::piped());
-        let Ok(mut child) = cmd.spawn() else { return false };
+        let child = cmd.spawn().ok()?;
+        // Immediately drop stdin to close the pipe after writing
+        let mut child = child;
         if let Some(mut si) = child.stdin.take() {
             use std::io::Write;
             let _ = si.write_all(data);
         }
-        child.wait_with_output()
-            .map(|o| o.status.code().unwrap_or(-1) <= 1)
-            .unwrap_or(false)
+        child.wait_with_output().ok()?.status.code()
     } else {
         cmd.stdin(std::process::Stdio::null());
-        cmd.output().map(|o| o.status.code().unwrap_or(-1) <= 1).unwrap_or(false)
+        cmd.output().ok()?.status.code()
     }
+}
+
+/// Convenience: probe succeeds if exit code ≤ 1.
+#[allow(clippy::too_many_arguments)]
+fn probe_flag_value(
+    sandbox: &Sandbox, binary: &str, sub_args: &[&str],
+    flag: &str, value: Option<&str>,
+    companion: Option<(&str, &str)>,
+    pattern: &[String], work_dir: &std::path::Path,
+) -> bool {
+    probe_flag_exit(sandbox, binary, sub_args, flag, value, companion, pattern, work_dir, None)
+        .is_some_and(|c| c <= 1)
 }
 
 /// Try a deliberately invalid value for a flag and mine stderr for valid alternatives.
@@ -762,9 +763,17 @@ pub fn generate_initial_script(
                     }
                 }
 
-                let mut working: Vec<String> = cands.iter()
-                    .filter(|c| probe_flag_value(sandbox, binary, sub_args, flag, Some(c), None, first_pattern, work_dir))
-                    .cloned().collect();
+                // Probe all candidates, tracking which exit 0 vs exit 1
+                let mut working: Vec<String> = Vec::new();
+                let mut has_exit0 = false;
+                for c in &cands {
+                    if let Some(exit) = probe_flag_exit(sandbox, binary, sub_args, flag, Some(c), None, first_pattern, work_dir, None) {
+                        if exit <= 1 {
+                            working.push(c.clone());
+                            if exit == 0 { has_exit0 = true; }
+                        }
+                    }
+                }
 
                 // If no candidates worked, try error mining
                 if working.is_empty() {
@@ -776,25 +785,28 @@ pub fn generate_initial_script(
                     }
                 }
 
-                // If binary accepts stdin, also try candidates with piped input.
-                // Tools like xargs need stdin data to work — file-based probing
-                // may exit 1 (technically ≤1 but error-mode, not real behavior).
-                if stdin_works {
+                // If binary accepts stdin and no file-based candidate exited 0,
+                // try with piped input (xargs etc. need stdin data to exit 0).
+                // Stdin exit-0 value goes first — better combo value than file-based exit-1.
+                if stdin_works && !has_exit0 {
                     let stdin_data = b"cherry\napple\nbanana\n";
                     let empty_pattern: Vec<String> = vec![];
                     for c in &cands {
                         if !working.contains(c)
-                            && probe_flag_value_stdin(sandbox, binary, sub_args, flag, Some(c), None, &empty_pattern, work_dir, Some(stdin_data))
+                            && probe_flag_exit(sandbox, binary, sub_args, flag, Some(c), None, &empty_pattern, work_dir, Some(stdin_data)) == Some(0)
                         {
-                            working.push(c.clone());
+                            working.insert(0, c.clone());
+                            break; // one stdin exit-0 value is enough
                         }
                     }
                 }
 
-                if let Some(first) = working.first() {
+                let working_vals = working;
+
+                if let Some(first) = working_vals.first() {
                     flags[i].1 = Some(first.clone());
-                    if working.len() > 1 {
-                        extra_solo_values.insert(flags[i].0.clone(), working[1..].to_vec());
+                    if working_vals.len() > 1 {
+                        extra_solo_values.insert(flags[i].0.clone(), working_vals[1..].to_vec());
                     }
                 } else {
                     flags[i].1 = None;
@@ -831,6 +843,39 @@ pub fn generate_initial_script(
                 }
             }
 
+            // Phase 3: Mutual compound probing — try pairs of BOTH-failing flags.
+            // Only when both flags have real candidates (metavar or extracted).
+            // Discovers co-dependent flags like cut -d , -f 1.
+            let still_failing: Vec<(usize, Vec<String>)> = (0..flags.len())
+                .filter(|&i| flags[i].1.is_none())
+                .filter_map(|i| {
+                    let f = &flags[i].0;
+                    // Must have real candidates — don't use generic fallback
+                    let c: Vec<String> = flag_info.extracted_values
+                        .get(f).cloned().unwrap_or_default();
+                    if c.is_empty() {
+                        // Check if original metavar was probed (it was cleared to None)
+                        // We can't recover it, so skip this flag
+                        return None;
+                    }
+                    Some((i, c))
+                })
+                .collect();
+
+            for (ai, ref a_cands) in &still_failing {
+                if flags[*ai].1.is_some() { continue; }
+                for (bi, ref b_cands) in &still_failing {
+                    if bi == ai || flags[*bi].1.is_some() { continue; }
+                    if let (Some(va), Some(vb)) = (a_cands.first(), b_cands.first()) {
+                        let companion = Some((flags[*bi].0.as_str(), vb.as_str()));
+                        if probe_flag_value(sandbox, binary, sub_args, &flags[*ai].0, Some(va), companion, first_pattern, work_dir) {
+                            flags[*ai].1 = Some(va.clone());
+                            flags[*bi].1 = Some(vb.clone());
+                            break;
+                        }
+                    }
+                }
+            }
         }
     }
 

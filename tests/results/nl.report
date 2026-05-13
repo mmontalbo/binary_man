@@ -29,7 +29,7 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
            1	accept
             ...
   -l  # group of NUMBER empty lines counted as one
-    exemplar: "-l" "1" "input.txt" "other.txt" in formatted_minimal (-48 lines)
+    exemplar: "-l" "1" "input.txt" "other.txt" in formatted_minimal (-45 lines)
     base:
            1	first line
            2	second line with trailing spaces
