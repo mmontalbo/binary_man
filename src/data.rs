@@ -137,6 +137,80 @@ pub fn perturbations() -> Vec<SetupCommand> {
     ]
 }
 
+/// Build the full set of execution contexts for a grid.
+/// Latin square of 5 content types × 3 structure levels × 3 property levels,
+/// plus breadth-only extras, perturbations, and locale variation.
+pub fn build_contexts() -> Vec<crate::parse::NamedContext> {
+    use crate::parse::{self, NamedContext};
+
+    let build = |name: &str, content: &[String],
+                 structure_fn: fn(&[String]) -> Vec<SetupCommand>,
+                 props_fn: fn(&mut Vec<SetupCommand>)| -> NamedContext {
+        let mut cmds = structure_fn(content);
+        props_fn(&mut cmds);
+        NamedContext { name: name.into(), extends: None, commands: cmds }
+    };
+
+    let words = content_words();
+    let numbers = content_numbers();
+    let passwd = content_passwd();
+    let formatted = content_formatted();
+    let csv = content_csv();
+
+    let mut contexts = vec![
+        build("words_minimal",      &words,     structure_minimal,  props_default),
+        build("words_standard",     &words,     structure_standard, props_perms),
+        build("words_deep",         &words,     structure_deep,     props_times),
+        build("numbers_minimal",    &numbers,   structure_minimal,  props_times),
+        build("numbers_standard",   &numbers,   structure_standard, props_default),
+        build("numbers_deep",       &numbers,   structure_deep,     props_perms),
+        build("passwd_minimal",     &passwd,    structure_minimal,  props_perms),
+        build("passwd_standard",    &passwd,    structure_standard, props_times),
+        build("passwd_deep",        &passwd,    structure_deep,     props_default),
+        build("formatted_minimal",  &formatted, structure_minimal,  props_default),
+        build("formatted_standard", &formatted, structure_standard, props_times),
+        build("formatted_deep",     &formatted, structure_deep,     props_perms),
+        build("csv_minimal",        &csv,       structure_minimal,  props_times),
+        build("csv_standard",       &csv,       structure_standard, props_perms),
+        build("csv_deep",           &csv,       structure_deep,     props_default),
+        NamedContext { name: "empty_dir".into(), extends: None, commands: vec![] },
+    ];
+
+    // Breadth-only extras (minimal structure)
+    for (name, content) in [
+        ("access_log", content_access_log()),
+        ("syslog",     content_syslog()),
+        ("dates",      content_dates()),
+        ("config",     content_config()),
+        ("paths",      content_paths()),
+        ("naughty",    content_naughty()),
+    ] {
+        contexts.push(build(&format!("{}_minimal", name), &content, structure_minimal, props_default));
+    }
+
+    // Perturbations from numbers_standard
+    let base = contexts.iter().find(|c| c.name == "numbers_standard").unwrap().clone();
+    for p in &perturbations() {
+        let mut cmds = base.commands.clone();
+        cmds.push(p.clone());
+        contexts.push(NamedContext {
+            name: format!("numbers_standard / {}", parse::describe_perturbation(p)),
+            extends: None, commands: cmds,
+        });
+    }
+
+    // Locale perturbation on alpha content
+    let alpha = contexts.iter().find(|c| c.name == "words_minimal").unwrap().clone();
+    let mut cmds = alpha.commands.clone();
+    cmds.push(SetupCommand::SetEnv { var: "LC_ALL".into(), value: "en_US.UTF-8".into() });
+    contexts.push(NamedContext {
+        name: "words_minimal / env LC_ALL=en_US.UTF-8".into(),
+        extends: None, commands: cmds,
+    });
+
+    contexts
+}
+
 /// Common subcommand verbs for behavioral subcommand discovery.
 pub const SUBCOMMAND_CANDIDATES: &[&str] = &[
     "init", "add", "commit", "status", "diff", "log", "show",
