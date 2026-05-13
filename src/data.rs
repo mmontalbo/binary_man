@@ -234,14 +234,3 @@ pub fn build_contexts() -> Vec<crate::parse::NamedContext> {
     contexts
 }
 
-/// Common subcommand verbs for behavioral subcommand discovery.
-pub const SUBCOMMAND_CANDIDATES: &[&str] = &[
-    "init", "add", "commit", "status", "diff", "log", "show",
-    "clone", "push", "pull", "fetch", "merge", "rebase", "branch",
-    "checkout", "reset", "rm", "mv", "tag", "stash", "remote",
-    "build", "run", "test", "install", "clean", "update", "publish",
-    "create", "delete", "list", "get", "set", "describe", "apply",
-    "start", "stop", "restart", "exec", "inspect", "config",
-    "new", "check", "fmt", "lint", "deploy", "serve", "migrate",
-    "info", "version", "help",
-];

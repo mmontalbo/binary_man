@@ -53,33 +53,6 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, skeleton: bool)
         format!("{} {}", binary, sub_args.join(" "))
     };
 
-
-    // Probe for subcommands (if no subcommand was specified)
-    if sub_args.is_empty() {
-        let subcommands = discover::probe_subcommands(binary, sandbox);
-        // Only report if some candidates were rejected — if ALL succeed,
-        // the binary just accepts any arg as a filename, not subcommands
-        let total_probed = binary_grid::data::SUBCOMMAND_CANDIDATES.len();
-        let has_real_subcommands = !subcommands.is_empty()
-            && subcommands.len() < total_probed;
-        if has_real_subcommands {
-            let working: Vec<_> = subcommands.iter().filter(|s| s.exits_ok).collect();
-            let builders: Vec<_> = subcommands.iter().filter(|s| s.modifies_fs).collect();
-            let recognized: Vec<_> = subcommands.iter().filter(|s| !s.exits_ok && s.recognized).collect();
-            eprintln!("=== Subcommands discovered for {} ===", binary);
-            if !working.is_empty() {
-                eprintln!("  working: {}", working.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", "));
-            }
-            if !builders.is_empty() {
-                eprintln!("  state builders: {}", builders.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", "));
-            }
-            if !recognized.is_empty() {
-                eprintln!("  need state: {}", recognized.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", "));
-            }
-            eprintln!();
-        }
-    }
-
     // Single-phase exploration: fixed DoE design (no iterative refinement).
     // All single-flag and pairwise-combo runs are generated up front.
     let (script, flag_info) = discover::generate_initial_script(binary, &sub_args, sandbox)?;
