@@ -10,32 +10,28 @@ phase, then reports which flags have unique observable behavior.
 
 ```
 bgrid <binary>                        explore: discover flags + run grid + report
-bgrid --skeleton <binary>             print probe skeleton for manual authoring
 bgrid <binary> <file.probe>           run observation grid from a probe file
-bgrid --trace <binary> <file.probe>   include syscall traces
 bgrid --dry-run <binary> <file.probe> show resolved grid without executing
 ```
 
 ### Exploring a binary
 
-`bgrid sort` discovers flags from `--help`, generates orthogonal contexts
-(varying file content, directory structure, permissions, timestamps),
-runs every flag individually and all pairwise flag combinations across
-every context in parallel, then analyzes behavioral groups. Output is a
-report with exemplar observations showing what each flag does — base
-output vs flag output, mechanically selected from the context where the
-flag's behavior is most unique.
+`bgrid sort` discovers flags from `--help`, probes working argument
+values (via help text mining, error mining, and compound probing),
+generates orthogonal contexts (varying file content, structure,
+permissions, timestamps, stdin), runs every flag individually and all
+pairwise flag combinations across every context in parallel, then
+analyzes behavioral groups. Output is a report with exemplar
+observations showing what each flag does.
 
 For subcommands: `bgrid git diff` explores `git diff`.
 
 ### Manual probe authoring
 
-`bgrid --skeleton sort` prints a probe file to stdout. Edit it to add
-custom contexts, vary blocks, and run combinations, then execute:
+Write a `.probe` file to add custom contexts and runs that exercise
+flags the mechanical discovery can't reach:
 
 ```
-bgrid --skeleton sort > sort.probe
-# edit sort.probe
 bgrid sort sort.probe
 ```
 
@@ -43,24 +39,25 @@ See [LANGUAGE.md](LANGUAGE.md) for the probe language specification.
 
 ## How it works
 
-1. **Contexts** declare input states — files, directories, symlinks,
-   environment variables, and setup commands.
-2. **Runs** declare invocations to observe. Each run executes in every
-   applicable context inside a bwrap sandbox.
-3. **Analysis** compares observations using structural tree diff:
-   stdout/stderr are tokenized and aligned via two-level
-   Needleman-Wunsch, producing edit scripts that describe the
-   transformation each flag applies (e.g., "insert 8 tokens per
-   line", "reverse line order"). Runs with identical edit scripts
-   across all contexts are behaviorally equivalent. Singleton groups
-   are isolated — that flag has unique behavior.
-4. **Pairwise testing** runs all flag combinations to detect
-   interaction effects — two flags that look identical alone may
-   behave differently when combined with a third.
-5. **Report** shows observed behavior rate: flags where the tool saw
-   the flag work (exit 0, non-trivial output or filesystem changes).
-   Each flag gets an exemplar showing base vs flag output in the context
-   that best demonstrates its unique behavior.
+1. **Factor identification** — parse `--help` for flags, metavars,
+   aliases, and value enumerations. Probe invocation patterns
+   (positional args, stdin, Usage-line structural patterns like
+   `COMMAND` or `[expression]`).
+2. **Level determination** — pilot study probes each flag with
+   candidate values: help-mined values → metavar candidates → error
+   mining → companion probing → mutual compound probing.
+3. **Design construction** — cross all flags × invocation patterns ×
+   contexts into a fixed grid. No adaptation after this point.
+4. **Execution** — batched bwrap sandboxing, one invocation per
+   context, 16 threads. Each cell has a 2-second timeout.
+5. **Analysis** — hash-anchored structural diff (O(n) for shared
+   lines, NW only on gap segments), hash-based behavioral grouping,
+   pairwise interaction evidence, leave-one-out robustness scoring.
+6. **Report** — flags classified as solo-distinguished,
+   combo-distinguished, error-differentiated, or behavioral aliases.
+   Each flag gets an exemplar observation. Robustness tiers reported.
+
+See [DESIGN.md](DESIGN.md) for the full experiment design.
 
 ## Requirements
 
@@ -71,12 +68,18 @@ See [LANGUAGE.md](LANGUAGE.md) for the probe language specification.
 ## Testing
 
 ```
-cargo test                    # unit tests
-./tests/coreutils.sh          # integration test (22 binaries, ~64s)
+cargo test                          # unit tests
+./tests/coreutils.sh                # integration test (22 binaries, ~2 min)
+REPRO=1 ./tests/coreutils.sh        # + cross-run reproducibility check
 ```
 
-Reference reports with exemplar observations for each binary are
-in `tests/results/`.
+The test harness checks four properties per tool:
+- **observed ≥ threshold** — behavioral evidence doesn't regress
+- **total flags = expected** — flag discovery surface is stable
+- **fragile = 0** — no noise-dependent distinctions
+- **reproducible** (opt-in) — observed count matches across runs
+
+Reference reports are in `tests/results/`.
 
 ## Development
 
