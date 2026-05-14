@@ -102,6 +102,22 @@ pub fn format_obs(out: &mut String, obs: &Observation, indent: &str) {
     }
 }
 
+/// Strip ANSI escape sequences from a string for readable report output.
+pub fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_esc = false;
+    for c in s.chars() {
+        if in_esc {
+            if c.is_ascii_alphabetic() { in_esc = false; }
+        } else if c == '\x1b' {
+            in_esc = true;
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// Format a SetupCommand for display in skeleton/diagnostic output.
 pub fn format_setup_cmd(cmd: &SetupCommand) -> String {
     match cmd {

@@ -306,14 +306,21 @@ pub fn format_exploration_report(
     };
 
     // Classify evidence quality: did we actually see the flag work?
-    // A flag has "observed behavior" if any of its runs exited with an
+    // A flag has "observed behavior" if any run containing it exited with an
     // operational exit code (matching the base run's behavior) with either:
     // - non-empty stdout (the flag produced visible output), OR
     // - filesystem changes (the flag modified files — silent tools like cp, mv, rm)
+    // Checks both exact stem matches and component matches (for prerequisite
+    // runs where e.g. "-f -d" contains the target flag "-d").
     let has_observed_behavior = |stem: &str| -> bool {
         for run in all_runs {
             let run_stem = flag_stem(&run.args_str);
-            if run_stem.as_deref() == Some(stem) || run_stem.as_ref().map(|s| canonical_flag(s, aliases)) == Some(stem.to_string()) {
+            let matches = run_stem.as_ref().is_some_and(|rs| {
+                let canon = canonical_flag(rs, aliases);
+                canon == stem || rs == stem
+                    || rs.split(' ').any(|part| part == stem || canonical_flag(part, aliases) == stem)
+            });
+            if matches {
                 for (_, obs) in &run.context_groups {
                     if obs.exit_code.is_some_and(|c| operational_exit_codes.contains(&c))
                         && (!obs.stdout.trim().is_empty() || !obs.fs_changes.is_empty())
@@ -326,14 +333,16 @@ pub fn format_exploration_report(
         false
     };
 
+    // Only count flags from the --help surface (not expression operators
+    // like find's -print or prerequisite companions leaking through).
     let solo_observed: Vec<&String> = solo_distinguished.iter()
-        .filter(|s| has_observed_behavior(s)).collect();
+        .filter(|s| all_stems.contains(*s) && has_observed_behavior(s)).collect();
     let solo_error_only: Vec<&String> = solo_distinguished.iter()
-        .filter(|s| !has_observed_behavior(s)).collect();
+        .filter(|s| all_stems.contains(*s) && !has_observed_behavior(s)).collect();
     let combo_observed: Vec<&String> = combo_distinguished.iter()
-        .filter(|s| has_observed_behavior(s)).collect();
+        .filter(|s| all_stems.contains(*s) && has_observed_behavior(s)).collect();
     let combo_error_only: Vec<&String> = combo_distinguished.iter()
-        .filter(|s| !has_observed_behavior(s)).collect();
+        .filter(|s| all_stems.contains(*s) && !has_observed_behavior(s)).collect();
 
     let total_observed = solo_observed.len() + combo_observed.len();
     let total_error_only = solo_error_only.len() + combo_error_only.len();
@@ -397,30 +406,44 @@ pub fn format_exploration_report(
 
         // Find the exemplar: the context where this flag's output is most distinctive
         if let Some(ex) = find_exemplar(flag, all_runs) {
-            out.push_str(&format!("    exemplar: {} in {} ({})\n", ex.run_label, ex.context_name, ex.delta_summary));
-            out.push_str("    base:\n");
-            for line in ex.base_preview.lines() {
-                out.push_str(&format!("      {}\n", line));
+            out.push_str(&format!("    exemplar: {} in {}\n", ex.run_label, ex.context_name));
+            // Show diff components on separate lines for readability
+            for part in ex.vs_diff.split("; ") {
+                out.push_str(&format!("    | {}\n", part));
             }
-            out.push_str("    flag:\n");
-            for line in ex.flag_preview.lines() {
-                out.push_str(&format!("      {}\n", line));
+            if !ex.base_preview.is_empty() || !ex.flag_preview.is_empty() {
+                out.push_str("    base:\n");
+                for line in ex.base_preview.lines() {
+                    out.push_str(&format!("      {}\n", line));
+                }
+                out.push_str("    flag:\n");
+                for line in ex.flag_preview.lines() {
+                    out.push_str(&format!("      {}\n", line));
+                }
             }
         }
     }
     out.push('\n');
 
-    // Combo-characterized flags
+    // Combo-characterized flags — show vs_diff when available
     if !combo_distinguished.is_empty() {
         out.push_str("## Via combination (distinguishable when paired)\n");
         let mut sorted_combo: Vec<&String> = combo_distinguished.iter().collect();
         sorted_combo.sort();
         for flag in &sorted_combo {
-            let example = combo_evidence.get(*flag)
-                .and_then(|v| v.first())
-                .map(|e| format!("  e.g. {}", e))
+            let desc = flag_info.and_then(|fi| fi.descs.get(flag.as_str()))
+                .map(|d| format!("  # {}", d))
                 .unwrap_or_default();
-            out.push_str(&format!("  {}{}\n", flag, example));
+            out.push_str(&format!("  {}{}\n", flag, desc));
+            // Show the behavioral diff summary from the flag's runs
+            if let Some(diff) = find_vs_diff_for_flag(flag, all_runs, aliases) {
+                for part in diff.split("; ") {
+                    out.push_str(&format!("    | {}\n", part));
+                }
+            }
+            if let Some(evidence) = combo_evidence.get(*flag).and_then(|v| v.first()) {
+                out.push_str(&format!("    evidence: {}\n", evidence));
+            }
         }
         out.push('\n');
     }
@@ -457,18 +480,19 @@ pub fn format_exploration_report(
 }
 
 struct Exemplar {
-    run_label: String,      // the invocation (e.g., "-R" "." )
-    context_name: String,   // which context (e.g., alpha_standard)
-    base_preview: String,   // base invocation output (truncated)
-    flag_preview: String,   // flag invocation output (truncated)
-    delta_summary: String,  // what changed (+N lines, reordered, etc.)
+    run_label: String,
+    context_name: String,
+    vs_diff: String,          // computed diff summary (e.g., "3 only in this: .hidden, ., ..")
+    base_preview: String,     // first differing region from base
+    flag_preview: String,     // first differing region from flag
 }
 
 /// Find the most distinctive observation for a flag.
 /// Picks the context where this flag's output is shared by the fewest other flags —
 /// the context that most clearly demonstrates what makes this flag unique.
+/// Shows the first differing region (not the first N identical lines).
 fn find_exemplar(target_stem: &str, all_runs: &[&RunAnalysis]) -> Option<Exemplar> {
-    // Find all solo runs for this flag (not combinations) across all rounds
+    // Find all solo runs for this flag (not combinations)
     let target_runs: Vec<&&RunAnalysis> = all_runs.iter()
         .filter(|run| {
             let stem = flag_stem(&run.args_str);
@@ -479,20 +503,39 @@ fn find_exemplar(target_stem: &str, all_runs: &[&RunAnalysis]) -> Option<Exempla
 
     if target_runs.is_empty() { return None; }
 
-    // Collect all solo run outputs per context for comparison
-    // For each context name, how many OTHER runs produce the same stdout?
+    // Pick the context where the flag's effect is most visible.
+    // Prefer: contexts where the diff from base is non-identical, then by uniqueness.
     let mut best_context: Option<(&str, &&RunAnalysis, &crate::execute::Observation)> = None;
-    let mut best_uniqueness = usize::MAX; // lower = more unique
+    let mut best_score: (bool, usize) = (false, usize::MAX); // (has_diff, uniqueness)
 
     for run in &target_runs {
+        // Find the base observation for diff comparison
+        let base_map: HashMap<&str, &crate::execute::Observation> = run.from_ref.as_ref()
+            .and_then(|from_ref| {
+                let base_label = crate::output::format_args(from_ref);
+                all_runs.iter().find(|r| r.args_str == base_label)
+            })
+            .map(|base_run| {
+                base_run.context_groups.iter()
+                    .flat_map(|(names, obs)| names.iter().map(move |n| (n.as_str(), obs)))
+                    .collect()
+            })
+            .unwrap_or_default();
+
         for (ctx_names, obs) in &run.context_groups {
-            // Skip error-only contexts (exit >= 2 with empty stdout)
             if obs.exit_code.unwrap_or(-1) >= 2 && obs.stdout.trim().is_empty() {
                 continue;
             }
-
             for ctx_name in ctx_names {
-                // Count how many other runs produce the same stdout in this context
+                // Check if output actually differs from base in this context
+                let has_diff = base_map.get(ctx_name.as_str())
+                    .map(|base_obs| {
+                        base_obs.stdout != obs.stdout
+                            || base_obs.exit_code != obs.exit_code
+                            || base_obs.stderr != obs.stderr
+                    })
+                    .unwrap_or(true); // no base = standalone, always interesting
+
                 let same_output_count = all_runs.iter()
                     .filter(|other| !std::ptr::eq(**other, **run))
                     .filter(|other| {
@@ -503,18 +546,20 @@ fn find_exemplar(target_stem: &str, all_runs: &[&RunAnalysis]) -> Option<Exempla
                     })
                     .count();
 
-                if same_output_count < best_uniqueness {
-                    best_uniqueness = same_output_count;
+                let score = (has_diff, same_output_count);
+                // Prefer has_diff=true (sorted first), then lower uniqueness
+                if score.0 && !best_score.0 || (score.0 == best_score.0 && score.1 < best_score.1) {
+                    best_score = score;
                     best_context = Some((ctx_name.as_str(), run, obs));
                 }
             }
         }
     }
 
-    let (ctx_name, run, minority_obs) = best_context?;
+    let (ctx_name, run, flag_obs) = best_context?;
 
-    // Find the base run's output in the same context for comparison
-    let base_output = if let Some(ref from_ref) = run.from_ref {
+    // Find the base run's observation in the same context
+    let base_obs = run.from_ref.as_ref().and_then(|from_ref| {
         let base_label = crate::output::format_args(from_ref);
         all_runs.iter()
             .find(|r| r.args_str == base_label)
@@ -522,53 +567,92 @@ fn find_exemplar(target_stem: &str, all_runs: &[&RunAnalysis]) -> Option<Exempla
                 base_run.context_groups.iter()
                     .flat_map(|(names, obs)| names.iter().map(move |n| (n, obs)))
                     .find(|(n, _)| *n == ctx_name)
-                    .map(|(_, obs)| &obs.stdout)
+                    .map(|(_, obs)| obs)
             })
+    });
+
+    // Compute vs_diff using the existing diff function
+    let vs_diff = base_obs.map(|base| {
+        let diff = crate::execute::compute_diff(base, flag_obs);
+        if diff.is_empty() { "identical".into() } else { diff.join("; ") }
+    }).unwrap_or_else(|| "standalone".into());
+
+    // Build preview showing the first region where base and flag DIFFER.
+    // Skip shared prefix lines so the reader sees the actual change.
+    // Strip ANSI escapes so output is readable.
+    let (base_preview, flag_preview) = if let Some(base) = base_obs {
+        diff_preview(&output::strip_ansi(&base.stdout), &output::strip_ansi(&flag_obs.stdout), 6)
     } else {
-        None
+        (String::new(), truncate_lines(&output::strip_ansi(&flag_obs.stdout), 6))
     };
-
-    // Build delta summary
-    let majority_obs = &run.majority_obs;
-    let line_diff = minority_obs.stdout.lines().count() as i64
-        - majority_obs.stdout.lines().count() as i64;
-    let exit_diff = if minority_obs.exit_code != majority_obs.exit_code {
-        format!(", exit {}→{}", majority_obs.exit_code.unwrap_or(-1), minority_obs.exit_code.unwrap_or(-1))
-    } else {
-        String::new()
-    };
-
-    let delta_summary = if line_diff != 0 {
-        format!("{:+} lines{}", line_diff, exit_diff)
-    } else if minority_obs.stdout != majority_obs.stdout {
-        format!("reordered{}", exit_diff)
-    } else {
-        format!("different{}", exit_diff)
-    };
-
-    let truncate = |s: &str, max_lines: usize| -> String {
-        let lines: Vec<&str> = s.lines().take(max_lines).collect();
-        let result = lines.join("\n");
-        if s.lines().count() > max_lines {
-            format!("{}\n      ...", result)
-        } else {
-            result
-        }
-    };
-
-    let base_preview = base_output
-        .map(|s| truncate(s, 5))
-        .unwrap_or_else(|| "(no base)".into());
-
-    let flag_preview = truncate(&minority_obs.stdout, 5);
 
     Some(Exemplar {
         run_label: run.args_str.clone(),
         context_name: ctx_name.to_string(),
+        vs_diff,
         base_preview,
         flag_preview,
-        delta_summary,
     })
+}
+
+/// Build a preview showing the first region where two outputs differ.
+/// Skips shared prefix lines. Shows up to `max_lines` from the divergence point.
+fn diff_preview(base: &str, flag: &str, max_lines: usize) -> (String, String) {
+    let base_lines: Vec<&str> = base.lines().collect();
+    let flag_lines: Vec<&str> = flag.lines().collect();
+
+    // Find the first line that differs
+    let shared_prefix = base_lines.iter().zip(flag_lines.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    let context_before = 1; // show 1 line of context before the diff
+    let start = shared_prefix.saturating_sub(context_before);
+
+    let format_region = |lines: &[&str], start: usize, max: usize| -> String {
+        let end = (start + max).min(lines.len());
+        let region: Vec<&str> = lines[start..end].to_vec();
+        let mut result = region.join("\n");
+        if end < lines.len() {
+            result.push_str(&format!("\n      ... ({} more)", lines.len() - end));
+        }
+        if start > 0 {
+            result = format!("      ... ({} identical)\n{}", start, result);
+        }
+        result
+    };
+
+    (format_region(&base_lines, start, max_lines), format_region(&flag_lines, start, max_lines))
+}
+
+/// Truncate to first N lines with "... (N more)" suffix.
+fn truncate_lines(s: &str, max: usize) -> String {
+    let lines: Vec<&str> = s.lines().collect();
+    if lines.len() <= max {
+        lines.join("\n")
+    } else {
+        format!("{}\n      ... ({} more)", lines[..max].join("\n"), lines.len() - max)
+    }
+}
+
+/// Find the vs_diff for a flag stem from all runs (used for combo flag summaries).
+fn find_vs_diff_for_flag(stem: &str, all_runs: &[&RunAnalysis], aliases: Option<&HashMap<String, String>>) -> Option<String> {
+    for run in all_runs {
+        let run_stem = flag_stem(&run.args_str);
+        let matches = run_stem.as_ref().is_some_and(|rs| {
+            let canon = canonical_flag(rs, aliases);
+            canon == stem || rs == stem
+                || rs.split(' ').any(|part| part == stem || canonical_flag(part, aliases) == stem)
+        });
+        if matches {
+            if let Some(ref diff) = run.vs_diff {
+                if diff != "identical" {
+                    return Some(diff.clone());
+                }
+            }
+        }
+    }
+    None
 }
 
 fn format_alias_map(aliases: &HashMap<String, String>) -> String {
