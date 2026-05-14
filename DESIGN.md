@@ -18,6 +18,64 @@ A **behavioral group** is a set of runs that produce identical observations acro
 
 A flag has **observed behavior** when at least one run containing it exits 0 with non-trivial output or filesystem changes — the tool saw the flag work, not just fail distinctively.
 
+## Pipeline
+
+Six stages. Each transforms data and passes it downstream.
+
+```
+                          binary name
+                              │
+                              ▼
+┌──────────────────────────────────────────────────────┐
+│                    DISCOVER                          │
+│                                                      │
+│  What factors exist? What levels work?               │
+│  What's the experimental design?                     │
+│                                                      │
+│  IN:  binary path                                    │
+│  OUT: Script (contexts × runs) + FlagInfo            │
+└──────────────────────┬───────────────────────────────┘
+                       │
+            Script: 25-35 contexts
+                    100-4000+ runs
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────┐
+│                    EXECUTE                            │
+│                                                      │
+│  Run every (context, run) cell in sandbox            │
+│                                                      │
+│  IN:  Script + binary                                │
+│  OUT: GridResult: (context, run) → Observation       │
+└──────────────────────┬───────────────────────────────┘
+                       │
+            GridResult: 200-7000 cells
+            each with stdout/stderr/exit/fs
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────┐
+│                    ANALYZE                            │
+│                                                      │
+│  Which flags are behaviorally distinct?              │
+│  How robust is the evidence?                         │
+│                                                      │
+│  IN:  Script + GridResult + FlagInfo                 │
+│  OUT: AnalysisMetrics (groups, robustness)           │
+└──────────────────────┬───────────────────────────────┘
+                       │
+            BehaviorGroups + robustness scores
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────┐
+│                    REPORT                             │
+│                                                      │
+│  Classify and present findings                       │
+│                                                      │
+│  IN:  AnalysisMetrics + FlagInfo                     │
+│  OUT: Markdown report                                │
+└──────────────────────────────────────────────────────┘
+```
+
 ## Worked Example: `head`
 
 ### Discovery
@@ -39,14 +97,14 @@ The tool generates ~178 runs (7 short flags + 6 long flags × 3 patterns + stdin
 
 Consider `head -v input.txt` across three contexts:
 
-**Context: alpha_minimal** (input.txt = `cherry\nApple\nbanana\n...`, 7 lines)
+**Context: words_minimal** (input.txt = `cherry\nApple\nbanana\n...`, 7 lines)
 ```
 base (head input.txt):     cherry\nApple\nbanana\nDate\nelderberry\nBANANA\napple
 flag (head -v input.txt):  ==> input.txt <==\ncherry\nApple\nbanana\nDate\nelderberry\nBANANA\napple
 ```
 Delta from base: +1 line (`==> input.txt <==` header prepended)
 
-**Context: numeric_minimal** (input.txt = `100\n2\n30\n...`, 16 lines)
+**Context: numbers_minimal** (input.txt = `100\n2\n30\n...`, 16 lines)
 ```
 base: 100\n2\n30\n1\n20\n3\n10\n50\n8\n200
 flag: ==> input.txt <==\n100\n2\n30\n1\n20\n3\n10\n50\n8\n200
@@ -76,29 +134,146 @@ All flag pairs are tested in the same grid: `head --lines --silent input.txt oth
 
 Result: **7/7 flags observed** (4 solo + 3 via combination). The `-q`/`--silent` pair is correctly identified as behavioral aliases (same structural transformation in every context). Aliases detected: `-c = --bytes`, `-n = --lines`, `-v = --verbose`, `-z = --zero-terminated`.
 
+## Discovery
+
+Three sub-phases. The first two are adaptive (probing); the third is a deterministic cross-product with no further observation.
+
+```
+binary
+  │
+  ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. FACTOR IDENTIFICATION                                        │
+│                                                                 │
+│    try_help(binary)  ─────►  help text                          │
+│         │                       │                               │
+│         │              extract_flag_info()                       │
+│         │                       │                               │
+│         │                       ▼                               │
+│         │                   FlagInfo                             │
+│         │                   ├─ flags: [("-n", Some("NUM")),      │
+│         │                   │          ("--sort", Some("WORD")), │
+│         │                   │          ("-r", None), ...]        │
+│         │                   ├─ aliases: {"-n" ↔ "--numeric"}    │
+│         │                   └─ extracted_values: {"--sort" →     │
+│         │                       ["general", "human", "month"]}  │
+│         │                                                       │
+│         ▼                                                       │
+│    probe_arg_patterns(help_text)                                │
+│         │                                                       │
+│         │  ┌──────────── 1 bwrap ────────────┐                  │
+│         │  │ try [], [file], [dir],           │                  │
+│         │  │     [file,file], [file,dir],     │                  │
+│         │  │     [pattern,file], [pattern,dir]│                  │
+│         │  │     stdin, stdin+"-",            │                  │
+│         │  │     structural (echo, -print...) │                  │
+│         │  └─────────────────────────────────┘                  │
+│         │                                                       │
+│         ▼                                                       │
+│    working_patterns: [[file], [file,file], ...]                 │
+│    stdin_works: bool                                            │
+│    probe_pattern: Option<"cherry">                              │
+└─────────────────────────────────┬───────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. LEVEL DETERMINATION (pilot study)                            │
+│                                                                 │
+│    For each value-taking flag: which candidate values work?     │
+│                                                                 │
+│    Phase 1 ─── 1 bwrap ──────────────────────────────────────── │
+│    │  solo: every (flag, candidate) pair                        │
+│    │  + error mine: every flag with __bgrid_invalid__           │
+│    │                                                            │
+│    Phase 2 ─── 1 bwrap ──────────────────────────────────────── │
+│    │  probes for values parsed from error mine stderr           │
+│    │  + stdin retries for flags still without exit 0            │
+│    │                                                            │
+│    Phase 3 ─── 1 bwrap ──────────────────────────────────────── │
+│    │  companion: failing_flag + working_flag as enabler         │
+│    │  (e.g., cut -d needs -f to succeed)                        │
+│    │                                                            │
+│    Phase 4 ─── 1 bwrap ──────────────────────────────────────── │
+│    │  mutual compound: pairs of both-failing flags together     │
+│    │                                                            │
+│    Result per flag:                                             │
+│      working value (first exit-0 candidate) ─or─ None          │
+│      extra_solo_values (additional working candidates)          │
+│      prerequisites (companion dependencies: -d requires -f)    │
+└─────────────────────────────────┬───────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. DESIGN CONSTRUCTION (deterministic cross-product)            │
+│                                                                 │
+│    Contexts from fixture corpus (see Context Design below)      │
+│                                                                 │
+│    Runs:                                                        │
+│    ┌─────────────────────────────────────────────────────┐      │
+│    │ For each working_pattern:                           │      │
+│    │   base run (no flags)                ──┐            │      │
+│    │   per-flag solo run (diff from base) ──┤ all ctxs   │      │
+│    │   extra value runs                   ──┘            │      │
+│    │                                                     │      │
+│    │ If stdin_works:                                     │      │
+│    │   bare base + per-flag solo runs        all ctxs    │      │
+│    │                                                     │      │
+│    │ Boundary runs: numeric flags ×{0,-1,MAX} 1st pattern│      │
+│    │                                                     │      │
+│    │ Pairwise combos: all flag pairs ×       6 ctxs only │      │
+│    │   both orderings (A,B) and (B,A)                    │      │
+│    │                                                     │      │
+│    │ Error provocation: nonexistent-file.txt all ctxs    │      │
+│    └─────────────────────────────────────────────────────┘      │
+│                                                                 │
+│    Each non-base run carries diff_from → baseline args          │
+│    Combo runs scoped to 6 diverse contexts (not all 35)         │
+│                                                                 │
+│    OUT: Script { contexts: ~30, runs: ~100-4000 }               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Value discovery pipeline
+
+Multi-source candidate discovery per flag:
+
+1. **Help text mining** — quoted values (`'auto'`), brace enumerations (`{a,b,c}`), bracket character sets (`[xyz]`), continuation lines.
+2. **Metavar candidates** — per-type curated lists (NUM → `1,0,2,10,100`; FILE → `input.txt`; CHAR → `,`, `:`, etc.).
+3. **Error mining** — fires when no candidate exits 0; sends `__bgrid_invalid__` and parses "Valid arguments are:" from stderr.
+4. **Companion probing** — failing flags tried with each working flag as companion.
+5. **Mutual compound probing** — pairs of both-failing flags tried together (discovers co-dependencies like `cut -d` + `cut -f`).
+
+First working value = combo value (stable). All working values generate independent solo runs (additive).
+
+**Alias propagation**: short flags inherit metavar from long alias for proper value probing.
+
+The pilot is adaptive (later probes depend on earlier results). The main experiment is fixed.
+
 ## Context Design
 
 5 content levels × 3 structure levels with cycling property modifiers:
 
 ```
               minimal         standard              deep
-alpha         default         varied-perms          varied-times
-numeric       varied-times    default               varied-perms
-fielded       varied-perms    varied-times          default
+words         default         varied-perms          varied-times
+numbers       varied-times    default               varied-perms
+passwd        varied-perms    varied-times          default
 formatted     default         varied-times          varied-perms
-tabular       varied-times    varied-perms          default
+csv           varied-times    varied-perms          default
 ```
 
 **Content levels** (what's in input.txt):
-- **alpha**: mixed-case words (cherry, Apple, banana, Date, ...)
-- **numeric**: 16 integers, longer than `head -n 10`
-- **fielded**: colon-delimited records (bob:30:sales, ...)
+- **words**: 1500 sorted English words with mixed case, hyphens, accents
+- **numbers**: integers, floats, hex, scientific notation, NaN, Infinity
+- **passwd**: /etc/passwd format, colon-delimited, 7 fields, UIDs, shells
 - **formatted**: tabs, blank lines, trailing whitespace, control characters
-- **tabular**: tab-delimited fields, duplicates, long line >80 chars
+- **csv**: RFC 4180 CSV, header row, quoted fields, accented names, duplicates
+
+**Breadth-only** (minimal structure only): access_log, syslog, dates, config, paths, naughty (unicode/emoji/RTL)
 
 **Structure levels** (what files exist):
 - **minimal**: input.txt + other.txt
-- **standard**: + hidden file, subdir, symlink, executable, readonly
+- **standard**: + hidden file, a.txt, b.txt, subdir, symlink, executable
 - **deep**: + 3-level nesting, directory symlink
 
 **Property levels** (file metadata):
@@ -106,33 +281,71 @@ tabular       varied-times    varied-perms          default
 - **varied-perms**: readonly file, flag-like filename (`-rf`)
 - **varied-times**: old mtime, large file (10KB)
 
-Plus 10 single-factor perturbations from numeric_standard, a locale perturbation on alpha_minimal, and 3 stdin contexts (words, numbers, passwd with varied delimiters). Total: ~35 contexts per grid.
+Plus 9 single-factor perturbations from numbers_standard (remove hidden/subdir/symlink, empty/readonly/old-mtime/tiny input.txt, COLUMNS=40, LC_ALL=en_US.UTF-8), a locale perturbation on words_minimal, and 3 stdin contexts (words, numbers, passwd with varied delimiters). Total: ~35 contexts per grid.
 
-## Factor Identification and Level Determination
+## Execution
 
-The experiment has three factors:
-- **Flag** (treatment): which flag is applied. Levels = all flags from `--help`.
-- **Value** (nested within flag): what argument value the flag gets. Levels determined by pilot study.
-- **Context** (blocking): input content, filesystem structure, environment. Levels = fixed fixture corpus.
+```
+Script { contexts: [C₁..Cₙ], runs: [R₁..Rₘ] }
+                    │
+                    ▼
+         ┌─── enumerate cells ───┐
+         │  filter: which runs   │
+         │  match each context   │
+         │  → cells_by_context   │
+         └───────────┬───────────┘
+                     │
+    ┌────────────────┼─────────────────┐
+    ▼                ▼                 ▼
+ Thread 1         Thread 2    ...   Thread T    (T ≤ 32)
+    │                │                 │
+    │  ┌── work-stealing queue ──┐     │
+    │  │  dequeue next context   │     │
+    │  └─────────┬───────────────┘     │
+    │            │                     │
+    ▼            ▼                     ▼
+ ┌─────────────────────────────────────────┐
+ │ PER CONTEXT (one bwrap invocation):     │
+ │                                         │
+ │  Host side:                             │
+ │  ├─ create batch_dir/                   │
+ │  ├─ apply_setup(context) → env vars     │
+ │  ├─ for each cell:                      │
+ │  │   ├─ create c{i}/ workspace          │
+ │  │   ├─ snapshot filesystem (before)    │
+ │  │   └─ emit shell script line          │
+ │  └─ write run.sh                        │
+ │                                         │
+ │  bwrap sandbox:                         │
+ │  ├─ --unshare-net --die-with-parent     │
+ │  ├─ ro-bind /usr /bin /lib /etc         │
+ │  ├─ bind batch_dir → /batch             │
+ │  └─ sh /batch/run.sh                    │
+ │       each cell: (cd /batch/c{i} &&     │
+ │         [stdin|] timeout 2 binary args   │
+ │         >/batch/out/{i}.out             │
+ │         2>/batch/out/{i}.err;           │
+ │         echo $? >/batch/out/{i}.rc) &   │
+ │       wait every 32 cells               │
+ │                                         │
+ │  Host side (after):                     │
+ │  ├─ read {i}.out, {i}.err, {i}.rc      │
+ │  ├─ snapshot filesystem (after)         │
+ │  └─ diff snapshots → FsChanges         │
+ └─────────────────────────────────────────┘
+                     │
+                     ▼
+         GridResult {
+           cells: { (context_name, run_idx) → Observation }
+           setup_failures: { context → error }
+         }
+```
 
-### Pilot study (factor level determination)
+Discovery probing uses the same batched model — each phase of the pilot study (solo candidates, error mining, companion probing, compound probing) generates a shell script and runs all probes in a single bwrap invocation, with per-probe cell directories for isolation.
 
-Before the main experiment, a sequential pilot study determines working factor levels:
+## Analysis
 
-- **Invocation patterns**: 7 positional arg candidates + structural patterns from Usage line (`COMMAND → echo`, `[expression] → -name/-type`). Working patterns become run templates.
-- **Stdin**: piped content tested. If accepted, stdin contexts provide input alongside file contexts.
-- **Flag values**: multi-source candidate discovery per flag:
-  1. *Help text mining* — quoted values, brace enumerations, bracket character sets, continuation lines.
-  2. *Metavar candidates* — per-type curated lists (NUM → `1,0,2,10,100`; FILE → `input.txt`; etc.).
-  3. *Error mining* — fires when no candidate exits 0; parses "Valid arguments are:" from stderr.
-  4. *Companion probing* — failing flags tried with each working flag as companion.
-  5. *Mutual compound probing* — pairs of both-failing flags tried together (discovers co-dependencies).
-  First working value = combo value (stable). All working values generate independent solo runs (additive).
-- **Alias propagation**: short flags inherit metavar from long alias for proper value probing.
-
-The pilot is adaptive (later probes depend on earlier results). The main experiment is fixed.
-
-## Delta Grouping
+### Delta grouping
 
 For runs with a `from` reference (base invocation), comparison uses **structural deltas** — what transformation the flag applied to the base output — rather than the raw output content. This groups flags by the structural change they produce ("prepended 8 tokens per line", "reversed line order", "inserted a header line") rather than by specific output values.
 
@@ -145,19 +358,163 @@ The structural delta is computed via hash-anchored alignment:
 
 For outputs with shared lines (90%+ for most tools), alignment is O(n). For completely different outputs (e.g., diff normal vs unified format), the disjoint hash sets trigger an early exit — no anchor search needed.
 
-Runs with identical edit scripts in every context form a behavioral group. This is the equivalence relation: two flags are indistinguishable iff no tested context separates their structural transformation.
+### Grouping and evidence pipeline
+
+```
+GridResult + Script
+        │
+        ▼
+┌───────────────────────────────────────────────────────────────┐
+│ PER-RUN ANALYSIS                                              │
+│                                                               │
+│ For each run Rᵢ across all contexts:                          │
+│                                                               │
+│   ┌─── Has diff_from? ───┐                                   │
+│   │ YES                  │ NO                                 │
+│   ▼                      ▼                                    │
+│  ObsKey = structural    ObsKey = tokenized                    │
+│  delta vs baseline      raw observation                       │
+│                                                               │
+│  Structural delta (two-level NW):                             │
+│  ┌──────────────────────────────────────┐                     │
+│  │ ref: "Alice"    obs: "-rw 1 Alice"   │                     │
+│  │      "Bob"           "-rw 1 Bob"     │                     │
+│  │                                      │                     │
+│  │ Line alignment (hash anchors + NW):  │                     │
+│  │   Modified([Insert("-rw"),           │                     │
+│  │            Insert("1"),              │                     │
+│  │            Keep("Alice")])           │                     │
+│  │   Modified([Insert("-rw"),           │                     │
+│  │            Insert("1"),              │                     │
+│  │            Keep("Bob")])             │                     │
+│  │                                      │                     │
+│  │ Same structural edit = same behavior │                     │
+│  │ regardless of content nondeterminism │                     │
+│  └──────────────────────────────────────┘                     │
+│                                                               │
+│  Per-run output:                                              │
+│    context_groups: [{majority ctxs, obs}, {minority, obs}]    │
+│    sensitivity: ["stdin (+3 lines)", "COLUMNS (reordered)"]   │
+│    universals: ["exit 0", "stdout not empty"]                 │
+└───────────────────────────┬───────────────────────────────────┘
+                            │
+                            ▼
+┌───────────────────────────────────────────────────────────────┐
+│ BEHAVIORAL GROUPING                                           │
+│                                                               │
+│  group_key(Rᵢ) = hash(diff_from, [ObsKey per context])       │
+│                                                               │
+│  Runs with identical structural deltas across all contexts    │
+│  collapse into the same BehaviorGroup.                        │
+│                                                               │
+│  Example groups for `ls`:                                     │
+│  ┌──────────────────────────────────────────────────┐         │
+│  │ Group A (isolated): ["-l"]                       │         │
+│  │   → inserts 8 tokens per line                    │         │
+│  │                                                  │         │
+│  │ Group B (isolated): ["-i"]                       │         │
+│  │   → inserts 1 token (inode) per line             │         │
+│  │                                                  │         │
+│  │ Group C (2 runs):   ["-a", "--all"]              │         │
+│  │   → same delta (add hidden files) = alias        │         │
+│  │                                                  │         │
+│  │ Group D (3 runs):   ["--color=auto",             │         │
+│  │                      "--color=always", "-G"]     │         │
+│  │   → indistinguishable under test conditions      │         │
+│  └──────────────────────────────────────────────────┘         │
+│                                                               │
+│  isolated group (1 run)  → solo-distinguished                 │
+│  multi-run group         → need pairwise evidence to separate │
+└───────────────────────────┬───────────────────────────────────┘
+                            │
+                            ▼
+┌───────────────────────────────────────────────────────────────┐
+│ PAIRWISE INTERACTION EVIDENCE                                 │
+│                                                               │
+│  For combination runs (2+ flags):                             │
+│  If runs sharing the same companion flags land in different   │
+│  groups, the differing flag is proven distinguishable.        │
+│                                                               │
+│  "-a -l" in Group X,  "-r -l" in Group Y                     │
+│   └─ same companion (-l), different groups                    │
+│   └─ proves: -a ≠ -r (both distinguished)                    │
+│                                                               │
+│  This catches flags that ARE different but happen to          │
+│  produce identical solo output.                               │
+└───────────────────────────┬───────────────────────────────────┘
+                            │
+                            ▼
+┌───────────────────────────────────────────────────────────────┐
+│ LEAVE-ONE-OUT ROBUSTNESS                                      │
+│                                                               │
+│  For each distinguished flag:                                 │
+│    For each of ≤10 sampled contexts:                          │
+│      mask that context, re-group, re-check distinguished      │
+│                                                               │
+│  flag → (survived / total)                                    │
+│  15/15 = robust:  flag works regardless of any single context │
+│   3/15 = fragile: flag only distinguished in specific setups  │
+│                                                               │
+│  Uses hash-only grouping (no equality verify) for speed       │
+│  O(contexts × runs) per iteration                             │
+└───────────────────────────────────────────────────────────────┘
+```
 
 All runs — single-flag AND pairwise combinations — are tested in a single phase. No iterative refinement. The experimental design is fixed before execution, eliminating path-dependence (where intermediate results could influence which experiments are generated next).
 
-## Execution
+## Report
 
-Cells are batched by context. Per context: create per-cell workspace directories, generate one shell script with all commands (each with 2-second timeout), invoke bwrap once. ~35 bwrap invocations instead of thousands. 16 threads across contexts.
+```
+AnalysisMetrics
+       │
+       ├─── solo_distinguished: flags in isolated groups
+       │      exemplar: most distinctive (context, base, flag output)
+       │
+       ├─── combo_distinguished: proved different via pairwise evidence
+       │      but not isolated (identical solo behavior)
+       │
+       ├─── behavioral_aliases: 2-run groups with different flag names
+       │      (e.g., -A = --show-all)
+       │
+       ├─── error_differentiated: unique error messages per flag
+       │      (flag errors with all tried values)
+       │
+       ├─── indistinguishable: in multi-run groups, no pairwise evidence
+       │      (might be truly identical, or contexts don't expose difference)
+       │
+       └─── untested: known flags never included in any run
+```
 
 ## Quality metrics
 
 - **Robustness**: leave-one-out context removal (sampled 10 contexts). Flags that survive all removals are robust; flags dependent on a single context are fragile.
 - **Reproducibility**: opt-in cross-run verification (REPRO=1). Re-runs all binaries and compares observed counts. Nondeterministic binaries reported but don't fail the test.
 - **Surface stability**: exact flag count checked against expected total. Changes in flag discovery surface (regex shifts) are caught.
+
+## Design Invariants
+
+```
+1. FIXED GRID        The entire experiment (contexts × runs) is
+                     determined before any behavioral observation.
+                     Discovery probes determine levels; they do
+                     not observe behavior.
+
+2. ADDITIVE-ONLY     Adding contexts or values can only ADD
+                     evidence, never remove it.
+
+3. STRUCTURAL DIFF   Grouping uses edit scripts, not raw output.
+                     Two flags producing the same transformation
+                     group together regardless of input content.
+
+4. BATCHED SANDBOX   Both discovery probes and grid cells use the
+                     same model: shell script → bwrap → read files.
+                     One bwrap per context (grid) or per phase
+                     (discovery). No individual process spawning.
+
+5. DETERMINISTIC     Candidate lists are ordered and stable.
+   VALUE SELECTION   First working = combo value. Probing order
+                     is fixed, not adaptive within a phase.
+```
 
 ## Limitations
 

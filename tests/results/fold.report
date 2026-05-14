@@ -1,60 +1,46 @@
 # Exploration: fold
 
 ## Rounds
-  round 0: 64 isolated cumulative, 35 identical in round (single-phase)
+  round 0: 49 isolated cumulative, 32 identical in round (single-phase)
 
 ## Observed: 3/3 flags
-  3 solo, 0 via combination
+  1 solo, 2 via combination
+  robustness: 4 robust, 0 moderate, 0 fragile
 
 Aliases: -b = --bytes, -s = --spaces, -w = --width
 
 ## Solo (unique behavior)
-  -b  # count bytes rather than columns
-    exemplar: "-b" "input.txt" "other.txt" in passwd_minimal (-42 lines)
-    base:
-      root:x:0:0:root:/root:/bin/bash
-      daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
-      bin:x:2:2:bin:/bin:/usr/sbin/nologin
-      sys:x:3:3:sys:/dev:/usr/sbin/nologin
-      sync:x:4:65534:sync:/bin:/bin/sync
-            ...
-    flag:
-      root:x:0:0:root:/root:/bin/bash
-      daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
-      bin:x:2:2:bin:/bin:/usr/sbin/nologin
-      sys:x:3:3:sys:/dev:/usr/sbin/nologin
-      sync:x:4:65534:sync:/bin:/bin/sync
-            ...
-  -s  # break at spaces
-    exemplar: "-s" "input.txt" "other.txt" in passwd_minimal (-42 lines)
-    base:
-      root:x:0:0:root:/root:/bin/bash
-      daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
-      bin:x:2:2:bin:/bin:/usr/sbin/nologin
-      sys:x:3:3:sys:/dev:/usr/sbin/nologin
-      sync:x:4:65534:sync:/bin:/bin/sync
-            ...
-    flag:
-      root:x:0:0:root:/root:/bin/bash
-      daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
-      bin:x:2:2:bin:/bin:/usr/sbin/nologin
-      sys:x:3:3:sys:/dev:/usr/sbin/nologin
-      sync:x:4:65534:sync:/bin:/bin/sync
-            ...
   -w  # use WIDTH columns instead of 80
-    exemplar: "-w" "1" "input.txt" "other.txt" in numbers_minimal (+572 lines)
+    exemplar: "-w" "2" "input.txt" "other.txt" in numbers_minimal
+    | 264 only in this: 1., 00, $1, .0, 1/
+    | 61 only in ref: 1.00, $1.00, 1/2, 1E2, 1E02
+    | 12 shared
     base:
-      0
+            ... (1 identical)
       1
       1.00
       $1.00
       1/2
-            ...
+      1E2
+      1E02
+            ... (66 more)
     flag:
-      0
+            ... (1 identical)
       1
-      1
-      .
+      1.
+      00
+      $1
+      .0
       0
-            ...
+            ... (295 more)
+
+## Via combination (distinguishable when paired)
+  -b  # count bytes rather than columns
+    | exit: 1 → 0
+    | stderr removed
+    evidence: (pairwise evidence)
+  -s  # break at spaces
+    | exit: 1 → 0
+    | stderr removed
+    evidence: (pairwise evidence)
 

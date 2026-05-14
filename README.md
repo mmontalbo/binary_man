@@ -45,11 +45,12 @@ See [LANGUAGE.md](LANGUAGE.md) for the probe language specification.
    `COMMAND` or `[expression]`).
 2. **Level determination** — pilot study probes each flag with
    candidate values: help-mined values → metavar candidates → error
-   mining → companion probing → mutual compound probing.
+   mining → companion probing → mutual compound probing. Each phase
+   runs all probes in a single batched bwrap invocation.
 3. **Design construction** — cross all flags × invocation patterns ×
    contexts into a fixed grid. No adaptation after this point.
 4. **Execution** — batched bwrap sandboxing, one invocation per
-   context, 16 threads. Each cell has a 2-second timeout.
+   context, up to 32 threads. Each cell has a 2-second timeout.
 5. **Analysis** — hash-anchored structural diff (O(n) for shared
    lines, NW only on gap segments), hash-based behavioral grouping,
    pairwise interaction evidence, leave-one-out robustness scoring.

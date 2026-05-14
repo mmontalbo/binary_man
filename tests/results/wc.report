@@ -1,48 +1,65 @@
 # Exploration: wc
 
 ## Rounds
-  round 0: 58 isolated cumulative, 40 identical in round (single-phase)
+  round 0: 40 isolated cumulative, 50 identical in round (single-phase)
 
 ## Observed: 6/7 flags
   4 solo, 2 via combination
   1 additional error-differentiated
-  robustness: 7 robust, 0 moderate, 0 fragile
+  robustness: 12 robust, 0 moderate, 0 fragile
 
 Aliases: -L = --max-line-length, -c = --bytes, -l = --lines, -m = --chars, -w = --words
 
 ## Solo (unique behavior)
   --files0-from  # read input from the files specified by NUL-terminated names in file F; If F is - then read names from standard input
-    exemplar: "--files0-from=1" in words_standard (different)
+    exemplar: "--files0-from=1" in words_standard
+    | 1 only in ref:       0       0       0
+    | exit: 0 → 1
+    | stderr: wc: cannot open '1' for reading: No such file or directory
     base:
             0       0       0
     flag:
   --total  # when to print a line with total counts; WHEN can be: auto, always, only, never
-    exemplar: "--total=always" in words_minimal (different)
+    exemplar: "--total=always" in words_minimal
+    | 1 only in this:       0       0       0 total
+    | 1 shared
     base:
             0       0       0
     flag:
             0       0       0
             0       0       0 total
   -L  # print the maximum display width
-    exemplar: "-L" "input.txt" in words_minimal (reordered)
+    exemplar: "-L" in words_minimal / stdin
+    | 1 only in this: 6
+    | 1 only in ref:       2       3      19
     base:
-       1512  1513 10586 input.txt
+            2       3      19
     flag:
-      18 input.txt
+      6
   -l  # print the newline counts
-    exemplar: "-l" "input.txt" in words_minimal (reordered)
+    exemplar: "-l" in words_minimal / stdin
+    | 1 only in this: 2
+    | 1 only in ref:       2       3      19
     base:
-       1512  1513 10586 input.txt
+            2       3      19
     flag:
-      1512 input.txt
+      2
   -w  # print the word counts
-    exemplar: "-w" "input.txt" in words_minimal (reordered)
+    exemplar: "-w" in words_minimal / stdin
+    | 1 only in this: 3
+    | 1 only in ref:       2       3      19
     base:
-       1512  1513 10586 input.txt
+            2       3      19
     flag:
-      1513 input.txt
+      3
 
 ## Via combination (distinguishable when paired)
-  -c  e.g. (pairwise evidence)
-  -m  e.g. (pairwise evidence)
+  -c  # print the byte counts
+    | 1 only in this: 0
+    | 1 only in ref:       0       0       0
+    evidence: (pairwise evidence)
+  -m  # print the character counts
+    | 1 only in this: 0
+    | 1 only in ref:       0       0       0
+    evidence: (pairwise evidence)
 

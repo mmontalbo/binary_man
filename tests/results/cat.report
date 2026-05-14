@@ -11,163 +11,199 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
 
 ## Solo (unique behavior)
   -A  # equivalent to -vET
-    exemplar: "-A" "input.txt" "other.txt" in formatted_minimal (-45 lines)
+    exemplar: "-A" "input.txt" "other.txt" in formatted_minimal
+    | 28 only in this: first line$, second line with trailing spaces$, ^Iindented with tab$,     indented with spaces$, ^I ^Imixed tabs and spaces$
+    | 28 only in ref: first line, second line with trailing spaces, 	indented with tab,     indented with spaces, 	 	mixed tabs and spaces
     base:
       first line
       second line with trailing spaces
       	indented with tab
           indented with spaces
       	 	mixed tabs and spaces
-            ...
+      
+            ... (22 more)
     flag:
       first line$
       second line with trailing spaces$
       ^Iindented with tab$
           indented with spaces$
       ^I ^Imixed tabs and spaces$
-            ...
+      $
+            ... (22 more)
   -E  # display $ at end of each line
-    exemplar: "-E" "input.txt" "other.txt" in words_minimal (+1440 lines)
+    exemplar: "-E" "input.txt" "other.txt" in words_minimal
+    | 1513 only in this: aardvark$, abbreviation$, about$, abstract$, accept$
+    | 1513 only in ref: aardvark, abbreviation, about, abstract, accept
     base:
       aardvark
       abbreviation
       about
       abstract
       accept
-            ...
+      accepted
+            ... (1507 more)
     flag:
       aardvark$
       abbreviation$
       about$
       abstract$
       accept$
-            ...
+      accepted$
+            ... (1507 more)
   -T  # display TAB characters as ^I
-    exemplar: "-T" "input.txt" "other.txt" in formatted_minimal (-45 lines)
+    exemplar: "-T" "input.txt" "other.txt" in formatted_minimal
+    | 6 only in this: ^Iindented with tab, ^I ^Imixed tabs and spaces, trailing^Itab, ^I^Idouble tab indent, has^Imultiple^I^Itabs^I^I^Iwith^Ivarying^I^Iwidths
+    | 6 only in ref: 	indented with tab, 	 	mixed tabs and spaces, trailing	tab, 		double tab indent, has	multiple		tabs			with	varying		widths
+    | 22 shared
     base:
-      first line
+            ... (1 identical)
       second line with trailing spaces
       	indented with tab
           indented with spaces
       	 	mixed tabs and spaces
-            ...
+      
+      blank line above
+            ... (21 more)
     flag:
-      first line
+            ... (1 identical)
       second line with trailing spaces
       ^Iindented with tab
           indented with spaces
       ^I ^Imixed tabs and spaces
-            ...
+      
+      blank line above
+            ... (21 more)
   -b  # number nonempty output lines, overrides -n
-    exemplar: "-b" "input.txt" "other.txt" in formatted_minimal (-45 lines)
+    exemplar: "-b" "input.txt" "other.txt" in formatted_minimal
+    | 24 only in this:      1	first line,      2	second line with trailing spaces,      3		indented with tab,      4	    indented with spaces,      5		 	mixed tabs and spaces
+    | 24 only in ref: first line, second line with trailing spaces, 	indented with tab,     indented with spaces, 	 	mixed tabs and spaces
+    | 4 shared
     base:
       first line
       second line with trailing spaces
       	indented with tab
           indented with spaces
       	 	mixed tabs and spaces
-            ...
+      
+            ... (22 more)
     flag:
            1	first line
            2	second line with trailing spaces
            3		indented with tab
            4	    indented with spaces
            5		 	mixed tabs and spaces
-            ...
+      
+            ... (22 more)
   -e  # equivalent to -vE
-    exemplar: "-e" "input.txt" "other.txt" in formatted_minimal (-45 lines)
+    exemplar: "-e" "input.txt" "other.txt" in formatted_minimal
+    | 28 only in this: first line$, second line with trailing spaces$, 	indented with tab$,     indented with spaces$, 	 	mixed tabs and spaces$
+    | 28 only in ref: first line, second line with trailing spaces, 	indented with tab,     indented with spaces, 	 	mixed tabs and spaces
     base:
       first line
       second line with trailing spaces
       	indented with tab
           indented with spaces
       	 	mixed tabs and spaces
-            ...
+      
+            ... (22 more)
     flag:
       first line$
       second line with trailing spaces$
       	indented with tab$
           indented with spaces$
       	 	mixed tabs and spaces$
-            ...
+      $
+            ... (22 more)
   -n  # number all output lines
-    exemplar: "-n" "input.txt" "other.txt" in formatted_minimal (-45 lines)
+    exemplar: "-n" "input.txt" "other.txt" in formatted_minimal
+    | 28 only in this:      1	first line,      2	second line with trailing spaces,      3		indented with tab,      4	    indented with spaces,      5		 	mixed tabs and spaces
+    | 28 only in ref: first line, second line with trailing spaces, 	indented with tab,     indented with spaces, 	 	mixed tabs and spaces
     base:
       first line
       second line with trailing spaces
       	indented with tab
           indented with spaces
       	 	mixed tabs and spaces
-            ...
+      
+            ... (22 more)
     flag:
            1	first line
            2	second line with trailing spaces
            3		indented with tab
            4	    indented with spaces
            5		 	mixed tabs and spaces
-            ...
+           6	
+            ... (22 more)
   -s  # suppress repeated empty output lines
-    exemplar: "-s" "input.txt" "other.txt" in formatted_minimal (-46 lines)
+    exemplar: "-s" "input.txt" "other.txt" in formatted_minimal
+    | stdout: same lines, different order
     base:
-      first line
-      second line with trailing spaces
-      	indented with tab
-          indented with spaces
-      	 	mixed tabs and spaces
-            ...
+            ... (9 identical)
+      
+      
+      three blank lines above
+      a]very long line that exceeds eighty characters in total width to exercise fold and fmt and similar line-wrapping tools and to ensure that column-counting logic works properly across all contexts
+      short
+      x
+            ... (13 more)
     flag:
-      first line
-      second line with trailing spaces
-      	indented with tab
-          indented with spaces
-      	 	mixed tabs and spaces
-            ...
+            ... (9 identical)
+      
+      three blank lines above
+      a]very long line that exceeds eighty characters in total width to exercise fold and fmt and similar line-wrapping tools and to ensure that column-counting logic works properly across all contexts
+      short
+      x
+      trailing	tab
+            ... (12 more)
   -t  # equivalent to -vT
-    exemplar: "-t" "input.txt" "other.txt" in formatted_minimal (-45 lines)
+    exemplar: "-t" "input.txt" "other.txt" in formatted_minimal
+    | 9 only in this: ^Iindented with tab, ^I ^Imixed tabs and spaces, trailing^Itab, ^I^Idouble tab indent, has^Imultiple^I^Itabs^I^I^Iwith^Ivarying^I^Iwidths
+    | 9 only in ref: 	indented with tab, 	 	mixed tabs and spaces, trailing	tab, 		double tab indent, has	multiple		tabs			with	varying		widths
+    | 19 shared
     base:
-      first line
+            ... (1 identical)
       second line with trailing spaces
       	indented with tab
           indented with spaces
       	 	mixed tabs and spaces
-            ...
+      
+      blank line above
+            ... (21 more)
     flag:
-      first line
+            ... (1 identical)
       second line with trailing spaces
       ^Iindented with tab
           indented with spaces
       ^I ^Imixed tabs and spaces
-            ...
+      
+      blank line above
+            ... (21 more)
   -u  # (ignored)
-    exemplar: "-u" "input.txt" "other.txt" in formatted_minimal (-45 lines)
+    exemplar: "-u" "input.txt" "other.txt" in formatted_minimal
+    | identical
     base:
-      first line
-      second line with trailing spaces
-      	indented with tab
-          indented with spaces
-      	 	mixed tabs and spaces
-            ...
+            ... (27 identical)
+      hello world
     flag:
-      first line
-      second line with trailing spaces
-      	indented with tab
-          indented with spaces
-      	 	mixed tabs and spaces
-            ...
+            ... (27 identical)
+      hello world
   -v  # use ^ and M- notation, except for LFD and TAB
-    exemplar: "-v" "input.txt" "other.txt" in formatted_minimal (-45 lines)
+    exemplar: "-v" "input.txt" "other.txt" in formatted_minimal
+    | 3 only in this: cafM-CM-) rM-CM-)sumM-CM-) naM-CM-/ve M-CM-<ber straM-CM-^_e M-bM-^@M-^T multi-byte words that wrap differently with fold -b vs fold (columns vs bytes), M-fM-^WM-%M-fM-^\M-,M-hM-*M-^^M-cM-^CM-^FM-cM-^BM--M-cM-^BM-9M-cM-^CM-^HM-oM-<M-^ZM-fM-<M-"M-eM--M-^WM-cM-^AM-(M-cM-^AM-2M-cM-^BM-^IM-cM-^AM-^LM-cM-^AM-*M-cM-^AM-(M-cM-^BM-+M-cM-^BM-?M-cM-^BM-+M-cM-^CM-^JM-cM-^BM-^RM-eM-^PM-+M-cM-^BM-^@M-hM-!M-^LM-cM-^AM-'M-cM-^@M-^AM-cM-^CM-^PM-cM-^BM-$M-cM-^CM-^HM-fM-^UM-0M-cM-^AM-(M-fM-^VM-^GM-eM--M-^WM-fM-^UM-0M-cM-^AM-^LM-gM-^UM-0M-cM-^AM-*M-cM-^BM-^K, emoji line: M-pM-^_M-^NM-^IM-pM-^_M-^NM-^JM-pM-^_M-^NM-^HM-pM-^_M-^NM-^AM-pM-^_M-^NM-^BM-pM-^_M-^NM-^DM-pM-^_M-^NM-^CM-pM-^_M-^NM-^FM-pM-^_M-^NM-^GM-bM-^\M-(M-pM-^_M-^LM-^_M-pM-^_M-^RM-+M-bM--M-^PM-oM-8M-^OM-pM-^_M-^LM-^HM-bM-^XM-^@M-oM-8M-^OM-pM-^_M-^LM-^YM-bM-^ZM-!M-oM-8M-^OM-pM-^_M-^TM-%M-pM-^_M-^RM-'M-pM-^_M-^LM-^J
+    | 3 only in ref: café résumé naïve über straße — multi-byte words that wrap differently with fold -b vs fold (columns vs bytes), 日本語テキスト：漢字とひらがなとカタカナを含む行で、バイト数と文字数が異なる, emoji line: 🎉🎊🎈🎁🎂🎄🎃🎆🎇✨🌟💫⭐️🌈☀️🌙⚡️🔥💧🌊
+    | 25 shared
     base:
-      first line
-      second line with trailing spaces
-      	indented with tab
-          indented with spaces
-      	 	mixed tabs and spaces
-            ...
+            ... (23 identical)
+      	tab	tab	tab	tab	tab	tab	tab	tab
+      café résumé naïve über straße — multi-byte words that wrap differently with fold -b vs fold (columns vs bytes)
+      日本語テキスト：漢字とひらがなとカタカナを含む行で、バイト数と文字数が異なる
+      emoji line: 🎉🎊🎈🎁🎂🎄🎃🎆🎇✨🌟💫⭐️🌈☀️🌙⚡️🔥💧🌊
+      hello world
     flag:
-      first line
-      second line with trailing spaces
-      	indented with tab
-          indented with spaces
-      	 	mixed tabs and spaces
-            ...
+            ... (23 identical)
+      	tab	tab	tab	tab	tab	tab	tab	tab
+      cafM-CM-) rM-CM-)sumM-CM-) naM-CM-/ve M-CM-<ber straM-CM-^_e M-bM-^@M-^T multi-byte words that wrap differently with fold -b vs fold (columns vs bytes)
+      M-fM-^WM-%M-fM-^\M-,M-hM-*M-^^M-cM-^CM-^FM-cM-^BM--M-cM-^BM-9M-cM-^CM-^HM-oM-<M-^ZM-fM-<M-"M-eM--M-^WM-cM-^AM-(M-cM-^AM-2M-cM-^BM-^IM-cM-^AM-^LM-cM-^AM-*M-cM-^AM-(M-cM-^BM-+M-cM-^BM-?M-cM-^BM-+M-cM-^CM-^JM-cM-^BM-^RM-eM-^PM-+M-cM-^BM-^@M-hM-!M-^LM-cM-^AM-'M-cM-^@M-^AM-cM-^CM-^PM-cM-^BM-$M-cM-^CM-^HM-fM-^UM-0M-cM-^AM-(M-fM-^VM-^GM-eM--M-^WM-fM-^UM-0M-cM-^AM-^LM-gM-^UM-0M-cM-^AM-*M-cM-^BM-^K
+      emoji line: M-pM-^_M-^NM-^IM-pM-^_M-^NM-^JM-pM-^_M-^NM-^HM-pM-^_M-^NM-^AM-pM-^_M-^NM-^BM-pM-^_M-^NM-^DM-pM-^_M-^NM-^CM-pM-^_M-^NM-^FM-pM-^_M-^NM-^GM-bM-^\M-(M-pM-^_M-^LM-^_M-pM-^_M-^RM-+M-bM--M-^PM-oM-8M-^OM-pM-^_M-^LM-^HM-bM-^XM-^@M-oM-8M-^OM-pM-^_M-^LM-^YM-bM-^ZM-!M-oM-8M-^OM-pM-^_M-^TM-%M-pM-^_M-^RM-'M-pM-^_M-^LM-^J
+      hello world
 

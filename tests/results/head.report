@@ -3,57 +3,55 @@
 ## Rounds
   round 0: 56 isolated cumulative, 32 identical in round (single-phase)
 
-## Observed: 5/7 flags
-  2 solo, 3 via combination
-  2 additional error-differentiated
+## Observed: 7/7 flags
+  4 solo, 3 via combination
   robustness: 7 robust, 0 moderate, 0 fragile
 
 Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
 
 ## Solo (unique behavior)
   -c  # print the first NUM bytes of each file; with the leading '-', print all but the last NUM bytes of each file
-    exemplar: "-c" in words_standard (different)
-    base:
-    flag:
+    exemplar: "-c" in words_standard
+    | exit: 0 → 1
+    | stderr: head: option requires an argument -- 'c'
   -n  # print the first NUM lines instead of the first 10; with the leading '-', print all but the last NUM lines of each file
-    exemplar: "-n" in words_standard (different)
-    base:
-    flag:
+    exemplar: "-n" in words_standard
+    | exit: 0 → 1
+    | stderr: head: option requires an argument -- 'n'
   -v  # always print headers giving file names
-    exemplar: "-v" "input.txt" "other.txt" in words_minimal (-1 lines)
+    exemplar: "-v" in words_minimal
+    | 1 only in this: ==> standard input <==
     base:
-      ==> input.txt <==
-      aardvark
-      abbreviation
-      about
-      abstract
-            ...
     flag:
-      ==> input.txt <==
-      aardvark
-      abbreviation
-      about
-      abstract
-            ...
+      ==> standard input <==
   -z  # line delimiter is NUL, not newline
-    exemplar: "-z" "input.txt" in words_minimal (+1441 lines)
+    exemplar: "-z" "input.txt" in words_minimal
+    | 1502 only in this: across, Africa, afternoon, again, against
+    | 10 shared
     base:
-      aardvark
-      abbreviation
-      about
-      abstract
-      accept
-            ...
+            ... (9 identical)
+      acknowledge
     flag:
-      aardvark
-      abbreviation
-      about
-      abstract
-      accept
-            ...
+            ... (9 identical)
+      acknowledge
+      across
+      Africa
+      afternoon
+      again
+      against
+            ... (1497 more)
 
 ## Via combination (distinguishable when paired)
-  --quiet  e.g. "-n" "--quiet" "$(head -n1 input.txt)" "."
-  --silent  e.g. "-c" "--silent" "$(head -n1 input.txt)" "."
-  -q  e.g. "-n" "-q" "$(head -n1 input.txt)" "."
+  --quiet
+    | 3 only in ref: ==> input.txt <==, , ==> other.txt <==
+    | 12 shared
+    evidence: "-n" "--quiet" "$(head -n1 input.txt)" "."
+  --silent
+    | 3 only in ref: ==> input.txt <==, , ==> other.txt <==
+    | 12 shared
+    evidence: "-n" "--silent" "$(head -n1 input.txt)" "."
+  -q
+    | 3 only in ref: ==> input.txt <==, , ==> other.txt <==
+    | 12 shared
+    evidence: "-c" "-q" "$(head -n1 input.txt)" "."
 

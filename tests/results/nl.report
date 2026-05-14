@@ -1,58 +1,62 @@
 # Exploration: nl
 
 ## Rounds
-  round 0: 146 isolated cumulative, 100 identical in round (single-phase)
+  round 0: 146 isolated cumulative, 105 identical in round (single-phase)
 
-## Observed: 9/11 flags
-  5 solo, 4 via combination
+## Observed: 10/11 flags
+  5 solo, 5 via combination
   1 additional error-differentiated
   1 behavioral aliases detected
-  robustness: 5 robust, 3 moderate, 0 fragile
+  robustness: 10 robust, 0 moderate, 0 fragile
 
 Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numbering, -h = --header-numbering, -i = --line-increment, -l = --join-blank-lines, -n = --number-format, -p = --no-renumber, -s = --number-separator, -v = --starting-line-number, -w = --number-width
 
 ## Solo (unique behavior)
   -i  # line number increment at each line
-    exemplar: "-i" "0" "input.txt" "other.txt" in words_minimal (+1440 lines)
+    exemplar: "-i" "0" "input.txt" "other.txt" in words_minimal
+    | 1512 only in this:      1	abbreviation,      1	about,      1	abstract,      1	accept,      1	accepted
+    | 1512 only in ref:      2	abbreviation,      3	about,      4	abstract,      5	accept,      6	accepted
+    | 1 shared
     base:
            1	aardvark
            2	abbreviation
            3	about
            4	abstract
            5	accept
-            ...
+           6	accepted
+            ... (1507 more)
     flag:
            1	aardvark
            1	abbreviation
            1	about
            1	abstract
            1	accept
-            ...
+           1	accepted
+            ... (1507 more)
   -l  # group of NUMBER empty lines counted as one
-    exemplar: "-l" "1" "input.txt" "other.txt" in formatted_minimal (-45 lines)
+    exemplar: "-l" "1" in words_minimal / stdin
+    | 3 only in ref:      1	cherry,      2	apple,      3	banana
+    | exit: 0 → 1
+    | stderr: nl: option requires an argument -- 'l'
     base:
-           1	first line
-           2	second line with trailing spaces
-           3		indented with tab
-           4	    indented with spaces
-           5		 	mixed tabs and spaces
-            ...
+           1	cherry
+           2	apple
+           3	banana
     flag:
-           1	first line
-           2	second line with trailing spaces
-           3		indented with tab
-           4	    indented with spaces
-           5		 	mixed tabs and spaces
-            ...
   -n  # insert line numbers according to FORMAT
-    exemplar: "-n" "%s" in words_minimal / stdin (different)
+    exemplar: "-n" "%s" in words_minimal / stdin
+    | 3 only in ref:      1	cherry,      2	apple,      3	banana
+    | exit: 0 → 1
+    | stderr: nl: invalid line numbering format: '%s'
     base:
            1	cherry
            2	apple
            3	banana
     flag:
   -s  # add STRING after (possible) line number
-    exemplar: "-s" "x" in words_minimal / stdin (+3 lines)
+    exemplar: "-s" "x" in words_minimal / stdin
+    | 3 only in this:      1xcherry,      2xapple,      3xbanana
+    | 3 only in ref:      1	cherry,      2	apple,      3	banana
     base:
            1	cherry
            2	apple
@@ -62,41 +66,65 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
            2xapple
            3xbanana
   -v  # first line number for each section
-    exemplar: "-v" "0" "input.txt" "other.txt" in words_minimal (+1440 lines)
+    exemplar: "-v" "0" "input.txt" "other.txt" in words_minimal
+    | 1513 only in this:      0	aardvark,      1	abbreviation,      2	about,      3	abstract,      4	accept
+    | 1513 only in ref:      1	aardvark,      2	abbreviation,      3	about,      4	abstract,      5	accept
     base:
            1	aardvark
            2	abbreviation
            3	about
            4	abstract
            5	accept
-            ...
+           6	accepted
+            ... (1507 more)
     flag:
            0	aardvark
            1	abbreviation
            2	about
            3	abstract
            4	accept
-            ...
+           5	accepted
+            ... (1507 more)
   -w  # use NUMBER columns for line numbers
-    exemplar: "-w" "1" "input.txt" "other.txt" in words_minimal (+1440 lines)
+    exemplar: "-w" "1" "input.txt" "other.txt" in words_minimal
+    | 1513 only in this: 1	aardvark, 2	abbreviation, 3	about, 4	abstract, 5	accept
+    | 1513 only in ref:      1	aardvark,      2	abbreviation,      3	about,      4	abstract,      5	accept
     base:
            1	aardvark
            2	abbreviation
            3	about
            4	abstract
            5	accept
-            ...
+           6	accepted
+            ... (1507 more)
     flag:
       1	aardvark
       2	abbreviation
       3	about
       4	abstract
       5	accept
-            ...
+      6	accepted
+            ... (1507 more)
 
 ## Via combination (distinguishable when paired)
-  -b  e.g. (pairwise evidence)
-  -d  e.g. (pairwise evidence)
-  -f  e.g. (pairwise evidence)
-  -h  e.g. (pairwise evidence)
+  -b  # use STYLE for numbering body lines
+    | 71 only in this:        0,        1,        1.00,        $1.00,        1/2
+    | 71 only in ref:      1	0,      2	1,      3	1.00,      4	$1.00,      5	1/2
+    evidence: (pairwise evidence)
+  -d  # use CC for logical page delimiters
+    | exit: 0 → 1
+    | stderr: nl: option requires an argument -- 'd'
+    evidence: (pairwise evidence)
+  -f  # use STYLE for numbering footer lines
+    | 1512 only in ref:      1	aardvark,      2	abbreviation,      3	about,      4	abstract,      5	accept
+    | stderr changed: nl: invalid line numbering format: '%s'
+    evidence: (pairwise evidence)
+  -h  # use STYLE for numbering header lines
+    | 1512 only in ref:      1	aardvark,      2	abbreviation,      3	about,      4	abstract,      5	accept
+    | stderr changed: nl: invalid line numbering format: '%s'
+    evidence: (pairwise evidence)
+  -p  # do not reset line numbers for each section
+    | 1512 only in ref:      1	aardvark,      2	abbreviation,      3	about,      4	abstract,      5	accept
+    | stderr changed: nl: invalid line numbering format: '%s'
+    evidence: (pairwise evidence)
 

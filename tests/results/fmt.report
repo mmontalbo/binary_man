@@ -1,118 +1,86 @@
 # Exploration: fmt
 
 ## Rounds
-  round 0: 126 isolated cumulative, 70 identical in round (single-phase)
+  round 0: 94 isolated cumulative, 68 identical in round (single-phase)
 
 ## Observed: 7/7 flags
-  7 solo, 0 via combination
+  3 solo, 4 via combination
   1 behavioral aliases detected
-  robustness: 5 robust, 0 moderate, 0 fragile
+  robustness: 9 robust, 0 moderate, 0 fragile
 
 Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t = --tagged-paragraph, -u = --uniform-spacing, -w = --width
 
 ## Solo (unique behavior)
-  -c  # preserve indentation of first two lines
-    exemplar: "-c" "input.txt" "other.txt" in formatted_minimal (+14 lines)
-    base:
-      first line second line with trailing spaces
-      	indented with tab
-          indented with spaces
-      		mixed tabs and spaces
-      
-            ...
-    flag:
-      first line second line with trailing spaces
-      	indented with tab indented with spaces
-      		mixed tabs and spaces
-      
-      blank line above
-            ...
   -g  # goal width (default of 93% of width)
-    exemplar: "-g" "1" "input.txt" "other.txt" in words_minimal (+1315 lines)
+    exemplar: "-g" "1" "input.txt" "other.txt" in words_minimal
+    | 1376 only in this: aardvark, abbreviation, about, abstract, accept
+    | 151 only in ref: aardvark abbreviation about abstract accept accepted accepting access, accommodate acknowledge across Africa afternoon again against aggregate, ahead algorithm Alice all already also although always Amazon American, among an and another answer Apache apostrophe Apple application, approximately architect Argentina around arrange Asia assembly
     base:
       aardvark abbreviation about abstract accept accepted accepting access
       accommodate acknowledge across Africa afternoon again against aggregate
       ahead algorithm Alice all already also although always Amazon American
       among an and another answer Apache apostrophe Apple application
       approximately architect Argentina around arrange Asia assembly
-            ...
+      at Australia available awkward azure back balance banana bandwidth
+            ... (145 more)
     flag:
       aardvark
       abbreviation
       about
       abstract
       accept
-            ...
+      accepted
+            ... (1370 more)
   -p  # reformat only lines beginning with STRING, reattaching the prefix to reformatted lines
-    exemplar: "-p" "test" "input.txt" "other.txt" in numbers_standard / input.txt=size:1 (-71 lines)
+    exemplar: "-p" "test" "input.txt" "other.txt" in numbers_standard / input.txt=size:1
+    | 2 only in this: xother content, second line
+    | 2 only in ref: x, other content second line
     base:
       x
       other content second line
     flag:
       xother content
       second line
-  -s  # split long lines, but do not refill
-    exemplar: "-s" "input.txt" "other.txt" in passwd_minimal (-40 lines)
-    base:
-      root:x:0:0:root:/root:/bin/bash
-      daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
-      bin:x:2:2:bin:/bin:/usr/sbin/nologin
-      sys:x:3:3:sys:/dev:/usr/sbin/nologin sync:x:4:65534:sync:/bin:/bin/sync
-      games:x:5:60:games:/usr/games:/usr/sbin/nologin
-            ...
-    flag:
-      root:x:0:0:root:/root:/bin/bash
-      daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
-      bin:x:2:2:bin:/bin:/usr/sbin/nologin
-      sys:x:3:3:sys:/dev:/usr/sbin/nologin
-      sync:x:4:65534:sync:/bin:/bin/sync
-            ...
-  -t  # indentation of first line different from second
-    exemplar: "-t" "input.txt" "other.txt" in passwd_minimal (-40 lines)
-    base:
-      root:x:0:0:root:/root:/bin/bash
-      daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
-      bin:x:2:2:bin:/bin:/usr/sbin/nologin
-      sys:x:3:3:sys:/dev:/usr/sbin/nologin sync:x:4:65534:sync:/bin:/bin/sync
-      games:x:5:60:games:/usr/games:/usr/sbin/nologin
-            ...
-    flag:
-      root:x:0:0:root:/root:/bin/bash
-      daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
-      bin:x:2:2:bin:/bin:/usr/sbin/nologin
-      sys:x:3:3:sys:/dev:/usr/sbin/nologin
-      sync:x:4:65534:sync:/bin:/bin/sync
-            ...
-  -u  # one space between words, two after sentences
-    exemplar: "-u" "input.txt" "other.txt" in formatted_minimal (+15 lines)
-    base:
-      first line second line with trailing spaces
-      	indented with tab
-          indented with spaces
-      		mixed tabs and spaces
-      
-            ...
-    flag:
-      first line second line with trailing spaces
-      	indented with tab
-          indented with spaces
-      		mixed tabs and spaces
-      
-            ...
   -w  # maximum line width (default of 75 columns)
-    exemplar: "-w" "10" "input.txt" "other.txt" in words_minimal (+1322 lines)
+    exemplar: "-w" "10" "input.txt" "other.txt" in words_minimal
+    | 1381 only in this: aardvark, abbreviation, about, abstract, accept
+    | 151 only in ref: aardvark abbreviation about abstract accept accepted accepting access, accommodate acknowledge across Africa afternoon again against aggregate, ahead algorithm Alice all already also although always Amazon American, among an and another answer Apache apostrophe Apple application, approximately architect Argentina around arrange Asia assembly
     base:
       aardvark abbreviation about abstract accept accepted accepting access
       accommodate acknowledge across Africa afternoon again against aggregate
       ahead algorithm Alice all already also although always Amazon American
       among an and another answer Apache apostrophe Apple application
       approximately architect Argentina around arrange Asia assembly
-            ...
+      at Australia available awkward azure back balance banana bandwidth
+            ... (145 more)
     flag:
       aardvark
       abbreviation
       about
       abstract
       accept
-            ...
+      accepted
+            ... (1375 more)
+
+## Via combination (distinguishable when paired)
+  -c  # preserve indentation of first two lines
+    | 24 only in this: sys:x:3:3:sys:/dev:/usr/sbin/nologin, sync:x:4:65534:sync:/bin:/bin/sync, alice:x:1000:1000:Alice, Johnson,,,:/home/alice:/bin/bash, bob:x:1001:1001:Bob
+    | 11 only in ref: sys:x:3:3:sys:/dev:/usr/sbin/nologin sync:x:4:65534:sync:/bin:/bin/sync, alice:x:1000:1000:Alice Johnson,,,:/home/alice:/bin/bash, bob:x:1001:1001:Bob Smith,Room 42,x1234,:/home/bob:/bin/zsh, charlie:x:1002:1002:Charlie Brown:/home/charlie:/bin/bash, diana:x:1003:1003:Diana Prince:/home/diana:/usr/bin/fish
+    | 20 shared
+    evidence: (pairwise evidence)
+  -s  # split long lines, but do not refill
+    | 24 only in this: sys:x:3:3:sys:/dev:/usr/sbin/nologin, sync:x:4:65534:sync:/bin:/bin/sync, alice:x:1000:1000:Alice, Johnson,,,:/home/alice:/bin/bash, bob:x:1001:1001:Bob
+    | 11 only in ref: sys:x:3:3:sys:/dev:/usr/sbin/nologin sync:x:4:65534:sync:/bin:/bin/sync, alice:x:1000:1000:Alice Johnson,,,:/home/alice:/bin/bash, bob:x:1001:1001:Bob Smith,Room 42,x1234,:/home/bob:/bin/zsh, charlie:x:1002:1002:Charlie Brown:/home/charlie:/bin/bash, diana:x:1003:1003:Diana Prince:/home/diana:/usr/bin/fish
+    | 20 shared
+    evidence: (pairwise evidence)
+  -t  # indentation of first line different from second
+    | 6 only in this:    000.00,    000,    000.00,    000,00,    000
+    | 6 only in ref: 000.00, 000, 000.00, 000,00, 000
+    | 71 shared
+    evidence: (pairwise evidence)
+  -u  # one space between words, two after sentences
+    | 24 only in this: sys:x:3:3:sys:/dev:/usr/sbin/nologin, sync:x:4:65534:sync:/bin:/bin/sync, alice:x:1000:1000:Alice, Johnson,,,:/home/alice:/bin/bash, bob:x:1001:1001:Bob
+    | 11 only in ref: sys:x:3:3:sys:/dev:/usr/sbin/nologin sync:x:4:65534:sync:/bin:/bin/sync, alice:x:1000:1000:Alice Johnson,,,:/home/alice:/bin/bash, bob:x:1001:1001:Bob Smith,Room 42,x1234,:/home/bob:/bin/zsh, charlie:x:1002:1002:Charlie Brown:/home/charlie:/bin/bash, diana:x:1003:1003:Diana Prince:/home/diana:/usr/bin/fish
+    | 20 shared
+    evidence: (pairwise evidence)
 

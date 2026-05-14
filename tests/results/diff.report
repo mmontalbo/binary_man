@@ -3,9 +3,8 @@
 ## Rounds
   round 0: 290 isolated cumulative, 50 identical in round (single-phase)
 
-## Observed: 51/53 flags
-  20 solo, 31 via combination
-  3 additional error-differentiated
+## Observed: 53/53 flags
+  21 solo, 32 via combination
   robustness: 51 robust, 0 moderate, 0 fragile
 
 Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -F = --show-function-line, -I = --ignore-matching-lines, -N = --new-file, -S = --starting-file, -T = --initial-tab, -W = --width, -X = --exclude-from, -Z = --ignore-trailing-space, -a = --text, -b = --ignore-space-change, -d = --minimal, -e = --ed, -i = --ignore-case, -l = --paginate, -n = --rcs, -p = --show-c-function, -q = --brief, -r = --recursive, -s = --report-identical-files, -t = --expand-tabs, -w = --ignore-all-space, -x = --exclude, -y = --side-by-side
@@ -14,337 +13,470 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
   --GTYPE-group-format  # format GTYPE input groups with GFMT
   --LTYPE-line-format  # format LTYPE input lines with LFMT
   --from-file  # compare FILE1 to all operands; FILE1 can be a directory
-    exemplar: "--from-file=/dev/null" "input.txt" "other.txt" in words_minimal (+1440 lines)
+    exemplar: "--from-file=/dev/null" "input.txt" "other.txt" in words_minimal
+    | 1514 only in this: 0a1,1512, > aardvark, > abbreviation, > about, > abstract
+    | 1514 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    | 1 shared
     base:
       1,1512c1
       < aardvark
       < abbreviation
       < about
       < abstract
-            ...
+      < accept
+            ... (1509 more)
     flag:
       0a1,1512
       > aardvark
       > abbreviation
       > about
       > abstract
-            ...
+      > accept
+            ... (1509 more)
   --line-format  # format all input lines with LFMT
-    exemplar: "--line-format=1" "input.txt" "other.txt" in words_standard (reordered)
+    exemplar: "--line-format=1" "input.txt" "other.txt" in words_standard
+    | 1 only in this: 11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111
+    | 1516 only in ref: 1,1512c1,2, < aardvark, < abbreviation, < about, < abstract
     base:
       1,1512c1,2
       < aardvark
       < abbreviation
       < about
       < abstract
-            ...
+      < accept
+            ... (1510 more)
     flag:
       11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111
   --suppress-blank-empty  # suppress space or tab before empty output lines
-    exemplar: "--suppress-blank-empty" "input.txt" "other.txt" in formatted_standard (-44 lines)
+    exemplar: "--suppress-blank-empty" "input.txt" "other.txt" in formatted_standard
+    | 4 only in this: <, <, <, <
+    | 4 only in ref: < , < , < , < 
+    | 27 shared
     base:
-      1,27c1,2
-      < first line
-      < second line with trailing spaces
-      < 	indented with tab
-      <     indented with spaces
-            ...
+            ... (5 identical)
+      < 	 	mixed tabs and spaces
+      < 
+      < blank line above
+      < 
+      < two blank lines above
+      < 
+            ... (20 more)
     flag:
-      1,27c1,2
-      < first line
-      < second line with trailing spaces
-      < 	indented with tab
-      <     indented with spaces
-            ...
+            ... (5 identical)
+      < 	 	mixed tabs and spaces
+      <
+      < blank line above
+      <
+      < two blank lines above
+      <
+            ... (20 more)
   --tabsize  # tab stops every NUM (default 8) print columns
-    exemplar: "--tabsize=1" "input.txt" "other.txt" in paths_minimal (-30 lines)
+    exemplar: "--tabsize=1" "input.txt" "other.txt" in paths_minimal
+    | identical
     base:
-      1,42c1
-      < /usr/local/bin/python3
-      < /usr/bin/env
-      < /bin/sh
-      < /home/alice/.bashrc
-            ...
+            ... (44 identical)
+      > hello world
     flag:
-      1,42c1
-      < /usr/local/bin/python3
-      < /usr/bin/env
-      < /bin/sh
-      < /home/alice/.bashrc
-            ...
+            ... (44 identical)
+      > hello world
   --to-file  # compare all operands to FILE2; FILE2 can be a directory
-    exemplar: "--to-file=/dev/null" "input.txt" "other.txt" in words_minimal (+1440 lines)
+    exemplar: "--to-file=/dev/null" "input.txt" "other.txt" in words_minimal
+    | 3 only in this: 1,1512d0, 1d0, < hello world
+    | 3 only in ref: 1,1512c1, ---, > hello world
+    | 1512 shared
     base:
       1,1512c1
       < aardvark
       < abbreviation
       < about
       < abstract
-            ...
+      < accept
+            ... (1509 more)
     flag:
       1,1512d0
       < aardvark
       < abbreviation
       < about
       < abstract
-            ...
+      < accept
+            ... (1509 more)
   --unified
-    exemplar: "--unified" "input.txt" "other.txt" in words_minimal (+1516 lines, exit 127→1)
+    exemplar: "--unified" "input.txt" "other.txt" in words_minimal
+    | 1516 only in this: --- input.txt	2026-05-14 03:06:48.142838744 -0700, +++ other.txt	2026-05-14 03:06:48.142849624 -0700, @@ -1,1512 +1 @@, -aardvark, -abbreviation
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
     base:
       1,1512c1
       < aardvark
       < abbreviation
       < about
       < abstract
-            ...
+      < accept
+            ... (1509 more)
     flag:
-      --- input.txt	2026-05-13 23:42:28.942382714 -0700
-      +++ other.txt	2026-05-13 23:42:28.942401609 -0700
+      --- input.txt	2026-05-14 03:06:48.142838744 -0700
+      +++ other.txt	2026-05-14 03:06:48.142849624 -0700
       @@ -1,1512 +1 @@
       -aardvark
       -abbreviation
-            ...
+      -about
+            ... (1510 more)
   -D  # output merged file with '#ifdef NAME' diffs
-    exemplar: "-D" "test" "input.txt" "other.txt" in words_standard (+1441 lines)
+    exemplar: "-D" "test" "input.txt" "other.txt" in words_standard
+    | 1517 only in this: #ifndef test, aardvark, abbreviation, about, abstract
+    | 1516 only in ref: 1,1512c1,2, < aardvark, < abbreviation, < about, < abstract
     base:
       1,1512c1,2
       < aardvark
       < abbreviation
       < about
       < abstract
-            ...
+      < accept
+            ... (1510 more)
     flag:
       #ifndef test
       aardvark
       abbreviation
       about
       abstract
-            ...
+      accept
+            ... (1511 more)
   -I  # ignore changes where all lines match RE
-    exemplar: "-I" "." "input.txt" "other.txt" in words_standard (different)
+    exemplar: "-I" "." "input.txt" "other.txt" in words_standard
+    | 1516 only in ref: 1,1512c1,2, < aardvark, < abbreviation, < about, < abstract
+    | exit: 1 → 0
     base:
       1,1512c1,2
       < aardvark
       < abbreviation
       < about
       < abstract
-            ...
+      < accept
+            ... (1510 more)
     flag:
   -T  # make tabs line up by prepending a tab
-    exemplar: "-T" "input.txt" "other.txt" in words_standard (+1441 lines)
+    exemplar: "-T" "input.txt" "other.txt" in words_standard
+    | 1514 only in this: <	aardvark, <	abbreviation, <	about, <	abstract, <	accept
+    | 1514 only in ref: < aardvark, < abbreviation, < about, < abstract, < accept
+    | 2 shared
     base:
       1,1512c1,2
       < aardvark
       < abbreviation
       < about
       < abstract
-            ...
+      < accept
+            ... (1510 more)
     flag:
       1,1512c1,2
       <	aardvark
       <	abbreviation
       <	about
       <	abstract
-            ...
+      <	accept
+            ... (1510 more)
   -U
-    exemplar: "-U" "1" "input.txt" "other.txt" in words_minimal (+1516 lines, exit 127→1)
+    exemplar: "-U" "1" "input.txt" "other.txt" in words_minimal
+    | 1516 only in this: --- input.txt	2026-05-14 03:06:48.142790332 -0700, +++ other.txt	2026-05-14 03:06:48.142800341 -0700, @@ -1,1512 +1 @@, -aardvark, -abbreviation
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
     base:
       1,1512c1
       < aardvark
       < abbreviation
       < about
       < abstract
-            ...
+      < accept
+            ... (1509 more)
     flag:
-      --- input.txt	2026-05-13 23:42:28.942332950 -0700
-      +++ other.txt	2026-05-13 23:42:28.942341396 -0700
+      --- input.txt	2026-05-14 03:06:48.142790332 -0700
+      +++ other.txt	2026-05-14 03:06:48.142800341 -0700
       @@ -1,1512 +1 @@
       -aardvark
       -abbreviation
-            ...
+      -about
+            ... (1510 more)
   -W  # output at most NUM (default 130) print columns
-    exemplar: "-W" "1" "input.txt" "other.txt" in paths_minimal (-30 lines)
+    exemplar: "-W" "1" "input.txt" "other.txt" in paths_minimal
+    | identical
     base:
-      1,42c1
-      < /usr/local/bin/python3
-      < /usr/bin/env
-      < /bin/sh
-      < /home/alice/.bashrc
-            ...
+            ... (44 identical)
+      > hello world
     flag:
-      1,42c1
-      < /usr/local/bin/python3
-      < /usr/bin/env
-      < /bin/sh
-      < /home/alice/.bashrc
-            ...
+            ... (44 identical)
+      > hello world
   -X  # exclude files that match any pattern in FILE
-    exemplar: "-X" "input.txt" "input.txt" "other.txt" in paths_minimal (-30 lines)
+    exemplar: "-X" "input.txt" "input.txt" "other.txt" in paths_minimal
+    | identical
     base:
-      1,42c1
-      < /usr/local/bin/python3
-      < /usr/bin/env
-      < /bin/sh
-      < /home/alice/.bashrc
-            ...
+            ... (44 identical)
+      > hello world
     flag:
-      1,42c1
-      < /usr/local/bin/python3
-      < /usr/bin/env
-      < /bin/sh
-      < /home/alice/.bashrc
-            ...
+            ... (44 identical)
+      > hello world
   -e  # output an ed script
-    exemplar: "-e" "input.txt" "other.txt" in words_standard (reordered)
+    exemplar: "-e" "input.txt" "other.txt" in words_standard
+    | 4 only in this: 1,1512c, other content, second line, .
+    | 1516 only in ref: 1,1512c1,2, < aardvark, < abbreviation, < about, < abstract
     base:
       1,1512c1,2
       < aardvark
       < abbreviation
       < about
       < abstract
-            ...
+      < accept
+            ... (1510 more)
     flag:
       1,1512c
       other content
       second line
       .
   -l  # pass output through 'pr' to paginate it
-    exemplar: "-l" "input.txt" "other.txt" in words_minimal (+1716 lines)
+    exemplar: "-l" "input.txt" "other.txt" in words_minimal
+    | 333 only in this: , , 2026-05-14 03:06           diff -l input.txt other.txt            Page 1, , 
+    | 1515 shared
     base:
       1,1512c1
       < aardvark
       < abbreviation
       < about
       < abstract
-            ...
+      < accept
+            ... (1509 more)
     flag:
       
       
-      2026-05-13 23:42           diff -l input.txt other.txt            Page 1
+      2026-05-14 03:06           diff -l input.txt other.txt            Page 1
       
       
-            ...
+      1,1512c1
+            ... (1842 more)
   -n  # output an RCS format diff
-    exemplar: "-n" "input.txt" "other.txt" in words_standard (reordered)
+    exemplar: "-n" "input.txt" "other.txt" in words_standard
+    | 4 only in this: d1 1512, a1512 2, other content, second line
+    | 1516 only in ref: 1,1512c1,2, < aardvark, < abbreviation, < about, < abstract
     base:
       1,1512c1,2
       < aardvark
       < abbreviation
       < about
       < abstract
-            ...
+      < accept
+            ... (1510 more)
     flag:
       d1 1512
       a1512 2
       other content
       second line
   -q  # report only when files differ
-    exemplar: "-q" "input.txt" "other.txt" in words_standard (different)
+    exemplar: "-q" "input.txt" "other.txt" in words_standard
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1516 only in ref: 1,1512c1,2, < aardvark, < abbreviation, < about, < abstract
     base:
       1,1512c1,2
       < aardvark
       < abbreviation
       < about
       < abstract
-            ...
+      < accept
+            ... (1510 more)
     flag:
       Files input.txt and other.txt differ
   -t  # expand tabs to spaces in output
-    exemplar: "-t" "input.txt" "other.txt" in formatted_standard (-44 lines)
+    exemplar: "-t" "input.txt" "other.txt" in formatted_standard
+    | 6 only in this: <         indented with tab, <                 mixed tabs and spaces, < trailing        tab, <                 double tab indent, < has     multiple                tabs                    with    varying         widths
+    | 6 only in ref: < 	indented with tab, < 	 	mixed tabs and spaces, < trailing	tab, < 		double tab indent, < has	multiple		tabs			with	varying		widths
+    | 25 shared
     base:
-      1,27c1,2
-      < first line
+            ... (2 identical)
       < second line with trailing spaces
       < 	indented with tab
       <     indented with spaces
-            ...
+      < 	 	mixed tabs and spaces
+      < 
+      < blank line above
+            ... (23 more)
     flag:
-      1,27c1,2
-      < first line
+            ... (2 identical)
       < second line with trailing spaces
       <         indented with tab
       <     indented with spaces
-            ...
+      <                 mixed tabs and spaces
+      < 
+      < blank line above
+            ... (23 more)
   -u
-    exemplar: "-u" "input.txt" "other.txt" in words_minimal (+1516 lines, exit 127→1)
+    exemplar: "-u" "input.txt" "other.txt" in words_minimal
+    | 1516 only in this: --- input.txt	2026-05-14 03:06:48.142717324 -0700, +++ other.txt	2026-05-14 03:06:48.142741831 -0700, @@ -1,1512 +1 @@, -aardvark, -abbreviation
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
     base:
       1,1512c1
       < aardvark
       < abbreviation
       < about
       < abstract
-            ...
+      < accept
+            ... (1509 more)
     flag:
-      --- input.txt	2026-05-13 23:42:28.942276293 -0700
-      +++ other.txt	2026-05-13 23:42:28.942276293 -0700
+      --- input.txt	2026-05-14 03:06:48.142717324 -0700
+      +++ other.txt	2026-05-14 03:06:48.142741831 -0700
       @@ -1,1512 +1 @@
       -aardvark
       -abbreviation
-            ...
-  -v  # output version information and exit
-    exemplar: "-v" "input.txt" "other.txt" in words_standard (different)
-    base:
-      1,1512c1,2
-      < aardvark
-      < abbreviation
-      < about
-      < abstract
-            ...
-    flag:
-      diff (GNU diffutils) 3.10
-      Copyright (C) 2023 Free Software Foundation, Inc.
-      License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.
-      This is free software: you are free to change and redistribute it.
-      There is NO WARRANTY, to the extent permitted by law.
-            ...
+      -about
+            ... (1510 more)
   -y  # output in two columns
-    exemplar: "-y" "input.txt" "other.txt" in words_standard (+1441 lines)
+    exemplar: "-y" "input.txt" "other.txt" in words_standard
+    | 1512 only in this: aardvark						      |	other content, abbreviation						      |	second line, about							      <, abstract						      <, accept							      <
+    | 1516 only in ref: 1,1512c1,2, < aardvark, < abbreviation, < about, < abstract
     base:
       1,1512c1,2
       < aardvark
       < abbreviation
       < about
       < abstract
-            ...
+      < accept
+            ... (1510 more)
     flag:
       aardvark						      |	other content
       abbreviation						      |	second line
       about							      <
       abstract						      <
       accept							      <
-            ...
+      accepted						      <
+            ... (1506 more)
 
 ## Via combination (distinguishable when paired)
-  --color  e.g. "--color" "--unified" "input.txt" "other.txt"
-  --context  e.g. (pairwise evidence)
-  --horizon-lines  e.g. "--unified" "--horizon-lines=1" "input.txt" "other.txt"
-  --ignore-file-name-case  e.g. "-U" "1" "--ignore-file-name-case" "input.txt" "other.txt"
-  --label  e.g. "-u" "--label=test" "input.txt" "other.txt"
-  --left-column  e.g. "--left-column" "-u" "input.txt" "other.txt"
-  --no-dereference  e.g. "--no-dereference" "-U" "1" "input.txt" "other.txt"
-  --no-ignore-file-name-case  e.g. "--no-ignore-file-name-case" "-u" "input.txt" "other.txt"
-  --normal  e.g. (pairwise evidence)
-  --palette  e.g. "--palette=1" "-U" "1" "input.txt" "other.txt"
-  --speed-large-files  e.g. "-u" "--speed-large-files" "input.txt" "other.txt"
-  --strip-trailing-cr  e.g. "--unified" "--strip-trailing-cr" "input.txt" "other.txt"
-  --suppress-common-lines  e.g. "--suppress-common-lines" "-u" "input.txt" "other.txt"
-  --unidirectional-new-file  e.g. "--unidirectional-new-file" "-U" "1" "input.txt" "other.txt"
-  -1  e.g. "-W" "-1" "input.txt" "other.txt"
-  -B  e.g. "-B" "-u" "input.txt" "other.txt"
-  -C  e.g. (pairwise evidence)
-  -E  e.g. "-E" "-u" "input.txt" "other.txt"
-  -F  e.g. "-u" "-F" "1" "input.txt" "other.txt"
-  -N  e.g. "-N" "--unified" "input.txt" "other.txt"
-  -S  e.g. "-S" "input.txt" "-U" "1" "input.txt" "other.txt"
-  -Z  e.g. "-u" "-Z" "input.txt" "other.txt"
-  -a  e.g. "-a" "-U" "1" "input.txt" "other.txt"
-  -b  e.g. "-u" "-b" "input.txt" "other.txt"
-  -c  e.g. (pairwise evidence)
-  -d  e.g. "--unified" "-d" "input.txt" "other.txt"
-  -i  e.g. "-U" "1" "-i" "input.txt" "other.txt"
-  -p  e.g. "-p" "--unified" "input.txt" "other.txt"
-  -r  e.g. "-r" "--unified" "input.txt" "other.txt"
-  -s  e.g. "-s" "-U" "1" "input.txt" "other.txt"
-  -w  e.g. "-w" "--unified" "input.txt" "other.txt"
-  -x  e.g. "-x" ".*" "-u" "input.txt" "other.txt"
+  --color
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "-U" "1" "--color" "input.txt" "other.txt"
+  --context
+    | 78 only in this: *** input.txt	Thu May 14 03:06:48 2026, --- other.txt	Thu May 14 03:06:48 2026, ***************, *** 1,71 ****, ! 0
+    | 75 only in ref: 1,71c1,2, < 0, < 1, < 1.00, < $1.00
+    evidence: (pairwise evidence)
+  --horizon-lines  # keep NUM lines of the common prefix and suffix
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "--horizon-lines=1" "-U" "1" "input.txt" "other.txt"
+  --ignore-file-name-case  # ignore case when comparing file names
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "--ignore-file-name-case" "-u" "input.txt" "other.txt"
+  --label
+    | 1 only in this: Files test and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "-u" "--label=test" "input.txt" "other.txt"
+  --left-column  # output only the left column of common lines
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "--left-column" "-u" "input.txt" "other.txt"
+  --no-dereference  # don't follow symbolic links
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "--no-dereference" "-u" "input.txt" "other.txt"
+  --no-ignore-file-name-case  # consider case when comparing file names
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "--no-ignore-file-name-case" "-U" "1" "input.txt" "other.txt"
+  --normal  # output a normal diff (the default)
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: (pairwise evidence)
+  --palette  # the colors to use when --color is active; PALETTE is a colon-separated list of terminfo capabilities
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "--palette=1" "--unified" "input.txt" "other.txt"
+  --speed-large-files  # assume large files and many scattered small changes
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "-U" "1" "--speed-large-files" "input.txt" "other.txt"
+  --strip-trailing-cr  # strip trailing carriage return on input
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "--strip-trailing-cr" "-u" "input.txt" "other.txt"
+  --suppress-common-lines  # do not output common lines
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "--suppress-common-lines" "-u" "input.txt" "other.txt"
+  --unidirectional-new-file  # treat absent first files as empty
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "--unified" "--unidirectional-new-file" "input.txt" "other.txt"
+  -1
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    | exit: 1 → 2
+    | stderr: diff: invalid context length '-1'
+    evidence: "-W" "-1" "input.txt" "other.txt"
+  -B  # ignore changes where lines are all blank
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "-u" "-B" "input.txt" "other.txt"
+  -C
+    | 78 only in this: *** input.txt	Thu May 14 03:06:48 2026, --- other.txt	Thu May 14 03:06:48 2026, ***************, *** 1,71 ****, ! 0
+    | 75 only in ref: 1,71c1,2, < 0, < 1, < 1.00, < $1.00
+    evidence: "-C" "1" "-v" "input.txt" "other.txt"
+  -E  # ignore changes due to tab expansion
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "-U" "1" "-E" "input.txt" "other.txt"
+  -F  # show the most recent line matching RE
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "-F" "1" "--unified" "input.txt" "other.txt"
+  -N  # treat absent files as empty
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "-N" "-u" "input.txt" "other.txt"
+  -S  # start with FILE when comparing directories
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "-S" "input.txt" "-u" "input.txt" "other.txt"
+  -Z  # ignore white space at line end
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "-Z" "--unified" "input.txt" "other.txt"
+  -a  # treat all files as text
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "--unified" "-a" "input.txt" "other.txt"
+  -b  # ignore changes in the amount of white space
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "-b" "-u" "input.txt" "other.txt"
+  -c
+    | 78 only in this: *** input.txt	Thu May 14 03:06:48 2026, --- other.txt	Thu May 14 03:06:48 2026, ***************, *** 1,71 ****, ! 0
+    | 75 only in ref: 1,71c1,2, < 0, < 1, < 1.00, < $1.00
+    evidence: (pairwise evidence)
+  -d  # try hard to find a smaller set of changes
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "-d" "-U" "1" "input.txt" "other.txt"
+  -i  # ignore case differences in file contents
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "--unified" "-i" "input.txt" "other.txt"
+  -p  # show which C function each change is in
+    | 78 only in this: *** input.txt	Thu May 14 03:06:48 2026, --- other.txt	Thu May 14 03:06:48 2026, ***************, *** 1,71 ****, ! 0
+    | 75 only in ref: 1,71c1,2, < 0, < 1, < 1.00, < $1.00
+    evidence: "-U" "1" "-p" "input.txt" "other.txt"
+  -r  # recursively compare any subdirectories found
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "-u" "-r" "input.txt" "other.txt"
+  -s  # report when two files are the same
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "-s" "-u" "input.txt" "other.txt"
+  -v  # output version information and exit
+    | 8 only in this: diff (GNU diffutils) 3.10, Copyright (C) 2023 Free Software Foundation, Inc., License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>., This is free software: you are free to change and redistribute it., There is NO WARRANTY, to the extent permitted by law.
+    | 1518 only in ref: *** input.txt	Thu May 14 03:06:48 2026, --- other.txt	Thu May 14 03:06:48 2026, ***************, *** 1,1512 ****, ! aardvark
+    | exit: 1 → 0
+    evidence: "-C" "1" "-v" "input.txt" "other.txt"
+  -w  # ignore all white space
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "-w" "--unified" "input.txt" "other.txt"
+  -x  # exclude files that match PAT
+    | 1 only in this: Files input.txt and other.txt differ
+    | 1515 only in ref: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
+    evidence: "-u" "-x" ".*" "input.txt" "other.txt"
 

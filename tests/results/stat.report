@@ -1,106 +1,85 @@
 # Exploration: stat
 
 ## Rounds
-  round 0: 114 isolated cumulative, 17 identical in round (single-phase)
+  round 0: 111 isolated cumulative, 17 identical in round (single-phase)
 
 ## Observed: 7/7 flags
-  7 solo, 0 via combination
-  1 behavioral aliases detected
-  robustness: 7 robust, 0 moderate, 0 fragile
+  4 solo, 3 via combination
+  2 behavioral aliases detected
+  robustness: 10 robust, 0 moderate, 0 fragile
 
 Aliases: -L = --dereference, -f = --file-system, -t = --terse
 
 ## Solo (unique behavior)
   --cached  # specify how to use cached attributes; useful on remote file systems. See MODE below
-    exemplar: "--cached=default" "input.txt" in words_minimal (+8 lines, exit 127→0)
+    exemplar: "--cached=default" "input.txt" in words_minimal
+    | standalone
     base:
-        File: input.txt
-        Size: 10586     	Blocks: 24         IO Block: 4096   regular file
-      Device: 254,0	Inode: 148176902   Links: 1
-      Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-13 23:42:23.463049815 -0700
-            ...
     flag:
         File: input.txt
         Size: 10586     	Blocks: 24         IO Block: 4096   regular file
-      Device: 254,0	Inode: 148177029   Links: 1
+      Device: 254,0	Inode: 147324952   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-13 23:42:23.396237479 -0700
-            ...
+      Access: 2026-05-14 03:07:13.875833769 -0700
+      Modify: 2026-05-14 03:07:13.875833769 -0700
+            ... (2 more)
   --format
-    exemplar: "--format=%s" "input.txt" "other.txt" in words_minimal (reordered)
+    exemplar: "--format=%s" "input.txt" "other.txt" in words_minimal
+    | 2 only in this: 10586, 12
+    | 16 only in ref:   File: input.txt,   Size: 10586     	Blocks: 24         IO Block: 4096   regular file, Device: 254,0	Inode: 147327703   Links: 1, Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users), Access: 2026-05-14 03:07:13.878325957 -0700
     base:
         File: input.txt
         Size: 10586     	Blocks: 24         IO Block: 4096   regular file
-      Device: 254,0	Inode: 148179794   Links: 1
+      Device: 254,0	Inode: 147327703   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-13 23:42:23.398532673 -0700
-            ...
+      Access: 2026-05-14 03:07:13.878325957 -0700
+      Modify: 2026-05-14 03:07:13.878325957 -0700
+            ... (10 more)
     flag:
       10586
       12
   --printf  # like --format, but interpret backslash escapes, and do not output a mandatory trailing newline; if you want a newline, include \n in FORMAT
-    exemplar: "--printf=%s" "input.txt" "other.txt" in words_minimal (reordered)
+    exemplar: "--printf=%s" "input.txt" "other.txt" in words_minimal
+    | 1 only in this: 1058612
+    | 16 only in ref:   File: input.txt,   Size: 10586     	Blocks: 24         IO Block: 4096   regular file, Device: 254,0	Inode: 147327703   Links: 1, Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users), Access: 2026-05-14 03:07:13.878325957 -0700
     base:
         File: input.txt
         Size: 10586     	Blocks: 24         IO Block: 4096   regular file
-      Device: 254,0	Inode: 148179794   Links: 1
+      Device: 254,0	Inode: 147327703   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-13 23:42:23.398532673 -0700
-            ...
+      Access: 2026-05-14 03:07:13.878325957 -0700
+      Modify: 2026-05-14 03:07:13.878325957 -0700
+            ... (10 more)
     flag:
       1058612
-  -L  # follow links
-    exemplar: "-L" "input.txt" in words_minimal (+8 lines, exit 127→0)
-    base:
-        File: input.txt
-        Size: 10586     	Blocks: 24         IO Block: 4096   regular file
-      Device: 254,0	Inode: 148176902   Links: 1
-      Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-13 23:42:23.463049815 -0700
-            ...
-    flag:
-        File: input.txt
-        Size: 10586     	Blocks: 24         IO Block: 4096   regular file
-      Device: 254,0	Inode: 148176920   Links: 1
-      Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-13 23:42:23.396039976 -0700
-            ...
   -c  # --format=FORMAT   use the specified FORMAT instead of the default; output a newline after each use of FORMAT
-    exemplar: "-c" "input.txt" "other.txt" in words_minimal (different)
+    exemplar: "-c" "input.txt" "other.txt" in words_minimal
+    | 1 only in this: input.txt
+    | 16 only in ref:   File: input.txt,   Size: 10586     	Blocks: 24         IO Block: 4096   regular file, Device: 254,0	Inode: 147327703   Links: 1, Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users), Access: 2026-05-14 03:07:13.878325957 -0700
     base:
         File: input.txt
         Size: 10586     	Blocks: 24         IO Block: 4096   regular file
-      Device: 254,0	Inode: 148179794   Links: 1
+      Device: 254,0	Inode: 147327703   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-13 23:42:23.398532673 -0700
-            ...
+      Access: 2026-05-14 03:07:13.878325957 -0700
+      Modify: 2026-05-14 03:07:13.878325957 -0700
+            ... (10 more)
     flag:
       input.txt
+
+## Via combination (distinguishable when paired)
+  -L  # follow links
+    | 5 only in this:   File: ".",     ID: c63eb3646de0a34 Namelen: 255     Type: ext2/ext3, Block size: 4096       Fundamental block size: 4096, Blocks: Total: 1937552970 Free: 1606627102 Available: 1508961044, Inodes: Total: 244158464  Free: 239481751
+    | 8 only in ref:   File: .,   Size: 4096      	Blocks: 8          IO Block: 4096   directory, Device: 254,0	Inode: 147399296   Links: 2, Access: (0755/drwxr-xr-x)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users), Access: 2026-05-14 03:07:14.214739844 -0700
+    | stderr changed: stat: cannot read file system information for 'root:x:0:0:root:/root:/bin/bash': No such file or directory
+    evidence: "--cached=default" "--dereference" "input.txt" "other.txt"
   -f  # display file system status instead of file status
-    exemplar: "-f" "input.txt" in words_minimal (+5 lines, exit 127→0)
-    base:
-        File: input.txt
-        Size: 10586     	Blocks: 24         IO Block: 4096   regular file
-      Device: 254,0	Inode: 148176902   Links: 1
-      Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-13 23:42:23.463049815 -0700
-            ...
-    flag:
-        File: "input.txt"
-          ID: c63eb3646de0a34 Namelen: 255     Type: ext2/ext3
-      Block size: 4096       Fundamental block size: 4096
-      Blocks: Total: 1937552970 Free: 1606863524 Available: 1509197466
-      Inodes: Total: 244158464  Free: 239468853
+    | 5 only in this:   File: ".",     ID: c63eb3646de0a34 Namelen: 255     Type: ext2/ext3, Block size: 4096       Fundamental block size: 4096, Blocks: Total: 1937552970 Free: 1606627102 Available: 1508961044, Inodes: Total: 244158464  Free: 239481751
+    | 8 only in ref:   File: .,   Size: 4096      	Blocks: 8          IO Block: 4096   directory, Device: 254,0	Inode: 147399296   Links: 2, Access: (0755/drwxr-xr-x)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users), Access: 2026-05-14 03:07:14.214739844 -0700
+    | stderr changed: stat: cannot read file system information for 'root:x:0:0:root:/root:/bin/bash': No such file or directory
+    evidence: "--cached=default" "--file-system" "."
   -t  # print the information in terse form
-    exemplar: "-t" "input.txt" in words_minimal (+1 lines, exit 127→0)
-    base:
-        File: input.txt
-        Size: 10586     	Blocks: 24         IO Block: 4096   regular file
-      Device: 254,0	Inode: 148176902   Links: 1
-      Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-13 23:42:23.463049815 -0700
-            ...
-    flag:
-      input.txt 10586 24 81a4 1000 100 fe00 148177238 1 0 0 1778740943 1778740943 1778740943 1778740943 4096
+    | 1 only in this: . 4096 8 41ed 1000 100 fe00 147400134 2 0 0 1778753234 1778753234 1778753234 1778753234 4096
+    | 8 only in ref:   File: .,   Size: 4096      	Blocks: 8          IO Block: 4096   directory, Device: 254,0	Inode: 147399296   Links: 2, Access: (0755/drwxr-xr-x)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users), Access: 2026-05-14 03:07:14.214739844 -0700
+    evidence: "--cached=default" "-t" "input.txt" "subdir"
 

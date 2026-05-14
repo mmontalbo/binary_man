@@ -1,248 +1,309 @@
 # Exploration: grep
 
 ## Rounds
-  round 0: 77 isolated cumulative, 109 identical in round (single-phase)
+  round 0: 55 isolated cumulative, 108 identical in round (single-phase)
 
-## Observed: 45/49 flags
-  19 solo, 26 via combination
-  4 additional error-differentiated
-  robustness: 48 robust, 0 moderate, 0 fragile
+## Observed: 49/49 flags
+  6 solo, 43 via combination
+  robustness: 72 robust, 0 moderate, 0 fragile
 
 Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --devices, -E = --extended-regexp, -F = --fixed-strings, -G = --basic-regexp, -H = --with-filename, -L = --files-without-match, -P = --perl-regexp, -R = --dereference-recursive, -T = --initial-tab, -U = --binary, -Z = --null, -a = --text, -b = --byte-offset, -c = --count, -d = --directories, -e = --regexp, -f = --file, -h = --no-filename, -i = --ignore-case, -l = --files-with-matches, -m = --max-count, -n = --line-number, -o = --only-matching, -r = --recursive, -s = --no-messages, -v = --invert-match, -w = --word-regexp, -x = --line-regexp, -z = --null-data
 
 ## Solo (unique behavior)
   --exclude-from  # skip files that match any file pattern from FILE
-    exemplar: "--exclude-from=input.txt" "$(head -n1 input.txt)" "input.txt" in numbers_standard (different)
+    exemplar: "--exclude-from=input.txt" "$(head -n1 input.txt)" "input.txt" in numbers_standard
+    | identical
     base:
-      0
-      1.00
-      $1.00
-      1E02
-      1E+02
-            ...
+            ... (47 identical)
+      2.2250738585072011e-308
     flag:
-      0
-      1.00
-      $1.00
-      1E02
-      1E+02
-            ...
+            ... (47 identical)
+      2.2250738585072011e-308
   -A  # print NUM lines of trailing context
-    exemplar: "-A" "1" "$(head -n1 input.txt)" "input.txt" in numbers_standard (different)
+    exemplar: "-A" "1" "$(head -n1 input.txt)" "input.txt" in numbers_standard
+    | 11 only in this: 1, 1/2, --, -1, -1/2
+    | 48 shared
     base:
       0
       1.00
       $1.00
       1E02
       1E+02
-            ...
+      -1.00
+            ... (42 more)
     flag:
       0
       1
       1.00
       $1.00
       1/2
-            ...
+      --
+            ... (53 more)
   -B  # print NUM lines of leading context
-    exemplar: "-B" "1" "$(head -n1 input.txt)" "input.txt" in numbers_standard (different)
+    exemplar: "-B" "1" "$(head -n1 input.txt)" "input.txt" in numbers_standard
+    | 11 only in this: 1, --, 1E2, -1, --
+    | 48 shared
     base:
       0
       1.00
       $1.00
       1E02
       1E+02
-            ...
+      -1.00
+            ... (42 more)
     flag:
       0
       1
       1.00
       $1.00
       --
-            ...
+      1E2
+            ... (53 more)
   -C  # print NUM lines of output context
-    exemplar: "-C" "1" "$(head -n1 input.txt)" "input.txt" in numbers_standard (different)
+    exemplar: "-C" "1" "$(head -n1 input.txt)" "input.txt" in numbers_standard
+    | 12 only in this: 1, 1/2, 1E2, -1, -1/2
+    | 48 shared
     base:
       0
       1.00
       $1.00
       1E02
       1E+02
-            ...
+      -1.00
+            ... (42 more)
     flag:
       0
       1
       1.00
       $1.00
       1/2
-            ...
-  -F  # PATTERNS are strings
-    exemplar: "-F" "$(head -n1 input.txt)" "input.txt" in access_log_minimal (-47 lines)
-    base:
-    flag:
-      192.168.1.1 - frank [10/Jan/2024:08:12:31 +0000] "GET /index.html HTTP/1.1" 200 3842 "https://www.example.com/" "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
-  -H  # print file name with output lines
-    exemplar: "-H" "$(head -n1 input.txt)" "input.txt" in words_standard (-47 lines)
-    base:
-      aardvark
-    flag:
-      input.txt:aardvark
-  -L  # print only names of FILEs with no selected lines
-    exemplar: "-L" "$(head -n1 input.txt)" "input.txt" in access_log_minimal (+1 lines, exit 0→1)
-    base:
-    flag:
-      input.txt
-  -V  # display version information and exit
-    exemplar: "-V" "$(head -n1 input.txt)" "input.txt" in words_standard (different)
-    base:
-      aardvark
-    flag:
-      grep (GNU grep) 3.11
-      Copyright (C) 2023 Free Software Foundation, Inc.
-      License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.
-      This is free software: you are free to change and redistribute it.
-      There is NO WARRANTY, to the extent permitted by law.
-            ...
-  -b  # print the byte offset with output lines
-    exemplar: "-b" "$(head -n1 input.txt)" "input.txt" in words_standard (-47 lines)
-    base:
-      aardvark
-    flag:
-      0:aardvark
-  -c  # print only a count of selected lines per FILE
-    exemplar: "-c" "$(head -n1 input.txt)" "input.txt" in words_standard (different)
-    base:
-      aardvark
-    flag:
-      1
+      1E2
+            ... (54 more)
   -d  # how to handle directories; ACTION is 'read', 'recurse', or 'skip'
-    exemplar: "-d" "1" "$(head -n1 input.txt)" "input.txt" in words_standard (different)
+    exemplar: "-d" "1" "$(head -n1 input.txt)" "input.txt" in words_standard
+    | 1 only in ref: aardvark
+    | exit: 0 → 1
+    | stderr: grep: invalid argument '1' for '--directories'
     base:
       aardvark
     flag:
-  -l  # print only names of FILEs with selected lines
-    exemplar: "-l" "$(head -n1 input.txt)" "input.txt" in words_standard (different)
-    base:
-      aardvark
-    flag:
-      input.txt
   -m  # stop after NUM selected lines
-    exemplar: "-m" "2" "$(head -n1 input.txt)" "input.txt" in numbers_minimal (different)
+    exemplar: "-m" "2" "$(head -n1 input.txt)" "input.txt" in numbers_minimal
+    | 46 only in ref: $1.00, 1E02, 1E+02, -1.00, -$1.00
+    | 2 shared
     base:
-      0
+            ... (1 identical)
       1.00
       $1.00
       1E02
       1E+02
-            ...
+      -1.00
+      -$1.00
+            ... (41 more)
     flag:
-      0
+            ... (1 identical)
       1.00
-  -n  # print line number with output lines
-    exemplar: "-n" "$(head -n1 input.txt)" "input.txt" in words_standard (-47 lines)
-    base:
-      aardvark
-    flag:
-      1:aardvark
-  -o  # show only nonempty parts of lines that match
-    exemplar: "-o" "$(head -n1 input.txt)" "input.txt" in numbers_standard (different)
-    base:
-      0
-      1.00
-      $1.00
-      1E02
-      1E+02
-            ...
-    flag:
-      0
-      0
-      0
-      0
-      0
-            ...
-  -s  # suppress error messages
-    exemplar: "-s" "$(head -n1 input.txt)" "input.txt" in numbers_standard (different)
-    base:
-      0
-      1.00
-      $1.00
-      1E02
-      1E+02
-            ...
-    flag:
-      0
-      1.00
-      $1.00
-      1E02
-      1E+02
-            ...
-  -v  # select non-matching lines
-    exemplar: "-v" "$(head -n1 input.txt)" "input.txt" in words_standard (+1488 lines)
-    base:
-      aardvark
-    flag:
-      abbreviation
-      about
-      abstract
-      accept
-      accepted
-            ...
-  -w  # match only whole words
-    exemplar: "-w" "$(head -n1 input.txt)" "input.txt" in numbers_standard (different)
-    base:
-      0
-      1.00
-      $1.00
-      1E02
-      1E+02
-            ...
-    flag:
-      0
-      1/0
-      0/0
-      -0
-      -0.0
-            ...
-  -z  # a data line ends in 0 byte, not newline
-    exemplar: "-z" "$(head -n1 input.txt)" "input.txt" in words_standard (+1441 lines)
-    base:
-      aardvark
-    flag:
-      aardvark
-      abbreviation
-      about
-      abstract
-      accept
-            ...
 
 ## Via combination (distinguishable when paired)
-  --binary-files  e.g. (pairwise evidence)
-  --color  e.g. (pairwise evidence)
-  --colour  e.g. (pairwise evidence)
-  --exclude  e.g. (pairwise evidence)
-  --exclude-dir  e.g. (pairwise evidence)
-  --group-separator  e.g. (pairwise evidence)
-  --include  e.g. (pairwise evidence)
-  --label  e.g. (pairwise evidence)
-  --line-buffered  e.g. (pairwise evidence)
-  --no-group-separator  e.g. (pairwise evidence)
-  --no-ignore-case  e.g. (pairwise evidence)
-  --quiet  e.g. (pairwise evidence)
-  --silent  e.g. (pairwise evidence)
-  -1  e.g. "-B" "-1" "$(head -n1 input.txt)" "input.txt"
-  -D  e.g. (pairwise evidence)
-  -E  e.g. (pairwise evidence)
-  -G  e.g. (pairwise evidence)
-  -I  e.g. "-e" "-I" "$(head -n1 input.txt)" "input.txt"
-  -P  e.g. (pairwise evidence)
-  -R  e.g. (pairwise evidence)
-  -T  e.g. (pairwise evidence)
-  -U  e.g. (pairwise evidence)
-  -Z  e.g. (pairwise evidence)
-  -a  e.g. "-e" "-a" "$(head -n1 input.txt)" "input.txt"
-  -e  e.g. "-e" "-o" "$(head -n1 input.txt)" "input.txt"
-  -h  e.g. "-e" "-h" "$(head -n1 input.txt)" "input.txt"
-  -i  e.g. (pairwise evidence)
-  -q  e.g. (pairwise evidence)
-  -r  e.g. "-e" "-r" "$(head -n1 input.txt)" "input.txt"
-  -x  e.g. (pairwise evidence)
+  --binary-files  # assume that binary files are TYPE; TYPE is 'binary', 'text', or 'without-match'
+    | 1 only in ref: root:x:0:0:root:/root:/bin/bash
+    | exit: 0 → 2
+    | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
+    evidence: (pairwise evidence)
+  --color
+    | 1 only in ref: root:x:0:0:root:/root:/bin/bash
+    | exit: 0 → 2
+    | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
+    evidence: (pairwise evidence)
+  --colour
+    | 1 only in ref: root:x:0:0:root:/root:/bin/bash
+    | exit: 0 → 2
+    | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
+    evidence: (pairwise evidence)
+  --exclude  # skip files that match GLOB
+    | 1 only in ref: aardvark
+    | exit: 0 → 1
+    evidence: (pairwise evidence)
+  --exclude-dir  # skip directories that match GLOB
+    | 1 only in ref: root:x:0:0:root:/root:/bin/bash
+    | exit: 0 → 2
+    | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
+    evidence: (pairwise evidence)
+  --group-separator  # print SEP on line between matches with context
+    | 1 only in ref: root:x:0:0:root:/root:/bin/bash
+    | exit: 0 → 2
+    | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
+    evidence: (pairwise evidence)
+  --include  # search only files that match GLOB (a file pattern)
+    | 1 only in ref: aardvark
+    | exit: 0 → 1
+    evidence: (pairwise evidence)
+  --label  # use LABEL as the standard input file name prefix
+    | 1 only in ref: root:x:0:0:root:/root:/bin/bash
+    | exit: 0 → 2
+    | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
+    evidence: (pairwise evidence)
+  --line-buffered  # flush output on every line
+    | 1 only in ref: root:x:0:0:root:/root:/bin/bash
+    | exit: 0 → 2
+    | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
+    evidence: (pairwise evidence)
+  --no-group-separator  # do not print separator for matches with context
+    | 1 only in ref: root:x:0:0:root:/root:/bin/bash
+    | exit: 0 → 2
+    | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
+    evidence: (pairwise evidence)
+  --no-ignore-case  # do not ignore case distinctions (default)
+    | 1 only in ref: root:x:0:0:root:/root:/bin/bash
+    | exit: 0 → 2
+    | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
+    evidence: (pairwise evidence)
+  --quiet
+    | 1 only in ref: aardvark
+    evidence: (pairwise evidence)
+  --silent
+    | 1 only in ref: aardvark
+    evidence: (pairwise evidence)
+  -1
+    | 1 only in ref: aardvark
+    | exit: 0 → 2
+    | stderr: grep: -1: invalid context length argument
+    evidence: "-B" "-1" "$(head -n1 input.txt)" "input.txt"
+  -D  # how to handle devices, FIFOs and sockets; ACTION is 'read' or 'skip'
+    | 1 only in ref: root:x:0:0:root:/root:/bin/bash
+    | exit: 0 → 2
+    | stderr: grep: read: No such file or directory
+    evidence: (pairwise evidence)
+  -E  # PATTERNS are extended regular expressions
+    | 1 only in ref: aardvark
+    | exit: 0 → 2
+    | stderr: grep: conflicting matchers specified
+    evidence: (pairwise evidence)
+  -F  # PATTERNS are strings
+    | 1 only in ref: aardvark
+    | exit: 0 → 2
+    | stderr: grep: conflicting matchers specified
+    evidence: (pairwise evidence)
+  -G  # PATTERNS are basic regular expressions
+    | 1 only in ref: aardvark
+    | exit: 0 → 2
+    | stderr: grep: conflicting matchers specified
+    evidence: (pairwise evidence)
+  -H  # print file name with output lines
+    | 1 only in this: input.txt:0
+    | 1 only in ref: 0
+    evidence: (pairwise evidence)
+  -I  # equivalent to --binary-files=without-match
+    | 1 only in ref: root:x:0:0:root:/root:/bin/bash
+    | exit: 0 → 2
+    | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
+    evidence: "-e" "-I" "$(head -n1 input.txt)" "input.txt"
+  -L  # print only names of FILEs with no selected lines
+    | 1 only in ref: aardvark
+    evidence: (pairwise evidence)
+  -P  # PATTERNS are Perl regular expressions
+    | 1 only in ref: aardvark
+    | exit: 0 → 2
+    | stderr: grep: conflicting matchers specified
+    evidence: (pairwise evidence)
+  -R  # likewise, but follow all symlinks
+    | 1 only in ref: root:x:0:0:root:/root:/bin/bash
+    | exit: 0 → 2
+    | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
+    evidence: (pairwise evidence)
+  -T  # make tabs line up (if needed)
+    | 1 only in ref: root:x:0:0:root:/root:/bin/bash
+    | exit: 0 → 2
+    | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
+    evidence: (pairwise evidence)
+  -U  # do not strip CR characters at EOL (MSDOS/Windows)
+    | 1 only in ref: root:x:0:0:root:/root:/bin/bash
+    | exit: 0 → 2
+    | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
+    evidence: (pairwise evidence)
+  -V  # display version information and exit
+    | 10 only in this: grep (GNU grep) 3.11, Copyright (C) 2023 Free Software Foundation, Inc., License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>., This is free software: you are free to change and redistribute it., There is NO WARRANTY, to the extent permitted by law.
+    | exit: 1 → 0
+    evidence: "-f" "/dev/null" "-V" "$(head -n1 input.txt)" "input.txt"
+  -Z  # print 0 byte after FILE name
+    | 1 only in ref: root:x:0:0:root:/root:/bin/bash
+    | exit: 0 → 2
+    | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
+    evidence: (pairwise evidence)
+  -a  # equivalent to --binary-files=text
+    | 1 only in ref: root:x:0:0:root:/root:/bin/bash
+    | exit: 0 → 2
+    | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
+    evidence: "-e" "-a" "$(head -n1 input.txt)" "input.txt"
+  -b  # print the byte offset with output lines
+    | 1 only in this: 0:0
+    | 1 only in ref: 0
+    evidence: "-e" "-b" "$(head -n1 input.txt)" "input.txt"
+  -c  # print only a count of selected lines per FILE
+    | 1 only in this: 1
+    | 1 only in ref: aardvark
+    evidence: "-e" "-c" "$(head -n1 input.txt)" "input.txt"
+  -e  # use PATTERNS for matching
+    | 1 only in ref: root:x:0:0:root:/root:/bin/bash
+    | exit: 0 → 2
+    | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
+    evidence: "-e" "-w" "$(head -n1 input.txt)" "input.txt"
+  -f  # take PATTERNS from FILE
+    | 1 only in ref: aardvark
+    | exit: 0 → 1
+    evidence: "-f" "/dev/null" "-V" "$(head -n1 input.txt)" "input.txt"
+  -h  # suppress the file name prefix on output
+    | 1 only in ref: root:x:0:0:root:/root:/bin/bash
+    | exit: 0 → 2
+    | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
+    evidence: "-e" "-h" "$(head -n1 input.txt)" "input.txt"
+  -i  # ignore case distinctions in patterns and data
+    | 1 only in ref: aardvark
+    | exit: 0 → 1
+    evidence: (pairwise evidence)
+  -l  # print only names of FILEs with selected lines
+    | 1 only in this: input.txt
+    | 1 only in ref: aardvark
+    evidence: (pairwise evidence)
+  -n  # print line number with output lines
+    | 1 only in this: 1:0
+    | 1 only in ref: 0
+    evidence: "-e" "-n" "$(head -n1 input.txt)" "input.txt"
+  -o  # show only nonempty parts of lines that match
+    | 1 only in ref: root:x:0:0:root:/root:/bin/bash
+    | exit: 0 → 2
+    | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
+    evidence: "-e" "-o" "$(head -n1 input.txt)" "input.txt"
+  -q
+    | 1 only in ref: aardvark
+    evidence: (pairwise evidence)
+  -r  # like --directories=recurse
+    | 1 only in ref: root:x:0:0:root:/root:/bin/bash
+    | exit: 0 → 2
+    | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
+    evidence: "-e" "-r" "$(head -n1 input.txt)" "input.txt"
+  -s  # suppress error messages
+    | 1 only in this: input.txt:git:x:998:998:git daemon user:/srv/git:/usr/bin/git-shell
+    | 1 only in ref: root:x:0:0:root:/root:/bin/bash
+    | exit: 0 → 2
+    | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
+    evidence: "-e" "-s" "$(head -n1 input.txt)" "input.txt"
+  -v  # select non-matching lines
+    | 1 only in this: 1
+    | 1 only in ref: 0
+    evidence: (pairwise evidence)
+  -w  # match only whole words
+    | 1 only in ref: root:x:0:0:root:/root:/bin/bash
+    | exit: 0 → 2
+    | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
+    evidence: "-e" "-w" "$(head -n1 input.txt)" "input.txt"
+  -x  # match only whole lines
+    | 1 only in ref: root:x:0:0:root:/root:/bin/bash
+    | exit: 0 → 2
+    | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
+    evidence: (pairwise evidence)
+  -z  # a data line ends in 0 byte, not newline
+    | 71 only in this: 1, 1.00, $1.00, 1/2, 1E2
+    | 1 shared
+    evidence: (pairwise evidence)
 

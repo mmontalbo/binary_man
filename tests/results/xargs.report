@@ -1,37 +1,44 @@
 # Exploration: xargs
 
 ## Rounds
-  round 0: 58 isolated cumulative, 87 identical in round (single-phase)
+  round 0: 63 isolated cumulative, 107 identical in round (single-phase)
 
 ## Observed: 16/21 flags
   7 solo, 9 via combination
   2 additional error-differentiated
-  robustness: 17 robust, 0 moderate, 0 fragile
+  robustness: 23 robust, 0 moderate, 0 fragile
 
 Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = --delimiter, -n = --max-args, -o = --open-tty, -p = --interactive, -r = --no-run-if-empty, -s = --max-chars, -t = --verbose, -x = --exit
 
 ## Solo (unique behavior)
   --show-limits  # show limits on command-line length
-    exemplar: "--show-limits" "echo" "input.txt" in words_standard (different)
+    exemplar: "--show-limits" in words_minimal / stdin
+    | stderr: Your environment variables take up 23044 bytes
     base:
-      input.txt
+      cherry apple banana
     flag:
-      input.txt
+      cherry apple banana
   -L  # use at most MAX-LINES non-blank input lines per command line
-    exemplar: "-L" "2" "echo" "input.txt" in passwd_minimal / stdin (+1 lines)
+    exemplar: "-L" "2" "echo" "input.txt" in passwd_minimal / stdin
+    | 2 only in this: input.txt a,b,c d:e:f, input.txt g h i
+    | 1 only in ref: input.txt a,b,c d:e:f g h i
     base:
       input.txt a,b,c d:e:f g h i
     flag:
       input.txt a,b,c d:e:f
       input.txt g h i
   -a  # read arguments from FILE, not standard input
-    exemplar: "-a" "input.txt" "echo" "input.txt" in words_standard (reordered)
+    exemplar: "-a" "other.txt" "echo" "input.txt" in words_minimal
+    | 1 only in this: input.txt hello world
+    | 1 only in ref: input.txt
     base:
       input.txt
     flag:
-      input.txt aardvark abbreviation about abstract accept accepted accepting access accommodate acknowledge across Africa afternoon again against aggregate ahead algorithm Alice all already also although always Amazon American among an and another answer Apache apostrophe Apple application approximately architect Argentina around arrange Asia assembly at Australia available awkward azure back balance banana bandwidth Barcelona be because been before beginning Beijing believe bell-tower below benchmark beneath Berlin best between beyond bicycle billion binary birthday black blue Bob Boolean both boundary breakfast bridge brilliant brother-in-law Budapest buffalo build business but by café California came can Canada cannot
+      input.txt hello world
   -n  # use at most MAX-ARGS arguments per command line
-    exemplar: "-n" "2" "echo" "input.txt" in passwd_minimal / stdin (+2 lines)
+    exemplar: "-n" "2" "echo" "input.txt" in passwd_minimal / stdin
+    | 3 only in this: input.txt a,b,c d:e:f, input.txt g h, input.txt i
+    | 1 only in ref: input.txt a,b,c d:e:f g h i
     base:
       input.txt a,b,c d:e:f g h i
     flag:
@@ -40,33 +47,63 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
       input.txt i
   -o  # Reopen stdin as /dev/tty in the child process before executing the command; useful to run an interactive application.
   -r  # if there are no arguments, then do not run COMMAND; if this option is not given, COMMAND will be run at least once
-    exemplar: "-r" in words_minimal / stdin (+1 lines)
-    base:
-      cherry apple banana
-    flag:
-      cherry apple banana
+    exemplar: "-r" in passwd_standard
+    | 1 only in ref: 
   -s  # limit length of command line to MAX-CHARS
-    exemplar: "-s" "100" "echo" "input.txt" in words_standard (different)
-    base:
-      input.txt
-    flag:
-      input.txt
+    exemplar: "-s" "1" in passwd_standard
+    | 1 only in ref: 
+    | exit: 0 → 1
+    | stderr: xargs: option requires an argument -- 's'
   -t  # print commands before executing them
-    exemplar: "-t" "echo" "input.txt" in words_standard (different)
+    exemplar: "-t" in words_minimal / stdin
+    | stderr: /nix/store/n9gh8gxx5xx51ihgll2l20ar9b2vmgzy-coreutils-9.5/bin/echo cherry apple banana
     base:
-      input.txt
+      cherry apple banana
     flag:
-      input.txt
+      cherry apple banana
 
 ## Via combination (distinguishable when paired)
-  --eof  e.g. (pairwise evidence)
-  --process-slot-var  e.g. (pairwise evidence)
-  --replace  e.g. (pairwise evidence)
-  -0  e.g. (pairwise evidence)
-  -P  e.g. (pairwise evidence)
-  -e  e.g. (pairwise evidence)
-  -i  e.g. (pairwise evidence)
-  -l  e.g. "-l" "-o" "echo" "input.txt"
-  -p  e.g. (pairwise evidence)
-  -x  e.g. (pairwise evidence)
+  --eof
+    | 1 only in this: input.txt root:x:0:0:root:/root:/bin/bash daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin bin:x:2:2:bin:/bin:/usr/sbin/nologin sys:x:3:3:sys:/dev:/usr/sbin/nologin sync:x:4:65534:sync:/bin:/bin/sync games:x:5:60:games:/usr/games:/usr/sbin/nologin man:x:6:12:man:/var/cache/man:/usr/sbin/nologin lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin mail:x:8:8:mail:/var/mail:/usr/sbin/nologin news:x:9:9:news:/var/spool/news:/usr/sbin/nologin uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin proxy:x:13:13:proxy:/bin:/usr/sbin/nologin www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin backup:x:34:34:backup:/var/backups:/usr/sbin/nologin nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin sshd:x:100:65534::/run/sshd:/usr/sbin/nologin alice:x:1000:1000:Alice Johnson,,,:/home/alice:/bin/bash bob:x:1001:1001:Bob Smith,Room 42,x1234,:/home/bob:/bin/zsh charlie:x:1002:1002:Charlie Brown:/home/charlie:/bin/bash diana:x:1003:1003:Diana Prince:/home/diana:/usr/bin/fish eve:x:1004:1004:Eve Wilson:/home/eve:/bin/bash frank:x:1005:1005:Frank Miller:/home/frank:/bin/bash grace:x:1006:1006:Grace Hopper:/home/grace:/bin/bash _postfix:x:105:109::/var/spool/postfix:/usr/sbin/nologin systemd-network:x:101:102:systemd Network Management,,,:/run/systemd:/usr/sbin/nologin messagebus:x:102:106::/nonexistent:/usr/sbin/nologin postgres:x:106:112:PostgreSQL administrator,,,:/var/lib/postgresql:/bin/bash redis:x:107:113::/var/lib/redis:/usr/sbin/nologin mysql:x:108:114:MySQL Server,,,:/nonexistent:/bin/false git:x:998:998:git daemon user:/srv/git:/usr/bin/git-shell
+    | 1 only in ref: input.txt
+    evidence: (pairwise evidence)
+  --process-slot-var  # set environment variable VAR in child processes
+    | 1 only in ref: 
+    | exit: 0 → 1
+    | stderr: xargs: failed to unset environment variable : Invalid argument
+    evidence: (pairwise evidence)
+  --replace
+    | 1 only in ref: 
+    evidence: "--replace={}" "-o" "echo" "input.txt"
+  -0  # items are separated by a null, not whitespace; disables quote and backslash processing and logical EOF processing
+    | 72 only in this: 0, 1, 1.00, $1.00, 1/2
+    | 1 only in ref: 0 1 1.00 $1.00 1/2 1E2 1E02 1E+02 -1 -1.00 -$1.00 -1/2 -1E2 -1E02 -1E+02 1/0 0/0 -2147483648/-1 -9223372036854775808/-1 -0 -0.0 +0 +0.0 0.00 0..0 . 0.0.0 0,00 0,,0 , 0,0,0 0.0/0 1.0/0.0 0.0/0.0 1,0/0,0 0,0/0,0 --1 - -. -, 999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999 NaN Infinity -Infinity INF 1#INF -1#IND 1#QNAN 1#SNAN 1#IND 0x0 0xffffffff 0xffffffffffffffff 0xabad1dea 123456789012345678901234567890123456789 1,000.00 1 000.00
+    | exit: 1 → 0
+    | stderr removed
+    evidence: "-0" "-o" "echo" "input.txt"
+  -P  # run at most MAX-PROCS processes at a time
+    | 1 only in ref: 
+    | exit: 0 → 1
+    | stderr: xargs: option requires an argument -- 'P'
+    evidence: "-P" "1" "-o" "echo" "input.txt"
+  -e
+    | 1 only in this: input.txt root:x:0:0:root:/root:/bin/bash daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin bin:x:2:2:bin:/bin:/usr/sbin/nologin sys:x:3:3:sys:/dev:/usr/sbin/nologin sync:x:4:65534:sync:/bin:/bin/sync games:x:5:60:games:/usr/games:/usr/sbin/nologin man:x:6:12:man:/var/cache/man:/usr/sbin/nologin lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin mail:x:8:8:mail:/var/mail:/usr/sbin/nologin news:x:9:9:news:/var/spool/news:/usr/sbin/nologin uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin proxy:x:13:13:proxy:/bin:/usr/sbin/nologin www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin backup:x:34:34:backup:/var/backups:/usr/sbin/nologin nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin sshd:x:100:65534::/run/sshd:/usr/sbin/nologin alice:x:1000:1000:Alice Johnson,,,:/home/alice:/bin/bash bob:x:1001:1001:Bob Smith,Room 42,x1234,:/home/bob:/bin/zsh charlie:x:1002:1002:Charlie Brown:/home/charlie:/bin/bash diana:x:1003:1003:Diana Prince:/home/diana:/usr/bin/fish eve:x:1004:1004:Eve Wilson:/home/eve:/bin/bash frank:x:1005:1005:Frank Miller:/home/frank:/bin/bash grace:x:1006:1006:Grace Hopper:/home/grace:/bin/bash _postfix:x:105:109::/var/spool/postfix:/usr/sbin/nologin systemd-network:x:101:102:systemd Network Management,,,:/run/systemd:/usr/sbin/nologin messagebus:x:102:106::/nonexistent:/usr/sbin/nologin postgres:x:106:112:PostgreSQL administrator,,,:/var/lib/postgresql:/bin/bash redis:x:107:113::/var/lib/redis:/usr/sbin/nologin mysql:x:108:114:MySQL Server,,,:/nonexistent:/bin/false git:x:998:998:git daemon user:/srv/git:/usr/bin/git-shell
+    | 1 only in ref: input.txt
+    evidence: "-o" "-e" "echo" "input.txt"
+  -i
+    | 57 only in this: , , , , 
+    | 1 only in ref: 0 1 1.00 $1.00 1/2 1E2 1E02 1E+02 -1 -1.00 -$1.00 -1/2 -1E2 -1E02 -1E+02 1/0 0/0 -2147483648/-1 -9223372036854775808/-1 -0 -0.0 +0 +0.0 0.00 0..0 . 0.0.0 0,00 0,,0 , 0,0,0 0.0/0 1.0/0.0 0.0/0.0 1,0/0,0 0,0/0,0 --1 - -. -, 999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999 NaN Infinity -Infinity INF 1#INF -1#IND 1#QNAN 1#SNAN 1#IND 0x0 0xffffffff 0xffffffffffffffff 0xabad1dea 123456789012345678901234567890123456789 1,000.00 1 000.00
+    evidence: "-a" "input.txt" "-i" "echo"
+  -l
+    | 57 only in this: 0, 1, 1.00, $1.00, 1/2
+    | 1 only in ref: 0 1 1.00 $1.00 1/2 1E2 1E02 1E+02 -1 -1.00 -$1.00 -1/2 -1E2 -1E02 -1E+02 1/0 0/0 -2147483648/-1 -9223372036854775808/-1 -0 -0.0 +0 +0.0 0.00 0..0 . 0.0.0 0,00 0,,0 , 0,0,0 0.0/0 1.0/0.0 0.0/0.0 1,0/0,0 0,0/0,0 --1 - -. -, 999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999 NaN Infinity -Infinity INF 1#INF -1#IND 1#QNAN 1#SNAN 1#IND 0x0 0xffffffff 0xffffffffffffffff 0xabad1dea 123456789012345678901234567890123456789 1,000.00 1 000.00
+    evidence: "-a" "input.txt" "-l"
+  -p  # prompt before running commands
+    | 1 only in ref: 
+    | exit: 0 → 1
+    | stderr: /nix/store/n9gh8gxx5xx51ihgll2l20ar9b2vmgzy-coreutils-9.5/bin/echoxargs: failed to open /dev/tty for reading: No such device or address
+    evidence: (pairwise evidence)
+  -x  # exit if the size (see -s) is exceeded
+    | 1 only in ref: aardvark abbreviation about abstract accept accepted accepting access accommodate acknowledge across Africa afternoon again against aggregate ahead algorithm Alice all already also although always Amazon American among an and another answer Apache apostrophe Apple application approximately architect Argentina around arrange Asia assembly at Australia available awkward azure back balance banana bandwidth Barcelona be because been before beginning Beijing believe bell-tower below benchmark beneath Berlin best between beyond bicycle billion binary birthday black blue Bob Boolean both boundary breakfast bridge brilliant brother-in-law Budapest buffalo build business but by café California came can Canada cannot
+    evidence: (pairwise evidence)
 

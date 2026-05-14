@@ -4,68 +4,89 @@
   round 0: 29 isolated cumulative, 14 identical in round (single-phase)
 
 ## Observed: 4/4 flags
-  3 solo, 1 via combination
-  3 additional error-differentiated
+  4 solo, 0 via combination
   1 behavioral aliases detected
   robustness: 4 robust, 0 moderate, 0 fragile
 
 ## Solo (unique behavior)
   -D
-    exemplar: "-D" "input.txt" "other.txt" in words_minimal (different)
+    exemplar: "-D" "input.txt" "other.txt" in words_minimal
+    | 1 only in ref: input.txt
+    | 1 shared
+    | stderr: find: Ignoring unrecognised debug flag 'input.txt'
     base:
       input.txt
       other.txt
     flag:
       other.txt
   -N
-    exemplar: "-N" in words_standard (different)
+    exemplar: "-N" in words_standard
+    | 12 only in ref: ., ./b.txt, ./exec.sh, ./a.txt, ./input.txt
+    | exit: 0 → 1
+    | stderr: find: unknown predicate `-N'
     base:
       .
       ./b.txt
       ./exec.sh
       ./a.txt
       ./input.txt
-            ...
+      ./subdir
+            ... (6 more)
     flag:
   -a
-    exemplar: "-a" in words_standard (different)
+    exemplar: "-a" in words_standard
+    | 12 only in ref: ., ./b.txt, ./exec.sh, ./a.txt, ./input.txt
+    | exit: 0 → 1
+    | stderr: find: invalid expression
+    | you have used a binary operator '-a' with nothing before it.
     base:
       .
       ./b.txt
       ./exec.sh
       ./a.txt
       ./input.txt
-            ...
+      ./subdir
+            ... (6 more)
     flag:
   -name
-    exemplar: "." "-name" "*.txt" in passwd_minimal (different)
+    exemplar: "." "-name" "*.txt" in passwd_minimal
+    | standalone
     base:
-      (no base)
     flag:
       ./input.txt
       ./other.txt
   -o
-    exemplar: "-o" in words_standard (different)
+    exemplar: "-o" in words_standard
+    | 12 only in ref: ., ./b.txt, ./exec.sh, ./a.txt, ./input.txt
+    | exit: 0 → 1
+    | stderr: find: invalid expression
+    | you have used a binary operator '-o' with nothing before it.
     base:
       .
       ./b.txt
       ./exec.sh
       ./a.txt
       ./input.txt
-            ...
+      ./subdir
+            ... (6 more)
     flag:
   -type
-    exemplar: "." "-type" "f" in words_standard (+7 lines)
+    exemplar: "." "-type" "f" in words_standard
+    | standalone
     base:
-      (no base)
     flag:
       ./b.txt
       ./exec.sh
       ./a.txt
       ./input.txt
       ./subdir/nested.txt
-            ...
+      ./readonly.dat
+            ... (3 more)
 
 ## Via combination (distinguishable when paired)
-  -print  e.g. "-N" "." "-print"
+  -print
+    | 3 only in ref: ., ./input.txt, ./other.txt
+    | exit: 0 → 1
+    | stderr: find: paths must precede expression: `.'
+    evidence: "-N" "." "-print"
 
