@@ -203,7 +203,7 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
     | 1 only in this: 0000001
     | exit: 1 → 0
     | stderr removed
-    evidence: "-j" "1" "-d" "input.txt"
+    evidence: "-j" "1" "-d" "$(head -n1 input.txt)" "input.txt"
   -o  # same as -t o2, select octal 2-byte units
     | 1 only in this: 0000001
     | exit: 1 → 0
@@ -213,7 +213,7 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
     | 1 only in this: 0000001
     | exit: 1 → 0
     | stderr removed
-    evidence: "-j" "1" "-s" "input.txt" "subdir"
+    evidence: "-j" "1" "-s" "input.txt"
   -v  # do not use * to mark line suppression
     | 1 only in this: 0000001
     | exit: 1 → 0

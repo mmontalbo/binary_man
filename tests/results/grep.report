@@ -247,7 +247,7 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
     | 1 only in ref: root:x:0:0:root:/root:/bin/bash
     | exit: 0 → 2
     | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
-    evidence: "-e" "-w" "$(head -n1 input.txt)" "input.txt"
+    evidence: "-e" "-o" "$(head -n1 input.txt)" "input.txt"
   -f  # take PATTERNS from FILE
     | 1 only in ref: aardvark
     | exit: 0 → 1

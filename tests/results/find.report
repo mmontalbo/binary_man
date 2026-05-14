@@ -50,7 +50,8 @@
     flag:
   -name
     exemplar: "." "-name" "*.txt" in passwd_minimal
-    | standalone
+    | stdout: 2 lines
+    | exit 0
     base:
     flag:
       ./input.txt
@@ -72,7 +73,8 @@
     flag:
   -type
     exemplar: "." "-type" "f" in words_standard
-    | standalone
+    | stdout: 9 lines
+    | exit 0
     base:
     flag:
       ./b.txt
@@ -88,5 +90,5 @@
     | 3 only in ref: ., ./input.txt, ./other.txt
     | exit: 0 → 1
     | stderr: find: paths must precede expression: `.'
-    evidence: "-N" "." "-print"
+    evidence: "-D" "." "-print"
 

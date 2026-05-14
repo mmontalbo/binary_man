@@ -1,7 +1,7 @@
 # Exploration: xargs
 
 ## Rounds
-  round 0: 63 isolated cumulative, 107 identical in round (single-phase)
+  round 0: 57 isolated cumulative, 106 identical in round (single-phase)
 
 ## Observed: 16/21 flags
   7 solo, 9 via combination
@@ -74,7 +74,7 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
     evidence: (pairwise evidence)
   --replace
     | 1 only in ref: 
-    evidence: "--replace={}" "-o" "echo" "input.txt"
+    evidence: (pairwise evidence)
   -0  # items are separated by a null, not whitespace; disables quote and backslash processing and logical EOF processing
     | 72 only in this: 0, 1, 1.00, $1.00, 1/2
     | 1 only in ref: 0 1 1.00 $1.00 1/2 1E2 1E02 1E+02 -1 -1.00 -$1.00 -1/2 -1E2 -1E02 -1E+02 1/0 0/0 -2147483648/-1 -9223372036854775808/-1 -0 -0.0 +0 +0.0 0.00 0..0 . 0.0.0 0,00 0,,0 , 0,0,0 0.0/0 1.0/0.0 0.0/0.0 1,0/0,0 0,0/0,0 --1 - -. -, 999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999 NaN Infinity -Infinity INF 1#INF -1#IND 1#QNAN 1#SNAN 1#IND 0x0 0xffffffff 0xffffffffffffffff 0xabad1dea 123456789012345678901234567890123456789 1,000.00 1 000.00
@@ -85,19 +85,19 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
     | 1 only in ref: 
     | exit: 0 → 1
     | stderr: xargs: option requires an argument -- 'P'
-    evidence: "-P" "1" "-o" "echo" "input.txt"
+    evidence: (pairwise evidence)
   -e
     | 1 only in this: input.txt root:x:0:0:root:/root:/bin/bash daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin bin:x:2:2:bin:/bin:/usr/sbin/nologin sys:x:3:3:sys:/dev:/usr/sbin/nologin sync:x:4:65534:sync:/bin:/bin/sync games:x:5:60:games:/usr/games:/usr/sbin/nologin man:x:6:12:man:/var/cache/man:/usr/sbin/nologin lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin mail:x:8:8:mail:/var/mail:/usr/sbin/nologin news:x:9:9:news:/var/spool/news:/usr/sbin/nologin uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin proxy:x:13:13:proxy:/bin:/usr/sbin/nologin www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin backup:x:34:34:backup:/var/backups:/usr/sbin/nologin nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin sshd:x:100:65534::/run/sshd:/usr/sbin/nologin alice:x:1000:1000:Alice Johnson,,,:/home/alice:/bin/bash bob:x:1001:1001:Bob Smith,Room 42,x1234,:/home/bob:/bin/zsh charlie:x:1002:1002:Charlie Brown:/home/charlie:/bin/bash diana:x:1003:1003:Diana Prince:/home/diana:/usr/bin/fish eve:x:1004:1004:Eve Wilson:/home/eve:/bin/bash frank:x:1005:1005:Frank Miller:/home/frank:/bin/bash grace:x:1006:1006:Grace Hopper:/home/grace:/bin/bash _postfix:x:105:109::/var/spool/postfix:/usr/sbin/nologin systemd-network:x:101:102:systemd Network Management,,,:/run/systemd:/usr/sbin/nologin messagebus:x:102:106::/nonexistent:/usr/sbin/nologin postgres:x:106:112:PostgreSQL administrator,,,:/var/lib/postgresql:/bin/bash redis:x:107:113::/var/lib/redis:/usr/sbin/nologin mysql:x:108:114:MySQL Server,,,:/nonexistent:/bin/false git:x:998:998:git daemon user:/srv/git:/usr/bin/git-shell
     | 1 only in ref: input.txt
-    evidence: "-o" "-e" "echo" "input.txt"
+    evidence: (pairwise evidence)
   -i
     | 57 only in this: , , , , 
     | 1 only in ref: 0 1 1.00 $1.00 1/2 1E2 1E02 1E+02 -1 -1.00 -$1.00 -1/2 -1E2 -1E02 -1E+02 1/0 0/0 -2147483648/-1 -9223372036854775808/-1 -0 -0.0 +0 +0.0 0.00 0..0 . 0.0.0 0,00 0,,0 , 0,0,0 0.0/0 1.0/0.0 0.0/0.0 1,0/0,0 0,0/0,0 --1 - -. -, 999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999 NaN Infinity -Infinity INF 1#INF -1#IND 1#QNAN 1#SNAN 1#IND 0x0 0xffffffff 0xffffffffffffffff 0xabad1dea 123456789012345678901234567890123456789 1,000.00 1 000.00
-    evidence: "-a" "input.txt" "-i" "echo"
+    evidence: "-a" "input.txt" "-i"
   -l
     | 57 only in this: 0, 1, 1.00, $1.00, 1/2
     | 1 only in ref: 0 1 1.00 $1.00 1/2 1E2 1E02 1E+02 -1 -1.00 -$1.00 -1/2 -1E2 -1E02 -1E+02 1/0 0/0 -2147483648/-1 -9223372036854775808/-1 -0 -0.0 +0 +0.0 0.00 0..0 . 0.0.0 0,00 0,,0 , 0,0,0 0.0/0 1.0/0.0 0.0/0.0 1,0/0,0 0,0/0,0 --1 - -. -, 999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999 NaN Infinity -Infinity INF 1#INF -1#IND 1#QNAN 1#SNAN 1#IND 0x0 0xffffffff 0xffffffffffffffff 0xabad1dea 123456789012345678901234567890123456789 1,000.00 1 000.00
-    evidence: "-a" "input.txt" "-l"
+    evidence: "-a" "input.txt" "-l" "echo"
   -p  # prompt before running commands
     | 1 only in ref: 
     | exit: 0 → 1

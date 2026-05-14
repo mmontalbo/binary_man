@@ -411,7 +411,11 @@ pub fn format_exploration_report(
             for part in ex.vs_diff.split("; ") {
                 out.push_str(&format!("    | {}\n", part));
             }
-            if !ex.base_preview.is_empty() || !ex.flag_preview.is_empty() {
+            // Show base/flag preview only when there's stdout to show.
+            // For side-effect tools (cp, rm) the diff lines above carry the signal.
+            let base_has_content = ex.base_preview.lines().any(|l| !l.contains("identical") && !l.trim().is_empty());
+            let flag_has_content = ex.flag_preview.lines().any(|l| !l.contains("identical") && !l.trim().is_empty());
+            if base_has_content || flag_has_content {
                 out.push_str("    base:\n");
                 for line in ex.base_preview.lines() {
                     out.push_str(&format!("      {}\n", line));
@@ -571,11 +575,14 @@ fn find_exemplar(target_stem: &str, all_runs: &[&RunAnalysis]) -> Option<Exempla
             })
     });
 
-    // Compute vs_diff using the existing diff function
-    let vs_diff = base_obs.map(|base| {
+    // Compute vs_diff using the existing diff function.
+    // For standalone runs (no base), describe the observation directly.
+    let vs_diff = if let Some(base) = base_obs {
         let diff = crate::execute::compute_diff(base, flag_obs);
         if diff.is_empty() { "identical".into() } else { diff.join("; ") }
-    }).unwrap_or_else(|| "standalone".into());
+    } else {
+        describe_observation(flag_obs)
+    };
 
     // Build preview showing the first region where base and flag DIFFER.
     // Skip shared prefix lines so the reader sees the actual change.
@@ -593,6 +600,32 @@ fn find_exemplar(target_stem: &str, all_runs: &[&RunAnalysis]) -> Option<Exempla
         base_preview,
         flag_preview,
     })
+}
+
+/// Describe a standalone observation (no base to diff against).
+/// Summarizes what the flag produced: stdout, exit code, stderr, fs changes.
+fn describe_observation(obs: &crate::execute::Observation) -> String {
+    let mut parts = Vec::new();
+    let stdout_lines = obs.stdout.lines().count();
+    if stdout_lines > 0 {
+        parts.push(format!("stdout: {} lines", stdout_lines));
+    }
+    parts.push(format!("exit {}", output::format_exit(obs.exit_code.unwrap_or(-1))));
+    if !obs.stderr.trim().is_empty() {
+        let first = obs.stderr.lines().next().unwrap_or("").trim();
+        parts.push(format!("stderr: {}", first));
+    }
+    for c in &obs.fs_changes {
+        match c {
+            crate::execute::FsChange::Created { path, size } =>
+                parts.push(format!("created {} ({} bytes)", path, size)),
+            crate::execute::FsChange::Deleted { path } =>
+                parts.push(format!("deleted {}", path)),
+            crate::execute::FsChange::Modified { path, detail } =>
+                parts.push(format!("modified {} ({})", path, detail)),
+        }
+    }
+    parts.join("; ")
 }
 
 /// Build a preview showing the first region where two outputs differ.
