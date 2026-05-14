@@ -91,7 +91,7 @@ pub fn format_run_report(
                 if arg.starts_with('-') {
                     let key = if let Some(eq) = arg.find('=') { &arg[..eq] } else { arg };
                     if let Some(desc) = fi.descs.get(key) {
-                        return format!("  # {}", desc);
+                        return format!("  # {}", first_clause(desc, 100));
                     }
                 }
             }
@@ -399,7 +399,7 @@ pub fn format_exploration_report(
     sorted_solo.sort();
     for flag in &sorted_solo {
         let desc = flag_info.and_then(|fi| fi.descs.get(flag.as_str()))
-            .map(|d| format!("  # {}", d))
+            .map(|d| format!("  # {}", first_clause(d, 100)))
             .unwrap_or_default();
         out.push_str(&format!("  {}{}\n", flag, desc));
 
@@ -435,7 +435,7 @@ pub fn format_exploration_report(
         sorted_combo.sort();
         for flag in &sorted_combo {
             let desc = flag_info.and_then(|fi| fi.descs.get(flag.as_str()))
-                .map(|d| format!("  # {}", d))
+                .map(|d| format!("  # {}", first_clause(d, 100)))
                 .unwrap_or_default();
             out.push_str(&format!("  {}{}\n", flag, desc));
             // Show the behavioral diff summary from the flag's runs
@@ -690,6 +690,44 @@ fn find_vs_diff_for_flag(stem: &str, all_runs: &[&RunAnalysis], aliases: Option<
         }
     }
     None
+}
+
+/// Extract the first self-contained clause from a --help description.
+/// Truncates at sentence boundaries (". " + uppercase), semicolons, or
+/// parenthetical asides — the natural points where help text shifts from
+/// describing what a flag does to elaboration, cross-references, or caveats.
+fn first_clause(desc: &str, max_len: usize) -> &str {
+    let mut end = desc.len();
+
+    // Semicolons are clause breaks: "prompt once; less intrusive than -i"
+    if let Some(i) = desc.find(';') {
+        end = end.min(i);
+    }
+
+    // Sentence boundary: ". " followed by uppercase (new sentence)
+    // Catches "equivalent to --update[=older].  See below" → keeps first sentence
+    for (i, _) in desc.match_indices(". ") {
+        let rest = desc[i + 2..].trim_start();
+        if rest.starts_with(|c: char| c.is_uppercase()) {
+            end = end.min(i);
+            break;
+        }
+    }
+
+    // Parenthetical after a complete thought: " (" preceded by word char
+    // Catches "remove it and try again (this option is ignored ...)"
+    if let Some(i) = desc.find(" (") {
+        if i >= 20 {
+            end = end.min(i);
+        }
+    }
+
+    // Cap at max_len with word-boundary truncation
+    if end > max_len {
+        end = desc[..max_len].rfind(' ').unwrap_or(max_len);
+    }
+
+    desc[..end].trim_end()
 }
 
 fn format_alias_map(aliases: &HashMap<String, String>) -> String {

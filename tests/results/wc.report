@@ -11,7 +11,7 @@
 Aliases: -L = --max-line-length, -c = --bytes, -l = --lines, -m = --chars, -w = --words
 
 ## Unique behavior (observable when tested alone)
-  --files0-from  # read input from the files specified by NUL-terminated names in file F; If F is - then read names from standard input
+  --files0-from  # read input from the files specified by NUL-terminated names in file F
     tested: "--files0-from=1" in words_standard
     | flag removes 1 lines:       0       0       0
     | exit: 0 → 1
@@ -19,7 +19,7 @@ Aliases: -L = --max-line-length, -c = --bytes, -l = --lines, -m = --chars, -w = 
     without flag:
             0       0       0
     with flag:
-  --total  # when to print a line with total counts; WHEN can be: auto, always, only, never
+  --total  # when to print a line with total counts
     tested: "--total=always" in words_minimal
     | flag adds 1 lines:       0       0       0 total
     | 1 lines unchanged

@@ -10,11 +10,11 @@
 Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
 
 ## Unique behavior (observable when tested alone)
-  -c  # print the first NUM bytes of each file; with the leading '-', print all but the last NUM bytes of each file
+  -c  # print the first NUM bytes of each file
     tested: "-c" in words_standard
     | exit: 0 → 1
     | stderr: head: option requires an argument -- 'c'
-  -n  # print the first NUM lines instead of the first 10; with the leading '-', print all but the last NUM lines of each file
+  -n  # print the first NUM lines instead of the first 10
     tested: "-n" in words_standard
     | exit: 0 → 1
     | stderr: head: option requires an argument -- 'n'
@@ -53,5 +53,5 @@ Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
   -q
     | flag removes 3 lines: ==> input.txt <==, , ==> other.txt <==
     | 12 lines unchanged
-    proven via: "-n" "-q" "$(head -n1 input.txt)" "."
+    proven via: "-c" "-q" "$(head -n1 input.txt)" "."
 

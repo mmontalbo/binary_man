@@ -73,8 +73,8 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
       1/2
       1E2
             ... (54 more)
-  -d  # how to handle directories; ACTION is 'read', 'recurse', or 'skip'
-    tested: "-d" "1" "$(head -n1 input.txt)" "input.txt" in words_standard
+  -d  # how to handle directories
+    tested: "--directories=1" "$(head -n1 input.txt)" "input.txt" in words_standard
     | flag removes 1 lines: aardvark
     | exit: 0 → 1
     | stderr: grep: invalid argument '1' for '--directories'
@@ -82,7 +82,7 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
       aardvark
     with flag:
   -m  # stop after NUM selected lines
-    tested: "--max-count=2" "$(head -n1 input.txt)" "input.txt" in numbers_minimal
+    tested: "-m" "2" "$(head -n1 input.txt)" "input.txt" in numbers_minimal
     | flag removes 46 lines: $1.00, 1E02, 1E+02, -1.00, -$1.00
     | 2 lines unchanged
     without flag:
@@ -99,7 +99,7 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
       1.00
 
 ## Distinguishable in combination (verified via flag pairs)
-  --binary-files  # assume that binary files are TYPE; TYPE is 'binary', 'text', or 'without-match'
+  --binary-files  # assume that binary files are TYPE
     | flag removes 1 lines: root:x:0:0:root:/root:/bin/bash
     | exit: 0 → 2
     | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
@@ -128,7 +128,7 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
     | exit: 0 → 2
     | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
     proven via: (pairwise evidence)
-  --include  # search only files that match GLOB (a file pattern)
+  --include  # search only files that match GLOB
     | flag removes 1 lines: aardvark
     | exit: 0 → 1
     proven via: (pairwise evidence)
@@ -147,7 +147,7 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
     | exit: 0 → 2
     | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
     proven via: (pairwise evidence)
-  --no-ignore-case  # do not ignore case distinctions (default)
+  --no-ignore-case  # do not ignore case distinctions
     | flag removes 1 lines: root:x:0:0:root:/root:/bin/bash
     | exit: 0 → 2
     | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
@@ -163,7 +163,7 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
     | exit: 0 → 2
     | stderr: grep: -1: invalid context length argument
     proven via: "-B" "-1" "$(head -n1 input.txt)" "input.txt"
-  -D  # how to handle devices, FIFOs and sockets; ACTION is 'read' or 'skip'
+  -D  # how to handle devices, FIFOs and sockets
     | flag removes 1 lines: root:x:0:0:root:/root:/bin/bash
     | exit: 0 → 2
     | stderr: grep: read: No such file or directory
@@ -210,7 +210,7 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
     | exit: 0 → 2
     | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
     proven via: (pairwise evidence)
-  -U  # do not strip CR characters at EOL (MSDOS/Windows)
+  -U  # do not strip CR characters at EOL
     | flag removes 1 lines: root:x:0:0:root:/root:/bin/bash
     | exit: 0 → 2
     | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
@@ -241,7 +241,7 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
     | flag removes 1 lines: root:x:0:0:root:/root:/bin/bash
     | exit: 0 → 2
     | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
-    proven via: "-e" "-b" "$(head -n1 input.txt)" "input.txt"
+    proven via: "-e" "-o" "$(head -n1 input.txt)" "input.txt"
   -f  # take PATTERNS from FILE
     | flag removes 1 lines: aardvark
     | exit: 0 → 1
