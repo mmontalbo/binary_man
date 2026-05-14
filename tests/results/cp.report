@@ -1,10 +1,10 @@
 # Exploration: cp
 
 ## Rounds
-  round 0: 57 isolated cumulative, 32 identical in round (single-phase)
+  round 0: 57 isolated cumulative, 28 identical in round (single-phase)
 
 ## Observed: 36/36 flags
-  15 solo, 21 via combination
+  19 solo, 17 via combination
   3 behavioral aliases detected
   robustness: 34 robust, 0 moderate, 0 fragile
 
@@ -15,16 +15,20 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     exemplar: "--attributes-only" "input.txt" "other.txt" in words_standard (different)
     base:
     flag:
+  --backup
+    exemplar: "--backup" "input.txt" "other.txt" in words_standard (different)
+    base:
+    flag:
+  --copy-contents  # copy contents of special files when recursive
+    exemplar: "--copy-contents" "input.txt" "other.txt" in words_standard (different)
+    base:
+    flag:
   --debug  # explain how a file is copied.  Implies -v
     exemplar: "--debug" "input.txt" "other.txt" in words_minimal (different)
     base:
     flag:
       'input.txt' -> 'other.txt'
       copy offload: yes, reflink: unsupported, sparse detection: no
-  --keep-directory-symlink  # follow existing symlinks to directories
-    exemplar: "--keep-directory-symlink" "input.txt" "other.txt" in words_standard (different)
-    base:
-    flag:
   --no-preserve  # don't preserve the specified attributes
     exemplar: "--no-preserve=mode" "input.txt" "other.txt" in words_standard (different)
     base:
@@ -34,7 +38,7 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     base:
     flag:
   --reflink
-    exemplar: "--reflink" "input.txt" "other.txt" in access_log_minimal (different)
+    exemplar: "--reflink" "input.txt" "other.txt" in syslog_minimal (different)
     base:
     flag:
   --remove-destination  # remove each existing destination file before attempting to open it (contrast with --force)
@@ -53,12 +57,24 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     exemplar: "-H" "input.txt" "other.txt" in words_standard (different)
     base:
     flag:
+  -L  # always follow symbolic links in SOURCE
+    exemplar: "-L" "input.txt" "other.txt" in words_standard (different)
+    base:
+    flag:
+  -P  # never follow symbolic links in SOURCE
+    exemplar: "-P" "input.txt" "other.txt" in words_standard (different)
+    base:
+    flag:
   -S  # override the usual backup suffix
     exemplar: "-S" "test" "input.txt" "other.txt" in words_standard (different)
     base:
     flag:
-  -T  # treat DEST as a normal file
-    exemplar: "-T" "input.txt" "other.txt" in words_standard (different)
+  -b  # like --backup but does not accept an argument
+    exemplar: "-b" "input.txt" "other.txt" in words_standard (different)
+    base:
+    flag:
+  -d  # same as --no-dereference --preserve=links
+    exemplar: "-d" "input.txt" "other.txt" in words_standard (different)
     base:
     flag:
   -f  # if an existing destination file cannot be opened, remove it and try again (this option is ignored when the -n option is also used)
@@ -76,19 +92,15 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
       'input.txt' -> 'other.txt'
 
 ## Via combination (distinguishable when paired)
-  --backup  e.g. (pairwise evidence)
   --context  e.g. (pairwise evidence)
-  --copy-contents  e.g. (pairwise evidence)
+  --keep-directory-symlink  e.g. (pairwise evidence)
   --preserve  e.g. (pairwise evidence)
   --recursive  e.g. (pairwise evidence)
   --update  e.g. (pairwise evidence)
-  -L  e.g. (pairwise evidence)
-  -P  e.g. (pairwise evidence)
   -R  e.g. (pairwise evidence)
+  -T  e.g. (pairwise evidence)
   -Z  e.g. (pairwise evidence)
   -a  e.g. (pairwise evidence)
-  -b  e.g. (pairwise evidence)
-  -d  e.g. (pairwise evidence)
   -i  e.g. (pairwise evidence)
   -l  e.g. (pairwise evidence)
   -n  e.g. (pairwise evidence)

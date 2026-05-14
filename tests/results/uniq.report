@@ -1,16 +1,27 @@
 # Exploration: uniq
 
 ## Rounds
-  round 0: 62 isolated cumulative, 77 identical in round (single-phase)
+  round 0: 108 isolated cumulative, 57 identical in round (single-phase)
 
 ## Observed: 11/11 flags
-  8 solo, 3 via combination
+  11 solo, 0 via combination
   2 behavioral aliases detected
   robustness: 11 robust, 0 moderate, 0 fragile
 
 Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, -s = --skip-chars, -u = --unique, -w = --check-chars, -z = --zero-terminated
 
 ## Solo (unique behavior)
+  --all-repeated
+    exemplar: "--all-repeated" "input.txt" in formatted_minimal (+2 lines)
+    base:
+      first line
+      second line with trailing spaces
+      	indented with tab
+          indented with spaces
+      	 	mixed tabs and spaces
+            ...
+    flag:
+      
   --group
     exemplar: "--group" "input.txt" in words_minimal (+2882 lines)
     base:
@@ -27,6 +38,17 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
       
       about
             ...
+  -D  # print all duplicate lines
+    exemplar: "-D" "input.txt" in formatted_minimal (+2 lines)
+    base:
+      first line
+      second line with trailing spaces
+      	indented with tab
+          indented with spaces
+      	 	mixed tabs and spaces
+            ...
+    flag:
+      
   -c  # prefix lines by the number of occurrences
     exemplar: "-c" "input.txt" in words_minimal (+1441 lines)
     base:
@@ -66,6 +88,22 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
       aardvark
       San Francisco
       Saturday
+  -i  # ignore differences in case when comparing
+    exemplar: "-i" "input.txt" in numbers_minimal (different)
+    base:
+      0
+      1
+      1.00
+      $1.00
+      1/2
+            ...
+    flag:
+      0
+      1
+      1.00
+      $1.00
+      1/2
+            ...
   -s  # avoid comparing the first N characters
     exemplar: "-s" "1" "input.txt" in numbers_minimal (different)
     base:
@@ -130,9 +168,4 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
       abstract
       accept
             ...
-
-## Via combination (distinguishable when paired)
-  --all-repeated  e.g. (pairwise evidence)
-  -D  e.g. (pairwise evidence)
-  -i  e.g. (pairwise evidence)
 

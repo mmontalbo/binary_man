@@ -162,8 +162,10 @@ fn diff_snapshots(before: &FsSnapshot, after: &FsSnapshot) -> Vec<FsChange> {
 /// Per-cell timeout in seconds.
 pub const CELL_TIMEOUT_SECS: u64 = 2;
 
-/// Max concurrent cells (threads).
+/// Max concurrent threads (for work-stealing across contexts).
 const MAX_THREADS: usize = 32;
+/// Max parallel cells within one bwrap invocation.
+const CELL_PARALLELISM: usize = 32;
 
 /// Run the entire grid with batched execution.
 ///
@@ -326,19 +328,24 @@ pub fn run_grid(
                             stdin_part.clone()
                         };
 
+                        // Background each cell with & for parallel execution within bwrap.
+                        // Concurrency limited by periodic `wait` every PAR cells.
                         script_content.push_str(&format!(
-                            "cd /batch/c{} && {}timeout {} {}{}{}>/batch/out/{}.out 2>/batch/out/{}.err; echo $? >/batch/out/{}.rc\n",
-                            cell_idx, cell_stdin, CELL_TIMEOUT_SECS,
-                            env_prefix, shell_escape(binary),
-                            if args_str.is_empty() { String::new() } else { format!(" {}", args_str) },
-                            cell_idx, cell_idx, cell_idx,
+                            "(cd /batch/c{ci} && {stdin}timeout {t} {env}{bin}{args}>/batch/out/{ci}.out 2>/batch/out/{ci}.err; echo $? >/batch/out/{ci}.rc) &\n",
+                            ci = cell_idx, stdin = cell_stdin, t = CELL_TIMEOUT_SECS,
+                            env = env_prefix, bin = shell_escape(binary),
+                            args = if args_str.is_empty() { String::new() } else { format!(" {}", args_str) },
                         ));
+                        if (global_cell_idx + 1).is_multiple_of(CELL_PARALLELISM) {
+                            script_content.push_str("wait\n");
+                        }
 
                         global_cell_idx += 1;
                     }
                 }
 
-                // Write and execute ONE script for all contexts in this thread
+                script_content.push_str("wait\n"); // ensure all backgrounded cells finish
+
                 let script_path = batch_dir.path().join("run.sh");
                 if let Err(e) = std::fs::write(&script_path, &script_content) {
                     for (ctx_name, ri, _) in &cell_data {
