@@ -14,7 +14,10 @@ set -euo pipefail
 BGRID="${1:-./target/release/bgrid}"
 TIMEOUT=${TIMEOUT:-600}
 RESULTS_DIR="tests/results"
-JOBS=${JOBS:-$(nproc 2>/dev/null || echo 4)}
+# Balance outer parallelism (tools) with inner parallelism (contexts per tool).
+# Too many JOBS = oversubscription and idle cores when fast tools finish.
+# JOBS=nproc/8 balances ~4 concurrent tools × 32 internal threads = good utilization.
+JOBS=${JOBS:-$(( $(nproc 2>/dev/null || echo 8) / 8 + 1 ))}
 REPRO=${REPRO:-0}
 
 # Create timestamped run directory for full diagnostic retention
