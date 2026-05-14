@@ -3,6 +3,10 @@
 ## Test scope
   78 behavioral groups: 45 unique, 33 shared
 
+  Contexts referenced in exemplars below:
+    access_log_minimal: Apache combined log format; input.txt + other.txt
+    words_standard: 1500 English words; files, hidden, subdir, symlink, executable, readonly
+
 ## Observed: 36/36 flags
   7 uniquely observable, 29 distinguishable via flag pairs
   robustness: 44 verified in all contexts, 0 in most, 0 context-dependent

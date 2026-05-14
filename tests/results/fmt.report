@@ -3,6 +3,12 @@
 ## Test scope
   162 behavioral groups: 94 unique, 68 shared
 
+  Contexts referenced in exemplars below:
+    numbers_standard / input.txt=size:1: standard structure, 1-byte input file
+    passwd_minimal / stdin: piped input via stdin
+    words_minimal: 1500 English words; input.txt + other.txt
+    words_minimal / stdin: piped input via stdin
+
 ## Observed: 7/7 flags
   3 uniquely observable, 4 distinguishable via flag pairs
   1 behavioral aliases (different flags, identical behavior)

@@ -3,6 +3,11 @@
 ## Test scope
   90 behavioral groups: 40 unique, 50 shared
 
+  Contexts referenced in exemplars below:
+    words_minimal: 1500 English words; input.txt + other.txt
+    words_minimal / stdin: piped input via stdin
+    words_standard: 1500 English words; files, hidden, subdir, symlink, executable, readonly
+
 ## Observed: 6/7 flags
   4 uniquely observable, 2 distinguishable via flag pairs
   1 error-only (flag recognized but no successful output observed)

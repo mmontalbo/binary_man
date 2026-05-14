@@ -3,6 +3,9 @@
 ## Test scope
   81 behavioral groups: 49 unique, 32 shared
 
+  Contexts referenced in exemplars below:
+    words_minimal / stdin: piped input via stdin
+
 ## Observed: 3/3 flags
   1 uniquely observable, 2 distinguishable via flag pairs
   robustness: 4 verified in all contexts, 0 in most, 0 context-dependent

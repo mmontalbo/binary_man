@@ -3,6 +3,11 @@
 ## Test scope
   490 behavioral groups: 324 unique, 166 shared
 
+  Contexts referenced in exemplars below:
+    words_minimal: 1500 English words; input.txt + other.txt
+    words_minimal / stdin: piped input via stdin
+    words_standard: 1500 English words; files, hidden, subdir, symlink, executable, readonly
+
 ## Observed: 18/21 flags
   11 uniquely observable, 7 distinguishable via flag pairs
   3 error-only (flag recognized but no successful output observed)
@@ -195,17 +200,17 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
     | flag adds 1 lines: 0000001
     | exit: 1 → 0
     | stderr removed
-    proven via: "-j" "1" "-d" "input.txt"
+    proven via: "-j" "1" "-d" "$(head -n1 input.txt)" "input.txt"
   -o  # same as -t o2, select octal 2-byte units
     | flag adds 1 lines: 0000001
     | exit: 1 → 0
     | stderr removed
-    proven via: "-j" "1" "-o" "input.txt" "subdir"
+    proven via: "-j" "1" "-o" "input.txt" "other.txt"
   -s  # same as -t d2, select decimal 2-byte units
     | flag adds 1 lines: 0000001
     | exit: 1 → 0
     | stderr removed
-    proven via: "-j" "1" "-s" "input.txt" "subdir"
+    proven via: "-j" "1" "-s" "input.txt"
   -v  # do not use * to mark line suppression
     | flag adds 1 lines: 0000001
     | exit: 1 → 0

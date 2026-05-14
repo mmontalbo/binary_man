@@ -3,6 +3,12 @@
 ## Test scope
   163 behavioral groups: 55 unique, 108 shared
 
+  Contexts referenced in exemplars below:
+    empty_dir: completely empty directory
+    numbers_minimal: numeric edge cases (ints, floats, hex, NaN); input.txt + other.txt
+    numbers_standard: numeric edge cases; files, hidden, subdir, symlink, executable
+    words_standard: 1500 English words; files, hidden, subdir, symlink, executable, readonly
+
 ## Observed: 49/49 flags
   6 uniquely observable, 43 distinguishable via flag pairs
   robustness: 72 verified in all contexts, 0 in most, 0 context-dependent
@@ -241,7 +247,7 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
     | flag removes 1 lines: root:x:0:0:root:/root:/bin/bash
     | exit: 0 → 2
     | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
-    proven via: "-e" "-n" "$(head -n1 input.txt)" "input.txt"
+    proven via: "-e" "-w" "$(head -n1 input.txt)" "input.txt"
   -f  # take PATTERNS from FILE
     | flag removes 1 lines: aardvark
     | exit: 0 → 1

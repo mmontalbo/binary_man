@@ -3,6 +3,10 @@
 ## Test scope
   88 behavioral groups: 56 unique, 32 shared
 
+  Contexts referenced in exemplars below:
+    words_minimal: 1500 English words; input.txt + other.txt
+    words_standard: 1500 English words; files, hidden, subdir, symlink, executable, readonly
+
 ## Observed: 7/7 flags
   4 uniquely observable, 3 distinguishable via flag pairs
   robustness: 7 verified in all contexts, 0 in most, 0 context-dependent
@@ -45,7 +49,7 @@ Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
   --quiet
     | flag removes 3 lines: ==> input.txt <==, , ==> other.txt <==
     | 12 lines unchanged
-    proven via: "-c" "--quiet" "$(head -n1 input.txt)" "."
+    proven via: "-n" "--quiet" "$(head -n1 input.txt)" "."
   --silent
     | flag removes 3 lines: ==> input.txt <==, , ==> other.txt <==
     | 12 lines unchanged

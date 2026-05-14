@@ -3,6 +3,12 @@
 ## Test scope
   22 behavioral groups: 11 unique, 11 shared
 
+  Contexts referenced in exemplars below:
+    empty_dir: completely empty directory
+    words_deep: 1500 English words; 3-level nesting, dir symlink, old-mtime file
+    words_minimal: 1500 English words; input.txt + other.txt
+    words_standard: 1500 English words; files, hidden, subdir, symlink, executable, readonly
+
 ## Observed: 12/12 flags
   2 uniquely observable, 10 distinguishable via flag pairs
   1 behavioral aliases (different flags, identical behavior)

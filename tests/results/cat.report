@@ -3,6 +3,10 @@
 ## Test scope
   135 behavioral groups: 73 unique, 62 shared
 
+  Contexts referenced in exemplars below:
+    formatted_minimal: whitespace edge cases (tabs, blanks, long lines); input.txt + other.txt
+    words_minimal: 1500 English words; input.txt + other.txt
+
 ## Observed: 10/10 flags
   10 uniquely observable, 0 distinguishable via flag pairs
   robustness: 10 verified in all contexts, 0 in most, 0 context-dependent
