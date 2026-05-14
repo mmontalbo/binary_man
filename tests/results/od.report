@@ -39,8 +39,8 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
     without flag:
       0000000
     with flag:
-  -A  # output format for file offsets
-    tested: "-A" "x" in words_minimal / stdin
+  -A  # output format for file offsets; RADIX is one of [doxn], for Decimal, Octal, Hex or None
+    tested: "--address-radix=x" in words_minimal / stdin
     | flag adds 3 lines: 000000 064143 071145 074562 060412 070160 062554 061012 067141, 000010 067141 000141, 000013
     | flag removes 3 lines: 0000000 064143 071145 074562 060412 070160 062554 061012 067141, 0000020 067141 000141, 0000023
     without flag:
@@ -195,17 +195,17 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
     | flag adds 1 lines: 0000001
     | exit: 1 → 0
     | stderr removed
-    proven via: "-j" "1" "-d" "input.txt" "subdir"
+    proven via: "-j" "1" "-d" "input.txt"
   -o  # same as -t o2, select octal 2-byte units
     | flag adds 1 lines: 0000001
     | exit: 1 → 0
     | stderr removed
-    proven via: "-j" "1" "-o" "input.txt" "other.txt"
+    proven via: "-j" "1" "-o" "input.txt" "subdir"
   -s  # same as -t d2, select decimal 2-byte units
     | flag adds 1 lines: 0000001
     | exit: 1 → 0
     | stderr removed
-    proven via: "-j" "1" "-s" "input.txt"
+    proven via: "-j" "1" "-s" "input.txt" "subdir"
   -v  # do not use * to mark line suppression
     | flag adds 1 lines: 0000001
     | exit: 1 → 0

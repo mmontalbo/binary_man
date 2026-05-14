@@ -46,7 +46,7 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
            3	banana
     with flag:
   -s  # add STRING after (possible) line number
-    tested: "--number-separator=x" in words_minimal / stdin
+    tested: "-s" "x" in words_minimal / stdin
     | flag adds 3 lines:      1xcherry,      2xapple,      3xbanana
     | flag removes 3 lines:      1	cherry,      2	apple,      3	banana
     without flag:

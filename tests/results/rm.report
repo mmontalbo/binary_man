@@ -32,7 +32,7 @@ Aliases: -d = --dir, -f = --force, -v = --verbose
     | fs: did not delete input.txt
     | fs: did not delete other.txt
     proven via: (pairwise evidence)
-  --one-file-system  # when removing a hierarchy recursively, skip any directory that is on a file system different from
+  --one-file-system  # when removing a hierarchy recursively, skip any directory that is on a file system different from that of the corresponding command line
     | stderr: rm: remove regular file 'input.txt'? rm: remove regular file 'other.txt'?
     | fs: did not delete input.txt
     | fs: did not delete other.txt
@@ -47,7 +47,7 @@ Aliases: -d = --dir, -f = --force, -v = --verbose
     | fs: did not delete input.txt
     | fs: did not delete other.txt
     proven via: (pairwise evidence)
-  -I  # prompt once before removing more than three files, or when removing recursively
+  -I  # prompt once before removing more than three files, or when removing recursively; less intrusive than -i, while still giving protection
     | stderr: rm: remove regular file 'input.txt'? rm: remove regular file 'other.txt'?
     | fs: did not delete input.txt
     | fs: did not delete other.txt
