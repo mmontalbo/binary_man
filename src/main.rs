@@ -53,7 +53,10 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox) -> Result<()> {
         script.contexts.len(), script.runs.len(), execute::count_cells(&script));
 
     let grid = execute::run_grid(binary, &script, std::path::Path::new("."), sandbox)?;
+
+    let t_analysis = std::time::Instant::now();
     let metrics = analyze::analyze(&script, &grid, Some(&flag_info), None);
+    let analysis_elapsed = t_analysis.elapsed();
 
     // Compute isolation
     let mut ever_isolated: HashSet<String> = HashSet::new();
@@ -84,6 +87,7 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox) -> Result<()> {
     }];
 
     let all_runs: Vec<&analyze::RunAnalysis> = metrics.runs.iter().collect();
+    let t_report = std::time::Instant::now();
     let report = report::format_exploration_report(
         &rounds,
         &metrics,
@@ -92,6 +96,9 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox) -> Result<()> {
         &cmd_label,
         &all_runs,
     );
+    let report_elapsed = t_report.elapsed();
+    eprintln!("  timing: analysis={}ms report={}ms",
+        analysis_elapsed.as_millis(), report_elapsed.as_millis());
     print!("{}", report);
 
     Ok(())

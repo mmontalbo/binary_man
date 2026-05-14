@@ -715,18 +715,18 @@ pub fn generate_initial_script(
     sandbox: &Sandbox,
 ) -> Result<(Script, FlagInfo)> {
     // --- Factor identification ---
-    // Parse help text for flags (treatment factors) and their metavars (value hints).
-    // Discover invocation patterns (positional arg templates that work).
+    let t0 = std::time::Instant::now();
     let help_text = try_help(binary, sub_args, sandbox)?;
     let flag_info = extract_flag_info(&help_text);
     let mut flags = flag_info.flags.clone();
+    let t_parse = t0.elapsed();
 
     let (working_patterns, stdin_works, probe_pattern) = probe_arg_patterns(binary, sub_args, sandbox);
     if stdin_works { eprintln!("  stdin: accepted"); }
     if probe_pattern.is_some() { eprintln!("  pattern: context-derived"); }
+    let t_patterns = t0.elapsed();
 
     // --- Level determination (pilot study) ---
-    // Probe each flag with candidate values to determine working levels.
     // Sequential and adaptive (standard pilot study practice) — but the
     // main experiment (the grid) is fixed once levels are determined.
     let original_metavars: HashMap<String, String> = flags.iter()
@@ -752,9 +752,9 @@ pub fn generate_initial_script(
         (HashMap::new(), HashMap::new())
     };
 
+    let t_probe = t0.elapsed();
+
     // --- Design construction ---
-    // Cross all flags × invocation patterns × contexts into a fixed grid.
-    // No adaptation from here — the design is determined.
     let contexts = crate::data::build_contexts();
 
     let mut runs: Vec<Run> = Vec::new();
@@ -898,6 +898,12 @@ pub fn generate_initial_script(
         err_args.push(Arg::Literal("nonexistent-file.txt".into()));
         runs.push(Run { args: err_args, in_contexts: None, diff_from: None });
     }
+
+    let t_total = t0.elapsed();
+    eprintln!("  discovery: parse={}ms patterns={}ms probe={}ms design={}ms total={}ms",
+        t_parse.as_millis(), (t_patterns - t_parse).as_millis(),
+        (t_probe - t_patterns).as_millis(), (t_total - t_probe).as_millis(),
+        t_total.as_millis());
 
     Ok((Script { contexts, runs }, flag_info))
 }
