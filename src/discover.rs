@@ -13,6 +13,8 @@ pub struct FlagInfo {
     pub aliases: HashMap<String, String>, // short -> long (and long -> short)
     pub all_flags: HashSet<String>,       // every flag discovered
     pub extracted_values: HashMap<String, Vec<String>>, // flag -> values mined from help text
+    /// Ordered flag list with resolved metavars (short flags inherit from long aliases).
+    pub flags: Vec<(String, Option<String>)>,
 }
 
 /// Extract values from a flag description using multiple patterns:
@@ -65,15 +67,48 @@ pub fn extract_flag_info(help_text: &str) -> FlagInfo {
     let mut all_flags: HashSet<String> = HashSet::new();
     let mut extracted_values: HashMap<String, Vec<String>> = HashMap::new();
 
+    // Flag regexes for the unified pass
     let flag_re = Regex::new(
         r"^\s+(-[a-zA-Z0-9](?:,\s*--[a-zA-Z][-a-zA-Z0-9]*(?:=\S+)?)?|--[a-zA-Z][-a-zA-Z0-9]*(?:=\S+)?)\s{2,}(.+)"
     ).unwrap();
+    let short_re = Regex::new(r"(?:^|\s)-([a-zA-Z0-9])\b").unwrap();
+    let short_metavar_re = Regex::new(r"^\s{2,}.*-([a-zA-Z0-9])\s+([A-Z][-A-Z_]*)(?:\s|,|$)").unwrap();
+    let long_re = Regex::new(r"--([a-zA-Z][a-zA-Z0-9-]*)(?:[=\s]([A-Z][A-Z_]*))?").unwrap();
+
+    // Collect flags with metavars in insertion order
+    let mut flags: Vec<(String, Option<String>)> = Vec::new();
+    let mut seen_flags: HashSet<String> = HashSet::new();
+    let mut long_metavars: HashMap<String, String> = HashMap::new();
+    let mut short_metavars: HashMap<String, String> = HashMap::new();
+
+    // Pre-pass: capture short flag metavars (only on indented flag lines)
+    for line in help_text.lines() {
+        for cap in short_metavar_re.captures_iter(line) {
+            short_metavars.insert(format!("-{}", &cap[1]), cap[2].to_string());
+        }
+    }
 
     // Two-pass: first collect full multi-line descriptions per flag group,
     // then mine all patterns from the complete description.
     let lines: Vec<&str> = help_text.lines().collect();
     let mut i = 0;
     while i < lines.len() {
+        // Collect flags with metavars (permissive matching)
+        for cap in short_re.captures_iter(lines[i]) {
+            let flag = format!("-{}", &cap[1]);
+            if seen_flags.insert(flag.clone()) {
+                flags.push((flag.clone(), short_metavars.get(&flag).cloned()));
+            }
+        }
+        for cap in long_re.captures_iter(lines[i]) {
+            let name = format!("--{}", &cap[1]);
+            if name == "--help" || name == "--version" { continue; }
+            let metavar = cap.get(2).map(|m| m.as_str().to_string());
+            if let Some(mv) = &metavar { long_metavars.insert(name.clone(), mv.clone()); }
+            if seen_flags.insert(name.clone()) { flags.push((name, metavar)); }
+        }
+
+        // Extract descriptions, aliases, and values from flag-description lines
         if let Some(cap) = flag_re.captures(lines[i]) {
             let flags_part = cap[1].trim();
             let mut desc = cap[2].trim().to_string();
@@ -135,7 +170,19 @@ pub fn extract_flag_info(help_text: &str) -> FlagInfo {
         i += 1;
     }
 
-    FlagInfo { descs, aliases, all_flags, extracted_values }
+    // Propagate metavars from long aliases to short flags
+    for (flag, metavar) in &mut flags {
+        if metavar.is_none() && flag.len() == 2 {
+            if let Some(long_alias) = aliases.get(flag) {
+                if let Some(mv) = long_metavars.get(long_alias) {
+                    *metavar = Some(mv.clone());
+                }
+            }
+        }
+    }
+
+    all_flags = seen_flags;
+    FlagInfo { descs, aliases, all_flags, extracted_values, flags }
 }
 
 /// Try --help, then -h to get help text from a binary.
@@ -495,53 +542,6 @@ impl<'a> ProbeCtx<'a> {
     }
 }
 
-/// Parse flags from help text into a unified list with metavars.
-/// Handles short flags, long flags, short-flag metavar capture, and alias propagation.
-fn parse_flags(help_text: &str, flag_info: &FlagInfo) -> (Vec<(String, Option<String>)>, HashSet<String>) {
-    let short_re = Regex::new(r"(?:^|\s)-([a-zA-Z0-9])\b").unwrap();
-    let short_metavar_re = Regex::new(r"^\s{2,}.*-([a-zA-Z0-9])\s+([A-Z][-A-Z_]*)(?:\s|,|$)").unwrap();
-    let long_re = Regex::new(r"--([a-zA-Z][a-zA-Z0-9-]*)(?:[=\s]([A-Z][A-Z_]*))?").unwrap();
-
-    let mut flags: Vec<(String, Option<String>)> = Vec::new();
-    let mut seen = HashSet::new();
-    let mut long_metavars: HashMap<String, String> = HashMap::new();
-    let mut short_metavars: HashMap<String, String> = HashMap::new();
-
-    for line in help_text.lines() {
-        for cap in short_metavar_re.captures_iter(line) {
-            short_metavars.insert(format!("-{}", &cap[1]), cap[2].to_string());
-        }
-    }
-
-    for line in help_text.lines() {
-        for cap in short_re.captures_iter(line) {
-            let flag = format!("-{}", &cap[1]);
-            if seen.insert(flag.clone()) {
-                flags.push((flag.clone(), short_metavars.get(&flag).cloned()));
-            }
-        }
-        for cap in long_re.captures_iter(line) {
-            let name = format!("--{}", &cap[1]);
-            if name == "--help" || name == "--version" { continue; }
-            let metavar = cap.get(2).map(|m| m.as_str().to_string());
-            if let Some(mv) = &metavar { long_metavars.insert(name.clone(), mv.clone()); }
-            if seen.insert(name.clone()) { flags.push((name, metavar)); }
-        }
-    }
-
-    // Propagate metavars from long aliases to short flags
-    for (flag, metavar) in &mut flags {
-        if metavar.is_none() && flag.len() == 2 {
-            if let Some(long_alias) = flag_info.aliases.get(flag) {
-                if let Some(mv) = long_metavars.get(long_alias) {
-                    *metavar = Some(mv.clone());
-                }
-            }
-        }
-    }
-
-    (flags, seen)
-}
 
 /// Pilot study: determine working factor levels for each flag.
 /// Tries candidates solo, then with companions, then mutual compounds.
@@ -719,9 +719,7 @@ pub fn generate_initial_script(
     // Discover invocation patterns (positional arg templates that work).
     let help_text = try_help(binary, sub_args, sandbox)?;
     let flag_info = extract_flag_info(&help_text);
-    let (mut flags, seen) = parse_flags(&help_text, &flag_info);
-    let mut flag_info = flag_info;
-    flag_info.all_flags = seen;
+    let mut flags = flag_info.flags.clone();
 
     let (working_patterns, stdin_works, probe_pattern) = probe_arg_patterns(binary, sub_args, sandbox);
     if stdin_works { eprintln!("  stdin: accepted"); }

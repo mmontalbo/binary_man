@@ -1,11 +1,11 @@
 # Exploration: cp
 
 ## Rounds
-  round 0: 43 isolated cumulative, 44 identical in round (single-phase)
+  round 0: 47 isolated cumulative, 40 identical in round (single-phase)
 
 ## Observed: 36/36 flags
-  10 solo, 26 via combination
-  5 behavioral aliases detected
+  15 solo, 21 via combination
+  4 behavioral aliases detected
   robustness: 34 robust, 0 moderate, 0 fragile
 
 Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-target-directory, -a = --archive, -f = --force, -i = --interactive, -l = --link, -n = --no-clobber, -s = --symbolic-link, -t = --target-directory, -v = --verbose, -x = --one-file-system
@@ -25,6 +25,10 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     exemplar: "--parents" "input.txt" "other.txt" in words_minimal (different)
     base:
     flag:
+  --recursive
+    exemplar: "--recursive" "input.txt" "other.txt" in words_minimal (different)
+    base:
+    flag:
   --reflink
     exemplar: "--reflink" "input.txt" "other.txt" in words_minimal (different)
     base:
@@ -37,12 +41,28 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     exemplar: "--sparse=auto" "input.txt" "other.txt" in words_minimal (different)
     base:
     flag:
+  -H  # follow command-line symbolic links in SOURCE
+    exemplar: "-H" "input.txt" "other.txt" in words_minimal (different)
+    base:
+    flag:
   -L  # always follow symbolic links in SOURCE
     exemplar: "-L" "input.txt" "other.txt" in words_minimal (different)
     base:
     flag:
+  -R
+    exemplar: "-R" "input.txt" "other.txt" in words_minimal (different)
+    base:
+    flag:
   -S  # override the usual backup suffix
     exemplar: "-S" "test" "input.txt" "other.txt" in words_minimal (different)
+    base:
+    flag:
+  -f  # if an existing destination file cannot be opened, remove it and try again (this option is ignored when the -n option is also used)
+    exemplar: "-f" "input.txt" "other.txt" in words_minimal (different)
+    base:
+    flag:
+  -r
+    exemplar: "-r" "input.txt" "other.txt" in words_minimal (different)
     base:
     flag:
   -t  # copy all SOURCE arguments into DIRECTORY
@@ -62,23 +82,18 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
   --copy-contents  e.g. (pairwise evidence)
   --keep-directory-symlink  e.g. (pairwise evidence)
   --preserve  e.g. (pairwise evidence)
-  --recursive  e.g. (pairwise evidence)
   --strip-trailing-slashes  e.g. (pairwise evidence)
   --update  e.g. (pairwise evidence)
-  -H  e.g. (pairwise evidence)
   -P  e.g. (pairwise evidence)
-  -R  e.g. (pairwise evidence)
   -T  e.g. (pairwise evidence)
   -Z  e.g. (pairwise evidence)
   -a  e.g. (pairwise evidence)
   -b  e.g. (pairwise evidence)
   -d  e.g. (pairwise evidence)
-  -f  e.g. (pairwise evidence)
   -i  e.g. (pairwise evidence)
   -l  e.g. (pairwise evidence)
   -n  e.g. (pairwise evidence)
   -p  e.g. (pairwise evidence)
-  -r  e.g. (pairwise evidence)
   -s  e.g. (pairwise evidence)
   -u  e.g. (pairwise evidence)
   -x  e.g. (pairwise evidence)
