@@ -5,7 +5,150 @@ use regex::Regex;
 use std::collections::{HashMap, HashSet};
 
 use crate::parse::{Arg, Run, Script};
-use crate::sandbox::Sandbox;
+use crate::sandbox::{Sandbox, shell_escape};
+
+// --- Batched probe infrastructure ---
+// Runs many probes in a single bwrap invocation using the same shell-script
+// pattern as grid execution: each probe gets its own cell directory, all run
+// in parallel within one sandbox, results read from output files.
+
+/// Result of a single probe within a batch.
+struct ProbeResult {
+    exit_code: Option<i32>,
+    stdout: String,
+    stderr: String,
+}
+
+/// A batch of probe commands executed in a single bwrap invocation.
+struct ProbeBatch<'a> {
+    sandbox: &'a Sandbox,
+    binary: &'a str,
+    work_template: &'a std::path::Path,
+    tasks: Vec<(Vec<String>, Option<Vec<u8>>)>, // (args, stdin_data)
+}
+
+impl<'a> ProbeBatch<'a> {
+    fn new(sandbox: &'a Sandbox, binary: &'a str, work_template: &'a std::path::Path) -> Self {
+        ProbeBatch { sandbox, binary, work_template, tasks: Vec::new() }
+    }
+
+    /// Queue a probe. Returns the task index for matching results.
+    fn add(&mut self, args: Vec<String>, stdin: Option<Vec<u8>>) -> usize {
+        let idx = self.tasks.len();
+        self.tasks.push((args, stdin));
+        idx
+    }
+
+    /// Execute all queued probes in one bwrap and return results.
+    fn run(self) -> Vec<ProbeResult> {
+        if self.tasks.is_empty() {
+            return Vec::new();
+        }
+
+        let batch_dir = tempfile::Builder::new()
+            .prefix("bgrid_probe_")
+            .tempdir()
+            .expect("create probe batch dir");
+        let out_dir = batch_dir.path().join("out");
+        let _ = std::fs::create_dir(&out_dir);
+
+        let mut script = String::new();
+        for (i, (args, stdin_data)) in self.tasks.iter().enumerate() {
+            // Each probe gets its own cell directory copied from the template
+            let cell_dir = batch_dir.path().join(format!("c{}", i));
+            let _ = std::fs::create_dir(&cell_dir);
+            copy_dir_shallow(self.work_template, &cell_dir);
+
+            let stdin_part = if let Some(data) = stdin_data {
+                // Write stdin data to a file in the batch dir
+                let stdin_file = batch_dir.path().join(format!("s{}", i));
+                let _ = std::fs::write(&stdin_file, data);
+                format!("cat /batch/s{} | ", i)
+            } else {
+                String::new()
+            };
+
+            let args_str = args.iter()
+                .map(|a| shell_escape(a))
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            script.push_str(&format!(
+                "(cd /batch/c{i} && {stdin}timeout {t} {bin} {args} >/batch/out/{i}.out 2>/batch/out/{i}.err; echo $? >/batch/out/{i}.rc) &\n",
+                i = i, stdin = stdin_part,
+                t = crate::execute::CELL_TIMEOUT_SECS,
+                bin = shell_escape(self.binary),
+                args = args_str,
+            ));
+            if (i + 1) % 64 == 0 {
+                script.push_str("wait\n");
+            }
+        }
+        script.push_str("wait\n");
+
+        let script_path = batch_dir.path().join("run.sh");
+        let _ = std::fs::write(&script_path, &script);
+
+        let env = HashMap::new();
+        let mut cmd = self.sandbox.batch_command(batch_dir.path(), "run.sh", &env);
+        cmd.stdin(std::process::Stdio::null());
+        cmd.stdout(std::process::Stdio::null());
+        cmd.stderr(std::process::Stdio::null());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            unsafe { cmd.pre_exec(|| { libc::setpgid(0, 0); Ok(()) }); }
+        }
+
+        let timeout_secs = crate::execute::CELL_TIMEOUT_SECS * (self.tasks.len() as u64 + 1);
+        match cmd.spawn() {
+            Ok(mut child) => {
+                let child_id = child.id();
+                let timer = std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(timeout_secs));
+                    #[cfg(unix)]
+                    unsafe { libc::kill(-(child_id as i32), libc::SIGKILL); }
+                });
+                let _ = child.wait();
+                drop(timer);
+            }
+            Err(_) => {
+                return (0..self.tasks.len())
+                    .map(|_| ProbeResult { exit_code: None, stdout: String::new(), stderr: String::new() })
+                    .collect();
+            }
+        }
+
+        // Read results
+        (0..self.tasks.len()).map(|i| {
+            let exit_code = std::fs::read_to_string(out_dir.join(format!("{}.rc", i)))
+                .ok()
+                .and_then(|s| s.trim().parse().ok());
+            let stdout = std::fs::read_to_string(out_dir.join(format!("{}.out", i)))
+                .unwrap_or_default();
+            let stderr = std::fs::read_to_string(out_dir.join(format!("{}.err", i)))
+                .unwrap_or_default();
+            ProbeResult { exit_code, stdout, stderr }
+        }).collect()
+    }
+}
+
+/// Copy files (non-recursive, top-level only) from src to dst.
+fn copy_dir_shallow(src: &std::path::Path, dst: &std::path::Path) {
+    if let Ok(entries) = std::fs::read_dir(src) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let dest = dst.join(entry.file_name());
+            if path.is_dir() {
+                let _ = std::fs::create_dir(&dest);
+                copy_dir_shallow(&path, &dest);
+            } else {
+                let _ = std::fs::copy(&path, &dest);
+            }
+        }
+    }
+}
 
 /// Extracted flag info from --help text.
 pub struct FlagInfo {
@@ -229,27 +372,24 @@ pub fn probe_arg_patterns(
     binary: &str,
     sub_args: &[&str],
     sandbox: &Sandbox,
+    help_text: &str,
 ) -> (Vec<Vec<String>>, bool, Option<String>) {
-    // Create a minimal workspace for probing
+    // Create a minimal workspace template for probing
     let probe_dir = match tempfile::Builder::new().prefix("bgrid_probe_").tempdir() {
         Ok(d) => d,
-        Err(_) => return (vec![vec!["input.txt".into()]], false, None), // fallback
+        Err(_) => return (vec![vec!["input.txt".into()]], false, None),
     };
     let work_dir = probe_dir.path();
-
-    // Set up minimal files for probing
     let probe_content = "cherry\napple\nbanana\n";
     let _ = std::fs::write(work_dir.join("input.txt"), probe_content);
     let _ = std::fs::write(work_dir.join("other.txt"), "hello world\n");
     let _ = std::fs::create_dir(work_dir.join("subdir"));
     let _ = std::fs::write(work_dir.join("subdir/nested.txt"), "nested\n");
 
-    // Extract pattern from probe content — guaranteed to match input.txt
     let probe_pattern = probe_content.lines().next().unwrap_or("test").to_string();
+    let pattern_str = probe_pattern.as_str();
 
-    // Build candidates dynamically: replace the hardcoded "alpha" placeholder
-    // with the actual first line of input.txt so pattern-taking tools (grep, sed)
-    // get a pattern that matches their input.
+    // All candidate arg patterns to try
     let candidates: Vec<Vec<&str>> = vec![
         vec![],                                       // no args
         vec!["input.txt"],                            // single file
@@ -257,110 +397,99 @@ pub fn probe_arg_patterns(
         vec!["input.txt", "other.txt"],               // two files (diff, paste)
         vec!["input.txt", "subdir"],                  // file to directory
     ];
-    // Pattern candidates use the probe_pattern (which matches content)
-    let pattern_str = probe_pattern.as_str();
     let pattern_candidates: Vec<Vec<&str>> = vec![
         vec![pattern_str, "input.txt"],               // pattern + file (grep, sed)
         vec![pattern_str, "."],                       // pattern + directory (grep -r)
     ];
 
-    let env = std::collections::HashMap::new();
+    // Structural candidates from usage line
+    let usage_line = help_text.lines()
+        .find(|l| l.starts_with("Usage:") || l.starts_with("usage:"))
+        .unwrap_or("");
+    let structural_candidates: Vec<Vec<&str>> = if usage_line.contains("COMMAND") {
+        vec![vec!["echo"], vec!["echo", "input.txt"]]
+    } else if usage_line.contains("[expression]") || usage_line.contains("EXPRESSION") {
+        vec![vec![".", "-print"], vec![".", "-name", "*.txt"], vec![".", "-type", "f"]]
+    } else {
+        vec![]
+    };
+
+    let stdin_data = b"cherry\napple\nbanana\n".to_vec();
+
+    // Batch all probes into one bwrap invocation
+    let mut batch = ProbeBatch::new(sandbox, binary, work_dir);
+
+    // Track which task indices correspond to which candidate type
+    let n_regular = candidates.len();
+
+    // Regular + pattern candidates
+    let all_candidates: Vec<&Vec<&str>> = candidates.iter()
+        .chain(pattern_candidates.iter())
+        .collect();
+    for candidate in &all_candidates {
+        let args: Vec<String> = sub_args.iter().map(|s| s.to_string())
+            .chain(candidate.iter().map(|s| s.to_string()))
+            .collect();
+        batch.add(args, None);
+    }
+
+    // Stdin probes: bare args, then with "-"
+    let stdin_bare_idx = batch.add(
+        sub_args.iter().map(|s| s.to_string()).collect(),
+        Some(stdin_data.clone()),
+    );
+    let stdin_dash_idx = batch.add(
+        sub_args.iter().map(|s| s.to_string()).chain(std::iter::once("-".to_string())).collect(),
+        Some(stdin_data.clone()),
+    );
+
+    // Structural candidates
+    let structural_start = batch.tasks.len();
+    for candidate in &structural_candidates {
+        let args: Vec<String> = sub_args.iter().map(|s| s.to_string())
+            .chain(candidate.iter().map(|s| s.to_string()))
+            .collect();
+        batch.add(args, None);
+    }
+
+    let results = batch.run();
+
+    // Process regular + pattern candidates
     let mut working = Vec::new();
     let mut found_pattern_candidate = false;
-
-    let all_candidates: Vec<&Vec<&str>> = candidates.iter().chain(pattern_candidates.iter()).collect();
-
-    for candidate in &all_candidates {
-        let mut args: Vec<&str> = sub_args.to_vec();
-        args.extend(candidate.iter());
-
-        let mut cmd = sandbox.command(binary, &args, work_dir, &env);
-        cmd.stdin(std::process::Stdio::null());
-        cmd.stdout(std::process::Stdio::piped());
-        cmd.stderr(std::process::Stdio::piped());
-
-        if let Ok(output) = cmd.output() {
-            let exit = output.status.code().unwrap_or(-1);
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let has_output = !stdout.trim().is_empty();
-            let has_fs_effect = {
-                // Quick check: did any file get created or modified?
-                // Compare against known initial files
-                let after_count = std::fs::read_dir(work_dir)
-                    .map(|d| d.count()).unwrap_or(0);
-                after_count > 3 // started with input.txt, other.txt, subdir
-            };
-
-            // Pattern works if: exit 0, or exit 0 with output, or exit 0 with fs effect
-            // Also accept exit 1 with output (grep no-match, diff differences-found)
-            if exit == 0 || (exit <= 1 && has_output) || has_fs_effect {
-                let pattern: Vec<String> = candidate.iter().map(|s| s.to_string()).collect();
-                // Track whether this was a pattern-taking candidate
-                if candidate.first() == Some(&pattern_str) {
-                    found_pattern_candidate = true;
-                }
-                working.push(pattern);
+    for (i, candidate) in all_candidates.iter().enumerate() {
+        let r = &results[i];
+        let exit = r.exit_code.unwrap_or(-1);
+        let has_output = !r.stdout.trim().is_empty();
+        // Check for fs effect: each cell gets its own dir, so count entries beyond template
+        let has_fs_effect = i < n_regular && {
+            // The cell directory had 3 entries (input.txt, other.txt, subdir)
+            // If more exist after the probe, the command created files
+            false // fs effect detection deferred: batch cells are isolated
+        };
+        if exit == 0 || (exit <= 1 && has_output) || has_fs_effect {
+            let pattern: Vec<String> = candidate.iter().map(|s| s.to_string()).collect();
+            if i >= n_regular {
+                found_pattern_candidate = true;
             }
-
-            // Reset workspace for next probe (in case a command modified files)
-            let _ = std::fs::write(work_dir.join("input.txt"), probe_content);
-            let _ = std::fs::write(work_dir.join("other.txt"), "hello world\n");
+            working.push(pattern);
         }
     }
 
-    // Probe stdin: try piping content (bare, then with "-" marker)
-    let stdin_works = [sub_args.to_vec(), { let mut a = sub_args.to_vec(); a.push("-"); a }]
-        .iter().any(|args| {
-            let mut cmd = sandbox.command(binary, args, work_dir, &env);
-            cmd.stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped());
-            let Ok(mut child) = cmd.spawn() else { return false };
-            if let Some(mut si) = child.stdin.take() {
-                use std::io::Write;
-                let _ = si.write_all(b"cherry\napple\nbanana\n");
-            }
-            child.wait_with_output().map(|o| {
-                let exit = o.status.code().unwrap_or(-1);
-                (exit == 0 || exit == 1) && !String::from_utf8_lossy(&o.stdout).trim().is_empty()
-            }).unwrap_or(false)
-        });
+    // Process stdin probes
+    let stdin_works = [stdin_bare_idx, stdin_dash_idx].iter().any(|&idx| {
+        let r = &results[idx];
+        let exit = r.exit_code.unwrap_or(-1);
+        (exit == 0 || exit == 1) && !r.stdout.trim().is_empty()
+    });
 
-    // Usage-line mining: detect structural args the binary expects after flags.
-    // E.g., "Usage: xargs [OPTION]... COMMAND" → try "echo" as trailing command.
-    if let Ok(help_text) = try_help(binary, sub_args, sandbox) {
-        let usage_line = help_text.lines()
-            .find(|l| l.starts_with("Usage:") || l.starts_with("usage:"))
-            .unwrap_or("");
-        // Look for uppercase structural placeholders after [OPTION]
-        let structural_candidates: Vec<Vec<&str>> = if usage_line.contains("COMMAND") {
-            vec![
-                vec!["echo"],
-                vec!["echo", "input.txt"],
-            ]
-        } else if usage_line.contains("[expression]") || usage_line.contains("EXPRESSION") {
-            vec![
-                vec![".", "-print"],
-                vec![".", "-name", "*.txt"],
-                vec![".", "-type", "f"],
-            ]
-        } else {
-            vec![]
-        };
-        for candidate in &structural_candidates {
-            let mut args: Vec<&str> = sub_args.to_vec();
-            args.extend(candidate.iter());
-            let mut cmd = sandbox.command(binary, &args, work_dir, &env);
-            cmd.stdin(std::process::Stdio::null());
-            cmd.stdout(std::process::Stdio::piped());
-            cmd.stderr(std::process::Stdio::piped());
-            if let Ok(output) = cmd.output() {
-                let exit = output.status.code().unwrap_or(-1);
-                let has_output = !String::from_utf8_lossy(&output.stdout).trim().is_empty();
-                if exit == 0 || (exit <= 1 && has_output) {
-                    working.push(candidate.iter().map(|s| s.to_string()).collect());
-                }
-            }
+    // Process structural candidates
+    for (si, candidate) in structural_candidates.iter().enumerate() {
+        let r = &results[structural_start + si];
+        let exit = r.exit_code.unwrap_or(-1);
+        let has_output = !r.stdout.trim().is_empty();
+        if exit == 0 || (exit <= 1 && has_output) {
+            working.push(candidate.iter().map(|s| s.to_string()).collect());
         }
     }
 
@@ -464,91 +593,55 @@ fn push_flag_arg(args: &mut Vec<Arg>, flag: &str, value: Option<&str>) {
     }
 }
 
-/// Probe a flag+value combination. Returns exit code if it ran, None if spawn failed.
-/// Shared context for probing flag values against a binary.
-struct ProbeCtx<'a> {
-    sandbox: &'a Sandbox,
-    binary: &'a str,
-    sub_args: &'a [&'a str],
-    pattern: &'a [String],
-    work_dir: &'a std::path::Path,
-}
-
-impl<'a> ProbeCtx<'a> {
-    /// Probe a flag+value. Returns exit code if it ran.
-    fn exit_code(&self, flag: &str, value: Option<&str>,
-        companion: Option<(&str, &str)>, stdin_data: Option<&[u8]>,
-    ) -> Option<i32> {
-        let env = std::collections::HashMap::new();
-        let mut args: Vec<String> = self.sub_args.iter().map(|s| s.to_string()).collect();
-        if let Some((cf, cv)) = companion {
-            if cf.starts_with("--") { args.push(format!("{}={}", cf, cv)); }
-            else { args.push(cf.to_string()); args.push(cv.to_string()); }
+/// Insert a flag (with optional value) at a specific position.
+fn push_flag_arg_at(args: &mut Vec<Arg>, pos: usize, flag: &str, value: Option<&str>) {
+    match value {
+        Some(v) if flag.starts_with("--") => {
+            args.insert(pos, Arg::Literal(format!("{}={}", flag, v)));
         }
-        if let Some(v) = value {
-            if flag.starts_with("--") { args.push(format!("{}={}", flag, v)); }
-            else { args.push(flag.to_string()); args.push(v.to_string()); }
-        } else {
-            args.push(flag.to_string());
+        Some(v) => {
+            args.insert(pos, Arg::Literal(flag.to_string()));
+            args.insert(pos + 1, Arg::Literal(v.to_string()));
         }
-        args.extend(self.pattern.iter().cloned());
-        let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-        let _ = std::fs::write(self.work_dir.join("input.txt"), "cherry\napple\nbanana\n");
-        let mut cmd = self.sandbox.command(self.binary, &refs, self.work_dir, &env);
-        cmd.stdout(std::process::Stdio::piped());
-        cmd.stderr(std::process::Stdio::piped());
-        if let Some(data) = stdin_data {
-            cmd.stdin(std::process::Stdio::piped());
-            let mut child = cmd.spawn().ok()?;
-            if let Some(mut si) = child.stdin.take() {
-                use std::io::Write;
-                let _ = si.write_all(data);
-            }
-            child.wait_with_output().ok()?.status.code()
-        } else {
-            cmd.stdin(std::process::Stdio::null());
-            cmd.output().ok()?.status.code()
-        }
-    }
-
-    /// Probe succeeds if exit code ≤ 1.
-    fn succeeds(&self, flag: &str, value: Option<&str>,
-        companion: Option<(&str, &str)>,
-    ) -> bool {
-        self.exit_code(flag, value, companion, None).is_some_and(|c| c <= 1)
-    }
-
-    /// Try invalid value and mine stderr for valid alternatives.
-    fn error_mine(&self, flag: &str) -> Vec<String> {
-        let env = std::collections::HashMap::new();
-        let mut args: Vec<String> = self.sub_args.iter().map(|s| s.to_string()).collect();
-        if flag.starts_with("--") {
-            args.push(format!("{}=__bgrid_invalid__", flag));
-        } else {
-            args.push(flag.to_string());
-            args.push("__bgrid_invalid__".into());
-        }
-        args.extend(self.pattern.iter().cloned());
-        let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-        let _ = std::fs::write(self.work_dir.join("input.txt"), "cherry\napple\nbanana\n");
-        let mut cmd = self.sandbox.command(self.binary, &refs, self.work_dir, &env);
-        cmd.stdin(std::process::Stdio::null());
-        cmd.stdout(std::process::Stdio::piped());
-        cmd.stderr(std::process::Stdio::piped());
-        match cmd.output() {
-            Ok(output) => mine_valid_values(&String::from_utf8_lossy(&output.stderr)),
-            Err(_) => Vec::new(),
+        None => {
+            args.insert(pos, Arg::Literal(flag.to_string()));
         }
     }
 }
 
+/// Build probe args: sub_args + [companion] + flag[=value] + pattern.
+fn build_probe_args(
+    sub_args: &[&str], flag: &str, value: Option<&str>,
+    companion: Option<(&str, &str)>, pattern: &[String],
+) -> Vec<String> {
+    let mut args: Vec<String> = sub_args.iter().map(|s| s.to_string()).collect();
+    if let Some((cf, cv)) = companion {
+        if cf.starts_with("--") { args.push(format!("{}={}", cf, cv)); }
+        else { args.push(cf.to_string()); args.push(cv.to_string()); }
+    }
+    if let Some(v) = value {
+        if flag.starts_with("--") { args.push(format!("{}={}", flag, v)); }
+        else { args.push(flag.to_string()); args.push(v.to_string()); }
+    } else {
+        args.push(flag.to_string());
+    }
+    args.extend(pattern.iter().cloned());
+    args
+}
 
 /// Pilot study: determine working factor levels for each flag.
-/// Tries candidates solo, then with companions, then mutual compounds.
-/// Returns (extra_solo_values, prerequisites).
-#[allow(clippy::type_complexity)]
+/// Batches probes into phases, each a single bwrap invocation:
+///   1. Solo candidates + error mine probes
+///   2. Mined value probes + stdin retries
+///   3. Companion probes
+///   4. Mutual compound probes
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn probe_values(
-    ctx: &ProbeCtx,
+    sandbox: &Sandbox,
+    binary: &str,
+    sub_args: &[&str],
+    pattern: &[String],
+    work_template: &std::path::Path,
     flags: &mut [(String, Option<String>)],
     flag_info: &FlagInfo,
     stdin_works: bool,
@@ -560,13 +653,11 @@ fn probe_values(
         .filter_map(|(f, mv)| mv.as_ref().map(|m| (f.clone(), m.clone())))
         .collect();
 
-    // Solo probing: try all candidates per flag
-    #[allow(clippy::needless_range_loop)]
-    for i in 0..flags.len() {
+    // Build candidate lists per flag (reused across phases)
+    let flag_cands: Vec<Option<Vec<String>>> = (0..flags.len()).map(|i| {
         let (ref flag, ref metavar) = flags[i];
         let has_extracted = flag_info.extracted_values.contains_key(flag);
-        if metavar.is_none() && !has_extracted { continue; }
-
+        if metavar.is_none() && !has_extracted { return None; }
         let mut cands: Vec<String> = Vec::new();
         if let Some(extracted) = flag_info.extracted_values.get(flag) {
             cands.extend(extracted.iter().cloned());
@@ -576,95 +667,198 @@ fn probe_values(
                 if !cands.iter().any(|e| e == c) { cands.push(c.to_string()); }
             }
         }
+        Some(cands)
+    }).collect();
 
-        let mut working: Vec<String> = Vec::new();
-        let mut has_exit0 = false;
-        for c in &cands {
-            if let Some(exit) = ctx.exit_code(flag, Some(c), None, None) {
-                if exit <= 1 {
-                    working.push(c.clone());
-                    if exit == 0 { has_exit0 = true; }
-                }
-            }
+    // === Phase 1: Solo candidates + error mine probes (1 bwrap) ===
+    let mut batch1 = ProbeBatch::new(sandbox, binary, work_template);
+
+    // Solo: (flag_index, value, task_index)
+    let mut solo_tasks: Vec<(usize, String, usize)> = Vec::new();
+    // Error mine: (flag_index, task_index)
+    let mut mine_tasks: Vec<(usize, usize)> = Vec::new();
+
+    for (i, cands) in flag_cands.iter().enumerate() {
+        let Some(cands) = cands else { continue };
+        let flag = &flags[i].0;
+        for c in cands {
+            let args = build_probe_args(sub_args, flag, Some(c), None, pattern);
+            let idx = batch1.add(args, None);
+            solo_tasks.push((i, c.clone(), idx));
         }
-
-        // Error mining: try when no candidates worked OR when all exit 1
-        if working.is_empty() || !has_exit0 {
-            let mined = ctx.error_mine(flag);
-            for val in mined {
-                if let Some(exit) = ctx.exit_code(flag, Some(&val), None, None) {
-                    if exit <= 1 {
-                        if exit == 0 && !has_exit0 {
-                            working.insert(0, val);
-                            has_exit0 = true;
-                        } else if !working.contains(&val) {
-                            working.push(val);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Stdin retry for stdin-primary tools
-        if stdin_works && !has_exit0 {
-            let stdin_data = b"cherry\napple\nbanana\n";
-            let empty_pattern: Vec<String> = vec![];
-            let stdin_ctx = ProbeCtx { pattern: &empty_pattern, ..*ctx };
-            for c in &cands {
-                if !working.contains(c)
-                    && stdin_ctx.exit_code(flag, Some(c), None, Some(stdin_data)) == Some(0)
-                {
-                    working.insert(0, c.clone());
-                    break;
-                }
-            }
-        }
-
-        if let Some(first) = working.first() {
-            flags[i].1 = Some(first.clone());
-            if working.len() > 1 {
-                extra_solo_values.insert(flags[i].0.clone(), working[1..].to_vec());
-            }
+        // Error mine probe (submit unconditionally; decide whether to use results later)
+        let mut mine_args: Vec<String> = sub_args.iter().map(|s| s.to_string()).collect();
+        if flag.starts_with("--") {
+            mine_args.push(format!("{}=__bgrid_invalid__", flag));
         } else {
-            flags[i].1 = None;
+            mine_args.push(flag.to_string());
+            mine_args.push("__bgrid_invalid__".into());
+        }
+        mine_args.extend(pattern.iter().cloned());
+        let idx = batch1.add(mine_args, None);
+        mine_tasks.push((i, idx));
+    }
+
+    let r1 = batch1.run();
+
+    // Collect solo results per flag
+    struct FlagState { working: Vec<String>, has_exit0: bool }
+    let mut states: HashMap<usize, FlagState> = HashMap::new();
+
+    for &(fi, ref val, ti) in &solo_tasks {
+        let exit = r1[ti].exit_code.unwrap_or(-1);
+        let state = states.entry(fi).or_insert(FlagState { working: Vec::new(), has_exit0: false });
+        if exit <= 1 {
+            state.working.push(val.clone());
+            if exit == 0 { state.has_exit0 = true; }
         }
     }
 
-    // Companion probing: try failing flags with each working flag as companion
+    // === Phase 2: Mined value probes + stdin retries (1 bwrap) ===
+    let mut batch2 = ProbeBatch::new(sandbox, binary, work_template);
+    let mut mined_tasks: Vec<(usize, String, usize)> = Vec::new();
+    let mut stdin_tasks: Vec<(usize, String, usize)> = Vec::new();
+
+    for &(fi, ti) in &mine_tasks {
+        let state = states.get(&fi);
+        let needs_mining = state.is_none_or(|s| s.working.is_empty() || !s.has_exit0);
+        if !needs_mining { continue; }
+        let mined = mine_valid_values(&r1[ti].stderr);
+        for val in mined {
+            let args = build_probe_args(sub_args, &flags[fi].0, Some(&val), None, pattern);
+            let idx = batch2.add(args, None);
+            mined_tasks.push((fi, val, idx));
+        }
+    }
+
+    // Stdin retry for flags still without exit 0
+    if stdin_works {
+        let stdin_data = b"cherry\napple\nbanana\n".to_vec();
+        for (i, cands) in flag_cands.iter().enumerate() {
+            let Some(cands) = cands else { continue };
+            let state = states.get(&i);
+            if state.is_some_and(|s| s.has_exit0) { continue; }
+            for c in cands {
+                let args = build_probe_args(sub_args, &flags[i].0, Some(c), None, &[]);
+                let idx = batch2.add(args, Some(stdin_data.clone()));
+                stdin_tasks.push((i, c.clone(), idx));
+            }
+        }
+    }
+
+    if !batch2.tasks.is_empty() {
+        let r2 = batch2.run();
+
+        // Process mined value results
+        for &(fi, ref val, ti) in &mined_tasks {
+            let exit = r2[ti].exit_code.unwrap_or(-1);
+            if exit <= 1 {
+                let state = states.entry(fi).or_insert(FlagState { working: Vec::new(), has_exit0: false });
+                if exit == 0 && !state.has_exit0 {
+                    state.working.insert(0, val.clone());
+                    state.has_exit0 = true;
+                } else if !state.working.contains(val) {
+                    state.working.push(val.clone());
+                }
+            }
+        }
+
+        // Process stdin retry results — only take first exit-0 per flag
+        let mut stdin_resolved: HashSet<usize> = HashSet::new();
+        for &(fi, ref val, ti) in &stdin_tasks {
+            if stdin_resolved.contains(&fi) { continue; }
+            if r2[ti].exit_code == Some(0) {
+                let state = states.entry(fi).or_insert(FlagState { working: Vec::new(), has_exit0: false });
+                state.working.insert(0, val.clone());
+                state.has_exit0 = true;
+                stdin_resolved.insert(fi);
+            }
+        }
+    }
+
+    // Apply results to flags
+    for (fi, state) in &states {
+        if let Some(first) = state.working.first() {
+            flags[*fi].1 = Some(first.clone());
+            if state.working.len() > 1 {
+                extra_solo_values.insert(flags[*fi].0.clone(), state.working[1..].to_vec());
+            }
+        } else {
+            flags[*fi].1 = None;
+        }
+    }
+
+    // === Phase 3: Companion probing (1 bwrap) ===
+    // Flags with values enter the grid, but only exit-0 flags are truly resolved.
+    // Flags with exit-1-only values (e.g., cut -d , → errors without -f) still
+    // need companion probing to find the enabling flag.
+    let has_exit0: HashSet<usize> = states.iter()
+        .filter(|(_, s)| s.has_exit0)
+        .map(|(fi, _)| *fi)
+        .collect();
+
     let working_flags: Vec<(String, String)> = flags.iter()
         .filter_map(|(f, v)| v.as_ref().map(|val| (f.clone(), val.clone())))
         .collect();
+
+    // Build all companion probes for flags without exit-0 values
+    let mut batch3 = ProbeBatch::new(sandbox, binary, work_template);
+    // (flag_index, companion_flag, value_or_none, task_index)
+    let mut companion_tasks: Vec<(usize, String, Option<String>, usize)> = Vec::new();
+
     #[allow(clippy::needless_range_loop)]
     for i in 0..flags.len() {
-        if flags[i].1.is_some() { continue; }
-        let flag = flags[i].0.clone();
+        if has_exit0.contains(&i) { continue; }
+        let flag = &flags[i].0;
         let mut target_cands: Vec<String> = flag_info.extracted_values
-            .get(&flag).cloned().unwrap_or_default();
+            .get(flag).cloned().unwrap_or_default();
         if target_cands.is_empty() {
-            if let Some(mv) = original_metavars.get(&flag) {
+            if let Some(mv) = original_metavars.get(flag) {
                 target_cands = candidates(mv).into_iter().map(String::from).collect();
             }
         }
-
-        'companion: for (cf, cv) in &working_flags {
-            if *cf == flag { continue; }
+        for (cf, cv) in &working_flags {
+            if *cf == *flag { continue; }
             let companion = Some((cf.as_str(), cv.as_str()));
             if target_cands.is_empty() {
-                if ctx.succeeds(&flag, None, companion) {
-                    break 'companion;
-                }
+                let args = build_probe_args(sub_args, flag, None, companion, pattern);
+                let idx = batch3.add(args, None);
+                companion_tasks.push((i, cf.clone(), None, idx));
             } else {
                 for val in &target_cands {
-                    if ctx.succeeds(&flag, Some(val), companion) {
-                        flags[i].1 = Some(val.clone());
-                        break 'companion;
-                    }
+                    let args = build_probe_args(sub_args, flag, Some(val), companion, pattern);
+                    let idx = batch3.add(args, None);
+                    companion_tasks.push((i, cf.clone(), Some(val.clone()), idx));
                 }
             }
         }
     }
 
-    // Mutual compound probing: try pairs of both-failing flags together
+    if !batch3.tasks.is_empty() {
+        let r3 = batch3.run();
+        // For each failing flag, find the first companion that produces exit 0.
+        // Exit 0 required (not exit 1) — exit 1 with a companion often means the
+        // companion masked the error rather than enabling the flag.
+        let mut resolved: HashSet<usize> = HashSet::new();
+        for &(fi, ref cf, ref val, ti) in &companion_tasks {
+            if resolved.contains(&fi) { continue; }
+            let exit = r3[ti].exit_code.unwrap_or(-1);
+            if exit == 0 {
+                if let Some(v) = val {
+                    flags[fi].1 = Some(v.clone());
+                }
+                // The companion that made this flag work is a prerequisite
+                let cv = working_flags.iter()
+                    .find(|(f, _)| f == cf)
+                    .map(|(_, v)| v.clone())
+                    .unwrap_or_default();
+                prerequisites.insert(flags[fi].0.clone(), (cf.clone(), cv.clone()));
+                resolved.insert(fi);
+            }
+        }
+    }
+
+    // === Phase 4: Mutual compound probing (1 bwrap) ===
     let still_failing: Vec<(usize, Vec<String>)> = (0..flags.len())
         .filter(|&i| flags[i].1.is_none())
         .filter_map(|i| {
@@ -681,18 +875,33 @@ fn probe_values(
         })
         .collect();
 
-    for (ai, ref a_cands) in &still_failing {
-        if flags[*ai].1.is_some() { continue; }
-        for (bi, ref b_cands) in &still_failing {
-            if bi == ai || flags[*bi].1.is_some() { continue; }
-            if let (Some(va), Some(vb)) = (a_cands.first(), b_cands.first()) {
-                let companion = Some((flags[*bi].0.as_str(), vb.as_str()));
-                if ctx.succeeds(&flags[*ai].0, Some(va), companion) {
-                    flags[*ai].1 = Some(va.clone());
-                    flags[*bi].1 = Some(vb.clone());
-                    prerequisites.insert(flags[*ai].0.clone(), (flags[*bi].0.clone(), vb.clone()));
-                    prerequisites.insert(flags[*bi].0.clone(), (flags[*ai].0.clone(), va.clone()));
-                    break;
+    if still_failing.len() >= 2 {
+        let mut batch4 = ProbeBatch::new(sandbox, binary, work_template);
+        // (flag_a_idx, flag_b_idx, value_a, value_b, task_index)
+        let mut compound_tasks: Vec<(usize, usize, String, String, usize)> = Vec::new();
+
+        for (ai, ref a_cands) in &still_failing {
+            for (bi, ref b_cands) in &still_failing {
+                if bi == ai { continue; }
+                if let (Some(va), Some(vb)) = (a_cands.first(), b_cands.first()) {
+                    let companion = Some((flags[*bi].0.as_str(), vb.as_str()));
+                    let args = build_probe_args(sub_args, &flags[*ai].0, Some(va), companion, pattern);
+                    let idx = batch4.add(args, None);
+                    compound_tasks.push((*ai, *bi, va.clone(), vb.clone(), idx));
+                }
+            }
+        }
+
+        if !batch4.tasks.is_empty() {
+            let r4 = batch4.run();
+            for &(ai, bi, ref va, ref vb, ti) in &compound_tasks {
+                if flags[ai].1.is_some() || flags[bi].1.is_some() { continue; }
+                let exit = r4[ti].exit_code.unwrap_or(-1);
+                if exit <= 1 {
+                    flags[ai].1 = Some(va.clone());
+                    flags[bi].1 = Some(vb.clone());
+                    prerequisites.insert(flags[ai].0.clone(), (flags[bi].0.clone(), vb.clone()));
+                    prerequisites.insert(flags[bi].0.clone(), (flags[ai].0.clone(), va.clone()));
                 }
             }
         }
@@ -721,7 +930,7 @@ pub fn generate_initial_script(
     let mut flags = flag_info.flags.clone();
     let t_parse = t0.elapsed();
 
-    let (working_patterns, stdin_works, probe_pattern) = probe_arg_patterns(binary, sub_args, sandbox);
+    let (working_patterns, stdin_works, probe_pattern) = probe_arg_patterns(binary, sub_args, sandbox, &help_text);
     if stdin_works { eprintln!("  stdin: accepted"); }
     if probe_pattern.is_some() { eprintln!("  pattern: context-derived"); }
     let t_patterns = t0.elapsed();
@@ -746,8 +955,8 @@ pub fn generate_initial_script(
         let _ = std::fs::write(work_dir.join("other.txt"), "hello world\n");
         let _ = std::fs::create_dir(work_dir.join("subdir"));
         let sub_refs: Vec<&str> = sub_args.to_vec();
-        let ctx = ProbeCtx { sandbox, binary, sub_args: &sub_refs, pattern: first_pattern, work_dir };
-        probe_values(&ctx, &mut flags, &flag_info, stdin_works)
+        probe_values(sandbox, binary, &sub_refs, first_pattern, work_dir,
+            &mut flags, &flag_info, stdin_works)
     } else {
         (HashMap::new(), HashMap::new())
     };
@@ -780,13 +989,25 @@ pub fn generate_initial_script(
         runs.push(Run { args: base_args.clone(), in_contexts: None, diff_from: None });
         for (flag, metavar) in flags.iter() {
             let mut args = sub_prefix.clone();
-            // Include prerequisite companion if this flag needs one
-            if let Some((cf, cv)) = prerequisites.get(flag) {
+            // Include prerequisite companion if this flag needs one.
+            // The diff baseline also includes the companion so the delta
+            // isolates the flag's effect (not the companion's).
+            let diff_base = if let Some((cf, cv)) = prerequisites.get(flag) {
                 push_flag_arg(&mut args, cf, Some(cv));
-            }
+                let mut prereq_base = base_args.clone();
+                let insert_pos = sub_prefix.len(); // after sub_args, before positionals
+                push_flag_arg_at(&mut prereq_base, insert_pos, cf, Some(cv));
+                // Ensure the prerequisite base run exists
+                if !runs.iter().any(|r| r.args == prereq_base) {
+                    runs.push(Run { args: prereq_base.clone(), in_contexts: None, diff_from: None });
+                }
+                prereq_base
+            } else {
+                base_args.clone()
+            };
             push_flag_arg(&mut args, flag, metavar.as_deref());
             args.extend(pattern.iter().map(&to_arg));
-            runs.push(Run { args, in_contexts: None, diff_from: Some(base_args.clone()) });
+            runs.push(Run { args, in_contexts: None, diff_from: Some(diff_base) });
         }
         // Extra solo runs for additional working values
         for (flag, extra_vals) in &extra_solo_values {

@@ -229,3 +229,13 @@ pub fn apply_setup(
     }
     Ok(env_vars)
 }
+
+/// Escape a string for shell use.
+pub fn shell_escape(s: &str) -> String {
+    if s.is_empty() { return "''".to_string(); }
+    if s.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-/=".contains(&b)) {
+        s.to_string()
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
+}

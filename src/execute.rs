@@ -462,15 +462,7 @@ pub fn run_grid(
     })
 }
 
-/// Escape a string for shell use.
-fn shell_escape(s: &str) -> String {
-    if s.is_empty() { return "''".to_string(); }
-    if s.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-/=".contains(&b)) {
-        s.to_string()
-    } else {
-        format!("'{}'", s.replace('\'', "'\\''"))
-    }
-}
+use crate::sandbox::shell_escape;
 
 /// Group observations by identical output. Returns (context_names, representative_obs) groups.
 pub fn collapse<'a>(
@@ -512,11 +504,13 @@ pub fn compute_diff(reference: &Observation, option: &Observation) -> Vec<String
         lines.push("stdout: same lines, different order".into());
     } else {
         if !only_in_opt.is_empty() {
-            let preview: Vec<&str> = only_in_opt.iter().take(5).map(|l| **l).collect();
+            let preview: Vec<String> = only_in_opt.iter().take(5)
+                .map(|l| crate::output::strip_ansi(l)).collect();
             lines.push(format!("{} only in this: {}", only_in_opt.len(), preview.join(", ")));
         }
         if !only_in_ref.is_empty() {
-            let preview: Vec<&str> = only_in_ref.iter().take(5).map(|l| **l).collect();
+            let preview: Vec<String> = only_in_ref.iter().take(5)
+                .map(|l| crate::output::strip_ansi(l)).collect();
             lines.push(format!("{} only in ref: {}", only_in_ref.len(), preview.join(", ")));
         }
         if !shared.is_empty() {
@@ -532,24 +526,36 @@ pub fn compute_diff(reference: &Observation, option: &Observation) -> Vec<String
 
     if reference.stderr != option.stderr {
         if reference.stderr.is_empty() && !option.stderr.is_empty() {
-            lines.push(format!("stderr added: {}", option.stderr.trim()));
+            // Show first line of stderr only (full errors are noisy in summaries)
+            let first = option.stderr.lines().next().unwrap_or("").trim();
+            lines.push(format!("stderr: {}", first));
         } else if !reference.stderr.is_empty() && option.stderr.is_empty() {
             lines.push("stderr removed".into());
         } else {
-            lines.push("stderr changed".into());
+            let first = option.stderr.lines().next().unwrap_or("").trim();
+            lines.push(format!("stderr changed: {}", first));
         }
     }
 
     let ref_fs: HashSet<&FsChange> = reference.fs_changes.iter().collect();
     let opt_fs: HashSet<&FsChange> = option.fs_changes.iter().collect();
     for c in option.fs_changes.iter().filter(|c| !ref_fs.contains(c)) {
-        lines.push(format!("fs additional: {:?}", c));
+        lines.push(format!("fs: also {}", format_fs_change(c)));
     }
     for c in reference.fs_changes.iter().filter(|c| !opt_fs.contains(c)) {
-        lines.push(format!("fs missing: {:?}", c));
+        lines.push(format!("fs: did not {}", format_fs_change(c)));
     }
 
     lines
+}
+
+/// Human-readable description of a filesystem change.
+fn format_fs_change(c: &FsChange) -> String {
+    match c {
+        FsChange::Created { path, size } => format!("create {} ({} bytes)", path, size),
+        FsChange::Deleted { path } => format!("delete {}", path),
+        FsChange::Modified { path, detail } => format!("modify {} ({})", path, detail),
+    }
 }
 
 /// Count cells in the execution grid (contexts × applicable runs).
