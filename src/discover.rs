@@ -1,10 +1,10 @@
-//! Flag discovery and probe skeleton generation from --help text.
+//! Flag discovery and behavioral probing from --help text.
 
 use anyhow::{Context, Result};
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
 
-use crate::parse::{Arg, NamedContext, Run, Script};
+use crate::parse::{Arg, Run, Script};
 use crate::sandbox::Sandbox;
 
 /// Extracted flag info from --help text.
@@ -147,7 +147,7 @@ pub fn try_help(binary: &str, sub_args: &[&str], sandbox: &Sandbox) -> Result<St
         let mut args: Vec<&str> = sub_args.to_vec();
         args.push(help_flag);
         let env = HashMap::new();
-        let mut cmd = sandbox.command(binary, &args, tmp.path(), &env, None);
+        let mut cmd = sandbox.command(binary, &args, tmp.path(), &env);
         cmd.stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
@@ -227,7 +227,7 @@ pub fn probe_arg_patterns(
         let mut args: Vec<&str> = sub_args.to_vec();
         args.extend(candidate.iter());
 
-        let mut cmd = sandbox.command(binary, &args, work_dir, &env, None);
+        let mut cmd = sandbox.command(binary, &args, work_dir, &env);
         cmd.stdin(std::process::Stdio::null());
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
@@ -264,7 +264,7 @@ pub fn probe_arg_patterns(
     // Probe stdin: try piping content (bare, then with "-" marker)
     let stdin_works = [sub_args.to_vec(), { let mut a = sub_args.to_vec(); a.push("-"); a }]
         .iter().any(|args| {
-            let mut cmd = sandbox.command(binary, args, work_dir, &env, None);
+            let mut cmd = sandbox.command(binary, args, work_dir, &env);
             cmd.stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped());
@@ -303,7 +303,7 @@ pub fn probe_arg_patterns(
         for candidate in &structural_candidates {
             let mut args: Vec<&str> = sub_args.to_vec();
             args.extend(candidate.iter());
-            let mut cmd = sandbox.command(binary, &args, work_dir, &env, None);
+            let mut cmd = sandbox.command(binary, &args, work_dir, &env);
             cmd.stdin(std::process::Stdio::null());
             cmd.stdout(std::process::Stdio::piped());
             cmd.stderr(std::process::Stdio::piped());
@@ -378,82 +378,6 @@ pub fn candidates(metavar: &str) -> Vec<&'static str> {
     }
 }
 
-/// Print a probe skeleton to stdout for manual authoring.
-/// Generates the same Script as `generate_initial_script` and serializes it to probe text.
-pub fn print_skeleton(
-    binary: &str,
-    sub_args: &[&str],
-    sandbox: &Sandbox,
-) -> Result<()> {
-    let (script, flag_info) = generate_initial_script(binary, sub_args, sandbox)?;
-
-    let cmd_label = if sub_args.is_empty() {
-        binary.to_string()
-    } else {
-        format!("{} {}", binary, sub_args.join(" "))
-    };
-
-    println!("# Discovered from: {} --help", cmd_label);
-    println!("# {} flags found", flag_info.all_flags.len());
-    println!();
-
-    // Serialize contexts
-    for ctx in &script.contexts {
-        // Skip vary-generated contexts (contain " / " in name) — print vary blocks instead below
-        if ctx.name.contains(" / ") { continue; }
-        println!("context \"{}\"", ctx.name);
-        for cmd in &ctx.commands {
-            println!("  {}", crate::output::format_setup_cmd(cmd));
-        }
-        println!();
-    }
-
-    // Reconstruct vary blocks from generated contexts
-    let vary_base = "many_files";
-    let vary_contexts: Vec<&NamedContext> = script.contexts.iter()
-        .filter(|c| c.name.starts_with(&format!("{} / ", vary_base)))
-        .collect();
-    if !vary_contexts.is_empty() {
-        println!("vary from \"{}\"", vary_base);
-        for ctx in &vary_contexts {
-            // The last command is the perturbation
-            if let Some(cmd) = ctx.commands.last() {
-                println!("  {}", crate::output::format_setup_cmd(cmd));
-            }
-        }
-        println!();
-    }
-
-    // Serialize runs
-    let mut current_from: Option<&Vec<Arg>> = None;
-    for run in &script.runs {
-        let args_str = run.args.iter().map(|a| a.display()).collect::<Vec<_>>().join(" ");
-
-        match (&run.diff_from, current_from) {
-            (Some(ref from), Some(prev)) if from == prev => {
-                // Inside an existing from block
-                println!("  run {}", args_str);
-            }
-            (Some(ref from), _) => {
-                // New from block
-                let from_str = from.iter().map(|a| a.display()).collect::<Vec<_>>().join(" ");
-                println!();
-                println!("from {}", from_str);
-                println!("  run {}", args_str);
-                current_from = Some(from);
-            }
-            (None, _) => {
-                println!("run {}", args_str);
-                current_from = None;
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Extract valid values from error output.
-/// Parses the GNU coreutils format: "Valid arguments are:\n  - 'value'\n  ..."
 fn mine_valid_values(stderr: &str) -> Vec<String> {
     let mut values = Vec::new();
     let re = Regex::new(r"'([a-zA-Z][-a-zA-Z0-9]*)'").unwrap();
@@ -523,7 +447,7 @@ impl<'a> ProbeCtx<'a> {
         args.extend(self.pattern.iter().cloned());
         let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
         let _ = std::fs::write(self.work_dir.join("input.txt"), "cherry\napple\nbanana\n");
-        let mut cmd = self.sandbox.command(self.binary, &refs, self.work_dir, &env, None);
+        let mut cmd = self.sandbox.command(self.binary, &refs, self.work_dir, &env);
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
         if let Some(data) = stdin_data {
@@ -560,7 +484,7 @@ impl<'a> ProbeCtx<'a> {
         args.extend(self.pattern.iter().cloned());
         let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
         let _ = std::fs::write(self.work_dir.join("input.txt"), "cherry\napple\nbanana\n");
-        let mut cmd = self.sandbox.command(self.binary, &refs, self.work_dir, &env, None);
+        let mut cmd = self.sandbox.command(self.binary, &refs, self.work_dir, &env);
         cmd.stdin(std::process::Stdio::null());
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());

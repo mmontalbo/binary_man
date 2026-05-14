@@ -87,7 +87,6 @@ enum LineEdit {
 #[derive(PartialEq, Eq, Clone, Debug, Hash)]
 enum OutputDelta {
     Identical,
-    Permutation(Vec<usize>),
     Edited(Vec<LineEdit>),
 }
 
@@ -300,20 +299,6 @@ fn compute_output_delta(ref_out: &str, obs_out: &str) -> OutputDelta {
 
     let ref_labels = tokenize(ref_out);
     let obs_labels = tokenize(obs_out);
-
-    // Check for pure reorder: same line multiset by canonical label pattern
-    if ref_labels.len() == obs_labels.len() {
-        let mut ref_sorted = ref_labels.clone();
-        let mut obs_sorted = obs_labels.clone();
-        ref_sorted.sort();
-        obs_sorted.sort();
-        if ref_sorted == obs_sorted {
-            let perm: Vec<usize> = obs_labels.iter().map(|obs_line| {
-                ref_labels.iter().position(|r| r == obs_line).unwrap_or(usize::MAX)
-            }).collect();
-            return OutputDelta::Permutation(perm);
-        }
-    }
 
     OutputDelta::Edited(align_lines(&ref_labels, &obs_labels))
 }

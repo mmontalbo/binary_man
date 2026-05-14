@@ -3,62 +3,15 @@
 use crate::execute::{FsChange, Observation};
 use crate::parse::{SetupCommand, Property};
 
-/// Sensitive file patterns that should be flagged in trace output.
-const SENSITIVE_PATHS: &[&str] = &[".netrc", ".git-credentials", ".ssh/", "credentials", "token"];
-
 /// Check if an observation has anomalies worth expanding in default mode.
 pub fn has_anomalies(obs: &Observation, majority_exit: Option<i32>) -> bool {
     let exit = obs.exit_code.unwrap_or(-1);
-    // Signal death
     if exit > 128 { return true; }
-    // Network attempts
-    if !obs.trace_net.is_empty() { return true; }
-    // Credential file access
-    if obs.trace_reads.iter().chain(obs.trace_failed.iter())
-        .any(|p| SENSITIVE_PATHS.iter().any(|s| p.contains(s))) { return true; }
-    // Exit code diverges from majority
     if let Some(maj) = majority_exit {
         if exit != maj { return true; }
     }
     false
 }
-
-/// Format a one-line trace summary (counts + anomaly flags).
-pub fn format_trace_summary(obs: &Observation) -> String {
-    let mut parts = Vec::new();
-
-    if !obs.trace_reads.is_empty() {
-        parts.push(format!("{} reads", obs.trace_reads.len()));
-    }
-    if !obs.trace_failed.is_empty() {
-        parts.push(format!("{} probes", obs.trace_failed.len()));
-    }
-    if !obs.trace_execs.is_empty() {
-        parts.push(format!("{} execs", obs.trace_execs.len()));
-    }
-    if !obs.trace_net.is_empty() {
-        let blocked = obs.trace_net.iter().filter(|n| n.contains("blocked")).count();
-        if blocked > 0 {
-            parts.push(format!("NET: {} blocked", blocked));
-        } else {
-            parts.push(format!("NET: {} connections", obs.trace_net.len()));
-        }
-    }
-    if !obs.trace_signals.is_empty() {
-        parts.push(format!("SIGNALS: {}", obs.trace_signals.len()));
-    }
-
-    // Flag sensitive file access
-    let sensitive: Vec<&String> = obs.trace_reads.iter().chain(obs.trace_failed.iter())
-        .filter(|p| SENSITIVE_PATHS.iter().any(|s| p.contains(s)))
-        .collect();
-    if !sensitive.is_empty() {
-        parts.push(format!("SENSITIVE: {}", sensitive.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")));
-    }
-
-    parts.join(" | ")
-}
-
 
 /// Extract quoted strings from a formatted run label like `"-b" "input.txt"`.
 pub fn parse_label(label: &str) -> Vec<&str> {
@@ -145,27 +98,6 @@ pub fn format_obs(out: &mut String, obs: &Observation, indent: &str) {
                     out.push_str(&format!("{}  modified: {} ({})\n", indent, path, detail));
                 }
             }
-        }
-    }
-    let has_trace = !obs.trace_reads.is_empty() || !obs.trace_failed.is_empty()
-        || !obs.trace_execs.is_empty() || !obs.trace_net.is_empty()
-        || !obs.trace_signals.is_empty();
-    if has_trace {
-        out.push_str(&format!("{}trace:\n", indent));
-        if !obs.trace_reads.is_empty() {
-            out.push_str(&format!("{}  reads: {}\n", indent, obs.trace_reads.join(", ")));
-        }
-        if !obs.trace_failed.is_empty() {
-            out.push_str(&format!("{}  failed: {}\n", indent, obs.trace_failed.join(", ")));
-        }
-        if !obs.trace_execs.is_empty() {
-            out.push_str(&format!("{}  execs: {}\n", indent, obs.trace_execs.join(", ")));
-        }
-        if !obs.trace_net.is_empty() {
-            out.push_str(&format!("{}  net: {}\n", indent, obs.trace_net.join(", ")));
-        }
-        if !obs.trace_signals.is_empty() {
-            out.push_str(&format!("{}  signals: {}\n", indent, obs.trace_signals.join(", ")));
         }
     }
 }

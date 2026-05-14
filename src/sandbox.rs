@@ -10,21 +10,14 @@ use std::process::{Command, Stdio};
 /// Path to the bwrap binary. Found once at startup.
 pub struct Sandbox {
     bwrap: PathBuf,
-    pub strace: Option<PathBuf>,
 }
 
 impl Sandbox {
     /// Find bwrap or fail with a clear error.
-    pub fn new(trace: bool) -> Result<Self> {
+    pub fn new() -> Result<Self> {
         let bwrap = which::which("bwrap")
             .context("bwrap not found — install bubblewrap for sandbox isolation")?;
-        let strace = if trace {
-            Some(which::which("strace")
-                .context("strace not found — install strace for --trace mode")?)
-        } else {
-            None
-        };
-        Ok(Sandbox { bwrap, strace })
+        Ok(Sandbox { bwrap })
     }
 
     /// Build a Command that runs `binary args...` inside the bwrap sandbox.
@@ -36,23 +29,9 @@ impl Sandbox {
         args: &[&str],
         work_dir: &Path,
         env_vars: &HashMap<String, String>,
-        trace_dir: Option<&Path>,
     ) -> Command {
         let mut cmd = self.bwrap_base(work_dir, "/workspace", env_vars);
-        if let Some(td) = trace_dir {
-            cmd.arg("--bind").arg(td).arg("/trace");
-        }
         cmd.arg("--");
-        if trace_dir.is_some() {
-            if let Some(ref strace) = self.strace {
-                cmd.arg(strace);
-                cmd.arg("-f");
-                cmd.arg("-e").arg("trace=openat,connect,execve,kill");
-                cmd.arg("-o").arg("/trace/.bgrid-trace");
-                cmd.arg("-qq");
-                cmd.arg("--");
-            }
-        }
         cmd.arg(binary);
         for arg in args {
             cmd.arg(arg);
@@ -227,7 +206,7 @@ pub fn apply_setup(
             }
             SetupCommand::Invoke { args } => {
                 let str_args: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-                let mut invoke = sandbox.command(binary, &str_args, work_dir, &env_vars, None);
+                let mut invoke = sandbox.command(binary, &str_args, work_dir, &env_vars);
                 invoke
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())

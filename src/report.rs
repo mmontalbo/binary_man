@@ -146,10 +146,6 @@ pub fn format_run_report(
             if exit > 128 {
                 out.push_str(&format!("  ANOMALY: {}\n", output::format_exit(exit)));
             }
-            let trace = output::format_trace_summary(&group.majority_obs);
-            if !trace.is_empty() {
-                out.push_str(&format!("  ANOMALY: {}\n", trace));
-            }
         }
     }
 

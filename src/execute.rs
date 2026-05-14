@@ -22,11 +22,6 @@ pub struct Observation {
     pub exit_code: Option<i32>,
     pub fs_changes: Vec<FsChange>,
     pub resources: ResourceUsage,
-    pub trace_reads: Vec<String>,
-    pub trace_failed: Vec<String>,
-    pub trace_execs: Vec<String>,
-    pub trace_net: Vec<String>,
-    pub trace_signals: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -392,16 +387,8 @@ pub fn run_grid(
                         };
 
                         results.push((ctx.name.clone(), ri, Ok(Observation {
-                            stdout,
-                            stderr,
-                            exit_code,
-                            fs_changes,
+                            stdout, stderr, exit_code, fs_changes,
                             resources: ResourceUsage { wall_time_ms },
-                            trace_reads: Vec::new(),
-                            trace_failed: Vec::new(),
-                            trace_execs: Vec::new(),
-                            trace_net: Vec::new(),
-                            trace_signals: Vec::new(),
                         })));
                     }
 

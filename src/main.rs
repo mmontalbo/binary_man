@@ -8,16 +8,12 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
     let dry_run = args.iter().any(|a| a == "--dry-run");
-    let trace = args.iter().any(|a| a == "--trace");
-    let skeleton = args.iter().any(|a| a == "--skeleton");
     let positional: Vec<&String> = args.iter().skip(1).filter(|a| !a.starts_with("--")).collect();
 
     if positional.is_empty() {
         eprintln!("Usage: bgrid [options] <binary> [<probe-file>]");
-        eprintln!("       bgrid <binary>                            explore: discover + run + iterate");
-        eprintln!("       bgrid --skeleton <binary>                 print probe skeleton to stdout");
+        eprintln!("       bgrid <binary>                            explore: discover + run");
         eprintln!("       bgrid <binary> <file.probe>               run observation grid");
-        eprintln!("       bgrid --trace <binary> <file.probe>       include syscall traces");
         eprintln!("       bgrid --dry-run <binary> <file.probe>     show grid without executing");
         std::process::exit(1);
     }
@@ -29,22 +25,18 @@ fn main() -> Result<()> {
         if dry_run {
             cmd_dry_run(&test_path)
         } else {
-            let sandbox = sandbox::Sandbox::new(trace)?;
+            let sandbox = sandbox::Sandbox::new()?;
             cmd_run(binary, &test_path, &sandbox)
         }
     } else {
-        let sandbox = sandbox::Sandbox::new(trace)?;
-        cmd_discover(&positional, &sandbox, skeleton)
+        let sandbox = sandbox::Sandbox::new()?;
+        cmd_discover(&positional, &sandbox)
     }
 }
 
-fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox, skeleton: bool) -> Result<()> {
+fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox) -> Result<()> {
     let binary = command[0].as_str();
     let sub_args: Vec<&str> = command[1..].iter().map(|s| s.as_str()).collect();
-
-    if skeleton {
-        return discover::print_skeleton(binary, &sub_args, sandbox);
-    }
 
     // --- Explore mode ---
     let cmd_label = if sub_args.is_empty() {
