@@ -189,13 +189,25 @@ fn align_lines(ref_lines: &[Vec<String>], obs_lines: &[Vec<String>]) -> Vec<Line
 }
 
 /// Compute structural delta for an output channel (stdout or stderr).
+/// Max lines to align for structural delta. Outputs longer than this are
+/// truncated before NW alignment — the first N lines are sufficient to
+/// characterize the structural transformation. Without this cap, diff's
+/// 1400-line output causes O(n²) = 2M operations per alignment.
+const MAX_ALIGN_LINES: usize = 100;
+
 fn compute_output_delta(ref_out: &str, obs_out: &str) -> OutputDelta {
     if ref_out == obs_out {
         return OutputDelta::Identical;
     }
 
-    let ref_labels = tokenize(ref_out);
-    let obs_labels = tokenize(obs_out);
+    let mut ref_labels = tokenize(ref_out);
+    let mut obs_labels = tokenize(obs_out);
+
+    // Truncate long outputs to bound NW alignment cost
+    if ref_labels.len() > MAX_ALIGN_LINES || obs_labels.len() > MAX_ALIGN_LINES {
+        ref_labels.truncate(MAX_ALIGN_LINES);
+        obs_labels.truncate(MAX_ALIGN_LINES);
+    }
 
     // Check for pure reorder: same line multiset by canonical label pattern
     if ref_labels.len() == obs_labels.len() {
@@ -384,6 +396,9 @@ pub fn analyze(
         h.finish()
     };
 
+    let analysis_start = std::time::Instant::now();
+    let mut delta_compute_ms = 0u128;
+
     for (ri, run) in script.runs.iter().enumerate() {
         let args_str = output::format_args(&run.args);
 
@@ -409,9 +424,11 @@ pub fn analyze(
                     Some(ref_obs) => {
                         // Cache stdout/stderr deltas by content hash
                         let stdout_key = (str_hash(&ref_obs.stdout), str_hash(&obs.stdout));
+                        let delta_start = std::time::Instant::now();
                         let stdout = delta_cache.entry(stdout_key)
                             .or_insert_with(|| compute_output_delta(&ref_obs.stdout, &obs.stdout))
                             .clone();
+                        delta_compute_ms += delta_start.elapsed().as_millis();
                         let stderr_key = (str_hash(&ref_obs.stderr), str_hash(&obs.stderr));
                         let stderr = delta_cache.entry(stderr_key)
                             .or_insert_with(|| compute_output_delta(&ref_obs.stderr, &obs.stderr))
@@ -555,6 +572,12 @@ pub fn analyze(
             has_anomaly,
             obs_count: obs_list.len(),
         });
+    }
+
+    let analysis_ms = analysis_start.elapsed().as_millis();
+    if analysis_ms > 1000 {
+        eprintln!("  analysis: {}ms (delta_compute={}ms, cache_hits={}, runs={})",
+            analysis_ms, delta_compute_ms, delta_cache.len(), run_analyses.len());
     }
 
     // --- Group runs into BehaviorGroups ---
