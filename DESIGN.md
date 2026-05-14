@@ -106,7 +106,7 @@ tabular       varied-times    varied-perms          default
 - **varied-perms**: readonly file, flag-like filename (`-rf`)
 - **varied-times**: old mtime, large file (10KB)
 
-Plus 10 single-factor perturbations from numeric_standard and a locale perturbation on alpha_minimal. Total: ~27 contexts per grid.
+Plus 10 single-factor perturbations from numeric_standard, a locale perturbation on alpha_minimal, and 3 stdin contexts (words, numbers, passwd with varied delimiters). Total: ~35 contexts per grid.
 
 ## Factor Identification and Level Determination
 
@@ -136,14 +136,14 @@ The pilot is adaptive (later probes depend on earlier results). The main experim
 
 For runs with a `from` reference (base invocation), comparison uses **structural deltas** — what transformation the flag applied to the base output — rather than the raw output content. This groups flags by the structural change they produce ("prepended 8 tokens per line", "reversed line order", "inserted a header line") rather than by specific output values.
 
-The structural delta is computed via two-level Needleman-Wunsch alignment:
+The structural delta is computed via hash-anchored alignment:
 
-1. **Tokenize**: split stdout into lines, split lines by whitespace. Shared tokens between ref and obs (filenames, keywords) are natural alignment anchors.
-2. **Line-level alignment**: match ref lines to obs lines. Match cost = token edit distance within the line pair. Delete/insert cost = token count. This correctly matches `"a.txt"` with `"-rw-r--r-- 1 root root 0 Jan 1 2020 a.txt"` because the shared token `a.txt` makes matching cheaper than delete+insert.
-3. **Token-level alignment**: within matched lines, classify each token position as Keep, Insert, Delete, or Replace.
-4. **Reorder detection**: if ref and obs contain the same lines in different order, encode as a permutation vector.
+1. **Tokenize**: split stdout into lines, split lines by whitespace.
+2. **Hash-anchor matching**: hash each line, find exact-match anchors between ref and obs in O(n). Shared lines (filenames, keywords) are natural anchors.
+3. **Gap alignment**: between anchors, run Needleman-Wunsch on the small unmatched segments. Match cost = token edit distance within line pairs. Gap cap at 100 lines for unanchored segments.
+4. **Token-level alignment**: within matched line pairs, classify each token as Keep, Insert, Delete, or Replace.
 
-The resulting edit script is a structural description independent of per-cell nondeterminism (each cell has its own inode numbers, but the edit "insert one token at position 0" is the same regardless of the specific inode value).
+For outputs with shared lines (90%+ for most tools), alignment is O(n). For completely different outputs (e.g., diff normal vs unified format), the disjoint hash sets trigger an early exit — no anchor search needed.
 
 Runs with identical edit scripts in every context form a behavioral group. This is the equivalence relation: two flags are indistinguishable iff no tested context separates their structural transformation.
 
@@ -151,7 +151,13 @@ All runs — single-flag AND pairwise combinations — are tested in a single ph
 
 ## Execution
 
-Cells are batched by context. Per context: create per-cell workspace directories, generate one shell script with all commands (each with 2-second timeout), invoke bwrap once. ~27 bwrap invocations instead of thousands. 8 threads across contexts. Integration tests run 22 binaries in parallel (JOBS=4) in ~67 seconds.
+Cells are batched by context. Per context: create per-cell workspace directories, generate one shell script with all commands (each with 2-second timeout), invoke bwrap once. ~35 bwrap invocations instead of thousands. 16 threads across contexts.
+
+## Quality metrics
+
+- **Robustness**: leave-one-out context removal (sampled 10 contexts). Flags that survive all removals are robust; flags dependent on a single context are fragile.
+- **Reproducibility**: opt-in cross-run verification (REPRO=1). Re-runs all binaries and compares observed counts. Nondeterministic binaries reported but don't fail the test.
+- **Surface stability**: exact flag count checked against expected total. Changes in flag discovery surface (regex shifts) are caught.
 
 ## Limitations
 
