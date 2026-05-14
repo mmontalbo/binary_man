@@ -3,9 +3,14 @@
 ## Test scope
   251 behavioral groups: 146 unique, 105 shared
 
-  Contexts referenced in exemplars below:
-    formatted_minimal: whitespace edge cases (tabs, blanks, long lines); input.txt + other.txt
-    words_minimal / stdin: piped input via stdin
+  Contexts referenced below:
+    formatted_minimal:
+      write "input.txt" "first line\nsecond line with trailing spaces\n	indented w..."
+      write "other.txt" "hello world"
+    words_minimal / stdin:
+      write "input.txt" "aardvark\nabbreviation\nabout\nabstract\naccept\naccepted..."
+      write "other.txt" "hello world"
+      stdin: cherry\napple\nbanana
 
 ## Observed: 10/11 flags
   5 uniquely observable, 5 distinguishable via flag pairs
@@ -50,7 +55,7 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
            3	banana
     with flag:
   -s  # add STRING after (possible) line number
-    tested: "-s" "x" in words_minimal / stdin
+    tested: "--number-separator=x" in words_minimal / stdin
     | flag adds 3 lines:      1xcherry,      2xapple,      3xbanana
     | flag removes 3 lines:      1	cherry,      2	apple,      3	banana
     without flag:

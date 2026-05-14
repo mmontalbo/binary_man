@@ -181,6 +181,7 @@ pub fn format_exploration_report(
     ever_isolated: &HashSet<String>,
     binary_label: &str,
     all_runs: &[&RunAnalysis],
+    contexts: &[crate::parse::NamedContext],
 ) -> String {
     let mut out = String::new();
     let aliases = flag_info.map(|fi| &fi.aliases);
@@ -283,6 +284,7 @@ pub fn format_exploration_report(
         total_isolated + total_identical, total_isolated, total_identical));
 
     // Collect context names referenced in exemplars, then describe them
+    // by listing their actual setup commands (files, properties, env, stdin).
     let mut referenced_contexts: Vec<String> = Vec::new();
     for flag in solo_distinguished.iter().chain(combo_distinguished.iter()) {
         if let Some(ex) = find_exemplar(flag, all_runs, aliases) {
@@ -293,9 +295,28 @@ pub fn format_exploration_report(
     }
     referenced_contexts.sort();
     if !referenced_contexts.is_empty() {
-        out.push_str("\n  Contexts referenced in exemplars below:\n");
-        for ctx in &referenced_contexts {
-            out.push_str(&format!("    {}: {}\n", ctx, describe_context(ctx)));
+        let ctx_map: HashMap<&str, &crate::parse::NamedContext> = contexts.iter()
+            .map(|c| (c.name.as_str(), c))
+            .collect();
+        out.push_str("\n  Contexts referenced below:\n");
+        for name in &referenced_contexts {
+            out.push_str(&format!("    {}:\n", name));
+            if let Some(ctx) = ctx_map.get(name.as_str()) {
+                for cmd in &ctx.commands {
+                    out.push_str(&format!("      {}\n", output::format_setup_cmd(cmd)));
+                }
+                if let Some(ref stdin) = ctx.stdin {
+                    match stdin {
+                        crate::parse::StdinSource::Lines(lines) =>
+                            out.push_str(&format!("      stdin: {}\n", lines.join("\\n"))),
+                        crate::parse::StdinSource::FromFile(path) =>
+                            out.push_str(&format!("      stdin from: {}\n", path)),
+                    }
+                }
+                if ctx.commands.is_empty() && ctx.stdin.is_none() {
+                    out.push_str("      (empty directory)\n");
+                }
+            }
         }
     }
     out.push('\n');
@@ -732,48 +753,6 @@ fn first_sentence(desc: &str, max_len: usize) -> &str {
     }
 
     desc[..end].trim_end()
-}
-
-/// Describe a context name in human terms.
-/// Context names encode content × structure × properties; this decodes them.
-fn describe_context(name: &str) -> &'static str {
-    // Perturbation contexts: "numbers_standard / remove .hidden"
-    if name.contains(" / stdin") { return "piped input via stdin"; }
-    if name.contains(" / remove") { return "standard structure with one element removed"; }
-    if name.contains(" / input.txt=empty") { return "standard structure, empty input file"; }
-    if name.contains(" / input.txt=readonly") { return "standard structure, read-only input file"; }
-    if name.contains(" / input.txt=size:1") { return "standard structure, 1-byte input file"; }
-    if name.contains(" / mtime") { return "standard structure, old-timestamp input file"; }
-    if name.contains(" / env COLUMNS") { return "standard structure, narrow terminal (COLUMNS=40)"; }
-    if name.contains(" / env LC_ALL") { return "standard structure, UTF-8 locale"; }
-
-    match name {
-        // Content × structure × properties
-        "words_minimal"       => "1500 English words; input.txt + other.txt",
-        "words_standard"      => "1500 English words; files, hidden, subdir, symlink, executable, readonly",
-        "words_deep"          => "1500 English words; 3-level nesting, dir symlink, old-mtime file",
-        "numbers_minimal"     => "numeric edge cases (ints, floats, hex, NaN); input.txt + other.txt",
-        "numbers_standard"    => "numeric edge cases; files, hidden, subdir, symlink, executable",
-        "numbers_deep"        => "numeric edge cases; 3-level nesting, dir symlink, readonly",
-        "passwd_minimal"      => "colon-delimited /etc/passwd records; input.txt + other.txt, readonly",
-        "passwd_standard"     => "colon-delimited records; files, hidden, subdir, symlink, old-mtime",
-        "passwd_deep"         => "colon-delimited records; 3-level nesting, dir symlink",
-        "formatted_minimal"   => "whitespace edge cases (tabs, blanks, long lines); input.txt + other.txt",
-        "formatted_standard"  => "whitespace edge cases; files, hidden, subdir, symlink, old-mtime",
-        "formatted_deep"      => "whitespace edge cases; 3-level nesting, dir symlink, readonly",
-        "csv_minimal"         => "RFC 4180 CSV with headers and quoted fields; input.txt + other.txt",
-        "csv_standard"        => "RFC 4180 CSV; files, hidden, subdir, symlink, readonly",
-        "csv_deep"            => "RFC 4180 CSV; 3-level nesting, dir symlink",
-        "empty_dir"           => "completely empty directory",
-        // Breadth-only
-        "access_log_minimal"  => "Apache combined log format; input.txt + other.txt",
-        "syslog_minimal"      => "BSD syslog format; input.txt + other.txt",
-        "dates_minimal"       => "date/time strings (ISO 8601, month names, timezones); input.txt + other.txt",
-        "config_minimal"      => "INI/env config (sections, key=value); input.txt + other.txt",
-        "paths_minimal"       => "Unix filesystem paths (absolute, relative, spaces, unicode); input.txt + other.txt",
-        "naughty_minimal"     => "unicode/emoji/RTL/CJK stress strings; input.txt + other.txt",
-        _ => "custom context",
-    }
 }
 
 fn format_alias_map(aliases: &HashMap<String, String>) -> String {

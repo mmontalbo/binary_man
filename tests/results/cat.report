@@ -3,9 +3,13 @@
 ## Test scope
   135 behavioral groups: 73 unique, 62 shared
 
-  Contexts referenced in exemplars below:
-    formatted_minimal: whitespace edge cases (tabs, blanks, long lines); input.txt + other.txt
-    words_minimal: 1500 English words; input.txt + other.txt
+  Contexts referenced below:
+    formatted_minimal:
+      write "input.txt" "first line\nsecond line with trailing spaces\n	indented w..."
+      write "other.txt" "hello world"
+    words_minimal:
+      write "input.txt" "aardvark\nabbreviation\nabout\nabstract\naccept\naccepted..."
+      write "other.txt" "hello world"
 
 ## Observed: 10/10 flags
   10 uniquely observable, 0 distinguishable via flag pairs

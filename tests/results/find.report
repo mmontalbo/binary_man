@@ -3,11 +3,44 @@
 ## Test scope
   43 behavioral groups: 29 unique, 14 shared
 
-  Contexts referenced in exemplars below:
-    numbers_standard / input.txt=empty: standard structure, empty input file
-    passwd_minimal: colon-delimited /etc/passwd records; input.txt + other.txt, readonly
-    words_minimal: 1500 English words; input.txt + other.txt
-    words_standard: 1500 English words; files, hidden, subdir, symlink, executable, readonly
+  Contexts referenced below:
+    numbers_standard / input.txt=empty:
+      write "input.txt" "0\n1\n1.00\n$1.00\n1/2\n1E2\n1E02\n1E+02\n-1\n-1.00\n-$1...."
+      write "other.txt" "other content\nsecond line"
+      write "a.txt" "first"
+      write "b.txt" "second"
+      write ".hidden" "secret"
+      mkdir "subdir"
+      write "subdir/nested.txt" "nested"
+      symlink "link.txt" -> "input.txt"
+      write "exec.sh" "#!/bin/sh
+echo hello"
+      props "exec.sh" executable
+      write "input.txt" "<empty>"
+    passwd_minimal:
+      write "input.txt" "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr..."
+      write "other.txt" "hello world"
+      write "readonly.dat" "protected"
+      props "readonly.dat" readonly
+      write "-rf" "flag-like filename"
+    words_minimal:
+      write "input.txt" "aardvark\nabbreviation\nabout\nabstract\naccept\naccepted..."
+      write "other.txt" "hello world"
+    words_standard:
+      write "input.txt" "aardvark\nabbreviation\nabout\nabstract\naccept\naccepted..."
+      write "other.txt" "other content\nsecond line"
+      write "a.txt" "first"
+      write "b.txt" "second"
+      write ".hidden" "secret"
+      mkdir "subdir"
+      write "subdir/nested.txt" "nested"
+      symlink "link.txt" -> "input.txt"
+      write "exec.sh" "#!/bin/sh
+echo hello"
+      props "exec.sh" executable
+      write "readonly.dat" "protected"
+      props "readonly.dat" readonly
+      write "-rf" "flag-like filename"
 
 ## Observed: 4/4 flags
   4 uniquely observable, 0 distinguishable via flag pairs
@@ -96,5 +129,5 @@
     | flag removes 3 lines: ., ./input.txt, ./other.txt
     | exit: 0 → 1
     | stderr: find: paths must precede expression: `.'
-    proven via: "-N" "." "-print"
+    proven via: "-D" "." "-print"
 

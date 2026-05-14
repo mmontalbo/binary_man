@@ -3,8 +3,11 @@
 ## Test scope
   81 behavioral groups: 49 unique, 32 shared
 
-  Contexts referenced in exemplars below:
-    words_minimal / stdin: piped input via stdin
+  Contexts referenced below:
+    words_minimal / stdin:
+      write "input.txt" "aardvark\nabbreviation\nabout\nabstract\naccept\naccepted..."
+      write "other.txt" "hello world"
+      stdin: cherry\napple\nbanana
 
 ## Observed: 3/3 flags
   1 uniquely observable, 2 distinguishable via flag pairs

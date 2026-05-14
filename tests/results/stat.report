@@ -3,9 +3,25 @@
 ## Test scope
   128 behavioral groups: 111 unique, 17 shared
 
-  Contexts referenced in exemplars below:
-    words_minimal: 1500 English words; input.txt + other.txt
-    words_standard: 1500 English words; files, hidden, subdir, symlink, executable, readonly
+  Contexts referenced below:
+    words_minimal:
+      write "input.txt" "aardvark\nabbreviation\nabout\nabstract\naccept\naccepted..."
+      write "other.txt" "hello world"
+    words_standard:
+      write "input.txt" "aardvark\nabbreviation\nabout\nabstract\naccept\naccepted..."
+      write "other.txt" "other content\nsecond line"
+      write "a.txt" "first"
+      write "b.txt" "second"
+      write ".hidden" "secret"
+      mkdir "subdir"
+      write "subdir/nested.txt" "nested"
+      symlink "link.txt" -> "input.txt"
+      write "exec.sh" "#!/bin/sh
+echo hello"
+      props "exec.sh" executable
+      write "readonly.dat" "protected"
+      props "readonly.dat" readonly
+      write "-rf" "flag-like filename"
 
 ## Observed: 7/7 flags
   4 uniquely observable, 3 distinguishable via flag pairs
@@ -23,22 +39,22 @@ Aliases: -L = --dereference, -f = --file-system, -t = --terse
     with flag:
         File: input.txt
         Size: 10586     	Blocks: 24         IO Block: 4096   regular file
-      Device: 254,0	Inode: 148635664   Links: 1
+      Device: 254,0	Inode: 148176923   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-14 12:40:44.573643807 -0700
-      Modify: 2026-05-14 12:40:44.573643807 -0700
+      Access: 2026-05-14 12:49:40.070595689 -0700
+      Modify: 2026-05-14 12:49:40.070595689 -0700
             ... (2 more)
   --format
     tested: "--format=%s" "input.txt" "other.txt" in words_minimal
     | flag adds 2 lines: 10586, 12
-    | flag removes 16 lines:   File: input.txt,   Size: 10586     	Blocks: 24         IO Block: 4096   regular file, Device: 254,0	Inode: 148638233   Links: 1, Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users), Access: 2026-05-14 12:40:44.576102500 -0700
+    | flag removes 16 lines:   File: input.txt,   Size: 10586     	Blocks: 24         IO Block: 4096   regular file, Device: 254,0	Inode: 148179583   Links: 1, Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users), Access: 2026-05-14 12:49:40.072998145 -0700
     without flag:
         File: input.txt
         Size: 10586     	Blocks: 24         IO Block: 4096   regular file
-      Device: 254,0	Inode: 148638233   Links: 1
+      Device: 254,0	Inode: 148179583   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-14 12:40:44.576102500 -0700
-      Modify: 2026-05-14 12:40:44.576102500 -0700
+      Access: 2026-05-14 12:49:40.072998145 -0700
+      Modify: 2026-05-14 12:49:40.073019145 -0700
             ... (10 more)
     with flag:
       10586
@@ -46,45 +62,45 @@ Aliases: -L = --dereference, -f = --file-system, -t = --terse
   --printf  # like --format, but interpret backslash escapes, and do not output a mandatory trailing newline; if you want a newline, include \n in FORMAT
     tested: "--printf=%s" "input.txt" "other.txt" in words_minimal
     | flag adds 1 lines: 1058612
-    | flag removes 16 lines:   File: input.txt,   Size: 10586     	Blocks: 24         IO Block: 4096   regular file, Device: 254,0	Inode: 148638233   Links: 1, Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users), Access: 2026-05-14 12:40:44.576102500 -0700
+    | flag removes 16 lines:   File: input.txt,   Size: 10586     	Blocks: 24         IO Block: 4096   regular file, Device: 254,0	Inode: 148179583   Links: 1, Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users), Access: 2026-05-14 12:49:40.072998145 -0700
     without flag:
         File: input.txt
         Size: 10586     	Blocks: 24         IO Block: 4096   regular file
-      Device: 254,0	Inode: 148638233   Links: 1
+      Device: 254,0	Inode: 148179583   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-14 12:40:44.576102500 -0700
-      Modify: 2026-05-14 12:40:44.576102500 -0700
+      Access: 2026-05-14 12:49:40.072998145 -0700
+      Modify: 2026-05-14 12:49:40.073019145 -0700
             ... (10 more)
     with flag:
       1058612
   -c  # --format=FORMAT   use the specified FORMAT instead of the default; output a newline after each use of FORMAT
     tested: "-c" "input.txt" "other.txt" in words_minimal
     | flag adds 1 lines: input.txt
-    | flag removes 16 lines:   File: input.txt,   Size: 10586     	Blocks: 24         IO Block: 4096   regular file, Device: 254,0	Inode: 148638233   Links: 1, Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users), Access: 2026-05-14 12:40:44.576102500 -0700
+    | flag removes 16 lines:   File: input.txt,   Size: 10586     	Blocks: 24         IO Block: 4096   regular file, Device: 254,0	Inode: 148179583   Links: 1, Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users), Access: 2026-05-14 12:49:40.072998145 -0700
     without flag:
         File: input.txt
         Size: 10586     	Blocks: 24         IO Block: 4096   regular file
-      Device: 254,0	Inode: 148638233   Links: 1
+      Device: 254,0	Inode: 148179583   Links: 1
       Access: (0644/-rw-r--r--)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users)
-      Access: 2026-05-14 12:40:44.576102500 -0700
-      Modify: 2026-05-14 12:40:44.576102500 -0700
+      Access: 2026-05-14 12:49:40.072998145 -0700
+      Modify: 2026-05-14 12:49:40.073019145 -0700
             ... (10 more)
     with flag:
       input.txt
 
 ## Distinguishable in combination (verified via flag pairs)
   -L  # follow links
-    | flag adds 5 lines:   File: ".",     ID: c63eb3646de0a34 Namelen: 255     Type: ext2/ext3, Block size: 4096       Fundamental block size: 4096, Blocks: Total: 1937552970 Free: 1606602341 Available: 1508936283, Inodes: Total: 244158464  Free: 239466822
-    | flag removes 8 lines:   File: .,   Size: 4096      	Blocks: 8          IO Block: 4096   directory, Device: 254,0	Inode: 148767071   Links: 2, Access: (0755/drwxr-xr-x)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users), Access: 2026-05-14 12:40:44.905717958 -0700
+    | flag adds 5 lines:   File: ".",     ID: c63eb3646de0a34 Namelen: 255     Type: ext2/ext3, Block size: 4096       Fundamental block size: 4096, Blocks: Total: 1937552970 Free: 1606611235 Available: 1508945177, Inodes: Total: 244158464  Free: 239477702
+    | flag removes 8 lines:   File: .,   Size: 4096      	Blocks: 8          IO Block: 4096   directory, Device: 254,0	Inode: 148308620   Links: 2, Access: (0755/drwxr-xr-x)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users), Access: 2026-05-14 12:49:40.363271177 -0700
     | stderr changed: stat: cannot read file system information for 'root:x:0:0:root:/root:/bin/bash': No such file or directory
-    proven via: "-c" "-L" "$(head -n1 input.txt)" "."
+    proven via: "-f" "-L" "$(head -n1 input.txt)" "."
   -f  # display file system status instead of file status
-    | flag adds 5 lines:   File: ".",     ID: c63eb3646de0a34 Namelen: 255     Type: ext2/ext3, Block size: 4096       Fundamental block size: 4096, Blocks: Total: 1937552970 Free: 1606602341 Available: 1508936283, Inodes: Total: 244158464  Free: 239466822
-    | flag removes 8 lines:   File: .,   Size: 4096      	Blocks: 8          IO Block: 4096   directory, Device: 254,0	Inode: 148767071   Links: 2, Access: (0755/drwxr-xr-x)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users), Access: 2026-05-14 12:40:44.905717958 -0700
+    | flag adds 5 lines:   File: ".",     ID: c63eb3646de0a34 Namelen: 255     Type: ext2/ext3, Block size: 4096       Fundamental block size: 4096, Blocks: Total: 1937552970 Free: 1606611235 Available: 1508945177, Inodes: Total: 244158464  Free: 239477702
+    | flag removes 8 lines:   File: .,   Size: 4096      	Blocks: 8          IO Block: 4096   directory, Device: 254,0	Inode: 148308620   Links: 2, Access: (0755/drwxr-xr-x)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users), Access: 2026-05-14 12:49:40.363271177 -0700
     | stderr changed: stat: cannot read file system information for 'root:x:0:0:root:/root:/bin/bash': No such file or directory
-    proven via: "-c" "-f" "$(head -n1 input.txt)" "."
+    proven via: "-f" "-L" "$(head -n1 input.txt)" "."
   -t  # print the information in terse form
-    | flag adds 1 lines: . 4096 8 41ed 1000 100 fe00 148767101 2 0 0 1778787644 1778787644 1778787644 1778787644 4096
-    | flag removes 8 lines:   File: .,   Size: 4096      	Blocks: 8          IO Block: 4096   directory, Device: 254,0	Inode: 148767071   Links: 2, Access: (0755/drwxr-xr-x)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users), Access: 2026-05-14 12:40:44.905717958 -0700
+    | flag adds 1 lines: . 4096 8 41ed 1000 100 fe00 148308929 2 0 0 1778788180 1778788180 1778788180 1778788180 4096
+    | flag removes 8 lines:   File: .,   Size: 4096      	Blocks: 8          IO Block: 4096   directory, Device: 254,0	Inode: 148308620   Links: 2, Access: (0755/drwxr-xr-x)  Uid: ( 1000/mmontalbo)   Gid: (  100/   users), Access: 2026-05-14 12:49:40.363271177 -0700
     proven via: "-c" "-t" "$(head -n1 input.txt)" "."
 

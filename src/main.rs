@@ -95,6 +95,7 @@ fn cmd_discover(command: &[&String], sandbox: &sandbox::Sandbox) -> Result<()> {
         &ever_isolated,
         &cmd_label,
         &all_runs,
+        &script.contexts,
     );
     let report_elapsed = t_report.elapsed();
     eprintln!("  timing: analysis={}ms report={}ms",
