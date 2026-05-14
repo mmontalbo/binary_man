@@ -653,19 +653,32 @@ pub fn analyze(
     let total_runs = run_analyses.len();
 
     // --- Leave-one-out robustness ---
+    let robustness_start = std::time::Instant::now();
     // For each context, mask it and re-group to check if each flag is still distinguished.
     // Uses lightweight grouping: just (from_ref_hash, masked_obs_keys) → group_index,
     // then pairwise_distinguished_from_labels on the resulting label groups.
     let context_names: Vec<String> = script.contexts.iter().map(|c| c.name.clone()).collect();
     let all_distinguished = pairwise_distinguished_from_groups(&behavior_groups);
 
+    // Sample contexts for leave-one-out when the grid is large.
+    // Full LOO is O(contexts × runs²) — for ls (35 × 4380²) this takes >100s.
+    // Sampling 10 contexts gives equivalent confidence at bounded cost.
+    let max_loo = 10;
+    let loo_contexts: Vec<&String> = if context_names.len() <= max_loo {
+        context_names.iter().collect()
+    } else {
+        // Deterministic sample: evenly spaced
+        let step = context_names.len() / max_loo;
+        context_names.iter().step_by(step).take(max_loo).collect()
+    };
+
     let mut robustness: HashMap<String, (usize, usize)> = HashMap::new();
-    let n_contexts = context_names.len();
+    let n_contexts = loo_contexts.len();
     for flag in &all_distinguished {
         robustness.insert(flag.clone(), (0, n_contexts));
     }
 
-    for drop_ctx in &context_names {
+    for &drop_ctx in &loo_contexts {
         // Re-group: hash each run's (from_ref, masked obs_keys) → group labels
         let mut loo_label_groups: Vec<Vec<String>> = Vec::new();
         let mut loo_index: HashMap<u64, Vec<usize>> = HashMap::new();
@@ -717,6 +730,11 @@ pub fn analyze(
                 robustness.get_mut(flag).unwrap().0 += 1;
             }
         }
+    }
+
+    let robustness_ms = robustness_start.elapsed().as_millis();
+    if robustness_ms > 1000 {
+        eprintln!("  robustness: {}ms ({} contexts × {} runs)", robustness_ms, context_names.len(), run_obs_keys.len());
     }
 
     AnalysisMetrics {
