@@ -167,234 +167,237 @@ const MAX_THREADS: usize = 16;
 
 /// Run the entire grid with batched execution.
 ///
-/// Groups cells by context. For each context, creates per-cell workspace
-/// directories under a batch parent, generates a shell script that runs all
-/// commands, and invokes bwrap once per context. Parallelized across contexts.
+/// All contexts assigned to a thread share ONE bwrap invocation.
+/// Per-cell workspace directories within the batch provide isolation.
 pub fn run_grid(
     binary: &str,
     script: &Script,
     probe_dir: &Path,
     sandbox: &Sandbox,
 ) -> Result<GridResult> {
-    // Group run indices by context
-    struct ContextBatch {
-        ctx_index: usize,
-        run_indices: Vec<usize>,
-    }
-    let mut batches: Vec<ContextBatch> = Vec::new();
+    // Build flat cell list: (context_index, run_index)
+    struct Cell { ctx_index: usize, run_index: usize }
+    let mut cells_by_ctx: Vec<Vec<Cell>> = Vec::new();
     let mut total_cells = 0;
     for (ci, ctx) in script.contexts.iter().enumerate() {
-        let runs: Vec<usize> = script.runs.iter().enumerate()
+        let runs: Vec<Cell> = script.runs.iter().enumerate()
             .filter(|(_, run)| run_matches_context(run, ctx))
-            .map(|(ri, _)| ri)
+            .map(|(ri, _)| Cell { ctx_index: ci, run_index: ri })
             .collect();
         total_cells += runs.len();
-        if !runs.is_empty() {
-            batches.push(ContextBatch { ctx_index: ci, run_indices: runs });
-        }
+        if !runs.is_empty() { cells_by_ctx.push(runs); }
     }
 
     let completed = AtomicUsize::new(0);
     let grid_start = std::time::Instant::now();
 
-    // Process contexts in parallel
+    // Split context groups across threads — ONE bwrap per thread
     let results: Vec<_> = std::thread::scope(|s| {
-        let n_threads = MAX_THREADS.min(batches.len()).max(1);
-        let chunk_size = batches.len().div_ceil(n_threads);
-        let chunks: Vec<&[ContextBatch]> = batches.chunks(chunk_size).collect();
+        let n_threads = MAX_THREADS.min(cells_by_ctx.len()).max(1);
+        let chunk_size = cells_by_ctx.len().div_ceil(n_threads);
+        let chunks: Vec<&[Vec<Cell>]> = cells_by_ctx.chunks(chunk_size).collect();
 
         let handles: Vec<_> = chunks.into_iter().map(|chunk| {
             let completed = &completed;
             s.spawn(move || {
                 let mut results: Vec<(String, usize, Result<Observation, String>)> = Vec::new();
 
-                for batch in chunk {
-                    let ctx = &script.contexts[batch.ctx_index];
-
-                    // Create batch directory with per-cell workspaces + output dir
-                    let batch_dir = match tempfile::Builder::new()
-                        .prefix("bgrid_batch_")
-                        .tempdir() {
-                        Ok(d) => d,
-                        Err(e) => {
-                            for &ri in &batch.run_indices {
-                                results.push((ctx.name.clone(), ri, Err(format!("create batch dir: {}", e))));
+                // Create ONE batch directory for ALL contexts in this thread
+                let batch_dir = match tempfile::Builder::new()
+                    .prefix("bgrid_batch_")
+                    .tempdir() {
+                    Ok(d) => d,
+                    Err(e) => {
+                        for ctx_cells in chunk {
+                            for cell in ctx_cells {
+                                let ctx_name = script.contexts[cell.ctx_index].name.clone();
+                                results.push((ctx_name, cell.run_index, Err(format!("create batch dir: {}", e))));
                             }
+                        }
+                        return results;
+                    }
+                };
+
+                let out_dir = batch_dir.path().join("out");
+                let _ = std::fs::create_dir(&out_dir);
+
+                // Set up ALL cell workspaces and generate ONE script for all contexts
+                let mut cell_data: Vec<(String, usize, FsSnapshot)> = Vec::new(); // (ctx_name, run_index, before)
+                let mut script_content = String::new();
+                let mut global_cell_idx = 0usize;
+                let mut setup_failed_ctxs: HashSet<usize> = HashSet::new();
+
+                for ctx_cells in chunk {
+                    if ctx_cells.is_empty() { continue; }
+                    let ci = ctx_cells[0].ctx_index;
+                    let ctx = &script.contexts[ci];
+
+                    // Set up first cell to get env vars and evaluate extracts
+                    let first_cell_dir = batch_dir.path().join(format!("c{}", global_cell_idx));
+                    let _ = std::fs::create_dir(&first_cell_dir);
+                    let env_vars = match sandbox::apply_setup(&first_cell_dir, binary, &ctx.commands, probe_dir, sandbox) {
+                        Ok(env) => env,
+                        Err(e) => {
+                            for cell in ctx_cells {
+                                results.push((ctx.name.clone(), cell.run_index, Err(format!("{}", e))));
+                            }
+                            setup_failed_ctxs.insert(ci);
+                            global_cell_idx += 1;
                             continue;
                         }
                     };
 
-                    let out_dir = batch_dir.path().join("out");
-                    let _ = std::fs::create_dir(&out_dir);
-
-                    // Create per-cell workspaces and take before-snapshots
-                    let mut cell_data: Vec<(usize, FsSnapshot)> = Vec::new();
-                    let mut env_vars = HashMap::new();
-                    let mut setup_failed = false;
-
-                    for (cell_idx, &ri) in batch.run_indices.iter().enumerate() {
-                        let cell_dir = batch_dir.path().join(format!("c{}", cell_idx));
-                        let _ = std::fs::create_dir(&cell_dir);
-
-                        match sandbox::apply_setup(&cell_dir, binary, &ctx.commands, probe_dir, sandbox) {
-                            Ok(env) => {
-                                if cell_idx == 0 { env_vars = env; }
-                            }
-                            Err(e) => {
-                                for &ri2 in &batch.run_indices {
-                                    results.push((ctx.name.clone(), ri2, Err(format!("{}", e))));
-                                }
-                                setup_failed = true;
-                                break;
-                            }
-                        }
-
-                        let before = snapshot_fs(&cell_dir);
-                        cell_data.push((ri, before));
-                    }
-
-                    if setup_failed { continue; }
-
-                    // Generate shell script
-                    let script_path = batch_dir.path().join("run.sh");
-                    {
-                        let mut script_content = String::new();
-
-                        // Hoist Extract expressions to variables at the top of the
-                        // batch script. All cells in a batch share the same context,
-                        // so the expression result is constant — evaluate once.
-                        let mut extract_vars: HashMap<String, String> = HashMap::new();
-                        let mut extract_counter = 0usize;
-                        for &ri in &batch.run_indices {
-                            for arg in &script.runs[ri].args {
-                                if let crate::parse::Arg::Extract(e) = arg {
-                                    if !extract_vars.contains_key(e) {
-                                        let var = format!("_E{}", extract_counter);
-                                        extract_counter += 1;
-                                        extract_vars.insert(e.clone(), var);
-                                    }
+                    // Evaluate extract expressions for this context
+                    let mut extract_vars: HashMap<String, String> = HashMap::new();
+                    let mut extract_counter = 0usize;
+                    for cell in ctx_cells {
+                        for arg in &script.runs[cell.run_index].args {
+                            if let crate::parse::Arg::Extract(e) = arg {
+                                if !extract_vars.contains_key(e) {
+                                    let var = format!("_E{}_{}", ci, extract_counter);
+                                    extract_counter += 1;
+                                    extract_vars.insert(e.clone(), var);
                                 }
                             }
                         }
-                        if !extract_vars.is_empty() {
-                            // Evaluate in the first cell's working directory
-                            script_content.push_str("cd /batch/c0\n");
-                            for (expr, var) in &extract_vars {
-                                script_content.push_str(&format!("{}=$({})\n", var, expr));
+                    }
+                    if !extract_vars.is_empty() {
+                        script_content.push_str(&format!("cd /batch/c{}\n", global_cell_idx));
+                        for (expr, var) in &extract_vars {
+                            script_content.push_str(&format!("{}=$({})\n", var, expr));
+                        }
+                    }
+
+                    // Create workspace + script line for each cell in this context
+                    let env_str: String = env_vars.iter()
+                        .map(|(k, v)| format!("{}={}", k, shell_escape(v)))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    let env_prefix = if env_str.is_empty() { String::new() }
+                        else { format!("{} ", env_str) };
+
+                    let stdin_part = match &ctx.stdin {
+                        Some(crate::parse::StdinSource::Lines(lines)) => {
+                            let content = lines.join("\n");
+                            format!("printf '{}' | ", content.replace('\'', "'\\''"))
+                        }
+                        Some(crate::parse::StdinSource::FromFile(_)) => String::new(), // handled per-cell below
+                        None => String::new(),
+                    };
+
+                    for (local_idx, cell) in ctx_cells.iter().enumerate() {
+                        let cell_idx = global_cell_idx;
+
+                        // First cell already set up; remaining cells copy from it
+                        if local_idx > 0 {
+                            let cell_dir = batch_dir.path().join(format!("c{}", cell_idx));
+                            let _ = std::fs::create_dir(&cell_dir);
+                            if let Err(e) = sandbox::apply_setup(&cell_dir, binary, &ctx.commands, probe_dir, sandbox) {
+                                results.push((ctx.name.clone(), cell.run_index, Err(format!("{}", e))));
+                                global_cell_idx += 1;
+                                continue;
                             }
                         }
 
-                        for (cell_idx, &ri) in batch.run_indices.iter().enumerate() {
-                            let run = &script.runs[ri];
-                            let args_str: String = run.args.iter()
-                                .map(|a| match a {
-                                    crate::parse::Arg::Literal(s) => shell_escape(s),
-                                    crate::parse::Arg::Extract(e) => {
-                                        let var = &extract_vars[e];
-                                        format!("\"${}\"", var)
-                                    }
-                                })
-                                .collect::<Vec<_>>()
-                                .join(" ");
+                        let before = snapshot_fs(&batch_dir.path().join(format!("c{}", cell_idx)));
+                        cell_data.push((ctx.name.clone(), cell.run_index, before));
 
-                            // Handle stdin from context (not run)
-                            let stdin_part = match &ctx.stdin {
-                                Some(crate::parse::StdinSource::Lines(lines)) => {
-                                    let content = lines.join("\n");
-                                    format!("printf '{}' | ", content.replace('\'', "'\\''"))
+                        let run = &script.runs[cell.run_index];
+                        let args_str: String = run.args.iter()
+                            .map(|a| match a {
+                                crate::parse::Arg::Literal(s) => shell_escape(s),
+                                crate::parse::Arg::Extract(e) => {
+                                    let var = &extract_vars[e];
+                                    format!("\"${}\"", var)
                                 }
-                                Some(crate::parse::StdinSource::FromFile(path)) => {
-                                    format!("cat /batch/c{}/{} | ", cell_idx, shell_escape(path))
-                                }
-                                None => String::new(),
-                            };
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" ");
 
-                            // Set per-context env vars inline
-                            let env_str: String = env_vars.iter()
-                                .map(|(k, v)| format!("{}={}", k, shell_escape(v)))
-                                .collect::<Vec<_>>()
-                                .join(" ");
-                            let env_prefix = if env_str.is_empty() { String::new() }
-                                else { format!("{} ", env_str) };
-
-                            script_content.push_str(&format!(
-                                "cd /batch/c{} && {}timeout {} {}{}{}>/batch/out/{}.out 2>/batch/out/{}.err; echo $? >/batch/out/{}.rc\n",
-                                cell_idx, stdin_part, CELL_TIMEOUT_SECS,
-                                env_prefix, shell_escape(binary), if args_str.is_empty() { String::new() } else { format!(" {}", args_str) },
-                                cell_idx, cell_idx, cell_idx,
-                            ));
-                        }
-                        if let Err(e) = std::fs::write(&script_path, &script_content) {
-                            for &ri in &batch.run_indices {
-                                results.push((ctx.name.clone(), ri, Err(format!("write script: {}", e))));
-                            }
-                            continue;
-                        }
-                    }
-
-                    // Run bwrap with the batch
-                    let mut cmd = sandbox.batch_command(batch_dir.path(), "run.sh", &HashMap::new());
-                    cmd.stdin(Stdio::null());
-                    cmd.stdout(Stdio::null());
-                    cmd.stderr(Stdio::null());
-
-                    // Process group for overall timeout
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::process::CommandExt;
-                        unsafe { cmd.pre_exec(|| { libc::setpgid(0, 0); Ok(()) }); }
-                    }
-
-                    let batch_timeout = CELL_TIMEOUT_SECS * (batch.run_indices.len() as u64 + 1);
-                    let child = cmd.spawn();
-                    match child {
-                        Ok(mut child) => {
-                            let child_id = child.id();
-                            let timer = std::thread::spawn(move || {
-                                std::thread::sleep(std::time::Duration::from_secs(batch_timeout));
-                                unsafe { libc::kill(-(child_id as i32), libc::SIGKILL); }
-                            });
-                            let _ = child.wait();
-                            drop(timer);
-                        }
-                        Err(e) => {
-                            for &ri in &batch.run_indices {
-                                results.push((ctx.name.clone(), ri, Err(format!("spawn bwrap: {}", e))));
-                            }
-                            continue;
-                        }
-                    }
-
-                    // Read results and build observations
-                    for (cell_idx, (ri, before)) in cell_data.into_iter().enumerate() {
-                        let stdout = std::fs::read_to_string(out_dir.join(format!("{}.out", cell_idx)))
-                            .unwrap_or_default();
-                        let stderr = std::fs::read_to_string(out_dir.join(format!("{}.err", cell_idx)))
-                            .unwrap_or_default();
-                        let exit_str = std::fs::read_to_string(out_dir.join(format!("{}.rc", cell_idx)))
-                            .unwrap_or_default();
-                        let exit_code: Option<i32> = exit_str.trim().parse().ok();
-
-                        let cell_dir = batch_dir.path().join(format!("c{}", cell_idx));
-                        let after = snapshot_fs(&cell_dir);
-                        let fs_changes = diff_snapshots(&before, &after);
-
-                        // Estimate wall time (we don't have per-command timing in batch mode)
-                        let wall_time_ms = if exit_code == Some(137) || exit_code == Some(-1) {
-                            CELL_TIMEOUT_SECS * 1000
+                        // Per-cell stdin for FromFile variant
+                        let cell_stdin = if let Some(crate::parse::StdinSource::FromFile(path)) = &ctx.stdin {
+                            format!("cat /batch/c{}/{} | ", cell_idx, shell_escape(path))
                         } else {
-                            0 // unknown in batch mode
+                            stdin_part.clone()
                         };
 
-                        results.push((ctx.name.clone(), ri, Ok(Observation {
-                            stdout, stderr, exit_code, fs_changes,
-                            resources: ResourceUsage { wall_time_ms },
-                        })));
-                    }
+                        script_content.push_str(&format!(
+                            "cd /batch/c{} && {}timeout {} {}{}{}>/batch/out/{}.out 2>/batch/out/{}.err; echo $? >/batch/out/{}.rc\n",
+                            cell_idx, cell_stdin, CELL_TIMEOUT_SECS,
+                            env_prefix, shell_escape(binary),
+                            if args_str.is_empty() { String::new() } else { format!(" {}", args_str) },
+                            cell_idx, cell_idx, cell_idx,
+                        ));
 
-                    let done = completed.fetch_add(batch.run_indices.len(), Ordering::Relaxed)
-                        + batch.run_indices.len();
-                    if total_cells >= 200 {
+                        global_cell_idx += 1;
+                    }
+                }
+
+                // Write and execute ONE script for all contexts in this thread
+                let script_path = batch_dir.path().join("run.sh");
+                if let Err(e) = std::fs::write(&script_path, &script_content) {
+                    for (ctx_name, ri, _) in &cell_data {
+                        results.push((ctx_name.clone(), *ri, Err(format!("write script: {}", e))));
+                    }
+                    return results;
+                }
+
+                let mut cmd = sandbox.batch_command(batch_dir.path(), "run.sh", &HashMap::new());
+                cmd.stdin(Stdio::null());
+                cmd.stdout(Stdio::null());
+                cmd.stderr(Stdio::null());
+
+                #[cfg(unix)]
+                {
+                    use std::os::unix::process::CommandExt;
+                    unsafe { cmd.pre_exec(|| { libc::setpgid(0, 0); Ok(()) }); }
+                }
+
+                let batch_timeout = CELL_TIMEOUT_SECS * (global_cell_idx as u64 + 1);
+                let child = cmd.spawn();
+                match child {
+                    Ok(mut child) => {
+                        let child_id = child.id();
+                        let timer = std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_secs(batch_timeout));
+                            unsafe { libc::kill(-(child_id as i32), libc::SIGKILL); }
+                        });
+                        let _ = child.wait();
+                        drop(timer);
+                    }
+                    Err(e) => {
+                        for (ctx_name, ri, _) in &cell_data {
+                            results.push((ctx_name.clone(), *ri, Err(format!("spawn bwrap: {}", e))));
+                        }
+                        return results;
+                    }
+                }
+
+                // Read results for all cells in this thread's batch
+                for (cell_idx, (ctx_name, ri, before)) in cell_data.into_iter().enumerate() {
+                    let stdout = std::fs::read_to_string(out_dir.join(format!("{}.out", cell_idx)))
+                        .unwrap_or_default();
+                    let stderr = std::fs::read_to_string(out_dir.join(format!("{}.err", cell_idx)))
+                        .unwrap_or_default();
+                    let exit_str = std::fs::read_to_string(out_dir.join(format!("{}.rc", cell_idx)))
+                        .unwrap_or_default();
+                    let exit_code: Option<i32> = exit_str.trim().parse().ok();
+
+                    let cell_dir = batch_dir.path().join(format!("c{}", cell_idx));
+                    let after = snapshot_fs(&cell_dir);
+                    let fs_changes = diff_snapshots(&before, &after);
+
+                    let wall_time_ms = if exit_code == Some(137) || exit_code == Some(-1) {
+                        CELL_TIMEOUT_SECS * 1000
+                    } else { 0 };
+
+                    results.push((ctx_name, ri, Ok(Observation {
+                        stdout, stderr, exit_code, fs_changes,
+                        resources: ResourceUsage { wall_time_ms },
+                    })));
+
+                    let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
+                    if total_cells >= 200 && done.is_multiple_of((total_cells / 35).max(1)) {
                         eprint!("\r  {}/{} cells", done, total_cells);
                     }
                 }

@@ -67,5 +67,5 @@
             ...
 
 ## Via combination (distinguishable when paired)
-  -print  e.g. "-N" "." "-print"
+  -print  e.g. "-D" "." "-print"
 

@@ -1,7 +1,7 @@
 # Exploration: sed
 
 ## Rounds
-  round 0: 11 isolated cumulative, 63 identical in round (single-phase)
+  round 0: 11 isolated cumulative, 62 identical in round (single-phase)
 
 ## Observed: 23/24 flags
   3 solo, 20 via combination
@@ -42,7 +42,7 @@
 
 ## Via combination (distinguishable when paired)
   --expression  e.g. (pairwise evidence)
-  --file  e.g. "--file" "-f" "$(head -n1 input.txt)" "input.txt"
+  --file  e.g. "-f" "--file" "$(head -n1 input.txt)" "input.txt"
   --in-place  e.g. (pairwise evidence)
   --line-length  e.g. (pairwise evidence)
   --null-data  e.g. (pairwise evidence)
@@ -54,7 +54,7 @@
   --unbuffered  e.g. (pairwise evidence)
   -E  e.g. (pairwise evidence)
   -e  e.g. (pairwise evidence)
-  -f  e.g. "--file" "-f" "$(head -n1 input.txt)" "input.txt"
+  -f  e.g. "-f" "--file" "$(head -n1 input.txt)" "input.txt"
   -i  e.g. (pairwise evidence)
   -n  e.g. (pairwise evidence)
   -r  e.g. (pairwise evidence)

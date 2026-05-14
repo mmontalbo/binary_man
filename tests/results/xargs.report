@@ -1,7 +1,7 @@
 # Exploration: xargs
 
 ## Rounds
-  round 0: 62 isolated cumulative, 77 identical in round (single-phase)
+  round 0: 65 isolated cumulative, 77 identical in round (single-phase)
 
 ## Observed: 18/21 flags
   7 solo, 11 via combination
@@ -59,16 +59,16 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
       cherry apple banana
 
 ## Via combination (distinguishable when paired)
-  --eof  e.g. "--eof" "-o" "echo" "input.txt"
+  --eof  e.g. "-o" "--eof" "echo" "input.txt"
   --process-slot-var  e.g. "--process-slot-var=test" "-o" "echo" "input.txt"
   --replace  e.g. (pairwise evidence)
-  -0  e.g. (pairwise evidence)
-  -E  e.g. "-o" "-E" "EOF" "echo" "input.txt"
-  -P  e.g. (pairwise evidence)
-  -d  e.g. "-d" "," "-o" "echo" "input.txt"
-  -e  e.g. "-o" "-e" "echo" "input.txt"
-  -i  e.g. "-o" "-i" "echo" "input.txt"
-  -l  e.g. "-o" "-l" "echo" "input.txt"
+  -0  e.g. "-o" "-0" "echo" "input.txt"
+  -E  e.g. "-E" "EOF" "-o" "echo" "input.txt"
+  -P  e.g. "-o" "-P" "1" "echo" "input.txt"
+  -d  e.g. "-o" "-d" "," "echo" "input.txt"
+  -e  e.g. "-e" "-o" "echo" "input.txt"
+  -i  e.g. (pairwise evidence)
+  -l  e.g. "-l" "-o" "echo" "input.txt"
   -p  e.g. (pairwise evidence)
-  -x  e.g. (pairwise evidence)
+  -x  e.g. "-x" "-o" "echo" "input.txt"
 
