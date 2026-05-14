@@ -1,10 +1,10 @@
 # Exploration: uniq
 
 ## Rounds
-  round 0: 79 isolated cumulative, 66 identical in round (single-phase)
+  round 0: 71 isolated cumulative, 73 identical in round (single-phase)
 
 ## Observed: 11/11 flags
-  8 solo, 3 via combination
+  9 solo, 2 via combination
   2 behavioral aliases detected
   robustness: 11 robust, 0 moderate, 0 fragile
 
@@ -66,6 +66,22 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
       aardvark
       San Francisco
       Saturday
+  -i  # ignore differences in case when comparing
+    exemplar: "-i" "input.txt" in numbers_minimal (different)
+    base:
+      0
+      1
+      1.00
+      $1.00
+      1/2
+            ...
+    flag:
+      0
+      1
+      1.00
+      $1.00
+      1/2
+            ...
   -s  # avoid comparing the first N characters
     exemplar: "-s" "1" "input.txt" in numbers_minimal (different)
     base:
@@ -134,5 +150,4 @@ Aliases: -c = --count, -d = --repeated, -f = --skip-fields, -i = --ignore-case, 
 ## Via combination (distinguishable when paired)
   --all-repeated  e.g. (pairwise evidence)
   -D  e.g. (pairwise evidence)
-  -i  e.g. "-c" "-i" "input.txt" "other.txt"
 

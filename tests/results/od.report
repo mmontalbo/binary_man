@@ -1,12 +1,12 @@
 # Exploration: od
 
 ## Rounds
-  round 0: 318 isolated cumulative, 169 identical in round (single-phase)
+  round 0: 316 isolated cumulative, 165 identical in round (single-phase)
 
 ## Observed: 18/21 flags
   15 solo, 3 via combination
   3 additional error-differentiated
-  1 behavioral aliases detected
+  2 behavioral aliases detected
   robustness: 19 robust, 0 moderate, 0 fragile
 
 Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --format, -v = --output-duplicates
@@ -28,6 +28,11 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000060 070164 062544 005141 061543 062560 072151 067147 005141
       0000100 061543 062563 071412 060543 061557 066555 067544 060564
             ...
+  --strings
+    exemplar: "--strings" in words_minimal (different)
+    base:
+      0000000
+    flag:
   --traditional  # accept arguments in third form above
     exemplar: "--traditional" in words_minimal / stdin (+2 lines)
     base:
@@ -49,14 +54,14 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       000010 067141 000141
       000013
   -N  # limit dump to BYTES input bytes
-    exemplar: "-N" "2" in words_minimal / stdin (+1 lines)
+    exemplar: "-N" "1" "input.txt" "other.txt" in numbers_standard / input.txt=empty (reordered)
     base:
-      0000000 064143 071145 074562 060412 070160 062554 061012 067141
-      0000020 067141 000141
-      0000023
+      0000000 072157 062550 020162 067543 072156 067145 005164 062563
+      0000020 067543 062156 066040 067151 005145
+      0000032
     flag:
-      0000000 064143
-      0000002
+      0000000 000157
+      0000001
   -a  # same as -t a,  select named characters, ignoring high-order bit
     exemplar: "-a" "input.txt" "other.txt" in words_minimal (+624 lines)
     base:
@@ -154,15 +159,21 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000100  1936024419  1667304051  1835888483  1952539759
             ...
   -j  # skip BYTES input bytes first
-    exemplar: "-j" "2" in words_minimal / stdin (+2 lines)
+    exemplar: "-j" "1" "input.txt" "other.txt" in words_minimal (+624 lines)
     base:
-      0000000 064143 071145 074562 060412 070160 062554 061012 067141
-      0000020 067141 000141
-      0000023
+      0000000 060541 062162 060566 065562 060412 061142 062562 064566
+      0000020 072141 067551 005156 061141 072557 005164 061141 072163
+      0000040 060562 072143 060412 061543 070145 005164 061541 062543
+      0000060 072160 062145 060412 061543 070145 064564 063556 060412
+      0000100 061543 071545 005163 061541 067543 066555 062157 072141
+            ...
     flag:
-      0000002 071145 074562 060412 070160 062554 061012 067141 067141
-      0000022 000141
-      0000023
+      0000001 071141 073144 071141 005153 061141 071142 073145 060551
+      0000021 064564 067157 060412 067542 072165 060412 071542 071164
+      0000041 061541 005164 061541 062543 072160 060412 061543 070145
+      0000061 062564 005144 061541 062543 072160 067151 005147 061541
+      0000101 062543 071563 060412 061543 066557 067555 060544 062564
+            ...
   -l  # same as -t dL, select decimal longs
     exemplar: "-l" "input.txt" "other.txt" in words_minimal (+624 lines)
     base:
@@ -234,7 +245,6 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
             ...
 
 ## Via combination (distinguishable when paired)
-  --strings  e.g. (pairwise evidence)
   --width  e.g. (pairwise evidence)
   -S  e.g. (pairwise evidence)
   -o  e.g. (pairwise evidence)

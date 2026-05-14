@@ -1,20 +1,16 @@
 # Exploration: cp
 
 ## Rounds
-  round 0: 46 isolated cumulative, 42 identical in round (single-phase)
+  round 0: 43 isolated cumulative, 44 identical in round (single-phase)
 
 ## Observed: 36/36 flags
-  11 solo, 25 via combination
-  2 behavioral aliases detected
+  10 solo, 26 via combination
+  5 behavioral aliases detected
   robustness: 34 robust, 0 moderate, 0 fragile
 
 Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-target-directory, -a = --archive, -f = --force, -i = --interactive, -l = --link, -n = --no-clobber, -s = --symbolic-link, -t = --target-directory, -v = --verbose, -x = --one-file-system
 
 ## Solo (unique behavior)
-  --context
-    exemplar: "--context" "input.txt" "other.txt" in words_minimal (different)
-    base:
-    flag:
   --debug  # explain how a file is copied.  Implies -v
     exemplar: "--debug" "input.txt" "other.txt" in words_minimal (different)
     base:
@@ -41,12 +37,12 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     exemplar: "--sparse=auto" "input.txt" "other.txt" in words_minimal (different)
     base:
     flag:
-  -S  # override the usual backup suffix
-    exemplar: "-S" "test" "input.txt" "other.txt" in words_minimal (different)
+  -L  # always follow symbolic links in SOURCE
+    exemplar: "-L" "input.txt" "other.txt" in words_minimal (different)
     base:
     flag:
-  -T  # treat DEST as a normal file
-    exemplar: "-T" "input.txt" "other.txt" in words_minimal (different)
+  -S  # override the usual backup suffix
+    exemplar: "-S" "test" "input.txt" "other.txt" in words_minimal (different)
     base:
     flag:
   -t  # copy all SOURCE arguments into DIRECTORY
@@ -62,6 +58,7 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
 ## Via combination (distinguishable when paired)
   --attributes-only  e.g. (pairwise evidence)
   --backup  e.g. (pairwise evidence)
+  --context  e.g. (pairwise evidence)
   --copy-contents  e.g. (pairwise evidence)
   --keep-directory-symlink  e.g. (pairwise evidence)
   --preserve  e.g. (pairwise evidence)
@@ -69,9 +66,9 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
   --strip-trailing-slashes  e.g. (pairwise evidence)
   --update  e.g. (pairwise evidence)
   -H  e.g. (pairwise evidence)
-  -L  e.g. (pairwise evidence)
   -P  e.g. (pairwise evidence)
   -R  e.g. (pairwise evidence)
+  -T  e.g. (pairwise evidence)
   -Z  e.g. (pairwise evidence)
   -a  e.g. (pairwise evidence)
   -b  e.g. (pairwise evidence)

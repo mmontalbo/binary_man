@@ -142,13 +142,109 @@ fn token_nw(a: &[String], b: &[String], need_edits: bool) -> (usize, Vec<TokenEd
     (cost, edits)
 }
 
-/// Line-level NW alignment. Match cost = token edit distance (unit leaf costs).
-/// Delete/insert cost = token count of the line.
+/// Line-level structural diff using hash-anchored alignment.
+///
+/// 1. Hash each line. Lines matching by hash are anchors (Keep/Same).
+/// 2. Find the longest common subsequence of line hashes (patience-diff style).
+/// 3. Between anchors, run NW alignment on the small gap segments.
+///
+/// O(n) for shared lines + O(k²) per gap segment of size k.
+/// For outputs with 90% shared lines, this is orders of magnitude faster
+/// than full O(n×m) NW on the entire output.
 fn align_lines(ref_lines: &[Vec<String>], obs_lines: &[Vec<String>]) -> Vec<LineEdit> {
+    use std::collections::HashMap;
+
+    // Hash each line for fast comparison
+    let hash_line = |line: &[String]| -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        line.hash(&mut h);
+        h.finish()
+    };
+
+    let ref_hashes: Vec<u64> = ref_lines.iter().map(|l| hash_line(l)).collect();
+    let obs_hashes: Vec<u64> = obs_lines.iter().map(|l| hash_line(l)).collect();
+
+    // Find anchor matches: for each unique line hash, pair up positions.
+    // Use a simple LCS on hashes via patience-diff-style unique line matching.
+    // Build map of obs_hash → positions
+    let mut obs_positions: HashMap<u64, Vec<usize>> = HashMap::new();
+    for (j, h) in obs_hashes.iter().enumerate() {
+        obs_positions.entry(*h).or_default().push(j);
+    }
+
+    // Greedy anchor matching: for each ref line, find the earliest unmatched obs line
+    // with the same hash, maintaining monotonicity (anchors don't cross).
+    let mut anchors: Vec<(usize, usize)> = Vec::new(); // (ref_idx, obs_idx)
+    let mut obs_used: Vec<bool> = vec![false; obs_lines.len()];
+    let mut min_obs = 0usize; // monotonicity: each anchor must be after the previous
+
+    for (i, rh) in ref_hashes.iter().enumerate() {
+        if let Some(positions) = obs_positions.get(rh) {
+            for &j in positions {
+                if j >= min_obs && !obs_used[j] && ref_lines[i] == obs_lines[j] {
+                    anchors.push((i, j));
+                    obs_used[j] = true;
+                    min_obs = j + 1;
+                    break;
+                }
+            }
+        }
+    }
+
+    // If no anchors found (completely different outputs), cap gap size
+    // to avoid O(n²) on large unrelated outputs.
+    let max_gap = 100;
+
+    // Build edit script from anchors + NW on gap segments
+    let mut edits = Vec::new();
+    let mut ri = 0usize;
+    let mut oi = 0usize;
+
+    for &(anchor_r, anchor_o) in &anchors {
+        let ref_gap = &ref_lines[ri..anchor_r];
+        let obs_gap = &obs_lines[oi..anchor_o];
+        if !ref_gap.is_empty() || !obs_gap.is_empty() {
+            // Cap gap size to avoid O(n²) on large unanchored segments
+            let rg = if ref_gap.len() > max_gap { &ref_gap[..max_gap] } else { ref_gap };
+            let og = if obs_gap.len() > max_gap { &obs_gap[..max_gap] } else { obs_gap };
+            edits.extend(align_gap(rg, og));
+            // Any truncated lines become bulk deletes/inserts
+            for _ in max_gap..ref_gap.len() { edits.push(LineEdit::Deleted); }
+            for _ in max_gap..obs_gap.len() { edits.push(LineEdit::Inserted); }
+        }
+        edits.push(LineEdit::Same);
+        ri = anchor_r + 1;
+        oi = anchor_o + 1;
+    }
+
+    let ref_gap = &ref_lines[ri..];
+    let obs_gap = &obs_lines[oi..];
+    if !ref_gap.is_empty() || !obs_gap.is_empty() {
+        let rg = if ref_gap.len() > max_gap { &ref_gap[..max_gap] } else { ref_gap };
+        let og = if obs_gap.len() > max_gap { &obs_gap[..max_gap] } else { obs_gap };
+        edits.extend(align_gap(rg, og));
+        for _ in max_gap..ref_gap.len() { edits.push(LineEdit::Deleted); }
+        for _ in max_gap..obs_gap.len() { edits.push(LineEdit::Inserted); }
+    }
+
+    edits
+}
+
+/// NW alignment on a small gap segment between anchors.
+/// These segments are typically 1-20 lines, so O(n×m) is cheap.
+fn align_gap(ref_lines: &[Vec<String>], obs_lines: &[Vec<String>]) -> Vec<LineEdit> {
     let n = ref_lines.len();
     let m = obs_lines.len();
 
-    // Precompute token-level match costs for all line pairs
+    if n == 0 {
+        return vec![LineEdit::Inserted; m];
+    }
+    if m == 0 {
+        return vec![LineEdit::Deleted; n];
+    }
+
+    // Precompute token-level match costs for gap line pairs
     let match_costs: Vec<Vec<usize>> = (0..n).map(|i|
         (0..m).map(|j| token_nw(&ref_lines[i], &obs_lines[j], false).0).collect()
     ).collect();
@@ -164,7 +260,6 @@ fn align_lines(ref_lines: &[Vec<String>], obs_lines: &[Vec<String>]) -> Vec<Line
         }
     }
 
-    // Backtrace — use cached match_costs, only compute edits for matched pairs
     let mut edits = Vec::new();
     let (mut i, mut j) = (n, m);
     while i > 0 || j > 0 {
@@ -188,26 +283,13 @@ fn align_lines(ref_lines: &[Vec<String>], obs_lines: &[Vec<String>]) -> Vec<Line
     edits
 }
 
-/// Compute structural delta for an output channel (stdout or stderr).
-/// Max lines to align for structural delta. Outputs longer than this are
-/// truncated before NW alignment — the first N lines are sufficient to
-/// characterize the structural transformation. Without this cap, diff's
-/// 1400-line output causes O(n²) = 2M operations per alignment.
-const MAX_ALIGN_LINES: usize = 100;
-
 fn compute_output_delta(ref_out: &str, obs_out: &str) -> OutputDelta {
     if ref_out == obs_out {
         return OutputDelta::Identical;
     }
 
-    let mut ref_labels = tokenize(ref_out);
-    let mut obs_labels = tokenize(obs_out);
-
-    // Truncate long outputs to bound NW alignment cost
-    if ref_labels.len() > MAX_ALIGN_LINES || obs_labels.len() > MAX_ALIGN_LINES {
-        ref_labels.truncate(MAX_ALIGN_LINES);
-        obs_labels.truncate(MAX_ALIGN_LINES);
-    }
+    let ref_labels = tokenize(ref_out);
+    let obs_labels = tokenize(obs_out);
 
     // Check for pure reorder: same line multiset by canonical label pattern
     if ref_labels.len() == obs_labels.len() {
