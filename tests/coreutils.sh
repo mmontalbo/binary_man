@@ -127,31 +127,31 @@ echo ""
 START=$(date +%s)
 
 # Expected values: "binary min_observed expected_total"
-# min_observed: lower bound for observed behavior count (improvements raise it)
-# expected_total: exact flag count from discovery (changes indicate regex/parsing shifts)
+# Ordered slowest-first so the longest tools start immediately,
+# and fast tools fill in around them.
 CHECKS=(
-    "sort 25 30"
+    "xargs 16 21"
     "ls 59 60"
+    "grep 45 49"
+    "diff 51 53"
+    "sort 25 30"
+    "od 18 21"
+    "du 25 26"
+    "cp 36 36"
     "cat 10 10"
     "cut 3 10"
     "head 5 7"
     "wc 6 7"
     "uniq 11 11"
     "nl 9 11"
-    "od 18 21"
     "fold 3 3"
     "fmt 6 7"
     "paste 2 3"
-    "du 25 26"
-    "cp 36 36"
     "rm 10 12"
     "stat 7 7"
     "df 15 16"
     "sed 22 24"
-    "xargs 16 21"
-    "diff 51 53"
     "find 4 4"
-    "grep 45 49"
 )
 
 # Run all checks in parallel, limited to $JOBS at a time
