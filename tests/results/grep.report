@@ -11,14 +11,8 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
 
 ## Solo (unique behavior)
   --exclude-from  # skip files that match any file pattern from FILE
-    exemplar: "--exclude-from=input.txt" "$(head -n1 input.txt)" "input.txt" in numbers_standard
-    | identical
-    base:
-            ... (47 identical)
-      2.2250738585072011e-308
-    flag:
-            ... (47 identical)
-      2.2250738585072011e-308
+    exemplar: "--exclude-from=other.txt" "$(head -n1 input.txt)" "input.txt" in empty_dir
+    | stderr changed: grep: other.txt: No such file or directory
   -A  # print NUM lines of trailing context
     exemplar: "-A" "1" "$(head -n1 input.txt)" "input.txt" in numbers_standard
     | 11 only in this: 1, 1/2, --, -1, -1/2
@@ -247,7 +241,7 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
     | 1 only in ref: root:x:0:0:root:/root:/bin/bash
     | exit: 0 → 2
     | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
-    evidence: "-e" "-o" "$(head -n1 input.txt)" "input.txt"
+    evidence: "-e" "-s" "$(head -n1 input.txt)" "input.txt"
   -f  # take PATTERNS from FILE
     | 1 only in ref: aardvark
     | exit: 0 → 1

@@ -45,13 +45,13 @@ Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
   --quiet
     | 3 only in ref: ==> input.txt <==, , ==> other.txt <==
     | 12 shared
-    evidence: "-n" "--quiet" "$(head -n1 input.txt)" "."
+    evidence: "-c" "--quiet" "$(head -n1 input.txt)" "."
   --silent
     | 3 only in ref: ==> input.txt <==, , ==> other.txt <==
     | 12 shared
-    evidence: "-n" "--silent" "$(head -n1 input.txt)" "."
+    evidence: "-c" "--silent" "$(head -n1 input.txt)" "."
   -q
     | 3 only in ref: ==> input.txt <==, , ==> other.txt <==
     | 12 shared
-    evidence: "-c" "-q" "$(head -n1 input.txt)" "."
+    evidence: "-n" "-q" "$(head -n1 input.txt)" "."
 

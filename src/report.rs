@@ -405,7 +405,7 @@ pub fn format_exploration_report(
         out.push_str(&format!("  {}{}\n", flag, desc));
 
         // Find the exemplar: the context where this flag's output is most distinctive
-        if let Some(ex) = find_exemplar(flag, all_runs) {
+        if let Some(ex) = find_exemplar(flag, all_runs, aliases) {
             out.push_str(&format!("    exemplar: {} in {}\n", ex.run_label, ex.context_name));
             // Show diff components on separate lines for readability
             for part in ex.vs_diff.split("; ") {
@@ -495,12 +495,17 @@ struct Exemplar {
 /// Picks the context where this flag's output is shared by the fewest other flags —
 /// the context that most clearly demonstrates what makes this flag unique.
 /// Shows the first differing region (not the first N identical lines).
-fn find_exemplar(target_stem: &str, all_runs: &[&RunAnalysis]) -> Option<Exemplar> {
-    // Find all solo runs for this flag (not combinations)
+fn find_exemplar(
+    target_stem: &str,
+    all_runs: &[&RunAnalysis],
+    aliases: Option<&HashMap<String, String>>,
+) -> Option<Exemplar> {
+    // Find all solo runs for this flag (not combinations).
+    // Match via alias resolution so "-q" finds "--quiet" runs.
     let target_runs: Vec<&&RunAnalysis> = all_runs.iter()
         .filter(|run| {
             let stem = flag_stem(&run.args_str);
-            stem.as_ref().map(|s| !is_combination(s) && canonical_flag(s, None) == *target_stem)
+            stem.as_ref().map(|s| !is_combination(s) && canonical_flag(s, aliases) == *target_stem)
                 .unwrap_or(false)
         })
         .collect();
@@ -527,9 +532,7 @@ fn find_exemplar(target_stem: &str, all_runs: &[&RunAnalysis]) -> Option<Exempla
             .unwrap_or_default();
 
         for (ctx_names, obs) in &run.context_groups {
-            if obs.exit_code.unwrap_or(-1) >= 2 && obs.stdout.trim().is_empty() {
-                continue;
-            }
+            let is_error_only = obs.exit_code.unwrap_or(-1) >= 2 && obs.stdout.trim().is_empty();
             for ctx_name in ctx_names {
                 // Check if output actually differs from base in this context
                 let has_diff = base_map.get(ctx_name.as_str())
@@ -550,8 +553,10 @@ fn find_exemplar(target_stem: &str, all_runs: &[&RunAnalysis]) -> Option<Exempla
                     })
                     .count();
 
-                let score = (has_diff, same_output_count);
-                // Prefer has_diff=true (sorted first), then lower uniqueness
+                // Score: prefer non-error contexts with diffs, then unique outputs.
+                // Error-only contexts are last resort (penalized by high uniqueness).
+                let adj_uniqueness = if is_error_only { same_output_count + 10000 } else { same_output_count };
+                let score = (has_diff, adj_uniqueness);
                 if score.0 && !best_score.0 || (score.0 == best_score.0 && score.1 < best_score.1) {
                     best_score = score;
                     best_context = Some((ctx_name.as_str(), run, obs));

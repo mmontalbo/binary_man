@@ -11,28 +11,21 @@ Aliases: -b = --bytes, -s = --spaces, -w = --width
 
 ## Solo (unique behavior)
   -w  # use WIDTH columns instead of 80
-    exemplar: "-w" "2" "input.txt" "other.txt" in numbers_minimal
-    | 264 only in this: 1., 00, $1, .0, 1/
-    | 61 only in ref: 1.00, $1.00, 1/2, 1E2, 1E02
-    | 12 shared
+    exemplar: "--width=2" in words_minimal / stdin
+    | 9 only in this: ch, er, ry, ap, pl
+    | 3 only in ref: cherry, apple, banana
     base:
-            ... (1 identical)
-      1
-      1.00
-      $1.00
-      1/2
-      1E2
-      1E02
-            ... (66 more)
+      cherry
+      apple
+      banana
     flag:
-            ... (1 identical)
-      1
-      1.
-      00
-      $1
-      .0
-      0
-            ... (295 more)
+      ch
+      er
+      ry
+      ap
+      pl
+      e
+            ... (3 more)
 
 ## Via combination (distinguishable when paired)
   -b  # count bytes rather than columns

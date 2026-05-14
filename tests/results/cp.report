@@ -1,11 +1,10 @@
 # Exploration: cp
 
 ## Rounds
-  round 0: 51 isolated cumulative, 34 identical in round (single-phase)
+  round 0: 53 isolated cumulative, 34 identical in round (single-phase)
 
 ## Observed: 36/36 flags
   7 solo, 29 via combination
-  1 behavioral aliases detected
   robustness: 44 robust, 0 moderate, 0 fragile
 
 Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-target-directory, -a = --archive, -f = --force, -i = --interactive, -l = --link, -n = --no-clobber, -s = --symbolic-link, -t = --target-directory, -v = --verbose, -x = --one-file-system
@@ -142,7 +141,7 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
-    evidence: "--no-preserve=mode" "--force" "input.txt" "other.txt"
+    evidence: (pairwise evidence)
   -l  # hard link files instead of copying
     | exit: 1 → 0
     | stderr removed
@@ -171,7 +170,7 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     evidence: (pairwise evidence)
   -v  # explain what is being done
     | 1 only in this: 'input.txt' -> 'other.txt'
-    evidence: "--no-preserve=mode" "-v" "input.txt" "other.txt"
+    evidence: "--no-preserve=mode" "--verbose" "input.txt" "other.txt"
   -x  # stay on this file system
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file

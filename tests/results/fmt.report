@@ -12,25 +12,14 @@ Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t 
 
 ## Solo (unique behavior)
   -g  # goal width (default of 93% of width)
-    exemplar: "-g" "1" "input.txt" "other.txt" in words_minimal
-    | 1376 only in this: aardvark, abbreviation, about, abstract, accept
-    | 151 only in ref: aardvark abbreviation about abstract accept accepted accepting access, accommodate acknowledge across Africa afternoon again against aggregate, ahead algorithm Alice all already also although always Amazon American, among an and another answer Apache apostrophe Apple application, approximately architect Argentina around arrange Asia assembly
+    exemplar: "--goal=2" in passwd_minimal / stdin
+    | 2 only in this: a,b,c, d:e:f g h i
+    | 1 only in ref: a,b,c d:e:f g h i
     base:
-      aardvark abbreviation about abstract accept accepted accepting access
-      accommodate acknowledge across Africa afternoon again against aggregate
-      ahead algorithm Alice all already also although always Amazon American
-      among an and another answer Apache apostrophe Apple application
-      approximately architect Argentina around arrange Asia assembly
-      at Australia available awkward azure back balance banana bandwidth
-            ... (145 more)
+      a,b,c d:e:f g h i
     flag:
-      aardvark
-      abbreviation
-      about
-      abstract
-      accept
-      accepted
-            ... (1370 more)
+      a,b,c
+      d:e:f g h i
   -p  # reformat only lines beginning with STRING, reattaching the prefix to reformatted lines
     exemplar: "-p" "test" "input.txt" "other.txt" in numbers_standard / input.txt=size:1
     | 2 only in this: xother content, second line
