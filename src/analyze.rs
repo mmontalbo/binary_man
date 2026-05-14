@@ -165,9 +165,23 @@ fn align_lines(ref_lines: &[Vec<String>], obs_lines: &[Vec<String>]) -> Vec<Line
     let ref_hashes: Vec<u64> = ref_lines.iter().map(|l| hash_line(l)).collect();
     let obs_hashes: Vec<u64> = obs_lines.iter().map(|l| hash_line(l)).collect();
 
-    // Find anchor matches: for each unique line hash, pair up positions.
-    // Use a simple LCS on hashes via patience-diff-style unique line matching.
-    // Build map of obs_hash → positions
+    // Max gap size for NW alignment between anchors (or when no anchors exist).
+    let max_gap = 100;
+
+    // Fast path: if hash sets are disjoint, outputs share zero lines.
+    // Skip anchor search — directly align as one capped gap.
+    let ref_set: HashSet<u64> = ref_hashes.iter().copied().collect();
+    if !obs_hashes.iter().any(|h| ref_set.contains(h)) {
+        return align_gap(
+            &ref_lines[..ref_lines.len().min(max_gap)],
+            &obs_lines[..obs_lines.len().min(max_gap)],
+        ).into_iter()
+            .chain(std::iter::repeat_n(LineEdit::Deleted, ref_lines.len().saturating_sub(max_gap)))
+            .chain(std::iter::repeat_n(LineEdit::Inserted, obs_lines.len().saturating_sub(max_gap)))
+            .collect();
+    }
+
+    // Build map of obs_hash → positions for anchor matching
     let mut obs_positions: HashMap<u64, Vec<usize>> = HashMap::new();
     for (j, h) in obs_hashes.iter().enumerate() {
         obs_positions.entry(*h).or_default().push(j);
@@ -175,9 +189,9 @@ fn align_lines(ref_lines: &[Vec<String>], obs_lines: &[Vec<String>]) -> Vec<Line
 
     // Greedy anchor matching: for each ref line, find the earliest unmatched obs line
     // with the same hash, maintaining monotonicity (anchors don't cross).
-    let mut anchors: Vec<(usize, usize)> = Vec::new(); // (ref_idx, obs_idx)
+    let mut anchors: Vec<(usize, usize)> = Vec::new();
     let mut obs_used: Vec<bool> = vec![false; obs_lines.len()];
-    let mut min_obs = 0usize; // monotonicity: each anchor must be after the previous
+    let mut min_obs = 0usize;
 
     for (i, rh) in ref_hashes.iter().enumerate() {
         if let Some(positions) = obs_positions.get(rh) {
@@ -191,10 +205,6 @@ fn align_lines(ref_lines: &[Vec<String>], obs_lines: &[Vec<String>]) -> Vec<Line
             }
         }
     }
-
-    // If no anchors found (completely different outputs), cap gap size
-    // to avoid O(n²) on large unrelated outputs.
-    let max_gap = 100;
 
     // Build edit script from anchors + NW on gap segments
     let mut edits = Vec::new();
