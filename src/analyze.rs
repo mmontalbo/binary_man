@@ -390,10 +390,34 @@ impl AnalysisMetrics {
     }
 }
 
-/// Find flag pairs proven different by cross-group interaction data.
+/// Pre-parsed label: flags and positionals extracted once, reused across LOO iterations.
+struct ParsedLabel {
+    flags: Vec<String>,      // flag stems (e.g., "-n", "--sort")
+    positionals: Vec<String>, // non-flag args
+}
+
+/// Parse all labels once, cache the result.
+fn parse_all_labels(labels: &[String]) -> Vec<ParsedLabel> {
+    labels.iter().map(|label| {
+        let args = output::parse_label(label);
+        let flags: Vec<String> = args.iter()
+            .filter(|a| a.starts_with('-'))
+            .map(|a| if let Some(eq) = a.find('=') { a[..eq].to_string() } else { a.to_string() })
+            .collect();
+        let positionals: Vec<String> = args.iter()
+            .filter(|a| !a.starts_with('-'))
+            .map(|s| s.to_string())
+            .collect();
+        ParsedLabel { flags, positionals }
+    }).collect()
+}
+
 /// Find flag stems proven distinguishable by cross-group pairwise interaction.
-/// Takes groups as slices of label slices — used by both full analysis and leave-one-out.
-fn pairwise_distinguished_from_label_groups(groups: &[&[String]]) -> HashSet<String> {
+/// Uses pre-parsed labels indexed by position in the flat label array.
+fn pairwise_distinguished_from_groups_parsed(
+    groups: &[&[usize]], // groups of indices into parsed_labels
+    parsed_labels: &[ParsedLabel],
+) -> HashSet<String> {
     struct ComboKey { base: Vec<String>, positionals: Vec<String> }
     impl std::hash::Hash for ComboKey {
         fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
@@ -405,24 +429,17 @@ fn pairwise_distinguished_from_label_groups(groups: &[&[String]]) -> HashSet<Str
     impl Eq for ComboKey {}
 
     let mut combo_map: HashMap<ComboKey, Vec<(String, usize)>> = HashMap::new();
-    for (gi, labels) in groups.iter().enumerate() {
-        for label in *labels {
-            let args = output::parse_label(label);
-            let flags: Vec<&&str> = args.iter().filter(|a| a.starts_with('-')).collect();
-            let positionals: Vec<String> = args.iter().filter(|a| !a.starts_with('-')).map(|s| s.to_string()).collect();
-            if flags.len() >= 2 {
-                for (fi, modifier) in flags.iter().enumerate() {
-                    let base: Vec<String> = flags.iter().enumerate()
+    for (gi, label_indices) in groups.iter().enumerate() {
+        for &li in *label_indices {
+            let pl = &parsed_labels[li];
+            if pl.flags.len() >= 2 {
+                for (fi, modifier) in pl.flags.iter().enumerate() {
+                    let base: Vec<String> = pl.flags.iter().enumerate()
                         .filter(|(i, _)| *i != fi)
-                        .map(|(_, f)| f.to_string())
+                        .map(|(_, f)| f.clone())
                         .collect();
-                    let mod_stem = if let Some(eq) = modifier.find('=') {
-                        modifier[..eq].to_string()
-                    } else {
-                        modifier.to_string()
-                    };
-                    combo_map.entry(ComboKey { base, positionals: positionals.clone() })
-                        .or_default().push((mod_stem, gi));
+                    combo_map.entry(ComboKey { base, positionals: pl.positionals.clone() })
+                        .or_default().push((modifier.clone(), gi));
                 }
             }
         }
@@ -445,9 +462,20 @@ fn pairwise_distinguished_from_label_groups(groups: &[&[String]]) -> HashSet<Str
     distinguished
 }
 
+/// Convenience wrapper using BehaviorGroups directly (for non-LOO use).
 fn pairwise_distinguished_from_groups(groups: &[BehaviorGroup]) -> HashSet<String> {
-    let label_slices: Vec<&[String]> = groups.iter().map(|g| g.run_labels.as_slice()).collect();
-    pairwise_distinguished_from_label_groups(&label_slices)
+    // Collect all labels, parse once
+    let all_labels: Vec<String> = groups.iter().flat_map(|g| g.run_labels.iter().cloned()).collect();
+    let parsed = parse_all_labels(&all_labels);
+    // Build index groups
+    let mut offset = 0;
+    let index_groups: Vec<Vec<usize>> = groups.iter().map(|g| {
+        let indices: Vec<usize> = (offset..offset + g.run_labels.len()).collect();
+        offset += g.run_labels.len();
+        indices
+    }).collect();
+    let index_slices: Vec<&[usize]> = index_groups.iter().map(|g| g.as_slice()).collect();
+    pairwise_distinguished_from_groups_parsed(&index_slices, &parsed)
 }
 
 /// Core analysis: Script + GridResult → AnalysisMetrics.
@@ -775,6 +803,13 @@ pub fn analyze(
     let context_names: Vec<String> = script.contexts.iter().map(|c| c.name.clone()).collect();
     let all_distinguished = pairwise_distinguished_from_groups(&behavior_groups);
 
+    // Pre-parse all run labels once for LOO iterations
+    let all_run_labels: Vec<String> = run_analyses.iter().map(|a| a.args_str.clone()).collect();
+    let parsed_labels = parse_all_labels(&all_run_labels);
+    // Map label string → parsed index
+    let label_to_idx: HashMap<&str, usize> = all_run_labels.iter().enumerate()
+        .map(|(i, s)| (s.as_str(), i)).collect();
+
     // Sample contexts for leave-one-out when the grid is large.
     // Full LOO is O(contexts × runs²) — for ls (35 × 4380²) this takes >100s.
     // Sampling 10 contexts gives equivalent confidence at bounded cost.
@@ -793,53 +828,44 @@ pub fn analyze(
         robustness.insert(flag.clone(), (0, n_contexts));
     }
 
+    // Pre-index run_analyses and run_obs_keys by run_index for O(1) lookup
+    let analysis_by_ri: HashMap<usize, usize> = run_analyses.iter().enumerate()
+        .map(|(i, a)| (a.run_index, i)).collect();
+
     for &drop_ctx in &loo_contexts {
-        // Re-group: hash each run's (from_ref, masked obs_keys) → group labels
-        let mut loo_label_groups: Vec<Vec<String>> = Vec::new();
-        let mut loo_index: HashMap<u64, Vec<usize>> = HashMap::new();
+        // Re-group by hash of (from_ref, masked obs_keys).
+        // Hash-only grouping (no equality verification) — hash collisions are
+        // vanishingly rare with u64 hashes and cause at most a false group merge,
+        // which only slightly underestimates robustness.
+        let mut loo_groups: Vec<Vec<usize>> = Vec::new();
+        let mut loo_hash_index: HashMap<u64, usize> = HashMap::new(); // hash → group index
 
         for entry in &run_obs_keys {
-            let ri = entry.run_index;
-            let Some(analysis) = run_analyses.iter().find(|a| a.run_index == ri) else { continue };
-            let masked_keys: Vec<&(String, ObsKey)> = entry.keys.iter()
-                .filter(|(ctx, _)| ctx != drop_ctx)
-                .collect();
+            let Some(&ai) = analysis_by_ri.get(&entry.run_index) else { continue };
+            let analysis = &run_analyses[ai];
+            let label_idx = label_to_idx.get(analysis.args_str.as_str()).copied().unwrap_or(0);
 
             use std::hash::{Hash, Hasher};
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             analysis.from_ref.hash(&mut hasher);
-            for (_, k) in &masked_keys { k.hash(&mut hasher); }
+            for (ctx, k) in &entry.keys {
+                if ctx != drop_ctx {
+                    k.hash(&mut hasher);
+                }
+            }
             let h = hasher.finish();
 
-            let found = loo_index.get(&h).and_then(|indices| {
-                indices.iter().find(|&&gi| {
-                    // Verify: same from_ref and same masked obs_keys
-                    let other_entry = run_obs_keys.iter().find(|e| {
-                        run_analyses.iter().any(|a| a.run_index == e.run_index
-                            && a.args_str == loo_label_groups[gi][0])
-                    });
-                    if let Some(other) = other_entry {
-                        let other_analysis = run_analyses.iter().find(|a| a.run_index == other.run_index).unwrap();
-                        if other_analysis.from_ref != analysis.from_ref { return false; }
-                        let other_masked: Vec<&(String, ObsKey)> = other.keys.iter()
-                            .filter(|(ctx, _)| ctx != drop_ctx).collect();
-                        masked_keys.len() == other_masked.len()
-                            && masked_keys.iter().zip(other_masked.iter()).all(|((_, a), (_, b))| a == b)
-                    } else { false }
-                }).copied()
-            });
-
-            if let Some(gi) = found {
-                loo_label_groups[gi].push(analysis.args_str.clone());
+            if let Some(&gi) = loo_hash_index.get(&h) {
+                loo_groups[gi].push(label_idx);
             } else {
-                let gi = loo_label_groups.len();
-                loo_index.entry(h).or_default().push(gi);
-                loo_label_groups.push(vec![analysis.args_str.clone()]);
+                let gi = loo_groups.len();
+                loo_hash_index.insert(h, gi);
+                loo_groups.push(vec![label_idx]);
             }
         }
 
-        let loo_slices: Vec<&[String]> = loo_label_groups.iter().map(|g| g.as_slice()).collect();
-        let loo_distinguished = pairwise_distinguished_from_label_groups(&loo_slices);
+        let loo_slices: Vec<&[usize]> = loo_groups.iter().map(|g| g.as_slice()).collect();
+        let loo_distinguished = pairwise_distinguished_from_groups_parsed(&loo_slices, &parsed_labels);
         for flag in &all_distinguished {
             if loo_distinguished.contains(flag) {
                 robustness.get_mut(flag).unwrap().0 += 1;
@@ -849,7 +875,7 @@ pub fn analyze(
 
     let robustness_ms = robustness_start.elapsed().as_millis();
     if robustness_ms > 1000 {
-        eprintln!("  robustness: {}ms ({} contexts × {} runs)", robustness_ms, context_names.len(), run_obs_keys.len());
+        eprintln!("  robustness: {}ms ({} contexts × {} runs)", robustness_ms, loo_contexts.len(), run_obs_keys.len());
     }
 
     AnalysisMetrics {
