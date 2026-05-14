@@ -1,15 +1,23 @@
 # Exploration: cp
 
 ## Rounds
-  round 0: 35 isolated cumulative, 36 identical in round (single-phase)
+  round 0: 49 isolated cumulative, 28 identical in round (single-phase)
 
 ## Observed: 36/36 flags
-  9 solo, 27 via combination
+  12 solo, 24 via combination
   robustness: 34 robust, 0 moderate, 0 fragile
 
 Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-target-directory, -a = --archive, -f = --force, -i = --interactive, -l = --link, -n = --no-clobber, -s = --symbolic-link, -t = --target-directory, -v = --verbose, -x = --one-file-system
 
 ## Solo (unique behavior)
+  --attributes-only  # don't copy the file data, just the attributes
+    exemplar: "--attributes-only" "input.txt" "other.txt" in words_standard (different)
+    base:
+    flag:
+  --backup
+    exemplar: "--backup" "input.txt" "other.txt" in words_standard (different)
+    base:
+    flag:
   --debug  # explain how a file is copied.  Implies -v
     exemplar: "--debug" "input.txt" "other.txt" in words_minimal (different)
     base:
@@ -17,31 +25,35 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
       'input.txt' -> 'other.txt'
       copy offload: yes, reflink: unsupported, sparse detection: no
   --no-preserve  # don't preserve the specified attributes
-    exemplar: "--no-preserve=mode" "input.txt" "other.txt" in words_minimal (different)
+    exemplar: "--no-preserve=mode" "input.txt" "other.txt" in words_standard (different)
     base:
     flag:
   --parents  # use full source file name under DIRECTORY
-    exemplar: "--parents" "input.txt" "other.txt" in words_minimal (different)
+    exemplar: "--parents" "input.txt" "other.txt" in words_standard (different)
     base:
     flag:
   --reflink
-    exemplar: "--reflink" "input.txt" "other.txt" in words_minimal (different)
+    exemplar: "--reflink" "input.txt" "other.txt" in access_log_minimal (different)
     base:
     flag:
   --remove-destination  # remove each existing destination file before attempting to open it (contrast with --force)
-    exemplar: "--remove-destination" "input.txt" "other.txt" in words_minimal (different)
+    exemplar: "--remove-destination" "input.txt" "other.txt" in words_standard (different)
     base:
     flag:
   --sparse  # control creation of sparse files. See below
-    exemplar: "--sparse=auto" "input.txt" "other.txt" in words_minimal (different)
+    exemplar: "--sparse=auto" "input.txt" "other.txt" in words_standard (different)
     base:
     flag:
   -S  # override the usual backup suffix
-    exemplar: "-S" "test" "input.txt" "other.txt" in words_minimal (different)
+    exemplar: "-S" "test" "input.txt" "other.txt" in words_standard (different)
+    base:
+    flag:
+  -b  # like --backup but does not accept an argument
+    exemplar: "-b" "input.txt" "other.txt" in words_standard (different)
     base:
     flag:
   -t  # copy all SOURCE arguments into DIRECTORY
-    exemplar: "-t" "." "input.txt" "other.txt" in words_minimal (different)
+    exemplar: "-t" "." "input.txt" "other.txt" in words_standard (different)
     base:
     flag:
   -v  # explain what is being done
@@ -51,8 +63,6 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
       'input.txt' -> 'other.txt'
 
 ## Via combination (distinguishable when paired)
-  --attributes-only  e.g. (pairwise evidence)
-  --backup  e.g. (pairwise evidence)
   --context  e.g. (pairwise evidence)
   --copy-contents  e.g. (pairwise evidence)
   --keep-directory-symlink  e.g. (pairwise evidence)
@@ -67,7 +77,6 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
   -T  e.g. (pairwise evidence)
   -Z  e.g. (pairwise evidence)
   -a  e.g. (pairwise evidence)
-  -b  e.g. (pairwise evidence)
   -d  e.g. (pairwise evidence)
   -f  e.g. (pairwise evidence)
   -i  e.g. (pairwise evidence)

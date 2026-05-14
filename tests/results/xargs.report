@@ -1,10 +1,10 @@
 # Exploration: xargs
 
 ## Rounds
-  round 0: 65 isolated cumulative, 77 identical in round (single-phase)
+  round 0: 56 isolated cumulative, 88 identical in round (single-phase)
 
-## Observed: 18/21 flags
-  7 solo, 11 via combination
+## Observed: 16/21 flags
+  7 solo, 9 via combination
   2 additional error-differentiated
   robustness: 17 robust, 0 moderate, 0 fragile
 
@@ -12,11 +12,11 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
 
 ## Solo (unique behavior)
   --show-limits  # show limits on command-line length
-    exemplar: "--show-limits" in words_minimal / stdin (reordered)
+    exemplar: "--show-limits" "echo" "input.txt" in words_standard (different)
     base:
-      cherry apple banana
+      input.txt
     flag:
-      cherry apple banana
+      input.txt
   -L  # use at most MAX-LINES non-blank input lines per command line
     exemplar: "-L" "2" "echo" "input.txt" in passwd_minimal / stdin (+1 lines)
     base:
@@ -25,11 +25,11 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
       input.txt a,b,c d:e:f
       input.txt g h i
   -a  # read arguments from FILE, not standard input
-    exemplar: "-a" "other.txt" "echo" "input.txt" in words_minimal (different)
+    exemplar: "-a" "input.txt" "echo" "input.txt" in words_standard (reordered)
     base:
       input.txt
     flag:
-      input.txt hello world
+      input.txt aardvark abbreviation about abstract accept accepted accepting access accommodate acknowledge across Africa afternoon again against aggregate ahead algorithm Alice all already also although always Amazon American among an and another answer Apache apostrophe Apple application approximately architect Argentina around arrange Asia assembly at Australia available awkward azure back balance banana bandwidth Barcelona be because been before beginning Beijing believe bell-tower below benchmark beneath Berlin best between beyond bicycle billion binary birthday black blue Bob Boolean both boundary breakfast bridge brilliant brother-in-law Budapest buffalo build business but by café California came can Canada cannot
   -n  # use at most MAX-ARGS arguments per command line
     exemplar: "-n" "2" "echo" "input.txt" in passwd_minimal / stdin (+2 lines)
     base:
@@ -46,29 +46,27 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
     flag:
       cherry apple banana
   -s  # limit length of command line to MAX-CHARS
-    exemplar: "-s" "100" "echo" in words_minimal / stdin (reordered)
+    exemplar: "-s" "100" "echo" "input.txt" in words_standard (different)
     base:
-      cherry apple banana
+      input.txt
     flag:
-      cherry apple banana
+      input.txt
   -t  # print commands before executing them
-    exemplar: "-t" in words_minimal / stdin (reordered)
+    exemplar: "-t" "echo" "input.txt" in words_standard (different)
     base:
-      cherry apple banana
+      input.txt
     flag:
-      cherry apple banana
+      input.txt
 
 ## Via combination (distinguishable when paired)
-  --eof  e.g. "-o" "--eof" "echo" "input.txt"
-  --process-slot-var  e.g. "--process-slot-var=test" "-o" "echo" "input.txt"
+  --eof  e.g. (pairwise evidence)
+  --process-slot-var  e.g. "-o" "--process-slot-var=test" "echo" "input.txt"
   --replace  e.g. (pairwise evidence)
-  -0  e.g. "-o" "-0" "echo" "input.txt"
-  -E  e.g. "-E" "EOF" "-o" "echo" "input.txt"
-  -P  e.g. "-o" "-P" "1" "echo" "input.txt"
-  -d  e.g. "-o" "-d" "," "echo" "input.txt"
-  -e  e.g. "-e" "-o" "echo" "input.txt"
+  -0  e.g. "-0" "-o" "echo" "input.txt"
+  -P  e.g. (pairwise evidence)
+  -e  e.g. (pairwise evidence)
   -i  e.g. (pairwise evidence)
-  -l  e.g. "-l" "-o" "echo" "input.txt"
+  -l  e.g. (pairwise evidence)
   -p  e.g. (pairwise evidence)
-  -x  e.g. "-x" "-o" "echo" "input.txt"
+  -x  e.g. "-o" "-x" "echo" "input.txt"
 

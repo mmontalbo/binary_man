@@ -844,8 +844,14 @@ pub fn generate_initial_script(
     }
 
     // Pairwise interaction runs: all flag pairs in both orderings.
-    // Detects flags distinguishable only through interaction effects.
-    // Uses richest pattern to ensure the tool has input to process.
+    // Scoped to a diverse subset of contexts — combos only need to
+    // prove two flags are DIFFERENT, not measure sensitivity across
+    // all contexts. One per content type + stdin for diversity.
+    let combo_contexts: Vec<String> = vec![
+        "words_minimal", "numbers_minimal", "passwd_minimal",
+        "formatted_minimal", "csv_minimal", "words_minimal / stdin",
+    ].into_iter().map(String::from).collect();
+
     let combo_pattern = working_patterns.iter()
         .max_by_key(|p| p.len())
         .or(working_patterns.first());
@@ -854,8 +860,13 @@ pub fn generate_initial_script(
             .chain(pattern.iter().map(&to_arg))
             .collect();
 
-        // Build deduplicated flag arg groups (resolve aliases to keep only one per pair).
-        // Each group is a Vec<Arg> because short flags with values produce two args (e.g., -A 1).
+        // Base run must also exist in combo contexts for diff_from to work
+        runs.push(Run {
+            args: base_args.clone(),
+            in_contexts: Some(combo_contexts.clone()),
+            diff_from: None,
+        });
+
         let mut all_flag_args: Vec<Vec<Arg>> = Vec::new();
         let mut seen_stems: HashSet<String> = HashSet::new();
         for (flag, metavar) in flags.iter() {
@@ -868,14 +879,8 @@ pub fn generate_initial_script(
             }
         }
 
-        // Generate all pairwise combos in BOTH orderings.
-        // Tools with last-flag-wins semantics (head -q -v ≠ head -v -q)
-        // produce different output depending on argument order.
-        // Testing both orderings detects order-sensitivity and prevents
-        // false positives where alias flags at different list positions
-        // get different orderings against a third flag.
         let pair_count = all_flag_args.len() * (all_flag_args.len() - 1);
-        eprintln!("  pairs: {} flags, {} combinations (both orderings)", all_flag_args.len(), pair_count);
+        eprintln!("  pairs: {} flags, {} combinations (in {} contexts)", all_flag_args.len(), pair_count, combo_contexts.len());
         for i in 0..all_flag_args.len() {
             for j in 0..all_flag_args.len() {
                 if i == j { continue; }
@@ -885,8 +890,8 @@ pub fn generate_initial_script(
                 args.extend(pattern.iter().map(&to_arg));
                 runs.push(Run {
                     args,
-                    in_contexts: None,
-                                       diff_from: Some(base_args.clone()),
+                    in_contexts: Some(combo_contexts.clone()),
+                    diff_from: Some(base_args.clone()),
                 });
             }
         }

@@ -1,7 +1,7 @@
 # Exploration: od
 
 ## Rounds
-  round 0: 316 isolated cumulative, 165 identical in round (single-phase)
+  round 0: 321 isolated cumulative, 169 identical in round (single-phase)
 
 ## Observed: 18/21 flags
   15 solo, 3 via combination
@@ -29,7 +29,7 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000100 061543 062563 071412 060543 061557 066555 067544 060564
             ...
   --strings
-    exemplar: "--strings" in words_minimal (different)
+    exemplar: "--strings" in words_standard (different)
     base:
       0000000
     flag:
@@ -207,7 +207,7 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000100  25443  29541   2675  25441  28515  28013  25711  29793
             ...
   -t  # select output format or formats
-    exemplar: "-t" "auto" in words_minimal (different)
+    exemplar: "-t" "auto" in words_standard (different)
     base:
       0000000
     flag:

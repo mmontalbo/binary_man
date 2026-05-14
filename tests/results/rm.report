@@ -1,7 +1,7 @@
 # Exploration: rm
 
 ## Rounds
-  round 0: 7 isolated cumulative, 10 identical in round (single-phase)
+  round 0: 11 isolated cumulative, 11 identical in round (single-phase)
 
 ## Observed: 10/12 flags
   2 solo, 8 via combination
@@ -13,7 +13,7 @@ Aliases: -d = --dir, -f = --force, -v = --verbose
 
 ## Solo (unique behavior)
   -f  # ignore nonexistent files and arguments, never prompt
-    exemplar: "-f" "input.txt" in words_minimal (different)
+    exemplar: "-f" "input.txt" in words_deep (different)
     base:
     flag:
   -v  # explain what is being done

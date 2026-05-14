@@ -1,10 +1,10 @@
 # Exploration: sed
 
 ## Rounds
-  round 0: 11 isolated cumulative, 62 identical in round (single-phase)
+  round 0: 15 isolated cumulative, 61 identical in round (single-phase)
 
 ## Observed: 23/24 flags
-  3 solo, 20 via combination
+  4 solo, 19 via combination
   3 behavioral aliases detected
   robustness: 23 robust, 0 moderate, 0 fragile
 
@@ -24,7 +24,7 @@
       nput.txt
       hello world
   --posix
-    exemplar: "--posix" "$(head -n1 input.txt)" "input.txt" in passwd_minimal (+30 lines, exit 1→0)
+    exemplar: "--posix" "$(head -n1 input.txt)" "input.txt" in passwd_standard (+30 lines, exit 1→0)
     base:
       root:x:0:0:root:/root:/bin/bash
       daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
@@ -39,6 +39,14 @@
       sys:x:3:3:sys:/dev:/usr/sbin/nologin
       sync:x:4:65534:sync:/bin:/bin/sync
             ...
+  --sandbox
+    exemplar: "--sandbox" "input.txt" "other.txt" in words_minimal (different)
+    base:
+      nput.txt
+      hello world
+    flag:
+      nput.txt
+      hello world
 
 ## Via combination (distinguishable when paired)
   --expression  e.g. (pairwise evidence)
@@ -48,7 +56,6 @@
   --null-data  e.g. (pairwise evidence)
   --quiet  e.g. (pairwise evidence)
   --regexp-extended  e.g. (pairwise evidence)
-  --sandbox  e.g. (pairwise evidence)
   --separate  e.g. (pairwise evidence)
   --silent  e.g. (pairwise evidence)
   --unbuffered  e.g. (pairwise evidence)

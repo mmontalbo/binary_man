@@ -1,13 +1,13 @@
 # Exploration: nl
 
 ## Rounds
-  round 0: 142 isolated cumulative, 95 identical in round (single-phase)
+  round 0: 146 isolated cumulative, 100 identical in round (single-phase)
 
 ## Observed: 9/11 flags
   5 solo, 4 via combination
   1 additional error-differentiated
   1 behavioral aliases detected
-  robustness: 8 robust, 0 moderate, 0 fragile
+  robustness: 5 robust, 3 moderate, 0 fragile
 
 Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numbering, -h = --header-numbering, -i = --line-increment, -l = --join-blank-lines, -n = --number-format, -p = --no-renumber, -s = --number-separator, -v = --starting-line-number, -w = --number-width
 

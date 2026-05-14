@@ -1,7 +1,7 @@
 # Exploration: cut
 
 ## Rounds
-  round 0: 0 isolated cumulative, 13 identical in round (single-phase)
+  round 0: 2 isolated cumulative, 16 identical in round (single-phase)
 
 ## Observed: 3/10 flags
   0 solo, 3 via combination
@@ -11,11 +11,14 @@
 Aliases: -b = --bytes, -c = --characters, -d = --delimiter, -f = --fields, -s = --only-delimited, -z = --zero-terminated
 
 ## Solo (unique behavior)
+  -M  # from first to M'th (included) byte, character or field
+    exemplar: "-M" "input.txt" in numbers_standard (different)
+    base:
+    flag:
 
 ## Via combination (distinguishable when paired)
   --complement  e.g. (pairwise evidence)
   --output-delimiter  e.g. (pairwise evidence)
-  -M  e.g. (pairwise evidence)
   -b  e.g. (pairwise evidence)
   -c  e.g. (pairwise evidence)
   -f  e.g. (pairwise evidence)
