@@ -1,37 +1,37 @@
 # Exploration: head
 
-## Rounds
-  round 0: 56 isolated cumulative, 32 identical in round (single-phase)
+## Test scope
+  88 behavioral groups: 56 unique, 32 shared
 
 ## Observed: 7/7 flags
-  4 solo, 3 via combination
-  robustness: 7 robust, 0 moderate, 0 fragile
+  4 uniquely observable, 3 distinguishable via flag pairs
+  robustness: 7 verified in all contexts, 0 in most, 0 context-dependent
 
 Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
 
-## Solo (unique behavior)
+## Unique behavior (observable when tested alone)
   -c  # print the first NUM bytes of each file; with the leading '-', print all but the last NUM bytes of each file
-    exemplar: "-c" in words_standard
+    tested: "-c" in words_standard
     | exit: 0 → 1
     | stderr: head: option requires an argument -- 'c'
   -n  # print the first NUM lines instead of the first 10; with the leading '-', print all but the last NUM lines of each file
-    exemplar: "-n" in words_standard
+    tested: "-n" in words_standard
     | exit: 0 → 1
     | stderr: head: option requires an argument -- 'n'
   -v  # always print headers giving file names
-    exemplar: "-v" in words_minimal
-    | 1 only in this: ==> standard input <==
-    base:
-    flag:
+    tested: "-v" in words_minimal
+    | flag adds 1 lines: ==> standard input <==
+    without flag:
+    with flag:
       ==> standard input <==
   -z  # line delimiter is NUL, not newline
-    exemplar: "-z" "input.txt" in words_minimal
-    | 1502 only in this: across, Africa, afternoon, again, against
-    | 10 shared
-    base:
+    tested: "-z" "input.txt" in words_minimal
+    | flag adds 1502 lines: across, Africa, afternoon, again, against
+    | 10 lines unchanged
+    without flag:
             ... (9 identical)
       acknowledge
-    flag:
+    with flag:
             ... (9 identical)
       acknowledge
       across
@@ -41,17 +41,17 @@ Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
       against
             ... (1497 more)
 
-## Via combination (distinguishable when paired)
+## Distinguishable in combination (verified via flag pairs)
   --quiet
-    | 3 only in ref: ==> input.txt <==, , ==> other.txt <==
-    | 12 shared
-    evidence: "-c" "--quiet" "$(head -n1 input.txt)" "."
+    | flag removes 3 lines: ==> input.txt <==, , ==> other.txt <==
+    | 12 lines unchanged
+    proven via: "-n" "--quiet" "$(head -n1 input.txt)" "."
   --silent
-    | 3 only in ref: ==> input.txt <==, , ==> other.txt <==
-    | 12 shared
-    evidence: "-c" "--silent" "$(head -n1 input.txt)" "."
+    | flag removes 3 lines: ==> input.txt <==, , ==> other.txt <==
+    | 12 lines unchanged
+    proven via: "-n" "--silent" "$(head -n1 input.txt)" "."
   -q
-    | 3 only in ref: ==> input.txt <==, , ==> other.txt <==
-    | 12 shared
-    evidence: "-n" "-q" "$(head -n1 input.txt)" "."
+    | flag removes 3 lines: ==> input.txt <==, , ==> other.txt <==
+    | 12 lines unchanged
+    proven via: "-n" "-q" "$(head -n1 input.txt)" "."
 

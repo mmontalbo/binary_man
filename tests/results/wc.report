@@ -1,65 +1,65 @@
 # Exploration: wc
 
-## Rounds
-  round 0: 40 isolated cumulative, 50 identical in round (single-phase)
+## Test scope
+  90 behavioral groups: 40 unique, 50 shared
 
 ## Observed: 6/7 flags
-  4 solo, 2 via combination
-  1 additional error-differentiated
-  robustness: 12 robust, 0 moderate, 0 fragile
+  4 uniquely observable, 2 distinguishable via flag pairs
+  1 error-only (flag recognized but no successful output observed)
+  robustness: 12 verified in all contexts, 0 in most, 0 context-dependent
 
 Aliases: -L = --max-line-length, -c = --bytes, -l = --lines, -m = --chars, -w = --words
 
-## Solo (unique behavior)
+## Unique behavior (observable when tested alone)
   --files0-from  # read input from the files specified by NUL-terminated names in file F; If F is - then read names from standard input
-    exemplar: "--files0-from=1" in words_standard
-    | 1 only in ref:       0       0       0
+    tested: "--files0-from=1" in words_standard
+    | flag removes 1 lines:       0       0       0
     | exit: 0 → 1
     | stderr: wc: cannot open '1' for reading: No such file or directory
-    base:
+    without flag:
             0       0       0
-    flag:
+    with flag:
   --total  # when to print a line with total counts; WHEN can be: auto, always, only, never
-    exemplar: "--total=always" in words_minimal
-    | 1 only in this:       0       0       0 total
-    | 1 shared
-    base:
+    tested: "--total=always" in words_minimal
+    | flag adds 1 lines:       0       0       0 total
+    | 1 lines unchanged
+    without flag:
             0       0       0
-    flag:
+    with flag:
             0       0       0
             0       0       0 total
   -L  # print the maximum display width
-    exemplar: "-L" in words_minimal / stdin
-    | 1 only in this: 6
-    | 1 only in ref:       2       3      19
-    base:
+    tested: "-L" in words_minimal / stdin
+    | flag adds 1 lines: 6
+    | flag removes 1 lines:       2       3      19
+    without flag:
             2       3      19
-    flag:
+    with flag:
       6
   -l  # print the newline counts
-    exemplar: "-l" in words_minimal / stdin
-    | 1 only in this: 2
-    | 1 only in ref:       2       3      19
-    base:
+    tested: "-l" in words_minimal / stdin
+    | flag adds 1 lines: 2
+    | flag removes 1 lines:       2       3      19
+    without flag:
             2       3      19
-    flag:
+    with flag:
       2
   -w  # print the word counts
-    exemplar: "-w" in words_minimal / stdin
-    | 1 only in this: 3
-    | 1 only in ref:       2       3      19
-    base:
+    tested: "-w" in words_minimal / stdin
+    | flag adds 1 lines: 3
+    | flag removes 1 lines:       2       3      19
+    without flag:
             2       3      19
-    flag:
+    with flag:
       3
 
-## Via combination (distinguishable when paired)
+## Distinguishable in combination (verified via flag pairs)
   -c  # print the byte counts
-    | 1 only in this: 0
-    | 1 only in ref:       0       0       0
-    evidence: (pairwise evidence)
+    | flag adds 1 lines: 0
+    | flag removes 1 lines:       0       0       0
+    proven via: (pairwise evidence)
   -m  # print the character counts
-    | 1 only in this: 0
-    | 1 only in ref:       0       0       0
-    evidence: (pairwise evidence)
+    | flag adds 1 lines: 0
+    | flag removes 1 lines:       0       0       0
+    proven via: (pairwise evidence)
 

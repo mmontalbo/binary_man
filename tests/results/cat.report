@@ -1,20 +1,20 @@
 # Exploration: cat
 
-## Rounds
-  round 0: 73 isolated cumulative, 62 identical in round (single-phase)
+## Test scope
+  135 behavioral groups: 73 unique, 62 shared
 
 ## Observed: 10/10 flags
-  10 solo, 0 via combination
-  robustness: 10 robust, 0 moderate, 0 fragile
+  10 uniquely observable, 0 distinguishable via flag pairs
+  robustness: 10 verified in all contexts, 0 in most, 0 context-dependent
 
 Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonblank, -n = --number, -s = --squeeze-blank, -v = --show-nonprinting
 
-## Solo (unique behavior)
+## Unique behavior (observable when tested alone)
   -A  # equivalent to -vET
-    exemplar: "-A" "input.txt" "other.txt" in formatted_minimal
-    | 28 only in this: first line$, second line with trailing spaces$, ^Iindented with tab$,     indented with spaces$, ^I ^Imixed tabs and spaces$
-    | 28 only in ref: first line, second line with trailing spaces, 	indented with tab,     indented with spaces, 	 	mixed tabs and spaces
-    base:
+    tested: "-A" "input.txt" "other.txt" in formatted_minimal
+    | flag adds 28 lines: first line$, second line with trailing spaces$, ^Iindented with tab$,     indented with spaces$, ^I ^Imixed tabs and spaces$
+    | flag removes 28 lines: first line, second line with trailing spaces, 	indented with tab,     indented with spaces, 	 	mixed tabs and spaces
+    without flag:
       first line
       second line with trailing spaces
       	indented with tab
@@ -22,7 +22,7 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
       	 	mixed tabs and spaces
       
             ... (22 more)
-    flag:
+    with flag:
       first line$
       second line with trailing spaces$
       ^Iindented with tab$
@@ -31,10 +31,10 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
       $
             ... (22 more)
   -E  # display $ at end of each line
-    exemplar: "-E" "input.txt" "other.txt" in words_minimal
-    | 1513 only in this: aardvark$, abbreviation$, about$, abstract$, accept$
-    | 1513 only in ref: aardvark, abbreviation, about, abstract, accept
-    base:
+    tested: "-E" "input.txt" "other.txt" in words_minimal
+    | flag adds 1513 lines: aardvark$, abbreviation$, about$, abstract$, accept$
+    | flag removes 1513 lines: aardvark, abbreviation, about, abstract, accept
+    without flag:
       aardvark
       abbreviation
       about
@@ -42,7 +42,7 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
       accept
       accepted
             ... (1507 more)
-    flag:
+    with flag:
       aardvark$
       abbreviation$
       about$
@@ -51,11 +51,11 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
       accepted$
             ... (1507 more)
   -T  # display TAB characters as ^I
-    exemplar: "-T" "input.txt" "other.txt" in formatted_minimal
-    | 6 only in this: ^Iindented with tab, ^I ^Imixed tabs and spaces, trailing^Itab, ^I^Idouble tab indent, has^Imultiple^I^Itabs^I^I^Iwith^Ivarying^I^Iwidths
-    | 6 only in ref: 	indented with tab, 	 	mixed tabs and spaces, trailing	tab, 		double tab indent, has	multiple		tabs			with	varying		widths
-    | 22 shared
-    base:
+    tested: "-T" "input.txt" "other.txt" in formatted_minimal
+    | flag adds 6 lines: ^Iindented with tab, ^I ^Imixed tabs and spaces, trailing^Itab, ^I^Idouble tab indent, has^Imultiple^I^Itabs^I^I^Iwith^Ivarying^I^Iwidths
+    | flag removes 6 lines: 	indented with tab, 	 	mixed tabs and spaces, trailing	tab, 		double tab indent, has	multiple		tabs			with	varying		widths
+    | 22 lines unchanged
+    without flag:
             ... (1 identical)
       second line with trailing spaces
       	indented with tab
@@ -64,7 +64,7 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
       
       blank line above
             ... (21 more)
-    flag:
+    with flag:
             ... (1 identical)
       second line with trailing spaces
       ^Iindented with tab
@@ -74,11 +74,11 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
       blank line above
             ... (21 more)
   -b  # number nonempty output lines, overrides -n
-    exemplar: "-b" "input.txt" "other.txt" in formatted_minimal
-    | 24 only in this:      1	first line,      2	second line with trailing spaces,      3		indented with tab,      4	    indented with spaces,      5		 	mixed tabs and spaces
-    | 24 only in ref: first line, second line with trailing spaces, 	indented with tab,     indented with spaces, 	 	mixed tabs and spaces
-    | 4 shared
-    base:
+    tested: "-b" "input.txt" "other.txt" in formatted_minimal
+    | flag adds 24 lines:      1	first line,      2	second line with trailing spaces,      3		indented with tab,      4	    indented with spaces,      5		 	mixed tabs and spaces
+    | flag removes 24 lines: first line, second line with trailing spaces, 	indented with tab,     indented with spaces, 	 	mixed tabs and spaces
+    | 4 lines unchanged
+    without flag:
       first line
       second line with trailing spaces
       	indented with tab
@@ -86,7 +86,7 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
       	 	mixed tabs and spaces
       
             ... (22 more)
-    flag:
+    with flag:
            1	first line
            2	second line with trailing spaces
            3		indented with tab
@@ -95,10 +95,10 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
       
             ... (22 more)
   -e  # equivalent to -vE
-    exemplar: "-e" "input.txt" "other.txt" in formatted_minimal
-    | 28 only in this: first line$, second line with trailing spaces$, 	indented with tab$,     indented with spaces$, 	 	mixed tabs and spaces$
-    | 28 only in ref: first line, second line with trailing spaces, 	indented with tab,     indented with spaces, 	 	mixed tabs and spaces
-    base:
+    tested: "-e" "input.txt" "other.txt" in formatted_minimal
+    | flag adds 28 lines: first line$, second line with trailing spaces$, 	indented with tab$,     indented with spaces$, 	 	mixed tabs and spaces$
+    | flag removes 28 lines: first line, second line with trailing spaces, 	indented with tab,     indented with spaces, 	 	mixed tabs and spaces
+    without flag:
       first line
       second line with trailing spaces
       	indented with tab
@@ -106,7 +106,7 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
       	 	mixed tabs and spaces
       
             ... (22 more)
-    flag:
+    with flag:
       first line$
       second line with trailing spaces$
       	indented with tab$
@@ -115,10 +115,10 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
       $
             ... (22 more)
   -n  # number all output lines
-    exemplar: "-n" "input.txt" "other.txt" in formatted_minimal
-    | 28 only in this:      1	first line,      2	second line with trailing spaces,      3		indented with tab,      4	    indented with spaces,      5		 	mixed tabs and spaces
-    | 28 only in ref: first line, second line with trailing spaces, 	indented with tab,     indented with spaces, 	 	mixed tabs and spaces
-    base:
+    tested: "-n" "input.txt" "other.txt" in formatted_minimal
+    | flag adds 28 lines:      1	first line,      2	second line with trailing spaces,      3		indented with tab,      4	    indented with spaces,      5		 	mixed tabs and spaces
+    | flag removes 28 lines: first line, second line with trailing spaces, 	indented with tab,     indented with spaces, 	 	mixed tabs and spaces
+    without flag:
       first line
       second line with trailing spaces
       	indented with tab
@@ -126,7 +126,7 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
       	 	mixed tabs and spaces
       
             ... (22 more)
-    flag:
+    with flag:
            1	first line
            2	second line with trailing spaces
            3		indented with tab
@@ -135,9 +135,9 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
            6	
             ... (22 more)
   -s  # suppress repeated empty output lines
-    exemplar: "-s" "input.txt" "other.txt" in formatted_minimal
-    | stdout: same lines, different order
-    base:
+    tested: "-s" "input.txt" "other.txt" in formatted_minimal
+    | reorders output (same lines, different order)
+    without flag:
             ... (9 identical)
       
       
@@ -146,7 +146,7 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
       short
       x
             ... (13 more)
-    flag:
+    with flag:
             ... (9 identical)
       
       three blank lines above
@@ -156,11 +156,11 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
       trailing	tab
             ... (12 more)
   -t  # equivalent to -vT
-    exemplar: "-t" "input.txt" "other.txt" in formatted_minimal
-    | 9 only in this: ^Iindented with tab, ^I ^Imixed tabs and spaces, trailing^Itab, ^I^Idouble tab indent, has^Imultiple^I^Itabs^I^I^Iwith^Ivarying^I^Iwidths
-    | 9 only in ref: 	indented with tab, 	 	mixed tabs and spaces, trailing	tab, 		double tab indent, has	multiple		tabs			with	varying		widths
-    | 19 shared
-    base:
+    tested: "-t" "input.txt" "other.txt" in formatted_minimal
+    | flag adds 9 lines: ^Iindented with tab, ^I ^Imixed tabs and spaces, trailing^Itab, ^I^Idouble tab indent, has^Imultiple^I^Itabs^I^I^Iwith^Ivarying^I^Iwidths
+    | flag removes 9 lines: 	indented with tab, 	 	mixed tabs and spaces, trailing	tab, 		double tab indent, has	multiple		tabs			with	varying		widths
+    | 19 lines unchanged
+    without flag:
             ... (1 identical)
       second line with trailing spaces
       	indented with tab
@@ -169,7 +169,7 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
       
       blank line above
             ... (21 more)
-    flag:
+    with flag:
             ... (1 identical)
       second line with trailing spaces
       ^Iindented with tab
@@ -179,27 +179,27 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
       blank line above
             ... (21 more)
   -u  # (ignored)
-    exemplar: "-u" "input.txt" "other.txt" in formatted_minimal
+    tested: "-u" "input.txt" "other.txt" in formatted_minimal
     | identical
-    base:
+    without flag:
             ... (27 identical)
       hello world
-    flag:
+    with flag:
             ... (27 identical)
       hello world
   -v  # use ^ and M- notation, except for LFD and TAB
-    exemplar: "-v" "input.txt" "other.txt" in formatted_minimal
-    | 3 only in this: cafM-CM-) rM-CM-)sumM-CM-) naM-CM-/ve M-CM-<ber straM-CM-^_e M-bM-^@M-^T multi-byte words that wrap differently with fold -b vs fold (columns vs bytes), M-fM-^WM-%M-fM-^\M-,M-hM-*M-^^M-cM-^CM-^FM-cM-^BM--M-cM-^BM-9M-cM-^CM-^HM-oM-<M-^ZM-fM-<M-"M-eM--M-^WM-cM-^AM-(M-cM-^AM-2M-cM-^BM-^IM-cM-^AM-^LM-cM-^AM-*M-cM-^AM-(M-cM-^BM-+M-cM-^BM-?M-cM-^BM-+M-cM-^CM-^JM-cM-^BM-^RM-eM-^PM-+M-cM-^BM-^@M-hM-!M-^LM-cM-^AM-'M-cM-^@M-^AM-cM-^CM-^PM-cM-^BM-$M-cM-^CM-^HM-fM-^UM-0M-cM-^AM-(M-fM-^VM-^GM-eM--M-^WM-fM-^UM-0M-cM-^AM-^LM-gM-^UM-0M-cM-^AM-*M-cM-^BM-^K, emoji line: M-pM-^_M-^NM-^IM-pM-^_M-^NM-^JM-pM-^_M-^NM-^HM-pM-^_M-^NM-^AM-pM-^_M-^NM-^BM-pM-^_M-^NM-^DM-pM-^_M-^NM-^CM-pM-^_M-^NM-^FM-pM-^_M-^NM-^GM-bM-^\M-(M-pM-^_M-^LM-^_M-pM-^_M-^RM-+M-bM--M-^PM-oM-8M-^OM-pM-^_M-^LM-^HM-bM-^XM-^@M-oM-8M-^OM-pM-^_M-^LM-^YM-bM-^ZM-!M-oM-8M-^OM-pM-^_M-^TM-%M-pM-^_M-^RM-'M-pM-^_M-^LM-^J
-    | 3 only in ref: café résumé naïve über straße — multi-byte words that wrap differently with fold -b vs fold (columns vs bytes), 日本語テキスト：漢字とひらがなとカタカナを含む行で、バイト数と文字数が異なる, emoji line: 🎉🎊🎈🎁🎂🎄🎃🎆🎇✨🌟💫⭐️🌈☀️🌙⚡️🔥💧🌊
-    | 25 shared
-    base:
+    tested: "-v" "input.txt" "other.txt" in formatted_minimal
+    | flag adds 3 lines: cafM-CM-) rM-CM-)sumM-CM-) naM-CM-/ve M-CM-<ber straM-CM-^_e M-bM-^@M-^T multi-byte words that wrap differently with fold -b vs fold (columns vs bytes), M-fM-^WM-%M-fM-^\M-,M-hM-*M-^^M-cM-^CM-^FM-cM-^BM--M-cM-^BM-9M-cM-^CM-^HM-oM-<M-^ZM-fM-<M-"M-eM--M-^WM-cM-^AM-(M-cM-^AM-2M-cM-^BM-^IM-cM-^AM-^LM-cM-^AM-*M-cM-^AM-(M-cM-^BM-+M-cM-^BM-?M-cM-^BM-+M-cM-^CM-^JM-cM-^BM-^RM-eM-^PM-+M-cM-^BM-^@M-hM-!M-^LM-cM-^AM-'M-cM-^@M-^AM-cM-^CM-^PM-cM-^BM-$M-cM-^CM-^HM-fM-^UM-0M-cM-^AM-(M-fM-^VM-^GM-eM--M-^WM-fM-^UM-0M-cM-^AM-^LM-gM-^UM-0M-cM-^AM-*M-cM-^BM-^K, emoji line: M-pM-^_M-^NM-^IM-pM-^_M-^NM-^JM-pM-^_M-^NM-^HM-pM-^_M-^NM-^AM-pM-^_M-^NM-^BM-pM-^_M-^NM-^DM-pM-^_M-^NM-^CM-pM-^_M-^NM-^FM-pM-^_M-^NM-^GM-bM-^\M-(M-pM-^_M-^LM-^_M-pM-^_M-^RM-+M-bM--M-^PM-oM-8M-^OM-pM-^_M-^LM-^HM-bM-^XM-^@M-oM-8M-^OM-pM-^_M-^LM-^YM-bM-^ZM-!M-oM-8M-^OM-pM-^_M-^TM-%M-pM-^_M-^RM-'M-pM-^_M-^LM-^J
+    | flag removes 3 lines: café résumé naïve über straße — multi-byte words that wrap differently with fold -b vs fold (columns vs bytes), 日本語テキスト：漢字とひらがなとカタカナを含む行で、バイト数と文字数が異なる, emoji line: 🎉🎊🎈🎁🎂🎄🎃🎆🎇✨🌟💫⭐️🌈☀️🌙⚡️🔥💧🌊
+    | 25 lines unchanged
+    without flag:
             ... (23 identical)
       	tab	tab	tab	tab	tab	tab	tab	tab
       café résumé naïve über straße — multi-byte words that wrap differently with fold -b vs fold (columns vs bytes)
       日本語テキスト：漢字とひらがなとカタカナを含む行で、バイト数と文字数が異なる
       emoji line: 🎉🎊🎈🎁🎂🎄🎃🎆🎇✨🌟💫⭐️🌈☀️🌙⚡️🔥💧🌊
       hello world
-    flag:
+    with flag:
             ... (23 identical)
       	tab	tab	tab	tab	tab	tab	tab	tab
       cafM-CM-) rM-CM-)sumM-CM-) naM-CM-/ve M-CM-<ber straM-CM-^_e M-bM-^@M-^T multi-byte words that wrap differently with fold -b vs fold (columns vs bytes)

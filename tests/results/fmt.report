@@ -1,40 +1,40 @@
 # Exploration: fmt
 
-## Rounds
-  round 0: 94 isolated cumulative, 68 identical in round (single-phase)
+## Test scope
+  162 behavioral groups: 94 unique, 68 shared
 
 ## Observed: 7/7 flags
-  3 solo, 4 via combination
-  1 behavioral aliases detected
-  robustness: 9 robust, 0 moderate, 0 fragile
+  3 uniquely observable, 4 distinguishable via flag pairs
+  1 behavioral aliases (different flags, identical behavior)
+  robustness: 9 verified in all contexts, 0 in most, 0 context-dependent
 
 Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t = --tagged-paragraph, -u = --uniform-spacing, -w = --width
 
-## Solo (unique behavior)
+## Unique behavior (observable when tested alone)
   -g  # goal width (default of 93% of width)
-    exemplar: "--goal=2" in passwd_minimal / stdin
-    | 2 only in this: a,b,c, d:e:f g h i
-    | 1 only in ref: a,b,c d:e:f g h i
-    base:
+    tested: "--goal=2" in passwd_minimal / stdin
+    | flag adds 2 lines: a,b,c, d:e:f g h i
+    | flag removes 1 lines: a,b,c d:e:f g h i
+    without flag:
       a,b,c d:e:f g h i
-    flag:
+    with flag:
       a,b,c
       d:e:f g h i
   -p  # reformat only lines beginning with STRING, reattaching the prefix to reformatted lines
-    exemplar: "-p" "test" "input.txt" "other.txt" in numbers_standard / input.txt=size:1
-    | 2 only in this: xother content, second line
-    | 2 only in ref: x, other content second line
-    base:
+    tested: "-p" "test" "input.txt" "other.txt" in numbers_standard / input.txt=size:1
+    | flag adds 2 lines: xother content, second line
+    | flag removes 2 lines: x, other content second line
+    without flag:
       x
       other content second line
-    flag:
+    with flag:
       xother content
       second line
   -w  # maximum line width (default of 75 columns)
-    exemplar: "-w" "10" "input.txt" "other.txt" in words_minimal
-    | 1381 only in this: aardvark, abbreviation, about, abstract, accept
-    | 151 only in ref: aardvark abbreviation about abstract accept accepted accepting access, accommodate acknowledge across Africa afternoon again against aggregate, ahead algorithm Alice all already also although always Amazon American, among an and another answer Apache apostrophe Apple application, approximately architect Argentina around arrange Asia assembly
-    base:
+    tested: "-w" "10" "input.txt" "other.txt" in words_minimal
+    | flag adds 1381 lines: aardvark, abbreviation, about, abstract, accept
+    | flag removes 151 lines: aardvark abbreviation about abstract accept accepted accepting access, accommodate acknowledge across Africa afternoon again against aggregate, ahead algorithm Alice all already also although always Amazon American, among an and another answer Apache apostrophe Apple application, approximately architect Argentina around arrange Asia assembly
+    without flag:
       aardvark abbreviation about abstract accept accepted accepting access
       accommodate acknowledge across Africa afternoon again against aggregate
       ahead algorithm Alice all already also although always Amazon American
@@ -42,7 +42,7 @@ Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t 
       approximately architect Argentina around arrange Asia assembly
       at Australia available awkward azure back balance banana bandwidth
             ... (145 more)
-    flag:
+    with flag:
       aardvark
       abbreviation
       about
@@ -51,25 +51,25 @@ Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t 
       accepted
             ... (1375 more)
 
-## Via combination (distinguishable when paired)
+## Distinguishable in combination (verified via flag pairs)
   -c  # preserve indentation of first two lines
-    | 24 only in this: sys:x:3:3:sys:/dev:/usr/sbin/nologin, sync:x:4:65534:sync:/bin:/bin/sync, alice:x:1000:1000:Alice, Johnson,,,:/home/alice:/bin/bash, bob:x:1001:1001:Bob
-    | 11 only in ref: sys:x:3:3:sys:/dev:/usr/sbin/nologin sync:x:4:65534:sync:/bin:/bin/sync, alice:x:1000:1000:Alice Johnson,,,:/home/alice:/bin/bash, bob:x:1001:1001:Bob Smith,Room 42,x1234,:/home/bob:/bin/zsh, charlie:x:1002:1002:Charlie Brown:/home/charlie:/bin/bash, diana:x:1003:1003:Diana Prince:/home/diana:/usr/bin/fish
-    | 20 shared
-    evidence: (pairwise evidence)
+    | flag adds 24 lines: sys:x:3:3:sys:/dev:/usr/sbin/nologin, sync:x:4:65534:sync:/bin:/bin/sync, alice:x:1000:1000:Alice, Johnson,,,:/home/alice:/bin/bash, bob:x:1001:1001:Bob
+    | flag removes 11 lines: sys:x:3:3:sys:/dev:/usr/sbin/nologin sync:x:4:65534:sync:/bin:/bin/sync, alice:x:1000:1000:Alice Johnson,,,:/home/alice:/bin/bash, bob:x:1001:1001:Bob Smith,Room 42,x1234,:/home/bob:/bin/zsh, charlie:x:1002:1002:Charlie Brown:/home/charlie:/bin/bash, diana:x:1003:1003:Diana Prince:/home/diana:/usr/bin/fish
+    | 20 lines unchanged
+    proven via: (pairwise evidence)
   -s  # split long lines, but do not refill
-    | 24 only in this: sys:x:3:3:sys:/dev:/usr/sbin/nologin, sync:x:4:65534:sync:/bin:/bin/sync, alice:x:1000:1000:Alice, Johnson,,,:/home/alice:/bin/bash, bob:x:1001:1001:Bob
-    | 11 only in ref: sys:x:3:3:sys:/dev:/usr/sbin/nologin sync:x:4:65534:sync:/bin:/bin/sync, alice:x:1000:1000:Alice Johnson,,,:/home/alice:/bin/bash, bob:x:1001:1001:Bob Smith,Room 42,x1234,:/home/bob:/bin/zsh, charlie:x:1002:1002:Charlie Brown:/home/charlie:/bin/bash, diana:x:1003:1003:Diana Prince:/home/diana:/usr/bin/fish
-    | 20 shared
-    evidence: (pairwise evidence)
+    | flag adds 24 lines: sys:x:3:3:sys:/dev:/usr/sbin/nologin, sync:x:4:65534:sync:/bin:/bin/sync, alice:x:1000:1000:Alice, Johnson,,,:/home/alice:/bin/bash, bob:x:1001:1001:Bob
+    | flag removes 11 lines: sys:x:3:3:sys:/dev:/usr/sbin/nologin sync:x:4:65534:sync:/bin:/bin/sync, alice:x:1000:1000:Alice Johnson,,,:/home/alice:/bin/bash, bob:x:1001:1001:Bob Smith,Room 42,x1234,:/home/bob:/bin/zsh, charlie:x:1002:1002:Charlie Brown:/home/charlie:/bin/bash, diana:x:1003:1003:Diana Prince:/home/diana:/usr/bin/fish
+    | 20 lines unchanged
+    proven via: (pairwise evidence)
   -t  # indentation of first line different from second
-    | 6 only in this:    000.00,    000,    000.00,    000,00,    000
-    | 6 only in ref: 000.00, 000, 000.00, 000,00, 000
-    | 71 shared
-    evidence: (pairwise evidence)
+    | flag adds 6 lines:    000.00,    000,    000.00,    000,00,    000
+    | flag removes 6 lines: 000.00, 000, 000.00, 000,00, 000
+    | 71 lines unchanged
+    proven via: (pairwise evidence)
   -u  # one space between words, two after sentences
-    | 24 only in this: sys:x:3:3:sys:/dev:/usr/sbin/nologin, sync:x:4:65534:sync:/bin:/bin/sync, alice:x:1000:1000:Alice, Johnson,,,:/home/alice:/bin/bash, bob:x:1001:1001:Bob
-    | 11 only in ref: sys:x:3:3:sys:/dev:/usr/sbin/nologin sync:x:4:65534:sync:/bin:/bin/sync, alice:x:1000:1000:Alice Johnson,,,:/home/alice:/bin/bash, bob:x:1001:1001:Bob Smith,Room 42,x1234,:/home/bob:/bin/zsh, charlie:x:1002:1002:Charlie Brown:/home/charlie:/bin/bash, diana:x:1003:1003:Diana Prince:/home/diana:/usr/bin/fish
-    | 20 shared
-    evidence: (pairwise evidence)
+    | flag adds 24 lines: sys:x:3:3:sys:/dev:/usr/sbin/nologin, sync:x:4:65534:sync:/bin:/bin/sync, alice:x:1000:1000:Alice, Johnson,,,:/home/alice:/bin/bash, bob:x:1001:1001:Bob
+    | flag removes 11 lines: sys:x:3:3:sys:/dev:/usr/sbin/nologin sync:x:4:65534:sync:/bin:/bin/sync, alice:x:1000:1000:Alice Johnson,,,:/home/alice:/bin/bash, bob:x:1001:1001:Bob Smith,Room 42,x1234,:/home/bob:/bin/zsh, charlie:x:1002:1002:Charlie Brown:/home/charlie:/bin/bash, diana:x:1003:1003:Diana Prince:/home/diana:/usr/bin/fish
+    | 20 lines unchanged
+    proven via: (pairwise evidence)
 

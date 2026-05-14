@@ -274,14 +274,13 @@ pub fn format_exploration_report(
 
     out.push_str(&format!("# Exploration: {}\n\n", binary_label));
 
-    // Round history
-    out.push_str("## Rounds\n");
-    for r in rounds {
-        let strat = if r.strategies.is_empty() { "discovery".into() }
-            else { r.strategies.join("+") };
-        out.push_str(&format!("  round {}: {} isolated cumulative, {} identical in round ({})\n",
-            r.round, r.isolated, r.identical, strat));
-    }
+    // Test summary
+    out.push_str("## Test scope\n");
+    let last = rounds.last();
+    let total_isolated = last.map(|r| r.isolated).unwrap_or(0);
+    let total_identical = last.map(|r| r.identical).unwrap_or(0);
+    out.push_str(&format!("  {} behavioral groups: {} unique, {} shared\n",
+        total_isolated + total_identical, total_isolated, total_identical));
     out.push('\n');
 
     // Compute operational exit codes from base runs (no flags).
@@ -350,13 +349,13 @@ pub fn format_exploration_report(
     // Flag distinguishability summary
     let untested = final_metrics.untested_flags.len();
     out.push_str(&format!("## Observed: {}/{} flags\n", total_observed, unique_stem_count));
-    out.push_str(&format!("  {} solo, {} via combination\n",
+    out.push_str(&format!("  {} uniquely observable, {} distinguishable via flag pairs\n",
         solo_observed.len(), combo_observed.len()));
     if total_error_only > 0 {
-        out.push_str(&format!("  {} additional error-differentiated\n", total_error_only));
+        out.push_str(&format!("  {} error-only (flag recognized but no successful output observed)\n", total_error_only));
     }
     if !behavioral_aliases.is_empty() {
-        out.push_str(&format!("  {} behavioral aliases detected\n", behavioral_aliases.len()));
+        out.push_str(&format!("  {} behavioral aliases (different flags, identical behavior)\n", behavioral_aliases.len()));
     }
     if !indistinguishable_groups.is_empty() {
         let indist_count: usize = indistinguishable_groups.iter()
@@ -380,7 +379,7 @@ pub fn format_exploration_report(
             else if *survived * 2 > *total { moderate += 1; }
             else { fragile += 1; }
         }
-        out.push_str(&format!("  robustness: {} robust, {} moderate, {} fragile\n",
+        out.push_str(&format!("  robustness: {} verified in all contexts, {} in most, {} context-dependent\n",
             robust, moderate, fragile));
     }
 
@@ -395,7 +394,7 @@ pub fn format_exploration_report(
     }
 
     // Solo-distinguished flags with exemplar observations
-    out.push_str("## Solo (unique behavior)\n");
+    out.push_str("## Unique behavior (observable when tested alone)\n");
     let mut sorted_solo: Vec<&String> = solo_distinguished.iter().collect();
     sorted_solo.sort();
     for flag in &sorted_solo {
@@ -406,7 +405,7 @@ pub fn format_exploration_report(
 
         // Find the exemplar: the context where this flag's output is most distinctive
         if let Some(ex) = find_exemplar(flag, all_runs, aliases) {
-            out.push_str(&format!("    exemplar: {} in {}\n", ex.run_label, ex.context_name));
+            out.push_str(&format!("    tested: {} in {}\n", ex.run_label, ex.context_name));
             // Show diff components on separate lines for readability
             for part in ex.vs_diff.split("; ") {
                 out.push_str(&format!("    | {}\n", part));
@@ -416,11 +415,11 @@ pub fn format_exploration_report(
             let base_has_content = ex.base_preview.lines().any(|l| !l.contains("identical") && !l.trim().is_empty());
             let flag_has_content = ex.flag_preview.lines().any(|l| !l.contains("identical") && !l.trim().is_empty());
             if base_has_content || flag_has_content {
-                out.push_str("    base:\n");
+                out.push_str("    without flag:\n");
                 for line in ex.base_preview.lines() {
                     out.push_str(&format!("      {}\n", line));
                 }
-                out.push_str("    flag:\n");
+                out.push_str("    with flag:\n");
                 for line in ex.flag_preview.lines() {
                     out.push_str(&format!("      {}\n", line));
                 }
@@ -431,7 +430,7 @@ pub fn format_exploration_report(
 
     // Combo-characterized flags — show vs_diff when available
     if !combo_distinguished.is_empty() {
-        out.push_str("## Via combination (distinguishable when paired)\n");
+        out.push_str("## Distinguishable in combination (verified via flag pairs)\n");
         let mut sorted_combo: Vec<&String> = combo_distinguished.iter().collect();
         sorted_combo.sort();
         for flag in &sorted_combo {
@@ -446,7 +445,7 @@ pub fn format_exploration_report(
                 }
             }
             if let Some(evidence) = combo_evidence.get(*flag).and_then(|v| v.first()) {
-                out.push_str(&format!("    evidence: {}\n", evidence));
+                out.push_str(&format!("    proven via: {}\n", evidence));
             }
         }
         out.push('\n');

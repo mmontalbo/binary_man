@@ -501,20 +501,20 @@ pub fn compute_diff(reference: &Observation, option: &Observation) -> Vec<String
     if ref_vec == opt_vec {
         // stdout identical
     } else if only_in_opt.is_empty() && only_in_ref.is_empty() {
-        lines.push("stdout: same lines, different order".into());
+        lines.push("reorders output (same lines, different order)".into());
     } else {
         if !only_in_opt.is_empty() {
             let preview: Vec<String> = only_in_opt.iter().take(5)
                 .map(|l| crate::output::strip_ansi(l)).collect();
-            lines.push(format!("{} only in this: {}", only_in_opt.len(), preview.join(", ")));
+            lines.push(format!("flag adds {} lines: {}", only_in_opt.len(), preview.join(", ")));
         }
         if !only_in_ref.is_empty() {
             let preview: Vec<String> = only_in_ref.iter().take(5)
                 .map(|l| crate::output::strip_ansi(l)).collect();
-            lines.push(format!("{} only in ref: {}", only_in_ref.len(), preview.join(", ")));
+            lines.push(format!("flag removes {} lines: {}", only_in_ref.len(), preview.join(", ")));
         }
         if !shared.is_empty() {
-            lines.push(format!("{} shared", shared.len()));
+            lines.push(format!("{} lines unchanged", shared.len()));
         }
     }
 

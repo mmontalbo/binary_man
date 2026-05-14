@@ -1,179 +1,180 @@
 # Exploration: cp
 
-## Rounds
-  round 0: 53 isolated cumulative, 34 identical in round (single-phase)
+## Test scope
+  83 behavioral groups: 49 unique, 34 shared
 
 ## Observed: 36/36 flags
-  7 solo, 29 via combination
-  robustness: 44 robust, 0 moderate, 0 fragile
+  7 uniquely observable, 29 distinguishable via flag pairs
+  1 behavioral aliases (different flags, identical behavior)
+  robustness: 44 verified in all contexts, 0 in most, 0 context-dependent
 
 Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-target-directory, -a = --archive, -f = --force, -i = --interactive, -l = --link, -n = --no-clobber, -s = --symbolic-link, -t = --target-directory, -v = --verbose, -x = --one-file-system
 
-## Solo (unique behavior)
+## Unique behavior (observable when tested alone)
   --no-preserve  # don't preserve the specified attributes
-    exemplar: "--no-preserve=mode" "input.txt" "other.txt" in words_standard
+    tested: "--no-preserve=mode" "input.txt" "other.txt" in words_standard
     | exit 0
     | modified other.txt (size: 26 -> 10586)
   --parents  # use full source file name under DIRECTORY
-    exemplar: "--parents" "input.txt" "other.txt" in words_standard
+    tested: "--parents" "input.txt" "other.txt" in words_standard
     | exit: 0 → 1
     | stderr: cp: with --parents, the destination must be a directory
     | fs: did not modify other.txt (size: 26 -> 10586)
   --reflink
-    exemplar: "--reflink" "input.txt" "other.txt" in access_log_minimal
+    tested: "--reflink" "input.txt" "other.txt" in access_log_minimal
     | exit: 0 → 1
     | stderr: cp: failed to clone 'other.txt' from 'input.txt': Operation not supported
     | fs: also modify other.txt (size: 12 -> 0)
     | fs: did not modify other.txt (size: 12 -> 3522)
   --sparse  # control creation of sparse files. See below
-    exemplar: "--sparse=none" "input.txt" "other.txt" in words_standard
+    tested: "--sparse=none" "input.txt" "other.txt" in words_standard
     | exit: 0 → 1
     | stderr: cp: invalid argument 'none' for '--sparse'
     | fs: did not modify other.txt (size: 26 -> 10586)
   -S  # override the usual backup suffix
-    exemplar: "-S" "test" "input.txt" "other.txt" in words_standard
+    tested: "-S" "test" "input.txt" "other.txt" in words_standard
     | exit 0
     | modified other.txt (size: 26 -> 10586)
     | created other.txttest (26 bytes)
   -i  # prompt before overwrite (overrides a previous -n option)
-    exemplar: "-i" "input.txt" "other.txt" in words_standard
+    tested: "-i" "input.txt" "other.txt" in words_standard
     | exit: 0 → 1
     | stderr: cp: overwrite 'other.txt'?
     | fs: did not modify other.txt (size: 26 -> 10586)
   -t  # copy all SOURCE arguments into DIRECTORY
-    exemplar: "-t" "." "input.txt" "other.txt" in words_standard
+    tested: "-t" "." "input.txt" "other.txt" in words_standard
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not modify other.txt (size: 26 -> 10586)
 
-## Via combination (distinguishable when paired)
+## Distinguishable in combination (verified via flag pairs)
   --attributes-only  # don't copy the file data, just the attributes
     | fs: did not modify other.txt (size: 12 -> 10586)
-    evidence: "--no-preserve=mode" "--attributes-only" "input.txt" "subdir"
+    proven via: "--no-preserve=mode" "--attributes-only" "input.txt" "subdir"
   --backup
     | fs: also create other.txt~ (26 bytes)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   --context
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   --copy-contents  # copy contents of special files when recursive
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   --debug  # explain how a file is copied.  Implies -v
-    | 2 only in this: 'input.txt' -> 'other.txt', copy offload: yes, reflink: unsupported, sparse detection: no
-    evidence: "--no-preserve=mode" "--debug" "input.txt" "other.txt"
+    | flag adds 2 lines: 'input.txt' -> 'other.txt', copy offload: yes, reflink: unsupported, sparse detection: no
+    proven via: "--no-preserve=mode" "--debug" "input.txt" "other.txt"
   --keep-directory-symlink  # follow existing symlinks to directories
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   --preserve
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   --recursive
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   --remove-destination  # remove each existing destination file before attempting to open it (contrast with --force)
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   --strip-trailing-slashes  # remove any trailing slashes from each SOURCE argument
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   --update
     | fs: did not modify other.txt (size: 12 -> 10586)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -H  # follow command-line symbolic links in SOURCE
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -L  # always follow symbolic links in SOURCE
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -P  # never follow symbolic links in SOURCE
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -R
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -T  # treat DEST as a normal file
     | exit: 0 → 1
     | stderr: cp: cannot overwrite directory 'subdir' with non-directory 'input.txt'
     | fs: did not create subdir/input.txt (10586 bytes)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -Z  # set SELinux security context of destination file to default type
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -a  # same as -dR --preserve=all
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -b  # like --backup but does not accept an argument
     | fs: also create other.txt~ (26 bytes)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -d  # same as --no-dereference --preserve=links
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -f  # if an existing destination file cannot be opened, remove it and try again (this option is ignored when the -n option is also used)
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -l  # hard link files instead of copying
     | exit: 1 → 0
     | stderr removed
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -n  # (deprecated) silently skip existing files. See also --update
     | exit: 1 → 0
     | stderr removed
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -p  # same as --preserve=mode,ownership,timestamps
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -r
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -s  # make symbolic links instead of copying
     | exit: 0 → 1
     | stderr: cp: subdir/input.txt: can make relative symbolic links only in current directory
     | fs: did not create subdir/input.txt (10586 bytes)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -u  # equivalent to --update[=older].  See below
     | fs: did not modify other.txt (size: 12 -> 10586)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -v  # explain what is being done
-    | 1 only in this: 'input.txt' -> 'other.txt'
-    evidence: "--no-preserve=mode" "--verbose" "input.txt" "other.txt"
+    | flag adds 1 lines: 'input.txt' -> 'other.txt'
+    proven via: "--no-preserve=mode" "-v" "input.txt" "other.txt"
   -x  # stay on this file system
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
 

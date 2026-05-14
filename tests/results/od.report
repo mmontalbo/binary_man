@@ -1,23 +1,23 @@
 # Exploration: od
 
-## Rounds
-  round 0: 324 isolated cumulative, 166 identical in round (single-phase)
+## Test scope
+  490 behavioral groups: 324 unique, 166 shared
 
 ## Observed: 18/21 flags
-  11 solo, 7 via combination
-  3 additional error-differentiated
-  3 behavioral aliases detected
-  robustness: 20 robust, 0 moderate, 0 fragile
+  11 uniquely observable, 7 distinguishable via flag pairs
+  3 error-only (flag recognized but no successful output observed)
+  3 behavioral aliases (different flags, identical behavior)
+  robustness: 20 verified in all contexts, 0 in most, 0 context-dependent
 
 Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --format, -v = --output-duplicates
 
-## Solo (unique behavior)
+## Unique behavior (observable when tested alone)
   --endian  # swap input bytes according the specified order
-    exemplar: "--endian=big" "input.txt" "other.txt" in words_minimal
-    | 663 only in this: 0000000 060541 071144 073141 071153 005141 061142 071145 073151, 0000020 060564 064557 067012 060542 067565 072012 060542 071564, 0000040 071141 061564 005141 061543 062560 072012 060543 061545, 0000060 070164 062544 005141 061543 062560 072151 067147 005141, 0000100 061543 062563 071412 060543 061557 066555 067544 060564
-    | 663 only in ref: 0000000 060541 062162 060566 065562 060412 061142 062562 064566, 0000020 072141 067551 005156 061141 072557 005164 061141 072163, 0000040 060562 072143 060412 061543 070145 005164 061541 062543, 0000060 072160 062145 060412 061543 070145 064564 063556 060412, 0000100 061543 071545 005163 061541 067543 066555 062157 072141
-    | 1 shared
-    base:
+    tested: "--endian=big" "input.txt" "other.txt" in words_minimal
+    | flag adds 663 lines: 0000000 060541 071144 073141 071153 005141 061142 071145 073151, 0000020 060564 064557 067012 060542 067565 072012 060542 071564, 0000040 071141 061564 005141 061543 062560 072012 060543 061545, 0000060 070164 062544 005141 061543 062560 072151 067147 005141, 0000100 061543 062563 071412 060543 061557 066555 067544 060564
+    | flag removes 663 lines: 0000000 060541 062162 060566 065562 060412 061142 062562 064566, 0000020 072141 067551 005156 061141 072557 005164 061141 072163, 0000040 060562 072143 060412 061543 070145 005164 061541 062543, 0000060 072160 062145 060412 061543 070145 064564 063556 060412, 0000100 061543 071545 005163 061541 067543 066555 062157 072141
+    | 1 lines unchanged
+    without flag:
       0000000 060541 062162 060566 065562 060412 061142 062562 064566
       0000020 072141 067551 005156 061141 072557 005164 061141 072163
       0000040 060562 072143 060412 061543 070145 005164 061541 062543
@@ -25,7 +25,7 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000100 061543 071545 005163 061541 067543 066555 062157 072141
       0000120 005145 061541 067153 073557 062554 063544 005145 061541
             ... (658 more)
-    flag:
+    with flag:
       0000000 060541 071144 073141 071153 005141 061142 071145 073151
       0000020 060564 064557 067012 060542 067565 072012 060542 071564
       0000040 071141 061564 005141 061543 062560 072012 060543 061545
@@ -34,186 +34,186 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000120 062412 060543 065556 067567 066145 062147 062412 060543
             ... (658 more)
   --strings
-    exemplar: "--strings" in words_standard
-    | 1 only in ref: 0000000
-    base:
+    tested: "--strings" in words_standard
+    | flag removes 1 lines: 0000000
+    without flag:
       0000000
-    flag:
+    with flag:
   -A  # output format for file offsets; RADIX is one of [doxn], for Decimal, Octal, Hex or None
-    exemplar: "--address-radix=x" in words_minimal / stdin
-    | 3 only in this: 000000 064143 071145 074562 060412 070160 062554 061012 067141, 000010 067141 000141, 000013
-    | 3 only in ref: 0000000 064143 071145 074562 060412 070160 062554 061012 067141, 0000020 067141 000141, 0000023
-    base:
+    tested: "-A" "x" in words_minimal / stdin
+    | flag adds 3 lines: 000000 064143 071145 074562 060412 070160 062554 061012 067141, 000010 067141 000141, 000013
+    | flag removes 3 lines: 0000000 064143 071145 074562 060412 070160 062554 061012 067141, 0000020 067141 000141, 0000023
+    without flag:
       0000000 064143 071145 074562 060412 070160 062554 061012 067141
       0000020 067141 000141
       0000023
-    flag:
+    with flag:
       000000 064143 071145 074562 060412 070160 062554 061012 067141
       000010 067141 000141
       000013
   -N  # limit dump to BYTES input bytes
-    exemplar: "--read-bytes=2" in words_minimal / stdin
-    | 2 only in this: 0000000 064143, 0000002
-    | 3 only in ref: 0000000 064143 071145 074562 060412 070160 062554 061012 067141, 0000020 067141 000141, 0000023
-    base:
+    tested: "--read-bytes=2" in words_minimal / stdin
+    | flag adds 2 lines: 0000000 064143, 0000002
+    | flag removes 3 lines: 0000000 064143 071145 074562 060412 070160 062554 061012 067141, 0000020 067141 000141, 0000023
+    without flag:
       0000000 064143 071145 074562 060412 070160 062554 061012 067141
       0000020 067141 000141
       0000023
-    flag:
+    with flag:
       0000000 064143
       0000002
   -a  # same as -t a,  select named characters, ignoring high-order bit
-    exemplar: "-a" in words_minimal / stdin
-    | 2 only in this: 0000000   c   h   e   r   r   y  nl   a   p   p   l   e  nl   b   a   n, 0000020   a   n   a
-    | 2 only in ref: 0000000 064143 071145 074562 060412 070160 062554 061012 067141, 0000020 067141 000141
-    | 1 shared
-    base:
+    tested: "-a" in words_minimal / stdin
+    | flag adds 2 lines: 0000000   c   h   e   r   r   y  nl   a   p   p   l   e  nl   b   a   n, 0000020   a   n   a
+    | flag removes 2 lines: 0000000 064143 071145 074562 060412 070160 062554 061012 067141, 0000020 067141 000141
+    | 1 lines unchanged
+    without flag:
       0000000 064143 071145 074562 060412 070160 062554 061012 067141
       0000020 067141 000141
       0000023
-    flag:
+    with flag:
       0000000   c   h   e   r   r   y  nl   a   p   p   l   e  nl   b   a   n
       0000020   a   n   a
       0000023
   -b  # same as -t o1, select octal bytes
-    exemplar: "-b" in words_minimal / stdin
-    | 2 only in this: 0000000 143 150 145 162 162 171 012 141 160 160 154 145 012 142 141 156, 0000020 141 156 141
-    | 2 only in ref: 0000000 064143 071145 074562 060412 070160 062554 061012 067141, 0000020 067141 000141
-    | 1 shared
-    base:
+    tested: "-b" in words_minimal / stdin
+    | flag adds 2 lines: 0000000 143 150 145 162 162 171 012 141 160 160 154 145 012 142 141 156, 0000020 141 156 141
+    | flag removes 2 lines: 0000000 064143 071145 074562 060412 070160 062554 061012 067141, 0000020 067141 000141
+    | 1 lines unchanged
+    without flag:
       0000000 064143 071145 074562 060412 070160 062554 061012 067141
       0000020 067141 000141
       0000023
-    flag:
+    with flag:
       0000000 143 150 145 162 162 171 012 141 160 160 154 145 012 142 141 156
       0000020 141 156 141
       0000023
   -c  # same as -t c,  select printable characters or backslash escapes
-    exemplar: "-c" in words_minimal / stdin
-    | 2 only in this: 0000000   c   h   e   r   r   y  \n   a   p   p   l   e  \n   b   a   n, 0000020   a   n   a
-    | 2 only in ref: 0000000 064143 071145 074562 060412 070160 062554 061012 067141, 0000020 067141 000141
-    | 1 shared
-    base:
+    tested: "-c" in words_minimal / stdin
+    | flag adds 2 lines: 0000000   c   h   e   r   r   y  \n   a   p   p   l   e  \n   b   a   n, 0000020   a   n   a
+    | flag removes 2 lines: 0000000 064143 071145 074562 060412 070160 062554 061012 067141, 0000020 067141 000141
+    | 1 lines unchanged
+    without flag:
       0000000 064143 071145 074562 060412 070160 062554 061012 067141
       0000020 067141 000141
       0000023
-    flag:
+    with flag:
       0000000   c   h   e   r   r   y  \n   a   p   p   l   e  \n   b   a   n
       0000020   a   n   a
       0000023
   -f  # same as -t fF, select floats
-    exemplar: "-f" in words_minimal / stdin
-    | 2 only in this: 0000000   4.5438888e+30    1.596501e+20   6.9784537e+22   1.7438162e+28, 0000020     8.94764e-39
-    | 2 only in ref: 0000000 064143 071145 074562 060412 070160 062554 061012 067141, 0000020 067141 000141
-    | 1 shared
-    base:
+    tested: "-f" in words_minimal / stdin
+    | flag adds 2 lines: 0000000   4.5438888e+30    1.596501e+20   6.9784537e+22   1.7438162e+28, 0000020     8.94764e-39
+    | flag removes 2 lines: 0000000 064143 071145 074562 060412 070160 062554 061012 067141, 0000020 067141 000141
+    | 1 lines unchanged
+    without flag:
       0000000 064143 071145 074562 060412 070160 062554 061012 067141
       0000020 067141 000141
       0000023
-    flag:
+    with flag:
       0000000   4.5438888e+30    1.596501e+20   6.9784537e+22   1.7438162e+28
       0000020     8.94764e-39
       0000023
   -i  # same as -t dI, select decimal ints
-    exemplar: "-i" in words_minimal / stdin
-    | 2 only in this: 0000000  1919248483  1628076402  1701605488  1851875850, 0000020     6385249
-    | 2 only in ref: 0000000 064143 071145 074562 060412 070160 062554 061012 067141, 0000020 067141 000141
-    | 1 shared
-    base:
+    tested: "-i" in words_minimal / stdin
+    | flag adds 2 lines: 0000000  1919248483  1628076402  1701605488  1851875850, 0000020     6385249
+    | flag removes 2 lines: 0000000 064143 071145 074562 060412 070160 062554 061012 067141, 0000020 067141 000141
+    | 1 lines unchanged
+    without flag:
       0000000 064143 071145 074562 060412 070160 062554 061012 067141
       0000020 067141 000141
       0000023
-    flag:
+    with flag:
       0000000  1919248483  1628076402  1701605488  1851875850
       0000020     6385249
       0000023
   -j  # skip BYTES input bytes first
-    exemplar: "--skip-bytes=2" in words_minimal / stdin
-    | 2 only in this: 0000002 071145 074562 060412 070160 062554 061012 067141 067141, 0000022 000141
-    | 2 only in ref: 0000000 064143 071145 074562 060412 070160 062554 061012 067141, 0000020 067141 000141
-    | 1 shared
-    base:
+    tested: "--skip-bytes=2" in words_minimal / stdin
+    | flag adds 2 lines: 0000002 071145 074562 060412 070160 062554 061012 067141 067141, 0000022 000141
+    | flag removes 2 lines: 0000000 064143 071145 074562 060412 070160 062554 061012 067141, 0000020 067141 000141
+    | 1 lines unchanged
+    without flag:
       0000000 064143 071145 074562 060412 070160 062554 061012 067141
       0000020 067141 000141
       0000023
-    flag:
+    with flag:
       0000002 071145 074562 060412 070160 062554 061012 067141 067141
       0000022 000141
       0000023
   -l  # same as -t dL, select decimal longs
-    exemplar: "-l" in words_minimal / stdin
-    | 2 only in this: 0000000  6992534903898597475  7953746213703807088, 0000020              6385249
-    | 2 only in ref: 0000000 064143 071145 074562 060412 070160 062554 061012 067141, 0000020 067141 000141
-    | 1 shared
-    base:
+    tested: "-l" in words_minimal / stdin
+    | flag adds 2 lines: 0000000  6992534903898597475  7953746213703807088, 0000020              6385249
+    | flag removes 2 lines: 0000000 064143 071145 074562 060412 070160 062554 061012 067141, 0000020 067141 000141
+    | 1 lines unchanged
+    without flag:
       0000000 064143 071145 074562 060412 070160 062554 061012 067141
       0000020 067141 000141
       0000023
-    flag:
+    with flag:
       0000000  6992534903898597475  7953746213703807088
       0000020              6385249
       0000023
   -t  # select output format or formats
-    exemplar: "-t" "auto" in words_standard
-    | 1 only in ref: 0000000
+    tested: "-t" "auto" in words_standard
+    | flag removes 1 lines: 0000000
     | exit: 0 → 1
     | stderr: od: invalid character 't' in type string 'auto'
-    base:
+    without flag:
       0000000
-    flag:
+    with flag:
   -x  # same as -t x2, select hexadecimal 2-byte units
-    exemplar: "-x" in words_minimal / stdin
-    | 2 only in this: 0000000 6863 7265 7972 610a 7070 656c 620a 6e61, 0000020 6e61 0061
-    | 2 only in ref: 0000000 064143 071145 074562 060412 070160 062554 061012 067141, 0000020 067141 000141
-    | 1 shared
-    base:
+    tested: "-x" in words_minimal / stdin
+    | flag adds 2 lines: 0000000 6863 7265 7972 610a 7070 656c 620a 6e61, 0000020 6e61 0061
+    | flag removes 2 lines: 0000000 064143 071145 074562 060412 070160 062554 061012 067141, 0000020 067141 000141
+    | 1 lines unchanged
+    without flag:
       0000000 064143 071145 074562 060412 070160 062554 061012 067141
       0000020 067141 000141
       0000023
-    flag:
+    with flag:
       0000000 6863 7265 7972 610a 7070 656c 620a 6e61
       0000020 6e61 0061
       0000023
 
-## Via combination (distinguishable when paired)
+## Distinguishable in combination (verified via flag pairs)
   --traditional  # accept arguments in third form above
-    | 1 only in this: 0000001
+    | flag adds 1 lines: 0000001
     | exit: 1 → 0
     | stderr removed
-    evidence: "-j" "1" "--traditional" "$(head -n1 input.txt)" "."
+    proven via: "-j" "1" "--traditional" "input.txt" "other.txt"
   --width
-    | 1 only in this: 0000001
+    | flag adds 1 lines: 0000001
     | exit: 1 → 0
     | stderr removed
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -S
-    | 1 only in ref: 0000000
+    | flag removes 1 lines: 0000000
     | exit: 0 → 1
     | stderr: od: option requires an argument -- 'S'
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -d  # same as -t u2, select unsigned decimal 2-byte units
-    | 1 only in this: 0000001
+    | flag adds 1 lines: 0000001
     | exit: 1 → 0
     | stderr removed
-    evidence: "-j" "1" "-d" "$(head -n1 input.txt)" "input.txt"
+    proven via: "-j" "1" "-d" "input.txt" "other.txt"
   -o  # same as -t o2, select octal 2-byte units
-    | 1 only in this: 0000001
+    | flag adds 1 lines: 0000001
     | exit: 1 → 0
     | stderr removed
-    evidence: "-j" "1" "-o" "$(head -n1 input.txt)" "input.txt"
+    proven via: "-j" "1" "-o" "input.txt" "subdir"
   -s  # same as -t d2, select decimal 2-byte units
-    | 1 only in this: 0000001
+    | flag adds 1 lines: 0000001
     | exit: 1 → 0
     | stderr removed
-    evidence: "-j" "1" "-s" "input.txt"
+    proven via: "-j" "1" "-s" "input.txt"
   -v  # do not use * to mark line suppression
-    | 1 only in this: 0000001
+    | flag adds 1 lines: 0000001
     | exit: 1 → 0
     | stderr removed
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -w
-    | 1 only in this: 0000001
+    | flag adds 1 lines: 0000001
     | exit: 1 → 0
     | stderr removed
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
 

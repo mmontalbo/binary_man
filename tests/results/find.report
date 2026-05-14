@@ -1,30 +1,30 @@
 # Exploration: find
 
-## Rounds
-  round 0: 29 isolated cumulative, 14 identical in round (single-phase)
+## Test scope
+  43 behavioral groups: 29 unique, 14 shared
 
 ## Observed: 4/4 flags
-  4 solo, 0 via combination
-  1 behavioral aliases detected
-  robustness: 4 robust, 0 moderate, 0 fragile
+  4 uniquely observable, 0 distinguishable via flag pairs
+  1 behavioral aliases (different flags, identical behavior)
+  robustness: 4 verified in all contexts, 0 in most, 0 context-dependent
 
-## Solo (unique behavior)
+## Unique behavior (observable when tested alone)
   -D
-    exemplar: "-D" "input.txt" "other.txt" in words_minimal
-    | 1 only in ref: input.txt
-    | 1 shared
+    tested: "-D" "input.txt" "other.txt" in words_minimal
+    | flag removes 1 lines: input.txt
+    | 1 lines unchanged
     | stderr: find: Ignoring unrecognised debug flag 'input.txt'
-    base:
+    without flag:
       input.txt
       other.txt
-    flag:
+    with flag:
       other.txt
   -N
-    exemplar: "-N" in words_standard
-    | 12 only in ref: ., ./b.txt, ./exec.sh, ./a.txt, ./input.txt
+    tested: "-N" in words_standard
+    | flag removes 12 lines: ., ./b.txt, ./exec.sh, ./a.txt, ./input.txt
     | exit: 0 → 1
     | stderr: find: unknown predicate `-N'
-    base:
+    without flag:
       .
       ./b.txt
       ./exec.sh
@@ -32,14 +32,14 @@
       ./input.txt
       ./subdir
             ... (6 more)
-    flag:
+    with flag:
   -a
-    exemplar: "-a" in words_standard
-    | 12 only in ref: ., ./b.txt, ./exec.sh, ./a.txt, ./input.txt
+    tested: "-a" in words_standard
+    | flag removes 12 lines: ., ./b.txt, ./exec.sh, ./a.txt, ./input.txt
     | exit: 0 → 1
     | stderr: find: invalid expression
     | you have used a binary operator '-a' with nothing before it.
-    base:
+    without flag:
       .
       ./b.txt
       ./exec.sh
@@ -47,22 +47,22 @@
       ./input.txt
       ./subdir
             ... (6 more)
-    flag:
+    with flag:
   -name
-    exemplar: "." "-name" "*.txt" in passwd_minimal
+    tested: "." "-name" "*.txt" in passwd_minimal
     | stdout: 2 lines
     | exit 0
-    base:
-    flag:
+    without flag:
+    with flag:
       ./input.txt
       ./other.txt
   -o
-    exemplar: "-o" in words_standard
-    | 12 only in ref: ., ./b.txt, ./exec.sh, ./a.txt, ./input.txt
+    tested: "-o" in words_standard
+    | flag removes 12 lines: ., ./b.txt, ./exec.sh, ./a.txt, ./input.txt
     | exit: 0 → 1
     | stderr: find: invalid expression
     | you have used a binary operator '-o' with nothing before it.
-    base:
+    without flag:
       .
       ./b.txt
       ./exec.sh
@@ -70,13 +70,13 @@
       ./input.txt
       ./subdir
             ... (6 more)
-    flag:
+    with flag:
   -type
-    exemplar: "." "-type" "f" in words_standard
+    tested: "." "-type" "f" in words_standard
     | stdout: 9 lines
     | exit 0
-    base:
-    flag:
+    without flag:
+    with flag:
       ./b.txt
       ./exec.sh
       ./a.txt
@@ -85,10 +85,10 @@
       ./readonly.dat
             ... (3 more)
 
-## Via combination (distinguishable when paired)
+## Distinguishable in combination (verified via flag pairs)
   -print
-    | 3 only in ref: ., ./input.txt, ./other.txt
+    | flag removes 3 lines: ., ./input.txt, ./other.txt
     | exit: 0 → 1
     | stderr: find: paths must precede expression: `.'
-    evidence: "-D" "." "-print"
+    proven via: "-N" "." "-print"
 

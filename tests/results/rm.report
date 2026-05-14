@@ -1,74 +1,74 @@
 # Exploration: rm
 
-## Rounds
-  round 0: 11 isolated cumulative, 11 identical in round (single-phase)
+## Test scope
+  22 behavioral groups: 11 unique, 11 shared
 
 ## Observed: 12/12 flags
-  2 solo, 10 via combination
-  1 behavioral aliases detected
-  robustness: 12 robust, 0 moderate, 0 fragile
+  2 uniquely observable, 10 distinguishable via flag pairs
+  1 behavioral aliases (different flags, identical behavior)
+  robustness: 12 verified in all contexts, 0 in most, 0 context-dependent
 
 Aliases: -d = --dir, -f = --force, -v = --verbose
 
-## Solo (unique behavior)
+## Unique behavior (observable when tested alone)
   -f  # ignore nonexistent files and arguments, never prompt
-    exemplar: "-f" "input.txt" in empty_dir
+    tested: "-f" "input.txt" in empty_dir
     | exit: 1 → 0
     | stderr removed
   -v  # explain what is being done
-    exemplar: "-v" "input.txt" in words_minimal
-    | 1 only in this: removed 'input.txt'
-    base:
-    flag:
+    tested: "-v" "input.txt" in words_minimal
+    | flag adds 1 lines: removed 'input.txt'
+    without flag:
+    with flag:
       removed 'input.txt'
 
-## Via combination (distinguishable when paired)
+## Distinguishable in combination (verified via flag pairs)
   --interactive
     | stderr: rm: remove regular file 'input.txt'?
     | fs: did not delete input.txt
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   --no-preserve-root  # do not treat '/' specially
     | stderr: rm: remove regular file 'input.txt'? rm: remove regular file 'other.txt'?
     | fs: did not delete input.txt
     | fs: did not delete other.txt
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   --one-file-system  # when removing a hierarchy recursively, skip any directory that is on a file system different from that of the corresponding command line argument
     | stderr: rm: remove regular file 'input.txt'? rm: remove regular file 'other.txt'?
     | fs: did not delete input.txt
     | fs: did not delete other.txt
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   --preserve-root
     | stderr: rm: remove regular file 'input.txt'? rm: remove regular file 'other.txt'?
     | fs: did not delete input.txt
     | fs: did not delete other.txt
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   --recursive
     | stderr: rm: remove regular file 'input.txt'? rm: remove regular file 'other.txt'?
     | fs: did not delete input.txt
     | fs: did not delete other.txt
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -I  # prompt once before removing more than three files, or when removing recursively; less intrusive than -i, while still giving protection against most mistakes
     | stderr: rm: remove regular file 'input.txt'? rm: remove regular file 'other.txt'?
     | fs: did not delete input.txt
     | fs: did not delete other.txt
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -R
     | stderr: rm: remove regular file 'input.txt'? rm: remove regular file 'other.txt'?
     | fs: did not delete input.txt
     | fs: did not delete other.txt
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -d  # remove empty directories
     | stderr: rm: remove regular file 'input.txt'? rm: remove regular file 'other.txt'?
     | fs: did not delete input.txt
     | fs: did not delete other.txt
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -i  # prompt before every removal
     | stderr: rm: remove regular file 'input.txt'?
     | fs: did not delete input.txt
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
   -r
     | stderr: rm: remove regular file 'input.txt'? rm: remove regular file 'other.txt'?
     | fs: did not delete input.txt
     | fs: did not delete other.txt
-    evidence: (pairwise evidence)
+    proven via: (pairwise evidence)
 
