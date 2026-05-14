@@ -1,7 +1,7 @@
 # Exploration: sort
 
 ## Rounds
-  round 0: 121 isolated cumulative, 125 identical in round (single-phase)
+  round 0: 121 isolated cumulative, 126 identical in round (single-phase)
 
 ## Observed: 25/30 flags
   15 solo, 10 via combination
@@ -47,29 +47,29 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       00:00:00
             ...
   --sort  # sort according to WORD: general-numeric -g, human-numeric -h, month -M, numeric -n, random -R, version -V
-    exemplar: "--sort=random" in passwd_minimal / stdin (+3 lines)
+    exemplar: "--sort=random" in words_minimal / stdin (+3 lines)
     base:
-      a,b,c
-      d:e:f
-      g h i
+      apple
+      banana
+      cherry
     flag:
-      d:e:f
-      a,b,c
-      g h i
+      banana
+      apple
+      cherry
   -C
     exemplar: "-C" in words_standard (different)
     base:
     flag:
   -R  # shuffle, but group identical keys.  See shuf(1)
-    exemplar: "-R" in passwd_minimal / stdin (+3 lines)
+    exemplar: "-R" in numbers_minimal / stdin (+3 lines)
     base:
-      a,b,c
-      d:e:f
-      g h i
+      apple
+      banana
+      cherry
     flag:
-      d:e:f
-      g h i
-      a,b,c
+      banana
+      apple
+      cherry
   -S  # use SIZE for main memory buffer
     exemplar: "-S" "1" "input.txt" in dates_minimal (+10 lines)
     base:
@@ -183,7 +183,7 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
       accept
             ...
   -o  # write result to FILE instead of standard output
-    exemplar: "-o" "input.txt" in words_standard (different)
+    exemplar: "-o" "input.txt" in words_deep (different, exit 127→0)
     base:
     flag:
   -r  # reverse the result of comparisons
@@ -237,15 +237,15 @@ Aliases: -M = --month-sort, -R = --random-sort, -S = --buffer-size, -T = --tempo
 
 ## Via combination (distinguishable when paired)
   --check  e.g. (pairwise evidence)
-  --compress-program  e.g. "--compress-program=cat" "-R" "input.txt" "other.txt"
+  --compress-program  e.g. "-R" "--compress-program=cat" "input.txt" "other.txt"
   --random-source  e.g. (pairwise evidence)
   -M  e.g. (pairwise evidence)
-  -T  e.g. "-T" "." "-R" "input.txt" "other.txt"
-  -V  e.g. "-R" "-V" "input.txt" "other.txt"
+  -T  e.g. "-R" "-T" "." "input.txt" "other.txt"
+  -V  e.g. "-V" "-R" "input.txt" "other.txt"
   -c  e.g. (pairwise evidence)
   -g  e.g. (pairwise evidence)
   -h  e.g. (pairwise evidence)
   -n  e.g. (pairwise evidence)
-  -s  e.g. "-s" "-R" "input.txt" "other.txt"
+  -s  e.g. "-R" "-s" "input.txt" "other.txt"
   -t  e.g. "-R" "-t" "," "input.txt" "other.txt"
 

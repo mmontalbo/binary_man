@@ -1,10 +1,10 @@
 # Exploration: sed
 
 ## Rounds
-  round 0: 15 isolated cumulative, 61 identical in round (single-phase)
+  round 0: 17 isolated cumulative, 61 identical in round (single-phase)
 
 ## Observed: 23/24 flags
-  4 solo, 19 via combination
+  6 solo, 17 via combination
   3 behavioral aliases detected
   robustness: 23 robust, 0 moderate, 0 fragile
 
@@ -23,6 +23,14 @@
     flag:
       nput.txt
       hello world
+  --in-place
+    exemplar: "--in-place" "input.txt" "other.txt" in words_standard (different)
+    base:
+      nput.txt
+      other content
+      nput.txt
+      second line
+    flag:
   --posix
     exemplar: "--posix" "$(head -n1 input.txt)" "input.txt" in passwd_standard (+30 lines, exit 1→0)
     base:
@@ -47,11 +55,18 @@
     flag:
       nput.txt
       hello world
+  -i
+    exemplar: "-i" "input.txt" "other.txt" in words_standard (different)
+    base:
+      nput.txt
+      other content
+      nput.txt
+      second line
+    flag:
 
 ## Via combination (distinguishable when paired)
   --expression  e.g. (pairwise evidence)
   --file  e.g. "-f" "--file" "$(head -n1 input.txt)" "input.txt"
-  --in-place  e.g. (pairwise evidence)
   --line-length  e.g. (pairwise evidence)
   --null-data  e.g. (pairwise evidence)
   --quiet  e.g. (pairwise evidence)
@@ -62,7 +77,6 @@
   -E  e.g. (pairwise evidence)
   -e  e.g. (pairwise evidence)
   -f  e.g. "-f" "--file" "$(head -n1 input.txt)" "input.txt"
-  -i  e.g. (pairwise evidence)
   -n  e.g. (pairwise evidence)
   -r  e.g. (pairwise evidence)
   -s  e.g. (pairwise evidence)

@@ -239,7 +239,7 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
   -U  e.g. (pairwise evidence)
   -Z  e.g. (pairwise evidence)
   -a  e.g. "-e" "-a" "$(head -n1 input.txt)" "input.txt"
-  -e  e.g. "-e" "-I" "$(head -n1 input.txt)" "input.txt"
+  -e  e.g. "-e" "-r" "$(head -n1 input.txt)" "input.txt"
   -h  e.g. "-e" "-h" "$(head -n1 input.txt)" "input.txt"
   -i  e.g. (pairwise evidence)
   -q  e.g. (pairwise evidence)

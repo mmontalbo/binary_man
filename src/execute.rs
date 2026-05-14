@@ -191,44 +191,51 @@ pub fn run_grid(
     let completed = AtomicUsize::new(0);
     let grid_start = std::time::Instant::now();
 
-    // Split context groups across threads — ONE bwrap per thread
+    // Work-stealing: threads dequeue contexts from a shared queue.
+    // Each context gets its own bwrap invocation. When a thread finishes
+    // a fast context, it immediately picks the next — no idle waiting
+    // while another thread processes a slow context.
+    use std::sync::Mutex;
+    let work_queue = Mutex::new(cells_by_ctx.iter());
+
     let results: Vec<_> = std::thread::scope(|s| {
         let n_threads = MAX_THREADS.min(cells_by_ctx.len()).max(1);
-        let chunk_size = cells_by_ctx.len().div_ceil(n_threads);
-        let chunks: Vec<&[Vec<Cell>]> = cells_by_ctx.chunks(chunk_size).collect();
 
-        let handles: Vec<_> = chunks.into_iter().map(|chunk| {
+        let handles: Vec<_> = (0..n_threads).map(|_| {
             let completed = &completed;
+            let work_queue = &work_queue;
             s.spawn(move || {
                 let mut results: Vec<(String, usize, Result<Observation, String>)> = Vec::new();
 
-                // Create ONE batch directory for ALL contexts in this thread
+                loop {
+                let ctx_cells = match work_queue.lock().unwrap().next() {
+                    Some(cells) => cells,
+                    None => break,
+                };
+                if ctx_cells.is_empty() { continue; }
+
                 let batch_dir = match tempfile::Builder::new()
                     .prefix("bgrid_batch_")
                     .tempdir() {
                     Ok(d) => d,
                     Err(e) => {
-                        for ctx_cells in chunk {
-                            for cell in ctx_cells {
-                                let ctx_name = script.contexts[cell.ctx_index].name.clone();
-                                results.push((ctx_name, cell.run_index, Err(format!("create batch dir: {}", e))));
-                            }
+                        for cell in ctx_cells {
+                            let ctx_name = script.contexts[cell.ctx_index].name.clone();
+                            results.push((ctx_name, cell.run_index, Err(format!("create batch dir: {}", e))));
                         }
-                        return results;
+                        continue;
                     }
                 };
 
                 let out_dir = batch_dir.path().join("out");
                 let _ = std::fs::create_dir(&out_dir);
 
-                // Set up ALL cell workspaces and generate ONE script for all contexts
-                let mut cell_data: Vec<(String, usize, FsSnapshot)> = Vec::new(); // (ctx_name, run_index, before)
+                // Set up cell workspaces and generate script for this context
+                let mut cell_data: Vec<(String, usize, FsSnapshot)> = Vec::new();
                 let mut script_content = String::new();
                 let mut global_cell_idx = 0usize;
-                let mut setup_failed_ctxs: HashSet<usize> = HashSet::new();
 
-                for ctx_cells in chunk {
-                    if ctx_cells.is_empty() { continue; }
+                {
                     let ci = ctx_cells[0].ctx_index;
                     let ctx = &script.contexts[ci];
 
@@ -241,8 +248,6 @@ pub fn run_grid(
                             for cell in ctx_cells {
                                 results.push((ctx.name.clone(), cell.run_index, Err(format!("{}", e))));
                             }
-                            setup_failed_ctxs.insert(ci);
-                            global_cell_idx += 1;
                             continue;
                         }
                     };
@@ -401,6 +406,8 @@ pub fn run_grid(
                         eprint!("\r  {}/{} cells", done, total_cells);
                     }
                 }
+
+                } // end loop iteration (one context)
 
                 results
             })
