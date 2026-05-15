@@ -35,7 +35,7 @@ echo hello"
 
 Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --format, -v = --output-duplicates
 
-## Unique behavior (observable when tested alone)
+## Verified behavior (flag produced observable output)
   --endian  # swap input bytes according the specified order
     tested: "--endian=big" "input.txt" "other.txt" in words_minimal
     | flag adds 663 lines: 0000000 060541 071144 073141 071153 005141 061142 071145 073151, 0000020 060564 064557 067012 060542 067565 072012 060542 071564, 0000040 071141 061564 005141 061543 062560 072012 060543 061545, 0000060 070164 062544 005141 061543 062560 072151 067147 005141, 0000100 061543 062563 071412 060543 061557 066555 067544 060564
@@ -57,12 +57,6 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000100 061543 062563 071412 060543 061557 066555 067544 060564
       0000120 062412 060543 065556 067567 066145 062147 062412 060543
             ... (658 more)
-  --strings
-    tested: "--strings" in words_standard
-    | flag removes 1 lines: 0000000
-    without flag:
-      0000000
-    with flag:
   -A  # output format for file offsets; RADIX is one of [doxn], for Decimal, Octal, Hex or None
     tested: "-A" "x" in words_minimal / stdin
     | flag adds 3 lines: 000000 064143 071145 074562 060412 070160 062554 061012 067141, 000010 067141 000141, 000013
@@ -177,14 +171,6 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000000  6992534903898597475  7953746213703807088
       0000020              6385249
       0000023
-  -t  # select output format or formats
-    tested: "-t" "auto" in words_standard
-    | flag removes 1 lines: 0000000
-    | exit: 0 → 1
-    | stderr: od: invalid character 't' in type string 'auto'
-    without flag:
-      0000000
-    with flag:
   -x  # same as -t x2, select hexadecimal 2-byte units
     tested: "-x" in words_minimal / stdin
     | flag adds 2 lines: 0000000 6863 7265 7972 610a 7070 656c 620a 6e61, 0000020 6e61 0061
@@ -199,12 +185,28 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
       0000020 6e61 0061
       0000023
 
+## Recognized but errored (flag accepted, no successful output observed)
+  --strings
+    tested: "--strings" in words_standard
+    | flag removes 1 lines: 0000000
+    without flag:
+      0000000
+    with flag:
+  -t  # select output format or formats
+    tested: "-t" "auto" in words_standard
+    | flag removes 1 lines: 0000000
+    | exit: 0 → 1
+    | stderr: od: invalid character 't' in type string 'auto'
+    without flag:
+      0000000
+    with flag:
+
 ## Distinguishable in combination (verified via flag pairs)
   --traditional  # accept arguments in third form above
     | flag adds 1 lines: 0000001
     | exit: 1 → 0
     | stderr removed
-    proven via: "-j" "1" "--traditional" "$(head -n1 input.txt)" "input.txt"
+    proven via: "-j" "1" "--traditional" "input.txt" "subdir"
   --width
     | flag adds 1 lines: 0000001
     | exit: 1 → 0
@@ -224,7 +226,7 @@ Aliases: -A = --address-radix, -N = --read-bytes, -j = --skip-bytes, -t = --form
     | flag adds 1 lines: 0000001
     | exit: 1 → 0
     | stderr removed
-    proven via: "-j" "1" "-o" "input.txt" "subdir"
+    proven via: "-j" "1" "-o" "$(head -n1 input.txt)" "input.txt"
   -s  # same as -t d2, select decimal 2-byte units
     | flag adds 1 lines: 0000001
     | exit: 1 → 0

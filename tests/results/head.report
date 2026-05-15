@@ -29,7 +29,7 @@ echo hello"
 
 Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
 
-## Unique behavior (observable when tested alone)
+## Verified behavior (flag produced observable output)
   -c  # print the first NUM bytes of each file; with the leading '-', print all but the last NUM bytes of each file
     tested: "-c" in words_standard
     | exit: 0 → 1
@@ -65,13 +65,13 @@ Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
   --quiet
     | flag removes 3 lines: ==> input.txt <==, , ==> other.txt <==
     | 12 lines unchanged
-    proven via: "-n" "--quiet" "$(head -n1 input.txt)" "."
+    proven via: "-c" "--quiet" "$(head -n1 input.txt)" "."
   --silent
     | flag removes 3 lines: ==> input.txt <==, , ==> other.txt <==
     | 12 lines unchanged
-    proven via: "-n" "--silent" "$(head -n1 input.txt)" "."
+    proven via: "-c" "--silent" "$(head -n1 input.txt)" "."
   -q
     | flag removes 3 lines: ==> input.txt <==, , ==> other.txt <==
     | 12 lines unchanged
-    proven via: "-c" "-q" "$(head -n1 input.txt)" "."
+    proven via: "-n" "-q" "$(head -n1 input.txt)" "."
 

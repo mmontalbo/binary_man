@@ -46,7 +46,7 @@ echo hello"
 
 Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --devices, -E = --extended-regexp, -F = --fixed-strings, -G = --basic-regexp, -H = --with-filename, -L = --files-without-match, -P = --perl-regexp, -R = --dereference-recursive, -T = --initial-tab, -U = --binary, -Z = --null, -a = --text, -b = --byte-offset, -c = --count, -d = --directories, -e = --regexp, -f = --file, -h = --no-filename, -i = --ignore-case, -l = --files-with-matches, -m = --max-count, -n = --line-number, -o = --only-matching, -r = --recursive, -s = --no-messages, -v = --invert-match, -w = --word-regexp, -x = --line-regexp, -z = --null-data
 
-## Unique behavior (observable when tested alone)
+## Verified behavior (flag produced observable output)
   --exclude-from  # skip files that match any file pattern from FILE
     tested: "--exclude-from=other.txt" "$(head -n1 input.txt)" "input.txt" in empty_dir
     | stderr changed: grep: other.txt: No such file or directory
@@ -111,7 +111,7 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
       1E2
             ... (54 more)
   -d  # how to handle directories; ACTION is 'read', 'recurse', or 'skip'
-    tested: "-d" "1" "$(head -n1 input.txt)" "input.txt" in words_standard
+    tested: "--directories=1" "$(head -n1 input.txt)" "input.txt" in words_standard
     | flag removes 1 lines: aardvark
     | exit: 0 → 1
     | stderr: grep: invalid argument '1' for '--directories'
@@ -119,7 +119,7 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
       aardvark
     with flag:
   -m  # stop after NUM selected lines
-    tested: "--max-count=2" "$(head -n1 input.txt)" "input.txt" in numbers_minimal
+    tested: "-m" "2" "$(head -n1 input.txt)" "input.txt" in numbers_minimal
     | flag removes 46 lines: $1.00, 1E02, 1E+02, -1.00, -$1.00
     | 2 lines unchanged
     without flag:

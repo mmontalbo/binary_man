@@ -43,7 +43,7 @@ echo hello"
 
 Aliases: -d = --dir, -f = --force, -v = --verbose
 
-## Unique behavior (observable when tested alone)
+## Verified behavior (flag produced observable output)
   -f  # ignore nonexistent files and arguments, never prompt
     tested: "-f" "input.txt" in empty_dir
     | exit: 1 → 0

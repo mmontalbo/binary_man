@@ -20,7 +20,7 @@
 
 Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numbering, -h = --header-numbering, -i = --line-increment, -l = --join-blank-lines, -n = --number-format, -p = --no-renumber, -s = --number-separator, -v = --starting-line-number, -w = --number-width
 
-## Unique behavior (observable when tested alone)
+## Verified behavior (flag produced observable output)
   -i  # line number increment at each line
     tested: "--line-increment=2" in words_minimal / stdin
     | flag adds 2 lines:      3	apple,      5	banana
@@ -39,16 +39,6 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
     | flag removes 3 lines:      1	cherry,      2	apple,      3	banana
     | exit: 0 → 1
     | stderr: nl: option requires an argument -- 'l'
-    without flag:
-           1	cherry
-           2	apple
-           3	banana
-    with flag:
-  -n  # insert line numbers according to FORMAT
-    tested: "-n" "%s" in words_minimal / stdin
-    | flag removes 3 lines:      1	cherry,      2	apple,      3	banana
-    | exit: 0 → 1
-    | stderr: nl: invalid line numbering format: '%s'
     without flag:
            1	cherry
            2	apple
@@ -90,6 +80,18 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
        1	cherry
        2	apple
        3	banana
+
+## Recognized but errored (flag accepted, no successful output observed)
+  -n  # insert line numbers according to FORMAT
+    tested: "-n" "%s" in words_minimal / stdin
+    | flag removes 3 lines:      1	cherry,      2	apple,      3	banana
+    | exit: 0 → 1
+    | stderr: nl: invalid line numbering format: '%s'
+    without flag:
+           1	cherry
+           2	apple
+           3	banana
+    with flag:
 
 ## Distinguishable in combination (verified via flag pairs)
   -b  # use STYLE for numbering body lines

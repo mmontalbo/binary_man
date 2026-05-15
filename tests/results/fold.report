@@ -15,7 +15,7 @@
 
 Aliases: -b = --bytes, -s = --spaces, -w = --width
 
-## Unique behavior (observable when tested alone)
+## Verified behavior (flag produced observable output)
   -w  # use WIDTH columns instead of 80
     tested: "--width=2" in words_minimal / stdin
     | flag adds 9 lines: ch, er, ry, ap, pl

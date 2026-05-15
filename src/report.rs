@@ -431,25 +431,18 @@ pub fn format_exploration_report(
         }
     }
 
-    // Solo-distinguished flags with exemplar observations
-    out.push_str("## Unique behavior (observable when tested alone)\n");
-    let mut sorted_solo: Vec<&String> = solo_distinguished.iter().collect();
-    sorted_solo.sort();
-    for flag in &sorted_solo {
-        let desc = flag_info.and_then(|fi| fi.descs.get(flag.as_str()))
+    // Helper: render a flag with its exemplar
+    let render_flag = |out: &mut String, flag: &str| {
+        let desc = flag_info.and_then(|fi| fi.descs.get(flag))
             .map(|d| format!("  # {}", first_sentence(d, 140)))
             .unwrap_or_default();
         out.push_str(&format!("  {}{}\n", flag, desc));
 
-        // Find the exemplar: the context where this flag's output is most distinctive
         if let Some(ex) = find_exemplar(flag, all_runs, aliases) {
             out.push_str(&format!("    tested: {} in {}\n", ex.run_label, ex.context_name));
-            // Show diff components on separate lines for readability
             for part in ex.vs_diff.split("; ") {
                 out.push_str(&format!("    | {}\n", part));
             }
-            // Show base/flag preview only when there's stdout to show.
-            // For side-effect tools (cp, rm) the diff lines above carry the signal.
             let base_has_content = ex.base_preview.lines().any(|l| !l.contains("identical") && !l.trim().is_empty());
             let flag_has_content = ex.flag_preview.lines().any(|l| !l.contains("identical") && !l.trim().is_empty());
             if base_has_content || flag_has_content {
@@ -463,8 +456,28 @@ pub fn format_exploration_report(
                 }
             }
         }
+    };
+
+    // Solo-distinguished flags: observed behavior first, then error-only
+    if !solo_observed.is_empty() {
+        out.push_str("## Verified behavior (flag produced observable output)\n");
+        let mut sorted: Vec<&&String> = solo_observed.iter().collect();
+        sorted.sort();
+        for flag in sorted {
+            render_flag(&mut out, flag);
+        }
+        out.push('\n');
     }
-    out.push('\n');
+
+    if !solo_error_only.is_empty() {
+        out.push_str("## Recognized but errored (flag accepted, no successful output observed)\n");
+        let mut sorted: Vec<&&String> = solo_error_only.iter().collect();
+        sorted.sort();
+        for flag in sorted {
+            render_flag(&mut out, flag);
+        }
+        out.push('\n');
+    }
 
     // Combo-characterized flags — show vs_diff when available
     if !combo_distinguished.is_empty() {

@@ -17,7 +17,7 @@
 
 Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonblank, -n = --number, -s = --squeeze-blank, -v = --show-nonprinting
 
-## Unique behavior (observable when tested alone)
+## Verified behavior (flag produced observable output)
   -A  # equivalent to -vET
     tested: "-A" "input.txt" "other.txt" in formatted_minimal
     | flag adds 28 lines: first line$, second line with trailing spaces$, ^Iindented with tab$,     indented with spaces$, ^I ^Imixed tabs and spaces$

@@ -39,7 +39,7 @@ echo hello"
 
 Aliases: -c = --crown-margin, -g = --goal, -p = --prefix, -s = --split-only, -t = --tagged-paragraph, -u = --uniform-spacing, -w = --width
 
-## Unique behavior (observable when tested alone)
+## Verified behavior (flag produced observable output)
   -g  # goal width (default of 93% of width)
     tested: "--goal=2" in passwd_minimal / stdin
     | flag adds 2 lines: a,b,c, d:e:f g h i
