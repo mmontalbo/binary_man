@@ -44,16 +44,18 @@ echo hello"
 Aliases: -d = --dir, -f = --force, -v = --verbose
 
 ## Verified behavior (flag produced observable output)
-  -f  # ignore nonexistent files and arguments, never prompt
-    tested: "-f" "input.txt" in empty_dir
-    | exit: 1 → 0
-    | stderr removed
   -v  # explain what is being done
     tested: "-v" "input.txt" in words_minimal
     | flag adds 1 lines: removed 'input.txt'
     without flag:
     with flag:
       removed 'input.txt'
+
+## Recognized but errored (flag accepted, no successful output observed)
+  -f  # ignore nonexistent files and arguments, never prompt
+    tested: "-f" "input.txt" in empty_dir
+    | exit: 1 → 0
+    | stderr removed
 
 ## Distinguishable in combination (verified via flag pairs)
   --interactive

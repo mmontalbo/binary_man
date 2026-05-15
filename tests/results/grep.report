@@ -47,9 +47,6 @@ echo hello"
 Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --devices, -E = --extended-regexp, -F = --fixed-strings, -G = --basic-regexp, -H = --with-filename, -L = --files-without-match, -P = --perl-regexp, -R = --dereference-recursive, -T = --initial-tab, -U = --binary, -Z = --null, -a = --text, -b = --byte-offset, -c = --count, -d = --directories, -e = --regexp, -f = --file, -h = --no-filename, -i = --ignore-case, -l = --files-with-matches, -m = --max-count, -n = --line-number, -o = --only-matching, -r = --recursive, -s = --no-messages, -v = --invert-match, -w = --word-regexp, -x = --line-regexp, -z = --null-data
 
 ## Verified behavior (flag produced observable output)
-  --exclude-from  # skip files that match any file pattern from FILE
-    tested: "--exclude-from=other.txt" "$(head -n1 input.txt)" "input.txt" in empty_dir
-    | stderr changed: grep: other.txt: No such file or directory
   -A  # print NUM lines of trailing context
     tested: "-A" "1" "$(head -n1 input.txt)" "input.txt" in numbers_standard
     | flag adds 11 lines: 1, 1/2, --, -1, -1/2
@@ -119,7 +116,7 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
       aardvark
     with flag:
   -m  # stop after NUM selected lines
-    tested: "-m" "2" "$(head -n1 input.txt)" "input.txt" in numbers_minimal
+    tested: "--max-count=2" "$(head -n1 input.txt)" "input.txt" in numbers_minimal
     | flag removes 46 lines: $1.00, 1E02, 1E+02, -1.00, -$1.00
     | 2 lines unchanged
     without flag:
@@ -134,6 +131,11 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
     with flag:
             ... (1 identical)
       1.00
+
+## Recognized but errored (flag accepted, no successful output observed)
+  --exclude-from  # skip files that match any file pattern from FILE
+    tested: "--exclude-from=other.txt" "$(head -n1 input.txt)" "input.txt" in empty_dir
+    | stderr changed: grep: other.txt: No such file or directory
 
 ## Distinguishable in combination (verified via flag pairs)
   --binary-files  # assume that binary files are TYPE; TYPE is 'binary', 'text', or 'without-match'
@@ -278,7 +280,7 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
     | flag removes 1 lines: root:x:0:0:root:/root:/bin/bash
     | exit: 0 → 2
     | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
-    proven via: "-e" "-w" "$(head -n1 input.txt)" "input.txt"
+    proven via: "-e" "-b" "$(head -n1 input.txt)" "input.txt"
   -f  # take PATTERNS from FILE
     | flag removes 1 lines: aardvark
     | exit: 0 → 1

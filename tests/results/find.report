@@ -87,6 +87,21 @@ echo hello"
       ./subdir
             ... (6 more)
     with flag:
+  -name
+    tested: "." "-name" "*.txt" in passwd_minimal
+    | flag removes 3 lines: ., ./readonly.dat, ./-rf
+    | 2 lines unchanged
+    | exit: 1 → 0
+    | stderr removed
+    without flag:
+      .
+      ./input.txt
+      ./readonly.dat
+      ./other.txt
+      ./-rf
+    with flag:
+      ./input.txt
+      ./other.txt
   -o
     tested: "-o" in words_standard
     | flag removes 12 lines: ., ./b.txt, ./exec.sh, ./a.txt, ./input.txt
@@ -102,11 +117,33 @@ echo hello"
       ./subdir
             ... (6 more)
     with flag:
+  -type
+    tested: "." "-type" "f" in words_standard
+    | flag removes 3 lines: ., ./subdir, ./link.txt
+    | 9 lines unchanged
+    | exit: 1 → 0
+    | stderr removed
+    without flag:
+      .
+      ./b.txt
+      ./exec.sh
+      ./a.txt
+      ./input.txt
+      ./subdir
+            ... (6 more)
+    with flag:
+      ./b.txt
+      ./exec.sh
+      ./a.txt
+      ./input.txt
+      ./subdir/nested.txt
+      ./readonly.dat
+            ... (3 more)
 
 ## Distinguishable in combination (verified via flag pairs)
   -print
     | flag removes 3 lines: ., ./input.txt, ./other.txt
     | exit: 0 → 1
     | stderr: find: paths must precede expression: `.'
-    proven via: "-D" "." "-print"
+    proven via: "-N" "." "-print"
 

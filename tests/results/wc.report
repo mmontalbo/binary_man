@@ -35,6 +35,14 @@ echo hello"
 Aliases: -L = --max-line-length, -c = --bytes, -l = --lines, -m = --chars, -w = --words
 
 ## Verified behavior (flag produced observable output)
+  --files0-from  # read input from the files specified by NUL-terminated names in file F; If F is - then read names from standard input
+    tested: "--files0-from=1" in words_standard
+    | flag removes 1 lines:       0       0       0
+    | exit: 0 → 1
+    | stderr: wc: cannot open '1' for reading: No such file or directory
+    without flag:
+            0       0       0
+    with flag:
   --total  # when to print a line with total counts; WHEN can be: auto, always, only, never
     tested: "--total=always" in words_minimal
     | flag adds 1 lines:       0       0       0 total
@@ -68,16 +76,6 @@ Aliases: -L = --max-line-length, -c = --bytes, -l = --lines, -m = --chars, -w = 
             2       3      19
     with flag:
       3
-
-## Recognized but errored (flag accepted, no successful output observed)
-  --files0-from  # read input from the files specified by NUL-terminated names in file F; If F is - then read names from standard input
-    tested: "--files0-from=1" in words_standard
-    | flag removes 1 lines:       0       0       0
-    | exit: 0 → 1
-    | stderr: wc: cannot open '1' for reading: No such file or directory
-    without flag:
-            0       0       0
-    with flag:
 
 ## Distinguishable in combination (verified via flag pairs)
   -c  # print the byte counts

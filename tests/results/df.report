@@ -1,7 +1,7 @@
 # Exploration: df
 
 ## Test scope
-  430 behavioral groups: 395 unique, 35 shared
+  431 behavioral groups: 397 unique, 34 shared
 
   Contexts referenced below:
     words_minimal:
@@ -33,13 +33,13 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
 ## Verified behavior (flag produced observable output)
   --no-sync  # do not invoke sync before getting usage info (default)
     tested: "--no-sync" in words_minimal
-    | flag adds 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325337860 6034209788  19% /nix
-    | flag removes 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix
+    | flag adds 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325274004 6034273644  19% /nix
+    | flag removes 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix
     | 11 lines unchanged
     without flag:
             ... (1 identical)
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix
       tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
       tmpfs                                                    65763428       1368   65762060   1% /run/wrappers
@@ -48,7 +48,7 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
     with flag:
             ... (1 identical)
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325337860 6034209788  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325274004 6034273644  19% /nix
       tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
       tmpfs                                                    65763428       1368   65762060   1% /run/wrappers
@@ -56,12 +56,12 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
             ... (5 more)
   --output
     tested: "--output" in words_minimal
-    | flag adds 12 lines: Filesystem                                             Type        Inodes   IUsed     IFree IUse%  1K-blocks       Used      Avail Use% File Mounted on, tmpfs                                                  tmpfs     16440857      13  16440844    1%   65763428          0   65763428   0% -    /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 ext4     244158464 4796778 239361686    2% 7750211880 1325343852 6034203796  19% -    /nix, tmpfs                                                  tmpfs     16440857    2442  16438415    1%   32881716       7924   32873792   1% -    /run, tmpfs                                                  tmpfs         1024       1      1023    1%       1024          0       1024   0% -    /run/credentials/systemd-journald.service
-    | flag removes 12 lines: Filesystem                                              1K-blocks       Used  Available Use% Mounted on, tmpfs                                                    65763428          0   65763428   0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix, tmpfs                                                    32881716       7924   32873792   1% /run, tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
+    | flag adds 12 lines: Filesystem                                             Type        Inodes   IUsed     IFree IUse%  1K-blocks       Used      Avail Use% File Mounted on, tmpfs                                                  tmpfs     16440857      13  16440844    1%   65763428          0   65763428   0% -    /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 ext4     244158464 4783177 239375287    2% 7750211880 1325274000 6034273648  19% -    /nix, tmpfs                                                  tmpfs     16440857    2442  16438415    1%   32881716       7924   32873792   1% -    /run, tmpfs                                                  tmpfs         1024       1      1023    1%       1024          0       1024   0% -    /run/credentials/systemd-journald.service
+    | flag removes 12 lines: Filesystem                                              1K-blocks       Used  Available Use% Mounted on, tmpfs                                                    65763428          0   65763428   0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix, tmpfs                                                    32881716       7924   32873792   1% /run, tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
     without flag:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix
       tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
       tmpfs                                                    65763428       1368   65762060   1% /run/wrappers
@@ -69,20 +69,20 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
     with flag:
       Filesystem                                             Type        Inodes   IUsed     IFree IUse%  1K-blocks       Used      Avail Use% File Mounted on
       tmpfs                                                  tmpfs     16440857      13  16440844    1%   65763428          0   65763428   0% -    /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 ext4     244158464 4796778 239361686    2% 7750211880 1325343852 6034203796  19% -    /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 ext4     244158464 4783177 239375287    2% 7750211880 1325274000 6034273648  19% -    /nix
       tmpfs                                                  tmpfs     16440857    2442  16438415    1%   32881716       7924   32873792   1% -    /run
       tmpfs                                                  tmpfs         1024       1      1023    1%       1024          0       1024   0% -    /run/credentials/systemd-journald.service
       tmpfs                                                  tmpfs     16440857      23  16440834    1%   65763428       1368   65762060   1% -    /run/wrappers
             ... (6 more)
   --sync  # invoke sync before getting usage info
     tested: "--sync" in words_minimal
-    | flag adds 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325336228 6034211420  19% /nix
-    | flag removes 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix
+    | flag adds 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325273176 6034274472  19% /nix
+    | flag removes 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix
     | 11 lines unchanged
     without flag:
             ... (1 identical)
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix
       tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
       tmpfs                                                    65763428       1368   65762060   1% /run/wrappers
@@ -91,7 +91,7 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
     with flag:
             ... (1 identical)
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325336228 6034211420  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325273176 6034274472  19% /nix
       tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
       tmpfs                                                    65763428       1368   65762060   1% /run/wrappers
@@ -99,13 +99,13 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
             ... (5 more)
   --total  # elide all entries insignificant to available space, and produce a grand total
     tested: "--total" in words_minimal
-    | flag adds 2 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325355696 6034191952  19% /nix, total                                                  8065879408 1325367680 6349847496  18% -
-    | flag removes 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix
+    | flag adds 2 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325273928 6034273720  19% /nix, total                                                  8065879408 1325285912 6349929264  18% -
+    | flag removes 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix
     | 11 lines unchanged
     without flag:
             ... (1 identical)
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix
       tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
       tmpfs                                                    65763428       1368   65762060   1% /run/wrappers
@@ -114,7 +114,7 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
     with flag:
             ... (1 identical)
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325355696 6034191952  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325273928 6034273720  19% /nix
       tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
       tmpfs                                                    65763428       1368   65762060   1% /run/wrappers
@@ -122,12 +122,12 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
             ... (6 more)
   -B  # scale sizes by SIZE before printing them; e.g., '-BM' prints sizes in units of 1,048,576 bytes; see SIZE format below
     tested: "--block-size=1" in words_minimal
-    | flag adds 12 lines: Filesystem                                                 1B-blocks          Used     Available Use% Mounted on, tmpfs                                                    67341750272             0   67341750272   0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7936216965120 1356899237888 6179277553664  19% /nix, tmpfs                                                    33670877184       8114176   33662763008   1% /run, tmpfs                                                        1048576             0       1048576   0% /run/credentials/systemd-journald.service
-    | flag removes 12 lines: Filesystem                                              1K-blocks       Used  Available Use% Mounted on, tmpfs                                                    65763428          0   65763428   0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix, tmpfs                                                    32881716       7924   32873792   1% /run, tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
+    | flag adds 12 lines: Filesystem                                                 1B-blocks          Used     Available Use% Mounted on, tmpfs                                                    67341750272             0   67341750272   0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7936216965120 1356862169088 6179314622464  19% /nix, tmpfs                                                    33670877184       8114176   33662763008   1% /run, tmpfs                                                        1048576             0       1048576   0% /run/credentials/systemd-journald.service
+    | flag removes 12 lines: Filesystem                                              1K-blocks       Used  Available Use% Mounted on, tmpfs                                                    65763428          0   65763428   0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix, tmpfs                                                    32881716       7924   32873792   1% /run, tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
     without flag:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix
       tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
       tmpfs                                                    65763428       1368   65762060   1% /run/wrappers
@@ -135,7 +135,7 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
     with flag:
       Filesystem                                                 1B-blocks          Used     Available Use% Mounted on
       tmpfs                                                    67341750272             0   67341750272   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7936216965120 1356899237888 6179277553664  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7936216965120 1356862169088 6179314622464  19% /nix
       tmpfs                                                    33670877184       8114176   33662763008   1% /run
       tmpfs                                                        1048576             0       1048576   0% /run/credentials/systemd-journald.service
       tmpfs                                                    67341750272       1400832   67340349440   1% /run/wrappers
@@ -143,11 +143,11 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
   -H  # print sizes in powers of 1000 (e.g., 1.1G)
     tested: "-H" in words_minimal
     | flag adds 12 lines: Filesystem                                              Size  Used Avail Use% Mounted on, tmpfs                                                    68G     0   68G   0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5  8.0T  1.4T  6.2T  19% /nix, tmpfs                                                    34G  8.2M   34G   1% /run, tmpfs                                                   1.1M     0  1.1M   0% /run/credentials/systemd-journald.service
-    | flag removes 12 lines: Filesystem                                              1K-blocks       Used  Available Use% Mounted on, tmpfs                                                    65763428          0   65763428   0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix, tmpfs                                                    32881716       7924   32873792   1% /run, tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
+    | flag removes 12 lines: Filesystem                                              1K-blocks       Used  Available Use% Mounted on, tmpfs                                                    65763428          0   65763428   0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix, tmpfs                                                    32881716       7924   32873792   1% /run, tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
     without flag:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix
       tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
       tmpfs                                                    65763428       1368   65762060   1% /run/wrappers
@@ -162,12 +162,12 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
             ... (6 more)
   -P  # use the POSIX output format
     tested: "-P" in words_minimal
-    | flag adds 12 lines: Filesystem                                             1024-blocks       Used  Available Capacity Mounted on, tmpfs                                                     65763428          0   65763428       0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5  7750211880 1325346328 6034201320      19% /nix, tmpfs                                                     32881716       7924   32873792       1% /run, tmpfs                                                         1024          0       1024       0% /run/credentials/systemd-journald.service
-    | flag removes 12 lines: Filesystem                                              1K-blocks       Used  Available Use% Mounted on, tmpfs                                                    65763428          0   65763428   0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix, tmpfs                                                    32881716       7924   32873792   1% /run, tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
+    | flag adds 12 lines: Filesystem                                             1024-blocks       Used  Available Capacity Mounted on, tmpfs                                                     65763428          0   65763428       0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5  7750211880 1325273932 6034273716      19% /nix, tmpfs                                                     32881716       7924   32873792       1% /run, tmpfs                                                         1024          0       1024       0% /run/credentials/systemd-journald.service
+    | flag removes 12 lines: Filesystem                                              1K-blocks       Used  Available Use% Mounted on, tmpfs                                                    65763428          0   65763428   0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix, tmpfs                                                    32881716       7924   32873792   1% /run, tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
     without flag:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix
       tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
       tmpfs                                                    65763428       1368   65762060   1% /run/wrappers
@@ -175,19 +175,19 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
     with flag:
       Filesystem                                             1024-blocks       Used  Available Capacity Mounted on
       tmpfs                                                     65763428          0   65763428       0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5  7750211880 1325346328 6034201320      19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5  7750211880 1325273932 6034273716      19% /nix
       tmpfs                                                     32881716       7924   32873792       1% /run
       tmpfs                                                         1024          0       1024       0% /run/credentials/systemd-journald.service
       tmpfs                                                     65763428       1368   65762060       1% /run/wrappers
             ... (6 more)
   -T  # print file system type
     tested: "-T" in words_minimal
-    | flag adds 12 lines: Filesystem                                             Type      1K-blocks       Used  Available Use% Mounted on, tmpfs                                                  tmpfs      65763428          0   65763428   0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 ext4     7750211880 1325323272 6034224376  19% /nix, tmpfs                                                  tmpfs      32881716       7924   32873792   1% /run, tmpfs                                                  tmpfs          1024          0       1024   0% /run/credentials/systemd-journald.service
-    | flag removes 12 lines: Filesystem                                              1K-blocks       Used  Available Use% Mounted on, tmpfs                                                    65763428          0   65763428   0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix, tmpfs                                                    32881716       7924   32873792   1% /run, tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
+    | flag adds 12 lines: Filesystem                                             Type      1K-blocks       Used  Available Use% Mounted on, tmpfs                                                  tmpfs      65763428          0   65763428   0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 ext4     7750211880 1325273884 6034273764  19% /nix, tmpfs                                                  tmpfs      32881716       7924   32873792   1% /run, tmpfs                                                  tmpfs          1024          0       1024   0% /run/credentials/systemd-journald.service
+    | flag removes 12 lines: Filesystem                                              1K-blocks       Used  Available Use% Mounted on, tmpfs                                                    65763428          0   65763428   0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix, tmpfs                                                    32881716       7924   32873792   1% /run, tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
     without flag:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix
       tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
       tmpfs                                                    65763428       1368   65762060   1% /run/wrappers
@@ -195,22 +195,22 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
     with flag:
       Filesystem                                             Type      1K-blocks       Used  Available Use% Mounted on
       tmpfs                                                  tmpfs      65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 ext4     7750211880 1325323272 6034224376  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 ext4     7750211880 1325273884 6034273764  19% /nix
       tmpfs                                                  tmpfs      32881716       7924   32873792   1% /run
       tmpfs                                                  tmpfs          1024          0       1024   0% /run/credentials/systemd-journald.service
       tmpfs                                                  tmpfs      65763428       1368   65762060   1% /run/wrappers
             ... (6 more)
   -a  # include pseudo, duplicate, inaccessible file systems
     tested: "-a" in words_minimal
-    | flag adds 16 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325097040 6034450608  19% /nix, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325097044 6034450604  19% /nix/store, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325097060 6034450588  19% /usr, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325097080 6034450568  19% /bin, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325097084 6034450564  19% /lib64
-    | flag removes 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix
+    | flag adds 16 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060696 6034486952  19% /nix, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060696 6034486952  19% /nix/store, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060700 6034486948  19% /usr, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060696 6034486952  19% /bin, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060696 6034486952  19% /lib64
+    | flag removes 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix
     | 11 lines unchanged
     | exit: 0 → 1
     | stderr: df: /run/user/1000/doc: Operation not permitted
     without flag:
             ... (1 identical)
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix
       tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
       tmpfs                                                    65763428       1368   65762060   1% /run/wrappers
@@ -219,20 +219,20 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
     with flag:
             ... (1 identical)
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325097040 6034450608  19% /nix
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325097044 6034450604  19% /nix/store
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325097060 6034450588  19% /usr
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325097080 6034450568  19% /bin
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325097084 6034450564  19% /lib64
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060696 6034486952  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060696 6034486952  19% /nix/store
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060700 6034486948  19% /usr
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060696 6034486952  19% /bin
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060696 6034486952  19% /lib64
             ... (20 more)
   -h  # print sizes in powers of 1024 (e.g., 1023M)
     tested: "-h" in words_minimal
     | flag adds 12 lines: Filesystem                                              Size  Used Avail Use% Mounted on, tmpfs                                                    63G     0   63G   0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5  7.3T  1.3T  5.7T  19% /nix, tmpfs                                                    32G  7.8M   32G   1% /run, tmpfs                                                   1.0M     0  1.0M   0% /run/credentials/systemd-journald.service
-    | flag removes 12 lines: Filesystem                                              1K-blocks       Used  Available Use% Mounted on, tmpfs                                                    65763428          0   65763428   0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix, tmpfs                                                    32881716       7924   32873792   1% /run, tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
+    | flag removes 12 lines: Filesystem                                              1K-blocks       Used  Available Use% Mounted on, tmpfs                                                    65763428          0   65763428   0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix, tmpfs                                                    32881716       7924   32873792   1% /run, tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
     without flag:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix
       tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
       tmpfs                                                    65763428       1368   65762060   1% /run/wrappers
@@ -247,12 +247,12 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
             ... (6 more)
   -i  # list inode information instead of block usage
     tested: "-i" in words_minimal
-    | flag adds 12 lines: Filesystem                                                Inodes   IUsed     IFree IUse% Mounted on, tmpfs                                                   16440857      13  16440844    1% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 244158464 4798735 239359729    2% /nix, tmpfs                                                   16440857    2442  16438415    1% /run, tmpfs                                                       1024       1      1023    1% /run/credentials/systemd-journald.service
-    | flag removes 12 lines: Filesystem                                              1K-blocks       Used  Available Use% Mounted on, tmpfs                                                    65763428          0   65763428   0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix, tmpfs                                                    32881716       7924   32873792   1% /run, tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
+    | flag adds 12 lines: Filesystem                                                Inodes   IUsed     IFree IUse% Mounted on, tmpfs                                                   16440857      13  16440844    1% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 244158464 4783157 239375307    2% /nix, tmpfs                                                   16440857    2442  16438415    1% /run, tmpfs                                                       1024       1      1023    1% /run/credentials/systemd-journald.service
+    | flag removes 12 lines: Filesystem                                              1K-blocks       Used  Available Use% Mounted on, tmpfs                                                    65763428          0   65763428   0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix, tmpfs                                                    32881716       7924   32873792   1% /run, tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
     without flag:
       Filesystem                                              1K-blocks       Used  Available Use% Mounted on
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix
       tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
       tmpfs                                                    65763428       1368   65762060   1% /run/wrappers
@@ -260,20 +260,20 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
     with flag:
       Filesystem                                                Inodes   IUsed     IFree IUse% Mounted on
       tmpfs                                                   16440857      13  16440844    1% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 244158464 4798735 239359729    2% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 244158464 4783157 239375307    2% /nix
       tmpfs                                                   16440857    2442  16438415    1% /run
       tmpfs                                                       1024       1      1023    1% /run/credentials/systemd-journald.service
       tmpfs                                                   16440857      23  16440834    1% /run/wrappers
             ... (6 more)
   -k  # like --block-size=1K
     tested: "-k" in words_minimal
-    | flag adds 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325358736 6034188912  19% /nix
-    | flag removes 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix
+    | flag adds 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325273884 6034273764  19% /nix
+    | flag removes 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix
     | 11 lines unchanged
     without flag:
             ... (1 identical)
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix
       tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
       tmpfs                                                    65763428       1368   65762060   1% /run/wrappers
@@ -282,7 +282,7 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
     with flag:
             ... (1 identical)
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325358736 6034188912  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325273884 6034273764  19% /nix
       tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
       tmpfs                                                    65763428       1368   65762060   1% /run/wrappers
@@ -290,13 +290,13 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
             ... (5 more)
   -l  # limit listing to local file systems
     tested: "-l" in words_minimal
-    | flag adds 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325359224 6034188424  19% /nix
-    | flag removes 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix
+    | flag adds 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325274008 6034273640  19% /nix
+    | flag removes 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix
     | 11 lines unchanged
     without flag:
             ... (1 identical)
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix
       tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
       tmpfs                                                    65763428       1368   65762060   1% /run/wrappers
@@ -305,7 +305,7 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
     with flag:
             ... (1 identical)
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325359224 6034188424  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325274008 6034273640  19% /nix
       tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
       tmpfs                                                    65763428       1368   65762060   1% /run/wrappers
@@ -313,13 +313,13 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
             ... (5 more)
   -v  # (ignored)
     tested: "-v" in words_minimal
-    | flag adds 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325308140 6034239508  19% /nix
-    | flag removes 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix
+    | flag adds 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325272404 6034275244  19% /nix
+    | flag removes 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix
     | 11 lines unchanged
     without flag:
             ... (1 identical)
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix
       tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
       tmpfs                                                    65763428       1368   65762060   1% /run/wrappers
@@ -328,7 +328,7 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
     with flag:
             ... (1 identical)
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325308140 6034239508  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325272404 6034275244  19% /nix
       tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
       tmpfs                                                    65763428       1368   65762060   1% /run/wrappers
@@ -336,13 +336,13 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
             ... (5 more)
   -x  # limit listing to file systems not of type TYPE
     tested: "-x" "auto" in words_minimal
-    | flag adds 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325104428 6034443220  19% /nix
-    | flag removes 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix
+    | flag adds 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325063888 6034483760  19% /nix
+    | flag removes 1 lines: /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix
     | 11 lines unchanged
     without flag:
             ... (1 identical)
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325060744 6034486904  19% /nix
       tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
       tmpfs                                                    65763428       1368   65762060   1% /run/wrappers
@@ -351,7 +351,7 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
     with flag:
             ... (1 identical)
       tmpfs                                                    65763428          0   65763428   0% /
-      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325104428 6034443220  19% /nix
+      /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325063888 6034483760  19% /nix
       tmpfs                                                    32881716       7924   32873792   1% /run
       tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
       tmpfs                                                    65763428       1368   65762060   1% /run/wrappers
@@ -360,7 +360,7 @@ Aliases: -B = --block-size, -H = --si, -P = --portability, -T = --print-type, -a
 
 ## Distinguishable in combination (verified via flag pairs)
   -t  # limit listing to file systems of type TYPE
-    | flag removes 12 lines: Filesystem                                              1K-blocks       Used  Available Use% Mounted on, tmpfs                                                    65763428          0   65763428   0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325099244 6034448404  19% /nix, tmpfs                                                    32881716       7924   32873792   1% /run, tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
+    | flag removes 12 lines: Filesystem                                              1K-blocks       Used  Available Use% Mounted on, tmpfs                                                    65763428          0   65763428   0% /, /dev/disk/by-uuid/a4565252-9676-46f3-92bd-315ea27c98b5 7750211880 1325273996 6034273652  19% /nix, tmpfs                                                    32881716       7924   32873792   1% /run, tmpfs                                                        1024          0       1024   0% /run/credentials/systemd-journald.service
     | exit: 0 → 1
     | stderr: df: no file systems processed
     proven via: (pairwise evidence)

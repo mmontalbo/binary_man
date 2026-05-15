@@ -431,50 +431,80 @@ pub fn format_exploration_report(
         }
     }
 
+    // Compute exemplars for all solo flags, then classify by what the
+    // exemplar actually shows — not by a heuristic over all runs.
+    let mut verified_flags: Vec<(String, Exemplar)> = Vec::new();
+    let mut errored_flags: Vec<(String, Option<Exemplar>)> = Vec::new();
+
+    let mut sorted_solo: Vec<&String> = solo_distinguished.iter().collect();
+    sorted_solo.sort();
+    for flag in sorted_solo {
+        let ex = find_exemplar(flag, all_runs, aliases);
+        let shows_working = ex.as_ref().is_some_and(|e| {
+            let errored = e.vs_diff.contains("exit:") || e.vs_diff.contains("stderr");
+            let has_output_diff = e.vs_diff.contains("flag adds")
+                || e.vs_diff.contains("flag removes")
+                || e.vs_diff.contains("reorders");
+            let has_fs_effect = e.vs_diff.contains("fs: also") && !errored;
+            // Verified = produced observable output changes without erroring,
+            // or has stdout diff evidence (which overrides error signals like
+            // stderr warnings that accompany valid output)
+            if errored { has_output_diff } // errors: only if stdout also changed
+            else { e.vs_diff != "identical" || has_fs_effect } // no error: any change counts
+        });
+        if shows_working {
+            verified_flags.push((flag.clone(), ex.unwrap()));
+        } else {
+            errored_flags.push((flag.clone(), ex));
+        }
+    }
+
     // Helper: render a flag with its exemplar
-    let render_flag = |out: &mut String, flag: &str| {
+    let render_flag_with_ex = |out: &mut String, flag: &str, ex: &Exemplar| {
         let desc = flag_info.and_then(|fi| fi.descs.get(flag))
             .map(|d| format!("  # {}", first_sentence(d, 140)))
             .unwrap_or_default();
         out.push_str(&format!("  {}{}\n", flag, desc));
-
-        if let Some(ex) = find_exemplar(flag, all_runs, aliases) {
-            out.push_str(&format!("    tested: {} in {}\n", ex.run_label, ex.context_name));
-            for part in ex.vs_diff.split("; ") {
-                out.push_str(&format!("    | {}\n", part));
+        out.push_str(&format!("    tested: {} in {}\n", ex.run_label, ex.context_name));
+        for part in ex.vs_diff.split("; ") {
+            out.push_str(&format!("    | {}\n", part));
+        }
+        let base_has_content = ex.base_preview.lines().any(|l| !l.contains("identical") && !l.trim().is_empty());
+        let flag_has_content = ex.flag_preview.lines().any(|l| !l.contains("identical") && !l.trim().is_empty());
+        if base_has_content || flag_has_content {
+            out.push_str("    without flag:\n");
+            for line in ex.base_preview.lines() {
+                out.push_str(&format!("      {}\n", line));
             }
-            let base_has_content = ex.base_preview.lines().any(|l| !l.contains("identical") && !l.trim().is_empty());
-            let flag_has_content = ex.flag_preview.lines().any(|l| !l.contains("identical") && !l.trim().is_empty());
-            if base_has_content || flag_has_content {
-                out.push_str("    without flag:\n");
-                for line in ex.base_preview.lines() {
-                    out.push_str(&format!("      {}\n", line));
-                }
-                out.push_str("    with flag:\n");
-                for line in ex.flag_preview.lines() {
-                    out.push_str(&format!("      {}\n", line));
-                }
+            out.push_str("    with flag:\n");
+            for line in ex.flag_preview.lines() {
+                out.push_str(&format!("      {}\n", line));
             }
         }
     };
 
-    // Solo-distinguished flags: observed behavior first, then error-only
-    if !solo_observed.is_empty() {
+    // Solo-distinguished flags: verified behavior first, then error-only
+    if !verified_flags.is_empty() {
         out.push_str("## Verified behavior (flag produced observable output)\n");
-        let mut sorted: Vec<&&String> = solo_observed.iter().collect();
-        sorted.sort();
-        for flag in sorted {
-            render_flag(&mut out, flag);
+        for (flag, ex) in &verified_flags {
+            render_flag_with_ex(&mut out, flag, ex);
         }
         out.push('\n');
     }
 
-    if !solo_error_only.is_empty() {
+    if !errored_flags.is_empty() {
         out.push_str("## Recognized but errored (flag accepted, no successful output observed)\n");
-        let mut sorted: Vec<&&String> = solo_error_only.iter().collect();
-        sorted.sort();
-        for flag in sorted {
-            render_flag(&mut out, flag);
+        for (flag, ex) in &errored_flags {
+            let desc = flag_info.and_then(|fi| fi.descs.get(flag.as_str()))
+                .map(|d| format!("  # {}", first_sentence(d, 140)))
+                .unwrap_or_default();
+            out.push_str(&format!("  {}{}\n", flag, desc));
+            if let Some(ex) = ex {
+                out.push_str(&format!("    tested: {} in {}\n", ex.run_label, ex.context_name));
+                for part in ex.vs_diff.split("; ") {
+                    out.push_str(&format!("    | {}\n", part));
+                }
+            }
         }
         out.push('\n');
     }

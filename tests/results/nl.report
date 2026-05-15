@@ -44,8 +44,18 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
            2	apple
            3	banana
     with flag:
+  -n  # insert line numbers according to FORMAT
+    tested: "-n" "%s" in words_minimal / stdin
+    | flag removes 3 lines:      1	cherry,      2	apple,      3	banana
+    | exit: 0 → 1
+    | stderr: nl: invalid line numbering format: '%s'
+    without flag:
+           1	cherry
+           2	apple
+           3	banana
+    with flag:
   -s  # add STRING after (possible) line number
-    tested: "-s" "x" in words_minimal / stdin
+    tested: "--number-separator=x" in words_minimal / stdin
     | flag adds 3 lines:      1xcherry,      2xapple,      3xbanana
     | flag removes 3 lines:      1	cherry,      2	apple,      3	banana
     without flag:
@@ -80,18 +90,6 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
        1	cherry
        2	apple
        3	banana
-
-## Recognized but errored (flag accepted, no successful output observed)
-  -n  # insert line numbers according to FORMAT
-    tested: "-n" "%s" in words_minimal / stdin
-    | flag removes 3 lines:      1	cherry,      2	apple,      3	banana
-    | exit: 0 → 1
-    | stderr: nl: invalid line numbering format: '%s'
-    without flag:
-           1	cherry
-           2	apple
-           3	banana
-    with flag:
 
 ## Distinguishable in combination (verified via flag pairs)
   -b  # use STYLE for numbering body lines

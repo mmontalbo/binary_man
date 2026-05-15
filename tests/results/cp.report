@@ -1,7 +1,7 @@
 # Exploration: cp
 
 ## Test scope
-  93 behavioral groups: 59 unique, 34 shared
+  78 behavioral groups: 45 unique, 33 shared
 
   Contexts referenced below:
     access_log_minimal:
@@ -30,6 +30,11 @@ echo hello"
 Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-target-directory, -a = --archive, -f = --force, -i = --interactive, -l = --link, -n = --no-clobber, -s = --symbolic-link, -t = --target-directory, -v = --verbose, -x = --one-file-system
 
 ## Verified behavior (flag produced observable output)
+  -S  # override the usual backup suffix
+    tested: "-S" "test" "input.txt" "other.txt" in words_standard
+    | fs: also create other.txttest (26 bytes)
+
+## Recognized but errored (flag accepted, no successful output observed)
   --no-preserve  # don't preserve the specified attributes
     tested: "--no-preserve=mode" "input.txt" "other.txt" in words_standard
     | identical
@@ -49,11 +54,6 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     | exit: 0 → 1
     | stderr: cp: invalid argument 'none' for '--sparse'
     | fs: did not modify other.txt (size: 26 -> 10586)
-  -S  # override the usual backup suffix
-    tested: "-S" "test" "input.txt" "other.txt" in words_standard
-    | fs: also modify other.txt (size: 26 -> 10586, mtime changed)
-    | fs: also create other.txttest (26 bytes)
-    | fs: did not modify other.txt (size: 26 -> 10586)
   -i  # prompt before overwrite (overrides a previous -n option)
     tested: "-i" "input.txt" "other.txt" in words_standard
     | exit: 0 → 1
@@ -70,32 +70,30 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     | fs: did not modify other.txt (size: 12 -> 10586)
     proven via: "--no-preserve=mode" "--attributes-only" "input.txt" "subdir"
   --backup
-    | fs: also modify other.txt (size: 26 -> 632)
     | fs: also create other.txt~ (26 bytes)
-    | fs: did not modify other.txt (size: 26 -> 632, mtime changed)
-    proven via: "--no-preserve=mode" "--backup" "input.txt" "other.txt"
+    proven via: (pairwise evidence)
   --context
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
     proven via: (pairwise evidence)
   --copy-contents  # copy contents of special files when recursive
-    | fs: also modify other.txt (size: 26 -> 632)
-    | fs: did not modify other.txt (size: 26 -> 632, mtime changed)
-    proven via: "--no-preserve=mode" "--copy-contents" "input.txt" "other.txt"
+    | exit: 0 → 1
+    | stderr: cp: 'input.txt' and './input.txt' are the same file
+    | fs: did not create subdir (10586 bytes)
+    proven via: (pairwise evidence)
   --debug  # explain how a file is copied
     | flag adds 2 lines: 'input.txt' -> 'other.txt', copy offload: yes, reflink: unsupported, sparse detection: no
-    | fs: also modify other.txt (size: 26 -> 632)
-    | fs: did not modify other.txt (size: 26 -> 632, mtime changed)
     proven via: "--no-preserve=mode" "--debug" "input.txt" "other.txt"
   --keep-directory-symlink  # follow existing symlinks to directories
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
-    proven via: "--no-preserve=mode" "--keep-directory-symlink" "input.txt" "other.txt"
+    proven via: (pairwise evidence)
   --preserve
-    | fs: also modify other.txt (size: 26 -> 632)
-    | fs: did not modify other.txt (size: 26 -> 632, mtime changed)
+    | exit: 0 → 1
+    | stderr: cp: 'input.txt' and './input.txt' are the same file
+    | fs: did not create subdir (10586 bytes)
     proven via: (pairwise evidence)
   --recursive
     | exit: 0 → 1
@@ -106,7 +104,7 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
-    proven via: "--no-preserve=mode" "--remove-destination" "input.txt" "other.txt"
+    proven via: (pairwise evidence)
   --strip-trailing-slashes  # remove any trailing slashes from each SOURCE argument
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
@@ -126,8 +124,9 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     | fs: did not create subdir (10586 bytes)
     proven via: (pairwise evidence)
   -P  # never follow symbolic links in SOURCE
-    | fs: also modify other.txt (size: 26 -> 632)
-    | fs: did not modify other.txt (size: 26 -> 632, mtime changed)
+    | exit: 0 → 1
+    | stderr: cp: 'input.txt' and './input.txt' are the same file
+    | fs: did not create subdir (10586 bytes)
     proven via: (pairwise evidence)
   -R
     | exit: 0 → 1
@@ -145,22 +144,23 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     | fs: did not create subdir (10586 bytes)
     proven via: (pairwise evidence)
   -a  # same as -dR --preserve=all
-    | fs: also modify other.txt (size: 26 -> 632)
-    | fs: did not modify other.txt (size: 26 -> 632, mtime changed)
+    | exit: 0 → 1
+    | stderr: cp: 'input.txt' and './input.txt' are the same file
+    | fs: did not create subdir (10586 bytes)
     proven via: (pairwise evidence)
   -b  # like --backup but does not accept an argument
-    | fs: also modify other.txt (size: 26 -> 632)
     | fs: also create other.txt~ (26 bytes)
-    | fs: did not modify other.txt (size: 26 -> 632, mtime changed)
-    proven via: "--no-preserve=mode" "-b" "input.txt" "other.txt"
+    proven via: (pairwise evidence)
   -d  # same as --no-dereference --preserve=links
-    | fs: also modify other.txt (size: 26 -> 632)
-    | fs: did not modify other.txt (size: 26 -> 632, mtime changed)
+    | exit: 0 → 1
+    | stderr: cp: 'input.txt' and './input.txt' are the same file
+    | fs: did not create subdir (10586 bytes)
     proven via: (pairwise evidence)
   -f  # if an existing destination file cannot be opened, remove it and try again (this option is ignored when the -n option is also used)
-    | fs: also modify other.txt (size: 26 -> 632)
-    | fs: did not modify other.txt (size: 26 -> 632, mtime changed)
-    proven via: "--no-preserve=mode" "-f" "input.txt" "other.txt"
+    | exit: 0 → 1
+    | stderr: cp: 'input.txt' and './input.txt' are the same file
+    | fs: did not create subdir (10586 bytes)
+    proven via: (pairwise evidence)
   -l  # hard link files instead of copying
     | exit: 1 → 0
     | stderr removed
@@ -170,8 +170,9 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     | stderr removed
     proven via: (pairwise evidence)
   -p  # same as --preserve=mode,ownership,timestamps
-    | fs: also modify other.txt (size: 26 -> 632)
-    | fs: did not modify other.txt (size: 26 -> 632, mtime changed)
+    | exit: 0 → 1
+    | stderr: cp: 'input.txt' and './input.txt' are the same file
+    | fs: did not create subdir (10586 bytes)
     proven via: (pairwise evidence)
   -r
     | exit: 0 → 1
@@ -179,17 +180,16 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     | fs: did not create subdir (10586 bytes)
     proven via: (pairwise evidence)
   -s  # make symbolic links instead of copying
-    | fs: also modify other.txt (size: 26 -> 632)
-    | fs: did not modify other.txt (size: 26 -> 632, mtime changed)
+    | exit: 0 → 1
+    | stderr: cp: subdir/input.txt: can make relative symbolic links only in current directory
+    | fs: did not create subdir/input.txt (10586 bytes)
     proven via: (pairwise evidence)
   -u  # equivalent to --update[=older]
     | fs: did not modify other.txt (size: 12 -> 10586)
     proven via: (pairwise evidence)
   -v  # explain what is being done
     | flag adds 1 lines: 'input.txt' -> 'other.txt'
-    | fs: also modify other.txt (size: 26 -> 632)
-    | fs: did not modify other.txt (size: 26 -> 632, mtime changed)
-    proven via: "--no-preserve=mode" "-v" "input.txt" "other.txt"
+    proven via: (pairwise evidence)
   -x  # stay on this file system
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file

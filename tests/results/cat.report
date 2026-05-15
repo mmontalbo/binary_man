@@ -186,15 +186,6 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
       
       blank line above
             ... (21 more)
-  -u  # (ignored)
-    tested: "-u" "input.txt" "other.txt" in formatted_minimal
-    | identical
-    without flag:
-            ... (27 identical)
-      hello world
-    with flag:
-            ... (27 identical)
-      hello world
   -v  # use ^ and M- notation, except for LFD and TAB
     tested: "-v" "input.txt" "other.txt" in formatted_minimal
     | flag adds 3 lines: cafM-CM-) rM-CM-)sumM-CM-) naM-CM-/ve M-CM-<ber straM-CM-^_e M-bM-^@M-^T multi-byte words that wrap differently with fold -b vs fold (columns vs bytes), M-fM-^WM-%M-fM-^\M-,M-hM-*M-^^M-cM-^CM-^FM-cM-^BM--M-cM-^BM-9M-cM-^CM-^HM-oM-<M-^ZM-fM-<M-"M-eM--M-^WM-cM-^AM-(M-cM-^AM-2M-cM-^BM-^IM-cM-^AM-^LM-cM-^AM-*M-cM-^AM-(M-cM-^BM-+M-cM-^BM-?M-cM-^BM-+M-cM-^CM-^JM-cM-^BM-^RM-eM-^PM-+M-cM-^BM-^@M-hM-!M-^LM-cM-^AM-'M-cM-^@M-^AM-cM-^CM-^PM-cM-^BM-$M-cM-^CM-^HM-fM-^UM-0M-cM-^AM-(M-fM-^VM-^GM-eM--M-^WM-fM-^UM-0M-cM-^AM-^LM-gM-^UM-0M-cM-^AM-*M-cM-^BM-^K, emoji line: M-pM-^_M-^NM-^IM-pM-^_M-^NM-^JM-pM-^_M-^NM-^HM-pM-^_M-^NM-^AM-pM-^_M-^NM-^BM-pM-^_M-^NM-^DM-pM-^_M-^NM-^CM-pM-^_M-^NM-^FM-pM-^_M-^NM-^GM-bM-^\M-(M-pM-^_M-^LM-^_M-pM-^_M-^RM-+M-bM--M-^PM-oM-8M-^OM-pM-^_M-^LM-^HM-bM-^XM-^@M-oM-8M-^OM-pM-^_M-^LM-^YM-bM-^ZM-!M-oM-8M-^OM-pM-^_M-^TM-%M-pM-^_M-^RM-'M-pM-^_M-^LM-^J
@@ -214,4 +205,9 @@ Aliases: -A = --show-all, -E = --show-ends, -T = --show-tabs, -b = --number-nonb
       M-fM-^WM-%M-fM-^\M-,M-hM-*M-^^M-cM-^CM-^FM-cM-^BM--M-cM-^BM-9M-cM-^CM-^HM-oM-<M-^ZM-fM-<M-"M-eM--M-^WM-cM-^AM-(M-cM-^AM-2M-cM-^BM-^IM-cM-^AM-^LM-cM-^AM-*M-cM-^AM-(M-cM-^BM-+M-cM-^BM-?M-cM-^BM-+M-cM-^CM-^JM-cM-^BM-^RM-eM-^PM-+M-cM-^BM-^@M-hM-!M-^LM-cM-^AM-'M-cM-^@M-^AM-cM-^CM-^PM-cM-^BM-$M-cM-^CM-^HM-fM-^UM-0M-cM-^AM-(M-fM-^VM-^GM-eM--M-^WM-fM-^UM-0M-cM-^AM-^LM-gM-^UM-0M-cM-^AM-*M-cM-^BM-^K
       emoji line: M-pM-^_M-^NM-^IM-pM-^_M-^NM-^JM-pM-^_M-^NM-^HM-pM-^_M-^NM-^AM-pM-^_M-^NM-^BM-pM-^_M-^NM-^DM-pM-^_M-^NM-^CM-pM-^_M-^NM-^FM-pM-^_M-^NM-^GM-bM-^\M-(M-pM-^_M-^LM-^_M-pM-^_M-^RM-+M-bM--M-^PM-oM-8M-^OM-pM-^_M-^LM-^HM-bM-^XM-^@M-oM-8M-^OM-pM-^_M-^LM-^YM-bM-^ZM-!M-oM-8M-^OM-pM-^_M-^TM-%M-pM-^_M-^RM-'M-pM-^_M-^LM-^J
       hello world
+
+## Recognized but errored (flag accepted, no successful output observed)
+  -u  # (ignored)
+    tested: "-u" "input.txt" "other.txt" in formatted_minimal
+    | identical
 
