@@ -21,19 +21,6 @@ echo hello"
       write "old.txt" "ancient"
       props "old.txt" mtime old
       write "big.bin" "<generated 10000 bytes>"
-    numbers_standard / input.txt=size:1:
-      write "input.txt" "0\n1\n1.00\n$1.00\n1/2\n1E2\n1E02\n1E+02\n-1\n-1.00\n-$1...."
-      write "other.txt" "other content\nsecond line"
-      write "a.txt" "first"
-      write "b.txt" "second"
-      write ".hidden" "secret"
-      mkdir "subdir"
-      write "subdir/nested.txt" "nested"
-      symlink "link.txt" -> "input.txt"
-      write "exec.sh" "#!/bin/sh
-echo hello"
-      props "exec.sh" executable
-      write "input.txt" "<generated 1 bytes>"
     paths_minimal:
       write "input.txt" "/usr/local/bin/python3\n/usr/bin/env\n/bin/sh\n/home/alic..."
       write "other.txt" "hello world"
@@ -186,7 +173,7 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
             ... (1509 more)
   --unified
     tested: "--unified" "input.txt" "other.txt" in words_minimal
-    | flag adds 1516 lines: --- input.txt	2026-05-14 12:49:13.994179813 -0700, +++ other.txt	2026-05-14 12:49:13.994196996 -0700, @@ -1,1512 +1 @@, -aardvark, -abbreviation
+    | flag adds 1516 lines: --- input.txt	2026-05-14 21:09:57.036219293 -0700, +++ other.txt	2026-05-14 21:09:57.036230554 -0700, @@ -1,1512 +1 @@, -aardvark, -abbreviation
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
     without flag:
       1,1512c1
@@ -197,8 +184,8 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       < accept
             ... (1509 more)
     with flag:
-      --- input.txt	2026-05-14 12:49:13.994179813 -0700
-      +++ other.txt	2026-05-14 12:49:13.994196996 -0700
+      --- input.txt	2026-05-14 21:09:57.036219293 -0700
+      +++ other.txt	2026-05-14 21:09:57.036230554 -0700
       @@ -1,1512 +1 @@
       -aardvark
       -abbreviation
@@ -225,7 +212,7 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       accept
             ... (1511 more)
   -I  # ignore changes where all lines match RE
-    tested: "--ignore-matching-lines=." "input.txt" "other.txt" in words_standard
+    tested: "-I" "." "input.txt" "other.txt" in words_standard
     | flag removes 1516 lines: 1,1512c1,2, < aardvark, < abbreviation, < about, < abstract
     | exit: 1 → 0
     without flag:
@@ -260,7 +247,7 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
             ... (1510 more)
   -U
     tested: "-U" "1" "input.txt" "other.txt" in words_minimal
-    | flag adds 1516 lines: --- input.txt	2026-05-14 12:49:13.994136582 -0700, +++ other.txt	2026-05-14 12:49:13.994147352 -0700, @@ -1,1512 +1 @@, -aardvark, -abbreviation
+    | flag adds 1516 lines: --- input.txt	2026-05-14 21:09:57.036178175 -0700, +++ other.txt	2026-05-14 21:09:57.036191731 -0700, @@ -1,1512 +1 @@, -aardvark, -abbreviation
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
     without flag:
       1,1512c1
@@ -271,8 +258,8 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       < accept
             ... (1509 more)
     with flag:
-      --- input.txt	2026-05-14 12:49:13.994136582 -0700
-      +++ other.txt	2026-05-14 12:49:13.994147352 -0700
+      --- input.txt	2026-05-14 21:09:57.036178175 -0700
+      +++ other.txt	2026-05-14 21:09:57.036191731 -0700
       @@ -1,1512 +1 @@
       -aardvark
       -abbreviation
@@ -314,7 +301,7 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       .
   -l  # pass output through 'pr' to paginate it
     tested: "-l" "input.txt" "other.txt" in words_minimal
-    | flag adds 333 lines: , , 2026-05-14 12:49           diff -l input.txt other.txt            Page 1, , 
+    | flag adds 333 lines: , , 2026-05-14 21:09           diff -l input.txt other.txt            Page 1, , 
     | 1515 lines unchanged
     without flag:
       1,1512c1
@@ -327,7 +314,7 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
     with flag:
       
       
-      2026-05-14 12:49           diff -l input.txt other.txt            Page 1
+      2026-05-14 21:09           diff -l input.txt other.txt            Page 1
       
       
       1,1512c1
@@ -388,7 +375,7 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
             ... (23 more)
   -u
     tested: "-u" "input.txt" "other.txt" in words_minimal
-    | flag adds 1516 lines: --- input.txt	2026-05-14 12:49:13.994094232 -0700, +++ other.txt	2026-05-14 12:49:13.994108949 -0700, @@ -1,1512 +1 @@, -aardvark, -abbreviation
+    | flag adds 1516 lines: --- input.txt	2026-05-14 21:09:57.036131978 -0700, +++ other.txt	2026-05-14 21:09:57.036146846 -0700, @@ -1,1512 +1 @@, -aardvark, -abbreviation
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
     without flag:
       1,1512c1
@@ -399,8 +386,8 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
       < accept
             ... (1509 more)
     with flag:
-      --- input.txt	2026-05-14 12:49:13.994094232 -0700
-      +++ other.txt	2026-05-14 12:49:13.994108949 -0700
+      --- input.txt	2026-05-14 21:09:57.036131978 -0700
+      +++ other.txt	2026-05-14 21:09:57.036146846 -0700
       @@ -1,1512 +1 @@
       -aardvark
       -abbreviation
@@ -431,35 +418,35 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
   --color
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
-    proven via: "--color" "-u" "input.txt" "other.txt"
+    proven via: "-u" "--color" "input.txt" "other.txt"
   --context
-    | flag adds 78 lines: *** input.txt	Thu May 14 12:49:14 2026, --- other.txt	Thu May 14 12:49:14 2026, ***************, *** 1,71 ****, ! 0
+    | flag adds 78 lines: *** input.txt	Thu May 14 21:09:57 2026, --- other.txt	Thu May 14 21:09:57 2026, ***************, *** 1,71 ****, ! 0
     | flag removes 75 lines: 1,71c1,2, < 0, < 1, < 1.00, < $1.00
     proven via: (pairwise evidence)
   --horizon-lines  # keep NUM lines of the common prefix and suffix
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
-    proven via: "--horizon-lines=1" "--unified" "input.txt" "other.txt"
+    proven via: "--horizon-lines=1" "-u" "input.txt" "other.txt"
   --ignore-file-name-case  # ignore case when comparing file names
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
-    proven via: "-u" "--ignore-file-name-case" "input.txt" "other.txt"
+    proven via: "-U" "1" "--ignore-file-name-case" "input.txt" "other.txt"
   --label
     | flag adds 1 lines: Files test and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
-    proven via: "--label=test" "--unified" "input.txt" "other.txt"
+    proven via: "-U" "1" "--label=test" "input.txt" "other.txt"
   --left-column  # output only the left column of common lines
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
-    proven via: "--left-column" "-u" "input.txt" "other.txt"
+    proven via: "--left-column" "--unified" "input.txt" "other.txt"
   --no-dereference  # don't follow symbolic links
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
-    proven via: "-u" "--no-dereference" "input.txt" "other.txt"
+    proven via: "-U" "1" "--no-dereference" "input.txt" "other.txt"
   --no-ignore-file-name-case  # consider case when comparing file names
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
-    proven via: "--no-ignore-file-name-case" "-U" "1" "input.txt" "other.txt"
+    proven via: "-u" "--no-ignore-file-name-case" "input.txt" "other.txt"
   --normal  # output a normal diff (the default)
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
@@ -467,11 +454,11 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
   --palette  # the colors to use when --color is active; PALETTE is a colon-separated list of terminfo capabilities
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
-    proven via: "--palette=1" "--unified" "input.txt" "other.txt"
+    proven via: "-u" "--palette=1" "input.txt" "other.txt"
   --speed-large-files  # assume large files and many scattered small changes
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
-    proven via: "--speed-large-files" "-u" "input.txt" "other.txt"
+    proven via: "-u" "--speed-large-files" "input.txt" "other.txt"
   --strip-trailing-cr  # strip trailing carriage return on input
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
@@ -483,7 +470,7 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
   --unidirectional-new-file  # treat absent first files as empty
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
-    proven via: "--unidirectional-new-file" "-u" "input.txt" "other.txt"
+    proven via: "-U" "1" "--unidirectional-new-file" "input.txt" "other.txt"
   -1
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
     | exit: 1 → 2
@@ -492,72 +479,72 @@ Aliases: -B = --ignore-blank-lines, -D = --ifdef, -E = --ignore-tab-expansion, -
   -B  # ignore changes where lines are all blank
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
-    proven via: "-B" "-U" "1" "input.txt" "other.txt"
+    proven via: "-U" "1" "-B" "input.txt" "other.txt"
   -C
-    | flag adds 78 lines: *** input.txt	Thu May 14 12:49:14 2026, --- other.txt	Thu May 14 12:49:14 2026, ***************, *** 1,71 ****, ! 0
+    | flag adds 78 lines: *** input.txt	Thu May 14 21:09:57 2026, --- other.txt	Thu May 14 21:09:57 2026, ***************, *** 1,71 ****, ! 0
     | flag removes 75 lines: 1,71c1,2, < 0, < 1, < 1.00, < $1.00
     proven via: "-C" "1" "-v" "input.txt" "other.txt"
   -E  # ignore changes due to tab expansion
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
-    proven via: "-u" "-E" "input.txt" "other.txt"
+    proven via: "-E" "--unified" "input.txt" "other.txt"
   -F  # show the most recent line matching RE
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
-    proven via: "-u" "-F" "1" "input.txt" "other.txt"
+    proven via: "--unified" "-F" "1" "input.txt" "other.txt"
   -N  # treat absent files as empty
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
-    proven via: "-N" "-U" "1" "input.txt" "other.txt"
+    proven via: "-N" "--unified" "input.txt" "other.txt"
   -S  # start with FILE when comparing directories
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
-    proven via: "-u" "-S" "input.txt" "input.txt" "other.txt"
+    proven via: "-S" "input.txt" "-U" "1" "input.txt" "other.txt"
   -Z  # ignore white space at line end
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
-    proven via: "-Z" "-U" "1" "input.txt" "other.txt"
+    proven via: "-u" "-Z" "input.txt" "other.txt"
   -a  # treat all files as text
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
-    proven via: "-a" "--unified" "input.txt" "other.txt"
+    proven via: "-a" "-u" "input.txt" "other.txt"
   -b  # ignore changes in the amount of white space
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
     proven via: "-U" "1" "-b" "input.txt" "other.txt"
   -c
-    | flag adds 78 lines: *** input.txt	Thu May 14 12:49:14 2026, --- other.txt	Thu May 14 12:49:14 2026, ***************, *** 1,71 ****, ! 0
+    | flag adds 78 lines: *** input.txt	Thu May 14 21:09:57 2026, --- other.txt	Thu May 14 21:09:57 2026, ***************, *** 1,71 ****, ! 0
     | flag removes 75 lines: 1,71c1,2, < 0, < 1, < 1.00, < $1.00
     proven via: (pairwise evidence)
   -d  # try hard to find a smaller set of changes
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
-    proven via: "-d" "-u" "input.txt" "other.txt"
+    proven via: "-d" "-U" "1" "input.txt" "other.txt"
   -i  # ignore case differences in file contents
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
-    proven via: "-i" "-U" "1" "input.txt" "other.txt"
+    proven via: "-U" "1" "-i" "input.txt" "other.txt"
   -p  # show which C function each change is in
-    | flag adds 78 lines: *** input.txt	Thu May 14 12:49:14 2026, --- other.txt	Thu May 14 12:49:14 2026, ***************, *** 1,71 ****, ! 0
+    | flag adds 78 lines: *** input.txt	Thu May 14 21:09:57 2026, --- other.txt	Thu May 14 21:09:57 2026, ***************, *** 1,71 ****, ! 0
     | flag removes 75 lines: 1,71c1,2, < 0, < 1, < 1.00, < $1.00
-    proven via: "-p" "-u" "input.txt" "other.txt"
+    proven via: "-U" "1" "-p" "input.txt" "other.txt"
   -r  # recursively compare any subdirectories found
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
-    proven via: "-u" "-r" "input.txt" "other.txt"
+    proven via: "-r" "-u" "input.txt" "other.txt"
   -s  # report when two files are the same
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
-    proven via: "--unified" "-s" "input.txt" "other.txt"
+    proven via: "-s" "-U" "1" "input.txt" "other.txt"
   -v  # output version information and exit
     | flag adds 8 lines: diff (GNU diffutils) 3.10, Copyright (C) 2023 Free Software Foundation, Inc., License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>., This is free software: you are free to change and redistribute it., There is NO WARRANTY, to the extent permitted by law.
-    | flag removes 1518 lines: *** input.txt	Thu May 14 12:49:13 2026, --- other.txt	Thu May 14 12:49:13 2026, ***************, *** 1,1512 ****, ! aardvark
+    | flag removes 1518 lines: *** input.txt	Thu May 14 21:09:57 2026, --- other.txt	Thu May 14 21:09:57 2026, ***************, *** 1,1512 ****, ! aardvark
     | exit: 1 → 0
     proven via: "-C" "1" "-v" "input.txt" "other.txt"
   -w  # ignore all white space
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract
-    proven via: "-w" "-U" "1" "input.txt" "other.txt"
+    proven via: "--unified" "-w" "input.txt" "other.txt"
   -x  # exclude files that match PAT
     | flag adds 1 lines: Files input.txt and other.txt differ
     | flag removes 1515 lines: 1,1512c1, < aardvark, < abbreviation, < about, < abstract

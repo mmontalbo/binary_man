@@ -1,12 +1,9 @@
 # Exploration: cp
 
 ## Test scope
-  81 behavioral groups: 47 unique, 34 shared
+  87 behavioral groups: 52 unique, 35 shared
 
   Contexts referenced below:
-    access_log_minimal:
-      write "input.txt" "192.168.1.1 - frank [10/Jan/2024:08:12:31 +0000] "GET /in..."
-      write "other.txt" "hello world"
     words_standard:
       write "input.txt" "aardvark\nabbreviation\nabout\nabstract\naccept\naccepted..."
       write "other.txt" "other content\nsecond line"
@@ -32,19 +29,18 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
 ## Unique behavior (observable when tested alone)
   --no-preserve  # don't preserve the specified attributes
     tested: "--no-preserve=mode" "input.txt" "other.txt" in words_standard
-    | exit 0
-    | modified other.txt (size: 26 -> 10586)
+    | identical
   --parents  # use full source file name under DIRECTORY
     tested: "--parents" "input.txt" "other.txt" in words_standard
     | exit: 0 → 1
     | stderr: cp: with --parents, the destination must be a directory
     | fs: did not modify other.txt (size: 26 -> 10586)
   --reflink
-    tested: "--reflink" "input.txt" "other.txt" in access_log_minimal
+    tested: "--reflink" "input.txt" "other.txt" in words_standard
     | exit: 0 → 1
     | stderr: cp: failed to clone 'other.txt' from 'input.txt': Operation not supported
-    | fs: also modify other.txt (size: 12 -> 0)
-    | fs: did not modify other.txt (size: 12 -> 3522)
+    | fs: also modify other.txt (size: 26 -> 0)
+    | fs: did not modify other.txt (size: 26 -> 10586)
   --sparse  # control creation of sparse files
     tested: "--sparse=none" "input.txt" "other.txt" in words_standard
     | exit: 0 → 1
@@ -52,9 +48,7 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     | fs: did not modify other.txt (size: 26 -> 10586)
   -S  # override the usual backup suffix
     tested: "-S" "test" "input.txt" "other.txt" in words_standard
-    | exit 0
-    | modified other.txt (size: 26 -> 10586)
-    | created other.txttest (26 bytes)
+    | fs: also create other.txttest (26 bytes)
   -i  # prompt before overwrite (overrides a previous -n option)
     tested: "-i" "input.txt" "other.txt" in words_standard
     | exit: 0 → 1
@@ -85,7 +79,7 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     proven via: (pairwise evidence)
   --debug  # explain how a file is copied
     | flag adds 2 lines: 'input.txt' -> 'other.txt', copy offload: yes, reflink: unsupported, sparse detection: no
-    proven via: "--no-preserve=mode" "--debug" "input.txt" "subdir"
+    proven via: "--no-preserve=mode" "--debug" "input.txt" "other.txt"
   --keep-directory-symlink  # follow existing symlinks to directories
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
@@ -190,7 +184,7 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     proven via: (pairwise evidence)
   -v  # explain what is being done
     | flag adds 1 lines: 'input.txt' -> 'other.txt'
-    proven via: "--no-preserve=mode" "--verbose" "input.txt" "other.txt"
+    proven via: "--no-preserve=mode" "-v" "input.txt" "other.txt"
   -x  # stay on this file system
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file

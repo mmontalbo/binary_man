@@ -528,6 +528,14 @@ struct Exemplar {
     flag_preview: String,     // first differing region from flag
 }
 
+/// Find an observation in a specific context from a run's context groups.
+fn obs_in_context<'a>(run: &'a RunAnalysis, ctx: &str) -> Option<&'a crate::execute::Observation> {
+    run.context_groups.iter()
+        .flat_map(|(names, obs)| names.iter().map(move |n| (n, obs)))
+        .find(|(n, _)| *n == ctx)
+        .map(|(_, obs)| obs)
+}
+
 /// Find the most distinctive observation for a flag.
 /// Picks the context where this flag's output is shared by the fewest other flags —
 /// the context that most clearly demonstrates what makes this flag unique.
@@ -604,18 +612,33 @@ fn find_exemplar(
 
     let (ctx_name, run, flag_obs) = best_context?;
 
-    // Find the base run's observation in the same context
-    let base_obs = run.from_ref.as_ref().and_then(|from_ref| {
+    // Find the base run's observation in the same context.
+    // If the run has an explicit diff_from, use that. Otherwise, find the
+    // base run with the same positional args but no flags — the bare invocation
+    // that shows what the tool does without this flag.
+    let base_obs = if let Some(ref from_ref) = run.from_ref {
         let base_label = crate::output::format_args(from_ref);
         all_runs.iter()
             .find(|r| r.args_str == base_label)
-            .and_then(|base_run| {
-                base_run.context_groups.iter()
-                    .flat_map(|(names, obs)| names.iter().map(move |n| (n, obs)))
-                    .find(|(n, _)| *n == ctx_name)
-                    .map(|(_, obs)| obs)
+            .and_then(|r| obs_in_context(r, ctx_name))
+    } else {
+        // Find a base run (no flags) in the same context for comparison.
+        // Pick the one with the most args in common with this run.
+        let run_args: HashSet<String> = run.args.iter()
+            .filter(|a| !a.is_flag())
+            .map(|a| a.display())
+            .collect();
+        all_runs.iter()
+            .filter(|r| !r.args.iter().any(|a| a.is_flag()))
+            .filter(|r| obs_in_context(r, ctx_name).is_some())
+            .max_by_key(|r| {
+                r.args.iter()
+                    .map(|a| a.display())
+                    .filter(|v| run_args.contains(v))
+                    .count()
             })
-    });
+            .and_then(|r| obs_in_context(r, ctx_name))
+    };
 
     // Compute vs_diff using the existing diff function.
     // For standalone runs (no base), describe the observation directly.

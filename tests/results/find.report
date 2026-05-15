@@ -89,9 +89,16 @@ echo hello"
     with flag:
   -name
     tested: "." "-name" "*.txt" in passwd_minimal
-    | stdout: 2 lines
-    | exit 0
+    | flag removes 3 lines: ., ./readonly.dat, ./-rf
+    | 2 lines unchanged
+    | exit: 1 → 0
+    | stderr removed
     without flag:
+      .
+      ./input.txt
+      ./readonly.dat
+      ./other.txt
+      ./-rf
     with flag:
       ./input.txt
       ./other.txt
@@ -112,9 +119,18 @@ echo hello"
     with flag:
   -type
     tested: "." "-type" "f" in words_standard
-    | stdout: 9 lines
-    | exit 0
+    | flag removes 3 lines: ., ./subdir, ./link.txt
+    | 9 lines unchanged
+    | exit: 1 → 0
+    | stderr removed
     without flag:
+      .
+      ./b.txt
+      ./exec.sh
+      ./a.txt
+      ./input.txt
+      ./subdir
+            ... (6 more)
     with flag:
       ./b.txt
       ./exec.sh
@@ -129,5 +145,5 @@ echo hello"
     | flag removes 3 lines: ., ./input.txt, ./other.txt
     | exit: 0 → 1
     | stderr: find: paths must precede expression: `.'
-    proven via: "-D" "." "-print"
+    proven via: "-N" "." "-print"
 

@@ -111,7 +111,7 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
       1E2
             ... (54 more)
   -d  # how to handle directories; ACTION is 'read', 'recurse', or 'skip'
-    tested: "--directories=1" "$(head -n1 input.txt)" "input.txt" in words_standard
+    tested: "-d" "1" "$(head -n1 input.txt)" "input.txt" in words_standard
     | flag removes 1 lines: aardvark
     | exit: 0 → 1
     | stderr: grep: invalid argument '1' for '--directories'
@@ -278,7 +278,7 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
     | flag removes 1 lines: root:x:0:0:root:/root:/bin/bash
     | exit: 0 → 2
     | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
-    proven via: "-e" "-I" "$(head -n1 input.txt)" "input.txt"
+    proven via: "-e" "-w" "$(head -n1 input.txt)" "input.txt"
   -f  # take PATTERNS from FILE
     | flag removes 1 lines: aardvark
     | exit: 0 → 1
