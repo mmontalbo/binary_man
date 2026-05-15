@@ -34,16 +34,6 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
            1	cherry
            3	apple
            5	banana
-  -l  # group of NUMBER empty lines counted as one
-    tested: "-l" "1" in words_minimal / stdin
-    | flag removes 3 lines:      1	cherry,      2	apple,      3	banana
-    | exit: 0 → 1
-    | stderr: nl: option requires an argument -- 'l'
-    without flag:
-           1	cherry
-           2	apple
-           3	banana
-    with flag:
   -n  # insert line numbers according to FORMAT
     tested: "-n" "%s" in words_minimal / stdin
     | flag removes 3 lines:      1	cherry,      2	apple,      3	banana
@@ -90,6 +80,11 @@ Aliases: -b = --body-numbering, -d = --section-delimiter, -f = --footer-numberin
        1	cherry
        2	apple
        3	banana
+
+## Recognized but errored (flag accepted, no successful output observed)
+  -l  # group of NUMBER empty lines counted as one
+    tested: "-l" "1" "input.txt" "other.txt" in formatted_minimal
+    | identical
 
 ## Distinguishable in combination (verified via flag pairs)
   -b  # use STYLE for numbering body lines

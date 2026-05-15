@@ -4,8 +4,6 @@
   163 behavioral groups: 55 unique, 108 shared
 
   Contexts referenced below:
-    empty_dir:
-      (empty directory)
     numbers_minimal:
       write "input.txt" "0\n1\n1.00\n$1.00\n1/2\n1E2\n1E02\n1E+02\n-1\n-1.00\n-$1...."
       write "other.txt" "hello world"
@@ -107,16 +105,8 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
       1/2
       1E2
             ... (54 more)
-  -d  # how to handle directories; ACTION is 'read', 'recurse', or 'skip'
-    tested: "--directories=1" "$(head -n1 input.txt)" "input.txt" in words_standard
-    | flag removes 1 lines: aardvark
-    | exit: 0 → 1
-    | stderr: grep: invalid argument '1' for '--directories'
-    without flag:
-      aardvark
-    with flag:
   -m  # stop after NUM selected lines
-    tested: "--max-count=2" "$(head -n1 input.txt)" "input.txt" in numbers_minimal
+    tested: "-m" "2" "$(head -n1 input.txt)" "input.txt" in numbers_minimal
     | flag removes 46 lines: $1.00, 1E02, 1E+02, -1.00, -$1.00
     | 2 lines unchanged
     without flag:
@@ -134,8 +124,11 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
 
 ## Recognized but errored (flag accepted, no successful output observed)
   --exclude-from  # skip files that match any file pattern from FILE
-    tested: "--exclude-from=other.txt" "$(head -n1 input.txt)" "input.txt" in empty_dir
-    | stderr changed: grep: other.txt: No such file or directory
+    tested: "--exclude-from=input.txt" "$(head -n1 input.txt)" "input.txt" in numbers_standard
+    | identical
+  -d  # how to handle directories; ACTION is 'read', 'recurse', or 'skip'
+    tested: "-d" "read" "$(head -n1 input.txt)" "input.txt" in numbers_standard
+    | identical
 
 ## Distinguishable in combination (verified via flag pairs)
   --binary-files  # assume that binary files are TYPE; TYPE is 'binary', 'text', or 'without-match'
@@ -280,7 +273,7 @@ Aliases: -A = --after-context, -B = --before-context, -C = --context, -D = --dev
     | flag removes 1 lines: root:x:0:0:root:/root:/bin/bash
     | exit: 0 → 2
     | stderr: grep: root:x:0:0:root:/root:/bin/bash: No such file or directory
-    proven via: "-e" "-b" "$(head -n1 input.txt)" "input.txt"
+    proven via: "-e" "-c" "$(head -n1 input.txt)" "input.txt"
   -f  # take PATTERNS from FILE
     | flag removes 1 lines: aardvark
     | exit: 0 → 1

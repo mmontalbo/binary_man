@@ -1,12 +1,20 @@
 # Exploration: cp
 
 ## Test scope
-  78 behavioral groups: 45 unique, 33 shared
+  86 behavioral groups: 53 unique, 33 shared
 
   Contexts referenced below:
-    access_log_minimal:
-      write "input.txt" "192.168.1.1 - frank [10/Jan/2024:08:12:31 +0000] "GET /in..."
-      write "other.txt" "hello world"
+    words_deep:
+      write "input.txt" "aardvark\nabbreviation\nabout\nabstract\naccept\naccepted..."
+      write "other.txt" "deep other\nline two\nline three"
+      mkdir "level1"
+      mkdir "level1/level2"
+      write "level1/a.txt" "depth one"
+      write "level1/level2/b.txt" "depth two"
+      symlink "link_to_dir" -> "level1"
+      write "old.txt" "ancient"
+      props "old.txt" mtime old
+      write "big.bin" "<generated 10000 bytes>"
     words_standard:
       write "input.txt" "aardvark\nabbreviation\nabout\nabstract\naccept\naccepted..."
       write "other.txt" "other content\nsecond line"
@@ -33,37 +41,31 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
   -S  # override the usual backup suffix
     tested: "-S" "test" "input.txt" "other.txt" in words_standard
     | fs: also create other.txttest (26 bytes)
+  -t  # copy all SOURCE arguments into DIRECTORY
+    tested: "-t" "subdir" "input.txt" "other.txt" in words_standard
+    | fs: also create subdir/input.txt (10586 bytes)
+    | fs: also create subdir/other.txt (26 bytes)
+    | fs: did not modify other.txt (size: 26 -> 10586)
 
 ## Recognized but errored (flag accepted, no successful output observed)
   --no-preserve  # don't preserve the specified attributes
     tested: "--no-preserve=mode" "input.txt" "other.txt" in words_standard
     | identical
   --parents  # use full source file name under DIRECTORY
-    tested: "--parents" "input.txt" "other.txt" in words_standard
-    | exit: 0 → 1
-    | stderr: cp: with --parents, the destination must be a directory
-    | fs: did not modify other.txt (size: 26 -> 10586)
+    tested: "--parents" "input.txt" "subdir" in words_standard
+    | identical
   --reflink
-    tested: "--reflink" "input.txt" "other.txt" in access_log_minimal
+    tested: "--reflink" "input.txt" "other.txt" in words_standard
     | exit: 0 → 1
     | stderr: cp: failed to clone 'other.txt' from 'input.txt': Operation not supported
-    | fs: also modify other.txt (size: 12 -> 0)
-    | fs: did not modify other.txt (size: 12 -> 3522)
+    | fs: also modify other.txt (size: 26 -> 0)
+    | fs: did not modify other.txt (size: 26 -> 10586)
   --sparse  # control creation of sparse files
-    tested: "--sparse=none" "input.txt" "other.txt" in words_standard
-    | exit: 0 → 1
-    | stderr: cp: invalid argument 'none' for '--sparse'
-    | fs: did not modify other.txt (size: 26 -> 10586)
+    tested: "--sparse=auto" "input.txt" "other.txt" in words_standard
+    | identical
   -i  # prompt before overwrite (overrides a previous -n option)
-    tested: "-i" "input.txt" "other.txt" in words_standard
-    | exit: 0 → 1
-    | stderr: cp: overwrite 'other.txt'?
-    | fs: did not modify other.txt (size: 26 -> 10586)
-  -t  # copy all SOURCE arguments into DIRECTORY
-    tested: "-t" "." "input.txt" "other.txt" in words_standard
-    | exit: 0 → 1
-    | stderr: cp: 'input.txt' and './input.txt' are the same file
-    | fs: did not modify other.txt (size: 26 -> 10586)
+    tested: "-i" "input.txt" "subdir" in words_deep
+    | identical
 
 ## Distinguishable in combination (verified via flag pairs)
   --attributes-only  # don't copy the file data, just the attributes
@@ -178,7 +180,7 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
-    proven via: (pairwise evidence)
+    proven via: "--no-preserve=mode" "-r" "input.txt" "other.txt"
   -s  # make symbolic links instead of copying
     | exit: 0 → 1
     | stderr: cp: subdir/input.txt: can make relative symbolic links only in current directory
@@ -189,10 +191,10 @@ Aliases: -L = --dereference, -P = --no-dereference, -S = --suffix, -T = --no-tar
     proven via: (pairwise evidence)
   -v  # explain what is being done
     | flag adds 1 lines: 'input.txt' -> 'other.txt'
-    proven via: (pairwise evidence)
+    proven via: "--no-preserve=mode" "-v" "input.txt" "other.txt"
   -x  # stay on this file system
     | exit: 0 → 1
     | stderr: cp: 'input.txt' and './input.txt' are the same file
     | fs: did not create subdir (10586 bytes)
-    proven via: (pairwise evidence)
+    proven via: "--no-preserve=mode" "-x" "input.txt" "other.txt"
 

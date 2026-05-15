@@ -4,11 +4,8 @@
   88 behavioral groups: 56 unique, 32 shared
 
   Contexts referenced below:
-    words_minimal:
-      write "input.txt" "aardvark\nabbreviation\nabout\nabstract\naccept\naccepted..."
-      write "other.txt" "hello world"
-    words_standard:
-      write "input.txt" "aardvark\nabbreviation\nabout\nabstract\naccept\naccepted..."
+    numbers_standard:
+      write "input.txt" "0\n1\n1.00\n$1.00\n1/2\n1E2\n1E02\n1E+02\n-1\n-1.00\n-$1...."
       write "other.txt" "other content\nsecond line"
       write "a.txt" "first"
       write "b.txt" "second"
@@ -19,9 +16,9 @@
       write "exec.sh" "#!/bin/sh
 echo hello"
       props "exec.sh" executable
-      write "readonly.dat" "protected"
-      props "readonly.dat" readonly
-      write "-rf" "flag-like filename"
+    words_minimal:
+      write "input.txt" "aardvark\nabbreviation\nabout\nabstract\naccept\naccepted..."
+      write "other.txt" "hello world"
 
 ## Observed: 7/7 flags
   4 uniquely observable, 3 distinguishable via flag pairs
@@ -30,6 +27,34 @@ echo hello"
 Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
 
 ## Verified behavior (flag produced observable output)
+  -c  # print the first NUM bytes of each file; with the leading '-', print all but the last NUM bytes of each file
+    tested: "-c" "$(head -n1 input.txt)" "input.txt" in numbers_standard
+    | flag removes 11 lines: ==> input.txt <==, 0, 1, 1.00, $1.00
+    | exit: 1 → 0
+    | stderr removed
+    without flag:
+      ==> input.txt <==
+      0
+      1
+      1.00
+      $1.00
+      1/2
+            ... (5 more)
+    with flag:
+  -n  # print the first NUM lines instead of the first 10; with the leading '-', print all but the last NUM lines of each file
+    tested: "-n" "$(head -n1 input.txt)" "input.txt" in numbers_standard
+    | flag removes 11 lines: ==> input.txt <==, 0, 1, 1.00, $1.00
+    | exit: 1 → 0
+    | stderr removed
+    without flag:
+      ==> input.txt <==
+      0
+      1
+      1.00
+      $1.00
+      1/2
+            ... (5 more)
+    with flag:
   -v  # always print headers giving file names
     tested: "-v" in words_minimal
     | flag adds 1 lines: ==> standard input <==
@@ -53,21 +78,11 @@ Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
       against
             ... (1497 more)
 
-## Recognized but errored (flag accepted, no successful output observed)
-  -c  # print the first NUM bytes of each file; with the leading '-', print all but the last NUM bytes of each file
-    tested: "-c" in words_standard
-    | exit: 0 → 1
-    | stderr: head: option requires an argument -- 'c'
-  -n  # print the first NUM lines instead of the first 10; with the leading '-', print all but the last NUM lines of each file
-    tested: "-n" in words_standard
-    | exit: 0 → 1
-    | stderr: head: option requires an argument -- 'n'
-
 ## Distinguishable in combination (verified via flag pairs)
   --quiet
     | flag removes 3 lines: ==> input.txt <==, , ==> other.txt <==
     | 12 lines unchanged
-    proven via: "-c" "--quiet" "$(head -n1 input.txt)" "."
+    proven via: "-n" "--quiet" "$(head -n1 input.txt)" "."
   --silent
     | flag removes 3 lines: ==> input.txt <==, , ==> other.txt <==
     | 12 lines unchanged
@@ -75,5 +90,5 @@ Aliases: -c = --bytes, -n = --lines, -v = --verbose, -z = --zero-terminated
   -q
     | flag removes 3 lines: ==> input.txt <==, , ==> other.txt <==
     | 12 lines unchanged
-    proven via: "-n" "-q" "$(head -n1 input.txt)" "."
+    proven via: "-c" "-q" "$(head -n1 input.txt)" "."
 

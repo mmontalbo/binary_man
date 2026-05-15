@@ -4,15 +4,8 @@
   90 behavioral groups: 40 unique, 50 shared
 
   Contexts referenced below:
-    words_minimal:
-      write "input.txt" "aardvark\nabbreviation\nabout\nabstract\naccept\naccepted..."
-      write "other.txt" "hello world"
-    words_minimal / stdin:
-      write "input.txt" "aardvark\nabbreviation\nabout\nabstract\naccept\naccepted..."
-      write "other.txt" "hello world"
-      stdin: cherry\napple\nbanana
-    words_standard:
-      write "input.txt" "aardvark\nabbreviation\nabout\nabstract\naccept\naccepted..."
+    numbers_standard / input.txt=empty:
+      write "input.txt" "0\n1\n1.00\n$1.00\n1/2\n1E2\n1E02\n1E+02\n-1\n-1.00\n-$1...."
       write "other.txt" "other content\nsecond line"
       write "a.txt" "first"
       write "b.txt" "second"
@@ -23,9 +16,14 @@
       write "exec.sh" "#!/bin/sh
 echo hello"
       props "exec.sh" executable
-      write "readonly.dat" "protected"
-      props "readonly.dat" readonly
-      write "-rf" "flag-like filename"
+      write "input.txt" "<empty>"
+    words_minimal:
+      write "input.txt" "aardvark\nabbreviation\nabout\nabstract\naccept\naccepted..."
+      write "other.txt" "hello world"
+    words_minimal / stdin:
+      write "input.txt" "aardvark\nabbreviation\nabout\nabstract\naccept\naccepted..."
+      write "other.txt" "hello world"
+      stdin: cherry\napple\nbanana
 
 ## Observed: 6/7 flags
   4 uniquely observable, 2 distinguishable via flag pairs
@@ -36,10 +34,8 @@ Aliases: -L = --max-line-length, -c = --bytes, -l = --lines, -m = --chars, -w = 
 
 ## Verified behavior (flag produced observable output)
   --files0-from  # read input from the files specified by NUL-terminated names in file F; If F is - then read names from standard input
-    tested: "--files0-from=1" in words_standard
+    tested: "--files0-from=input.txt" in numbers_standard / input.txt=empty
     | flag removes 1 lines:       0       0       0
-    | exit: 0 → 1
-    | stderr: wc: cannot open '1' for reading: No such file or directory
     without flag:
             0       0       0
     with flag:

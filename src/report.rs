@@ -601,9 +601,12 @@ fn find_exemplar(
     if target_runs.is_empty() { return None; }
 
     // Pick the context where the flag's effect is most visible.
-    // Prefer: contexts where the diff from base is non-identical, then by uniqueness.
+    // Priority: (1) flag succeeded (exit 0), (2) output differs from base, (3) fewest
+    // other flags share this output. This ensures exemplars show the flag working
+    // when possible, falling back to error contexts only when it errors everywhere.
     let mut best_context: Option<(&str, &&RunAnalysis, &crate::execute::Observation)> = None;
-    let mut best_score: (bool, usize) = (false, usize::MAX); // (has_diff, uniqueness)
+    // Score: (succeeded, has_diff, uniqueness) — lower uniqueness is better
+    let mut best_score: (bool, bool, usize) = (false, false, usize::MAX);
 
     for run in &target_runs {
         // Find the base observation for diff comparison
@@ -641,11 +644,13 @@ fn find_exemplar(
                     })
                     .count();
 
-                // Score: prefer non-error contexts with diffs, then unique outputs.
-                // Error-only contexts are last resort (penalized by high uniqueness).
+                let succeeded = obs.exit_code.unwrap_or(-1) == 0;
                 let adj_uniqueness = if is_error_only { same_output_count + 10000 } else { same_output_count };
-                let score = (has_diff, adj_uniqueness);
-                if score.0 && !best_score.0 || (score.0 == best_score.0 && score.1 < best_score.1) {
+                let score = (succeeded, has_diff, adj_uniqueness);
+                // Prefer succeeded > has_diff > lower uniqueness
+                if (score.0 && !best_score.0)
+                    || (score.0 == best_score.0 && score.1 && !best_score.1)
+                    || (score.0 == best_score.0 && score.1 == best_score.1 && score.2 < best_score.2) {
                     best_score = score;
                     best_context = Some((ctx_name.as_str(), run, obs));
                 }

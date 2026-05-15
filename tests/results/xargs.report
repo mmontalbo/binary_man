@@ -1,7 +1,7 @@
 # Exploration: xargs
 
 ## Test scope
-  168 behavioral groups: 63 unique, 105 shared
+  164 behavioral groups: 60 unique, 104 shared
 
   Contexts referenced below:
     passwd_minimal / stdin:
@@ -49,8 +49,8 @@ echo hello"
       props "readonly.dat" readonly
       write "-rf" "flag-like filename"
 
-## Observed: 17/21 flags
-  7 uniquely observable, 10 distinguishable via flag pairs
+## Observed: 19/21 flags
+  7 uniquely observable, 12 distinguishable via flag pairs
   2 error-only (flag recognized but no successful output observed)
   robustness: 23 verified in all contexts, 0 in most, 0 context-dependent
 
@@ -67,7 +67,7 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
       input.txt a,b,c d:e:f
       input.txt g h i
   -a  # read arguments from FILE, not standard input
-    tested: "--arg-file=other.txt" "echo" "input.txt" in words_minimal
+    tested: "-a" "other.txt" "echo" "input.txt" in words_minimal
     | flag adds 1 lines: input.txt hello world
     | flag removes 1 lines: input.txt
     without flag:
@@ -75,7 +75,7 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
     with flag:
       input.txt hello world
   -n  # use at most MAX-ARGS arguments per command line
-    tested: "-n" "2" "echo" "input.txt" in passwd_minimal / stdin
+    tested: "--max-args=2" "echo" "input.txt" in passwd_minimal / stdin
     | flag adds 3 lines: input.txt a,b,c d:e:f, input.txt g h, input.txt i
     | flag removes 1 lines: input.txt a,b,c d:e:f g h i
     without flag:
@@ -92,16 +92,14 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
   -r  # if there are no arguments, then do not run COMMAND; if this option is not given, COMMAND will be run at least once
     tested: "-r" in passwd_standard
     | flag removes 1 lines: 
-  -s  # limit length of command line to MAX-CHARS
-    tested: "-s" "1" in passwd_standard
-    | flag removes 1 lines: 
-    | exit: 0 → 1
-    | stderr: xargs: option requires an argument -- 's'
 
 ## Recognized but errored (flag accepted, no successful output observed)
   --show-limits  # show limits on command-line length
     tested: "--show-limits" in words_minimal / stdin
     | stderr: Your environment variables take up 23044 bytes
+  -s  # limit length of command line to MAX-CHARS
+    tested: "--max-chars=100" "echo" "input.txt" in words_standard
+    | identical
   -t  # print commands before executing them
     tested: "-t" in words_minimal / stdin
     | stderr: /nix/store/n9gh8gxx5xx51ihgll2l20ar9b2vmgzy-coreutils-9.5/bin/echo cherry apple banana
@@ -110,12 +108,12 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
   --eof
     | flag adds 1 lines: input.txt root:x:0:0:root:/root:/bin/bash daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin bin:x:2:2:bin:/bin:/usr/sbin/nologin sys:x:3:3:sys:/dev:/usr/sbin/nologin sync:x:4:65534:sync:/bin:/bin/sync games:x:5:60:games:/usr/games:/usr/sbin/nologin man:x:6:12:man:/var/cache/man:/usr/sbin/nologin lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin mail:x:8:8:mail:/var/mail:/usr/sbin/nologin news:x:9:9:news:/var/spool/news:/usr/sbin/nologin uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin proxy:x:13:13:proxy:/bin:/usr/sbin/nologin www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin backup:x:34:34:backup:/var/backups:/usr/sbin/nologin nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin sshd:x:100:65534::/run/sshd:/usr/sbin/nologin alice:x:1000:1000:Alice Johnson,,,:/home/alice:/bin/bash bob:x:1001:1001:Bob Smith,Room 42,x1234,:/home/bob:/bin/zsh charlie:x:1002:1002:Charlie Brown:/home/charlie:/bin/bash diana:x:1003:1003:Diana Prince:/home/diana:/usr/bin/fish eve:x:1004:1004:Eve Wilson:/home/eve:/bin/bash frank:x:1005:1005:Frank Miller:/home/frank:/bin/bash grace:x:1006:1006:Grace Hopper:/home/grace:/bin/bash _postfix:x:105:109::/var/spool/postfix:/usr/sbin/nologin systemd-network:x:101:102:systemd Network Management,,,:/run/systemd:/usr/sbin/nologin messagebus:x:102:106::/nonexistent:/usr/sbin/nologin postgres:x:106:112:PostgreSQL administrator,,,:/var/lib/postgresql:/bin/bash redis:x:107:113::/var/lib/redis:/usr/sbin/nologin mysql:x:108:114:MySQL Server,,,:/nonexistent:/bin/false git:x:998:998:git daemon user:/srv/git:/usr/bin/git-shell
     | flag removes 1 lines: input.txt
-    proven via: "--eof" "-o" "echo" "input.txt"
+    proven via: (pairwise evidence)
   --process-slot-var  # set environment variable VAR in child processes
     | flag removes 1 lines: 
     | exit: 0 → 1
     | stderr: xargs: failed to unset environment variable : Invalid argument
-    proven via: "--process-slot-var=test" "-o" "echo" "input.txt"
+    proven via: (pairwise evidence)
   --replace
     | flag removes 1 lines: 
     proven via: (pairwise evidence)
@@ -124,19 +122,26 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
     | flag removes 1 lines: 0 1 1.00 $1.00 1/2 1E2 1E02 1E+02 -1 -1.00 -$1.00 -1/2 -1E2 -1E02 -1E+02 1/0 0/0 -2147483648/-1 -9223372036854775808/-1 -0 -0.0 +0 +0.0 0.00 0..0 . 0.0.0 0,00 0,,0 , 0,0,0 0.0/0 1.0/0.0 0.0/0.0 1,0/0,0 0,0/0,0 --1 - -. -, 999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999 NaN Infinity -Infinity INF 1#INF -1#IND 1#QNAN 1#SNAN 1#IND 0x0 0xffffffff 0xffffffffffffffff 0xabad1dea 123456789012345678901234567890123456789 1,000.00 1 000.00
     | exit: 1 → 0
     | stderr removed
-    proven via: "-0" "-o" "echo" "input.txt"
+    proven via: (pairwise evidence)
   -E
     | stderr: xargs: warning: the -E option has no effect if -0 or -d is used.
     proven via: "-E" "EOF" "-o" "echo" "input.txt"
+  -I
+    | flag removes 1 lines: 
+    proven via: "-I" "{}" "-o" "echo" "input.txt"
   -P  # run at most MAX-PROCS processes at a time
     | flag removes 1 lines: 
     | exit: 0 → 1
     | stderr: xargs: option requires an argument -- 'P'
     proven via: (pairwise evidence)
+  -d  # items in input stream are separated by CHARACTER, not by whitespace; disables quote and backslash processing and logical EOF processing
+    | flag adds 31 lines: input.txt root:x:0:0:root:/root:/bin/bash, daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin, bin:x:2:2:bin:/bin:/usr/sbin/nologin, sys:x:3:3:sys:/dev:/usr/sbin/nologin, sync:x:4:65534:sync:/bin:/bin/sync
+    | flag removes 1 lines: input.txt
+    proven via: "-d" "," "-o" "echo" "input.txt"
   -e
     | flag adds 1 lines: input.txt root:x:0:0:root:/root:/bin/bash daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin bin:x:2:2:bin:/bin:/usr/sbin/nologin sys:x:3:3:sys:/dev:/usr/sbin/nologin sync:x:4:65534:sync:/bin:/bin/sync games:x:5:60:games:/usr/games:/usr/sbin/nologin man:x:6:12:man:/var/cache/man:/usr/sbin/nologin lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin mail:x:8:8:mail:/var/mail:/usr/sbin/nologin news:x:9:9:news:/var/spool/news:/usr/sbin/nologin uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin proxy:x:13:13:proxy:/bin:/usr/sbin/nologin www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin backup:x:34:34:backup:/var/backups:/usr/sbin/nologin nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin sshd:x:100:65534::/run/sshd:/usr/sbin/nologin alice:x:1000:1000:Alice Johnson,,,:/home/alice:/bin/bash bob:x:1001:1001:Bob Smith,Room 42,x1234,:/home/bob:/bin/zsh charlie:x:1002:1002:Charlie Brown:/home/charlie:/bin/bash diana:x:1003:1003:Diana Prince:/home/diana:/usr/bin/fish eve:x:1004:1004:Eve Wilson:/home/eve:/bin/bash frank:x:1005:1005:Frank Miller:/home/frank:/bin/bash grace:x:1006:1006:Grace Hopper:/home/grace:/bin/bash _postfix:x:105:109::/var/spool/postfix:/usr/sbin/nologin systemd-network:x:101:102:systemd Network Management,,,:/run/systemd:/usr/sbin/nologin messagebus:x:102:106::/nonexistent:/usr/sbin/nologin postgres:x:106:112:PostgreSQL administrator,,,:/var/lib/postgresql:/bin/bash redis:x:107:113::/var/lib/redis:/usr/sbin/nologin mysql:x:108:114:MySQL Server,,,:/nonexistent:/bin/false git:x:998:998:git daemon user:/srv/git:/usr/bin/git-shell
     | flag removes 1 lines: input.txt
-    proven via: "-e" "-o" "echo" "input.txt"
+    proven via: (pairwise evidence)
   -i
     | flag adds 57 lines: , , , , 
     | flag removes 1 lines: 0 1 1.00 $1.00 1/2 1E2 1E02 1E+02 -1 -1.00 -$1.00 -1/2 -1E2 -1E02 -1E+02 1/0 0/0 -2147483648/-1 -9223372036854775808/-1 -0 -0.0 +0 +0.0 0.00 0..0 . 0.0.0 0,00 0,,0 , 0,0,0 0.0/0 1.0/0.0 0.0/0.0 1,0/0,0 0,0/0,0 --1 - -. -, 999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999 NaN Infinity -Infinity INF 1#INF -1#IND 1#QNAN 1#SNAN 1#IND 0x0 0xffffffff 0xffffffffffffffff 0xabad1dea 123456789012345678901234567890123456789 1,000.00 1 000.00
@@ -144,7 +149,7 @@ Aliases: -0 = --null, -L = --max-lines, -P = --max-procs, -a = --arg-file, -d = 
   -l
     | flag adds 57 lines: 0, 1, 1.00, $1.00, 1/2
     | flag removes 1 lines: 0 1 1.00 $1.00 1/2 1E2 1E02 1E+02 -1 -1.00 -$1.00 -1/2 -1E2 -1E02 -1E+02 1/0 0/0 -2147483648/-1 -9223372036854775808/-1 -0 -0.0 +0 +0.0 0.00 0..0 . 0.0.0 0,00 0,,0 , 0,0,0 0.0/0 1.0/0.0 0.0/0.0 1,0/0,0 0,0/0,0 --1 - -. -, 999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999 NaN Infinity -Infinity INF 1#INF -1#IND 1#QNAN 1#SNAN 1#IND 0x0 0xffffffff 0xffffffffffffffff 0xabad1dea 123456789012345678901234567890123456789 1,000.00 1 000.00
-    proven via: "-a" "input.txt" "-l" "echo" "input.txt"
+    proven via: "-a" "input.txt" "-l" "echo"
   -p  # prompt before running commands
     | flag removes 1 lines: 
     | exit: 0 → 1
